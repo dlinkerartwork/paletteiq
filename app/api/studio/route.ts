@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { and, desc, eq } from 'drizzle-orm';
 import { getDb } from '@/db';
-import { projects, studioSettings } from '@/db/schema';
+import { imageBatches, projects, studioSettings } from '@/db/schema';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { userCredential } from '@/lib/credentials';
 import { normalizeListing } from '@/lib/etsy-listing';
@@ -10,10 +10,12 @@ const fail = (error: string, status = 400) => Response.json({ error }, { status 
 const secret = (key: string) => (env as unknown as Record<string, string | undefined>)[key];
 const extractText = (result: any) => result.output?.flatMap((o: any) => o.content ?? []).map((c: any) => c.text ?? '').join('') ?? '{}';
 
-export async function GET() {
+export async function GET(req: Request) {
   const user = await getChatGPTUser();
   if (!user) return fail('Sign in required', 401);
-  const rows = await getDb().select().from(projects).where(eq(projects.owner, user.userId)).orderBy(desc(projects.updatedAt));
+  const projectId = new URL(req.url).searchParams.get('projectId');
+  const filter = projectId ? and(eq(projects.owner, user.userId), eq(projects.id, projectId)) : eq(projects.owner, user.userId);
+  const rows = await getDb().select().from(projects).where(filter).orderBy(desc(projects.updatedAt));
   return Response.json(rows.map(x => ({ id: x.id, name: x.name, data: JSON.parse(x.data) })));
 }
 
@@ -115,6 +117,8 @@ export async function POST(req: Request) {
     const project = JSON.parse(saved[0].data) as { characters?: Array<{ id: string; prompt: string; status: string; imageUrl?: string; error?: string }> };
     const character = project.characters?.find(c => c.id === body.characterId);
     if (!character?.prompt || character.prompt.length > 8000) return fail('Character has no saved valid prompt.');
+    const batchJobs = await db.select().from(imageBatches).where(and(eq(imageBatches.projectId, body.projectId), eq(imageBatches.owner, user.userId)));
+    if (batchJobs.some(job => !['completed','completed_with_errors','failed','cancelled','expired'].includes(job.status) && (JSON.parse(job.items) as Array<{ id: string; status: string }>).some(item => item.id === character.id && item.status === 'pending'))) return fail('Character has an active Batch job. Wait for it to finish before regenerating.', 409);
     if (!env.BUCKET) return fail('Image storage is not provisioned', 503);
     const settings = await getDb().select().from(studioSettings).where(eq(studioSettings.owner, user.userId)).limit(1);
     const preferences = settings[0] ? JSON.parse(settings[0].preferences) as { output?: string; background?: string } : {};
@@ -126,7 +130,7 @@ export async function POST(req: Request) {
     const b64 = data.data?.[0]?.b64_json;
     if (!b64) return fail('Image API returned no file', 502);
     const extension = format === 'jpeg' ? 'jpg' : 'png';
-    const imageUrl = `/api/images/${character.id}?format=${extension}`;
+    const imageUrl = `/api/images/${character.id}?format=${extension}&v=${Date.now()}`;
     // A deterministic per-character object key allows recovery if DB persistence fails.
     await env.BUCKET.put(`generated/${user.userId}/${character.id}.${extension}`, Uint8Array.from(atob(b64), c => c.charCodeAt(0)), { httpMetadata: { contentType: format === 'jpeg' ? 'image/jpeg' : 'image/png' } });
     character.imageUrl = imageUrl; character.status = 'done'; character.error = '';
@@ -139,6 +143,7 @@ export async function POST(req: Request) {
   }
   if (body.action === 'recover-images') {
     if (typeof body.projectId !== 'string' || !env.BUCKET) return fail('Invalid recovery request');
+    const bucket = env.BUCKET;
     const db = getDb();
     const saved = await db.select().from(projects).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId))).limit(1);
     if (!saved.length) return fail('Collection not found', 404);
@@ -146,10 +151,10 @@ export async function POST(req: Request) {
     const recovered: Array<{ id: string; imageUrl: string; status: 'done'; error: string }> = [];
     for (const character of project.characters ?? []) {
       if (character.imageUrl || !/^[\w-]{8,80}$/.test(character.id)) continue;
-      const candidates = await Promise.all(['png', 'jpg'].map(async extension => ({ extension, object: await env.BUCKET.head(`generated/${user.userId}/${character.id}.${extension}`) })));
+      const candidates = await Promise.all(['png', 'jpg'].map(async extension => ({ extension, object: await bucket.head(`generated/${user.userId}/${character.id}.${extension}`) })));
       const latest = candidates.filter(c => c.object).sort((a, b) => (b.object!.uploaded?.getTime() || 0) - (a.object!.uploaded?.getTime() || 0))[0];
       if (!latest) continue;
-      character.imageUrl = `/api/images/${character.id}?format=${latest.extension}`;
+      character.imageUrl = `/api/images/${character.id}?format=${latest.extension}&v=${latest.object?.uploaded?.getTime() || Date.now()}`;
       character.status = 'done'; character.error = '';
       recovered.push({ id: character.id, imageUrl: character.imageUrl, status: 'done', error: '' });
     }

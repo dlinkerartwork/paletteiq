@@ -16,6 +16,7 @@ const openai = async (key: string, path: string, init: RequestInit = {}) => {
 };
 const safeJob = (job: typeof imageBatches.$inferSelect) => ({
   id: job.id, status: job.status, model: job.model, createdAt: job.createdAt,
+  characterIds: (JSON.parse(job.items) as BatchItem[]).map(i => i.id),
   total: job.total, completed: job.completed, failed: job.failed,
   imported: (JSON.parse(job.items) as BatchItem[]).filter(i => i.status !== 'pending').length,
   assets: (JSON.parse(job.items) as BatchItem[]).filter(i => i.status !== 'pending'),
@@ -25,15 +26,16 @@ const safeJob = (job: typeof imageBatches.$inferSelect) => ({
 export async function POST(req: Request) {
   const user = await getChatGPTUser();
   if (!user) return fail('Sign in required', 401);
-  const data = await req.json() as { projectId?: string; characterIds?: string[]; model?: string; quality?: string };
+  const data = await req.json() as { projectId?: string; characterIds?: string[]; model?: string; quality?: string; regenerate?: boolean };
   if (!data.projectId || !Array.isArray(data.characterIds) || !data.characterIds.length || data.characterIds.length > 120 || !MODELS.includes(data.model || '') || !['low','medium','high'].includes(data.quality || '')) return fail('Select 1–120 characters, a Batch model, and quality.');
   if (new Set(data.characterIds).size !== data.characterIds.length) return fail('Duplicate characters are not allowed.');
   const db = getDb();
   const saved = await db.select().from(projects).where(and(eq(projects.id, data.projectId), eq(projects.owner, user.userId))).limit(1);
   if (!saved.length) return fail('Save the collection before submitting a batch.', 404);
-  const project = JSON.parse(saved[0].data) as { characters?: Array<{ id: string; prompt: string; status?: string }> };
+  const project = JSON.parse(saved[0].data) as { characters?: Array<{ id: string; prompt: string; status?: string; imageUrl?: string }> };
   const selected = data.characterIds.map(id => project.characters?.find(c => c.id === id));
-  if (selected.some(c => !c?.prompt || c.status === 'done')) return fail('Only saved characters with pending prompts can be submitted.');
+  if (data.regenerate && data.characterIds.length !== 1) return fail('Regenerate must be submitted for one character at a time.');
+  if (selected.some(c => !c?.prompt || (!data.regenerate && (c.status === 'done' || c.status === 'error' || !!c.imageUrl)))) return fail('Bulk Batch accepts only never-generated prompts. Use per-card Regenerate for existing images.');
   const previous = await db.select().from(imageBatches).where(and(eq(imageBatches.owner, user.userId), eq(imageBatches.projectId, data.projectId)));
   const activeIds = new Set(previous.filter(b => !['failed','cancelled','expired','completed','completed_with_errors'].includes(b.status)).flatMap(b => (JSON.parse(b.items) as BatchItem[]).filter(i => i.status === 'pending').map(i => i.id)));
   if (data.characterIds.some(id => activeIds.has(id))) return fail('Some characters already have a pending Batch job.');
@@ -99,7 +101,7 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
         if (b64) {
           const extension = job.format === 'jpeg' ? 'jpg' : 'png';
           await env.BUCKET.put(`generated/${owner}/${record.custom_id}.${extension}`, Uint8Array.from(atob(b64), c => c.charCodeAt(0)), { httpMetadata: { contentType: extension === 'jpg' ? 'image/jpeg' : 'image/png' } });
-          item.status = 'done'; item.imageUrl = `/api/images/${record.custom_id}?format=${extension}`;
+          item.status = 'done'; item.imageUrl = `/api/images/${record.custom_id}?format=${extension}&v=${Date.now()}`;
         } else { item.status = 'error'; item.error = String(record.error?.message || record.response?.body?.error?.message || 'Batch item failed').slice(0, 260); }
         handled++;
         if (handled >= 5) { interrupted = true; break; }

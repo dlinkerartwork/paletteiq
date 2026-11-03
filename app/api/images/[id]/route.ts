@@ -9,5 +9,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const extension = new URL(req.url).searchParams.get('format') === 'jpg' ? 'jpg' : 'png';
   const obj = await env.BUCKET.get(`generated/${user.userId}/${id}.${extension}`);
   if (!obj) return new Response('Not found', { status: 404 });
-  return new Response(obj.body, { headers: { 'Content-Type': extension === 'jpg' ? 'image/jpeg' : 'image/png', 'Cache-Control': 'private, max-age=3600' } });
+  const download = new URL(req.url).searchParams.get('download') === '1';
+  return new Response(obj.body, { headers: { 'Content-Type': extension === 'jpg' ? 'image/jpeg' : 'image/png', 'Cache-Control': 'private, max-age=3600', ...(download ? { 'Content-Disposition': `attachment; filename="paletteiq-${id}.${extension}"` } : {}) } });
 }

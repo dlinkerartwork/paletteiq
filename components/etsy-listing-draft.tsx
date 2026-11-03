@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Copy, Download, LoaderCircle, Sparkles } from 'lucide-react';
 import { listingWarnings, normalizeListing, type EtsyListingDraft } from '@/lib/etsy-listing';
 
-type Project = { id: string; name: string; theme: string; characters: Array<{ status: string }>; listing?: EtsyListingDraft };
+type Project = { id: string; name: string; theme: string; characters: Array<{ status: string; imageUrl?: string }>; listing?: EtsyListingDraft };
 type Props = { project: Project; onChange: (draft: EtsyListingDraft) => void; onSave: () => Promise<void> };
 const download = (name: string, body: string, mime: string) => { const url = URL.createObjectURL(new Blob([body], { type: mime })); const a = document.createElement('a'); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url); };
 const slug = (s: string) => (s || 'paletteiq').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 60);
@@ -12,6 +12,7 @@ const slug = (s: string) => (s || 'paletteiq').toLowerCase().replace(/[^a-z0-9]+
 export default function EtsyListingDraft({ project, onChange, onSave }: Props) {
   const [working, setWorking] = useState(false);
   const [notice, setNotice] = useState('');
+  const [exporting, setExporting] = useState(false);
   const draft = project.listing ?? normalizeListing({});
   const edit = (fields: Partial<EtsyListingDraft>) => onChange({ ...draft, ...fields });
   const listEdit = (key: 'secondaryKeywords' | 'longTailKeywords' | 'materials' | 'imageAltTexts' | 'photoPlan' | 'digitalFiles', value: string) => edit({ [key]: value.split('\n').map(x => x.trim()).filter(Boolean) });
@@ -27,6 +28,16 @@ export default function EtsyListingDraft({ project, onChange, onSave }: Props) {
     } catch (e) { setNotice(e instanceof Error ? e.message : 'Generation failed'); } finally { setWorking(false); }
   };
   const copy = async (text: string) => { await navigator.clipboard.writeText(text); setNotice('Copied to clipboard.'); };
+  const exportPackage = async () => {
+    setExporting(true); setNotice('Saving listing draft and preparing collection ZIP…');
+    try {
+      await onSave();
+      const response = await fetch('/api/exports', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId: project.id, scope: 'package' }) });
+      if (!response.ok) throw new Error(((await response.json()) as { error?: string }).error || 'Export failed');
+      const blob = await response.blob(); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `${slug(project.name)}-etsy-package.zip`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 60000);
+      setNotice('Collection images and listing draft ZIP downloaded.');
+    } catch (e) { setNotice(e instanceof Error ? e.message : 'Export failed'); } finally { setExporting(false); }
+  };
   const formatted = () => `TITLE\n${draft.title}\n\nDESCRIPTION\n${draft.description}\n\nTAGS\n${draft.tags.join(', ')}\n\nPRIMARY KEYWORD\n${draft.primaryKeyword}\n\nSECONDARY KEYWORDS\n${draft.secondaryKeywords.join(', ')}\n\nLONG-TAIL KEYWORDS\n${draft.longTailKeywords.join(', ')}\n\nCATEGORY SUGGESTION\n${draft.categorySuggestion}\n\nATTRIBUTES\n${JSON.stringify(draft.attributes, null, 2)}\n\nMATERIALS\n${draft.materials.join(', ')}\n\nIMAGE ALT TEXT\n${draft.imageAltTexts.join('\n')}\n\nPHOTO PLAN\n${draft.photoPlan.join('\n')}\n\nPRICE SUGGESTION\n${draft.priceSuggestion}\n\nSKU\n${draft.sku}\n\nDIGITAL FILES\n${draft.digitalFiles.join('\n')}\n\nLICENSE NOTES\n${draft.licenseNotes}`;
   return <div className="listing-workspace">
     <div className="panel listing-hero"><div><h2>Etsy Listing Draft Studio</h2><p>Original SEO package based on this collection. Editable and saved in your collection JSON. No listing will be published to Etsy.</p></div><button className="primary-btn" disabled={working} onClick={generate}>{working ? <LoaderCircle size={16} className="spin"/> : <Sparkles size={16}/>} {draft.title ? 'Regenerate SEO draft' : 'Generate complete SEO draft'}</button></div>
@@ -40,6 +51,6 @@ export default function EtsyListingDraft({ project, onChange, onSave }: Props) {
       <label className="input-label">ATTRIBUTES</label><div className="listing-fields">{(Object.keys(draft.attributes) as Array<keyof EtsyListingDraft['attributes']>).map(key => <div key={key}><label className="input-label">{key.replace(/([A-Z])/g,' $1').toUpperCase()}</label><input value={draft.attributes[key]} onChange={e => edit({ attributes: { ...draft.attributes, [key]: e.target.value } })}/></div>)}</div>
       {([['SECONDARY KEYWORDS','secondaryKeywords'],['LONG-TAIL KEYWORDS','longTailKeywords'],['MATERIALS','materials'],['DIGITAL FILE PLAN','digitalFiles'],['LISTING PHOTO PLAN','photoPlan'],['IMAGE ALT TEXT','imageAltTexts']] as const).map(([label,key]) => <div key={key}><label className="input-label">{label} <span>one per line</span></label><textarea rows={3} value={draft[key].join('\n')} onChange={e => listEdit(key, e.target.value)}/></div>)}
     </section></div>
-    <div className="panel listing-bottom"><div><h2>Draft readiness</h2><p className="sub">{warnings.length} review items · {produced} generated character images</p><ul>{warnings.map((warning, i) => <li key={i}>{warning}</li>)}</ul></div><div className="listing-actions"><button className="primary-btn" onClick={async () => { await onSave(); setNotice('Save attempted. Check the save notification above.'); }}>Save collection</button><button className="outline-btn" onClick={() => download(`${slug(project.name)}-etsy-listing.json`, JSON.stringify({ projectId: project.id, draft, review: warnings }, null, 2), 'application/json')}><Download size={15}/> Export JSON</button><button className="outline-btn" onClick={() => download(`${slug(project.name)}-etsy-listing.txt`, formatted(), 'text/plain')}><Download size={15}/> Export TXT</button></div></div>
+    <div className="panel listing-bottom"><div><h2>Draft readiness</h2><p className="sub">{warnings.length} review items · {produced} generated character images</p><ul>{warnings.map((warning, i) => <li key={i}>{warning}</li>)}</ul></div><div className="listing-actions"><button className="primary-btn" onClick={async () => { try { await onSave(); setNotice('Collection and listing draft saved.'); } catch (e) { setNotice(String(e)); } }}>Save collection</button><button className="outline-btn" onClick={() => download(`${slug(project.name)}-etsy-listing.json`, JSON.stringify({ projectId: project.id, draft, review: warnings }, null, 2), 'application/json')}><Download size={15}/> Export JSON</button><button className="outline-btn" onClick={() => download(`${slug(project.name)}-etsy-listing.txt`, formatted(), 'text/plain')}><Download size={15}/> Export TXT</button><button className="primary-btn" disabled={exporting || !project.characters.some(c => c.imageUrl)} onClick={() => void exportPackage()}><Download size={15}/>{exporting ? 'Preparing ZIP…' : 'Download images + listing ZIP'}</button></div></div>
   </div>;
 }
