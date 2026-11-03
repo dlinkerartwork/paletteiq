@@ -58,6 +58,24 @@ export async function POST(req: Request) {
     if (!ai.ok) return fail(`AI expansion returned ${ai.status}`, 502);
     try { return Response.json(JSON.parse(extractText(await ai.json()))); } catch { return fail('Invalid AI response', 502); }
   }
+  if (body.action === 'generate-prompts') {
+    const aiKey = await userCredential(user.userId, 'openai') || secret('OPENAI_API_KEY');
+    if (!aiKey) return fail('Configure an OpenAI API key in Settings to generate prompts.', 503);
+    const incoming = Array.isArray(body.characters) ? body.characters : [];
+    if (!incoming.length || incoming.length > 10 || incoming.some((c: any) => typeof c.id !== 'string' || typeof c.name !== 'string' || !c.name.trim())) return fail('Select 1–10 valid characters per AI request.');
+    const context = { theme: String(body.theme ?? '').slice(0, 200), subtheme: String(body.subtheme ?? '').slice(0, 200), style: String(body.style ?? '').slice(0, 500), palette: String(body.palette ?? '').slice(0, 300), texture: String(body.texture ?? '').slice(0, 300) };
+    const characters = incoming.map((c: any) => ({ id: String(c.id).slice(0, 80), name: String(c.name).slice(0, 200), description: String(c.description ?? '').slice(0, 500), previousPrompt: String(c.prompt ?? '').slice(0, 1200) }));
+    const requestText = `Write ONE original, detailed, production-ready English image-generation prompt per character. Return JSON {"prompts":[{"id":"exact given id","prompt":"..."}]}. Preserve each id exactly. Each prompt must be visually distinctive in pose/composition/character details while following the same art direction. Use the explicit character identity and description. Include hand-painted texture, palette, lighting, expressive details, isolated full subject centered on transparent background; no text, logo, watermark, sticker cutline, white border, exterior shadows, unrelated elements. The image must be a single clipart element ready for a coordinated bundle. Avoid copying any existing shop's character or proprietary artwork. If previousPrompt exists, regenerate with fresh unique subject-specific details. Never add unsupported trademarked characters. Style guide: ${JSON.stringify(context)}. Subjects: ${JSON.stringify(characters)}`;
+    const ai = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'gpt-4.1-mini', input: requestText, text: { format: { type: 'json_object' } } }) });
+    if (!ai.ok) return fail(`OpenAI prompt generation failed (${ai.status}): ${(await ai.text()).slice(0, 200)}`, 502);
+    try {
+      const result = JSON.parse(extractText(await ai.json()));
+      const allowed = new Set(characters.map((c: { id: string }) => c.id));
+      const prompts = Array.isArray(result.prompts) ? result.prompts.filter((p: any) => allowed.has(p.id) && typeof p.prompt === 'string' && p.prompt.trim().length > 60).map((p: any) => ({ id: p.id, prompt: p.prompt.trim().slice(0, 8000) })) : [];
+      if (new Set(prompts.map((p: { id: string }) => p.id)).size !== characters.length || prompts.length !== characters.length) return fail('AI returned incomplete prompts. Please retry this group.', 502);
+      return Response.json({ prompts });
+    } catch (error) { return fail(error instanceof Error && error.message.startsWith('AI returned') ? error.message : 'Invalid OpenAI prompt response', 502); }
+  }
   if (body.action === 'listing-draft') {
     const aiKey = await userCredential(user.userId, 'openai') || secret('OPENAI_API_KEY');
     if (!aiKey) return fail('Configure your OpenAI API key in Settings.', 503);
