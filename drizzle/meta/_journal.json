@@ -15,6 +15,13 @@
       "when": 1793706075374,
       "tag": "0001_big_bedlam",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793710069232,
+      "tag": "0002_fine_red_hulk",
+      "breakpoints": true
     }
   ]
 }

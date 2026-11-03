@@ -6,7 +6,7 @@ import { encryptCredential } from '@/lib/credentials';
 
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 const defaultPrefs = { target: 120, model: 'gpt-image-1-mini', quality: 'low', analysisModel: 'gpt-4.1-mini', output: 'png', background: 'transparent', variations: 1, defaultStyle: 'Soft hand-painted watercolor illustration', autoSave: false };
-const allowedModels = ['gpt-image-1-mini', 'gpt-image-1', 'gpt-image-1.5'];
+const allowedModels = ['gpt-image-1-mini', 'gpt-image-1', 'gpt-image-1.5', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
 
 export async function GET() {
   const user = await getChatGPTUser();

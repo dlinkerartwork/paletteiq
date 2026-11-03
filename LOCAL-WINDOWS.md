@@ -30,7 +30,13 @@ The setup script installs exact dependencies with pnpm on Windows (no Bash/WSL r
 npm run dev
 ```
 
-Open `http://localhost:5173` in your browser. If you change the database schema in development, generate new migrations with `npm run db:generate` and apply only the new SQL files to the local database. Avoid re-running already-applied migrations.
+Open `http://localhost:5173` in your browser. When you pull an update that adds database tables, run `PowerShell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup-local.ps1 -SkipInstall` again. The script tracks applied migrations locally and applies only new ones.
+
+## Image production modes
+
+- **Single:** one selected character, billed at Standard API rates.
+- **Batch:** choose up to 120 characters and submit them to the OpenAI Batch API with a supported GPT Image 2.5 model. OpenAI offers a Batch discount and processes jobs asynchronously within a 24-hour completion window.
+- The job metadata and imported images persist locally. The batch continues on OpenAI if the browser closes, but the browser must be reopened to retrieve finished images. The progress display shows OpenAI request counts and image-import counts separately.
 
 ## Important limitations
 

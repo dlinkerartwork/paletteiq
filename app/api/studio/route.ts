@@ -60,7 +60,7 @@ export async function POST(req: Request) {
   if (body.action === 'generate') {
     const aiKey = await userCredential(user.userId, 'openai') || secret('OPENAI_API_KEY');
     if (!aiKey) return fail('OpenAI API not connected.', 503);
-    if (!['gpt-image-1-mini','gpt-image-1','gpt-image-1.5'].includes(body.model) || !['low','medium','high'].includes(body.quality) || typeof body.prompt !== 'string' || body.prompt.length > 8000) return fail('Invalid image settings');
+    if (!['gpt-image-1-mini','gpt-image-1','gpt-image-1.5','gpt-image-2.5-flare','gpt-image-2.5-sunburst'].includes(body.model) || !['low','medium','high'].includes(body.quality) || typeof body.prompt !== 'string' || body.prompt.length > 8000) return fail('Invalid image settings');
     const settings = await getDb().select().from(studioSettings).where(eq(studioSettings.owner, user.userId)).limit(1);
     const preferences = settings[0] ? JSON.parse(settings[0].preferences) as { output?: string; background?: string } : {};
     const format = preferences.output === 'jpg' ? 'jpeg' : 'png';

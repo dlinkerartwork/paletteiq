@@ -37,15 +37,23 @@ if (-not (Test-Path '.dev.vars')) {
 if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
 
 $marker = Join-Path $projectRoot '.wrangler/local-migrations-complete'
-if (-not (Test-Path $marker)) {
-  $sqlFiles = Get-ChildItem -Path 'drizzle' -Filter '*.sql' | Sort-Object Name
-  foreach ($sqlFile in $sqlFiles) {
-    Write-Host "Applying $($sqlFile.Name) ..."
-    & node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file ("drizzle/" + $sqlFile.Name)
-    if ($LASTEXITCODE -ne 0) { throw "Migration failed: $($sqlFile.Name)" }
-  }
-  New-Item -ItemType Directory -Path (Split-Path -Parent $marker) -Force | Out-Null
-  [System.IO.File]::WriteAllText($marker, (Get-Date).ToUniversalTime().ToString('o'))
+$appliedPath = Join-Path $projectRoot '.wrangler/applied-migrations.txt'
+New-Item -ItemType Directory -Path (Split-Path -Parent $appliedPath) -Force | Out-Null
+$applied = @()
+if (Test-Path $appliedPath) {
+  $applied = @(Get-Content $appliedPath)
+} elseif (Test-Path $marker) {
+  # Earlier setup versions created a single marker after applying 0000 and 0001.
+  $applied = @(Get-ChildItem 'drizzle' -Filter '*.sql' | Where-Object { $_.Name -match '^000[01]_' } | ForEach-Object Name)
+  Set-Content -Path $appliedPath -Value $applied
+}
+$sqlFiles = Get-ChildItem -Path 'drizzle' -Filter '*.sql' | Sort-Object Name
+foreach ($sqlFile in $sqlFiles) {
+  if ($applied -contains $sqlFile.Name) { continue }
+  Write-Host "Applying $($sqlFile.Name) ..."
+  & node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file ("drizzle/" + $sqlFile.Name)
+  if ($LASTEXITCODE -ne 0) { throw "Migration failed: $($sqlFile.Name)" }
+  Add-Content -Path $appliedPath -Value $sqlFile.Name
 }
 
 Write-Host 'Local setup finished.'
