@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers';
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { getDb } from '@/db';
 import { projects, studioSettings } from '@/db/schema';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
@@ -23,11 +23,22 @@ export async function POST(req: Request) {
   const body = await req.json() as Record<string, any>;
   if (body.action === 'save') {
     if (typeof body.id !== 'string' || !/^[\w-]{8,80}$/.test(body.id) || typeof body.name !== 'string' || !body.data) return fail('Invalid project');
-    const data = JSON.stringify(body.data);
-    if (data.length > 700000) return fail('Project too large');
+    const incoming = body.data as Record<string, any>;
+    if (incoming.id !== body.id || !Array.isArray(incoming.characters)) return fail('Invalid collection data');
     const db = getDb();
     const current = await db.select().from(projects).where(eq(projects.id, body.id)).limit(1);
     if (current.length && current[0].owner !== user.userId) return fail('Forbidden', 403);
+    if (current.length) {
+      // An older browser snapshot must not erase assets already persisted by the image worker.
+      const old = JSON.parse(current[0].data) as { characters?: Array<{ id: string; imageUrl?: string; status?: string }> };
+      const storedImages = new Map((old.characters || []).filter(c => c.imageUrl).map(c => [c.id, c]));
+      incoming.characters = incoming.characters.map((c: any) => {
+        const persisted = storedImages.get(c.id);
+        return persisted?.imageUrl ? { ...c, imageUrl: persisted.imageUrl, status: 'done', error: '' } : c;
+      });
+    }
+    const data = JSON.stringify(incoming);
+    if (data.length > 700000) return fail('Project too large');
     await db.insert(projects).values({ id: body.id, owner: user.userId, name: body.name.slice(0, 160), data, updatedAt: Date.now() }).onConflictDoUpdate({ target: projects.id, set: { name: body.name.slice(0, 160), data, updatedAt: Date.now() } });
     return Response.json({ ok: true });
   }
@@ -97,21 +108,53 @@ export async function POST(req: Request) {
   if (body.action === 'generate') {
     const aiKey = await userCredential(user.userId, 'openai') || secret('OPENAI_API_KEY');
     if (!aiKey) return fail('OpenAI API not connected.', 503);
-    if (!['gpt-image-1-mini','gpt-image-1','gpt-image-1.5','gpt-image-2.5-flare','gpt-image-2.5-sunburst'].includes(body.model) || !['low','medium','high'].includes(body.quality) || typeof body.prompt !== 'string' || body.prompt.length > 8000) return fail('Invalid image settings');
+    if (!['gpt-image-1-mini','gpt-image-1','gpt-image-1.5','gpt-image-2.5-flare','gpt-image-2.5-sunburst'].includes(body.model) || !['low','medium','high'].includes(body.quality) || typeof body.projectId !== 'string' || typeof body.characterId !== 'string') return fail('Invalid image settings');
+    const db = getDb();
+    const saved = await db.select().from(projects).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId))).limit(1);
+    if (!saved.length) return fail('Save the collection before generating images.', 404);
+    const project = JSON.parse(saved[0].data) as { characters?: Array<{ id: string; prompt: string; status: string; imageUrl?: string; error?: string }> };
+    const character = project.characters?.find(c => c.id === body.characterId);
+    if (!character?.prompt || character.prompt.length > 8000) return fail('Character has no saved valid prompt.');
+    if (!env.BUCKET) return fail('Image storage is not provisioned', 503);
     const settings = await getDb().select().from(studioSettings).where(eq(studioSettings.owner, user.userId)).limit(1);
     const preferences = settings[0] ? JSON.parse(settings[0].preferences) as { output?: string; background?: string } : {};
     const format = preferences.output === 'jpg' ? 'jpeg' : 'png';
     const background = preferences.background === 'opaque' || format === 'jpeg' ? 'opaque' : 'transparent';
-    const ai = await fetch('https://api.openai.com/v1/images/generations', { method: 'POST', headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: body.model, quality: body.quality, size: '1024x1024', background, output_format: format, n: 1, prompt: body.prompt }) });
+    const ai = await fetch('https://api.openai.com/v1/images/generations', { method: 'POST', headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: body.model, quality: body.quality, size: '1024x1024', background, output_format: format, n: 1, prompt: character.prompt }) });
     if (!ai.ok) return fail(`OpenAI image generation failed (${ai.status}): ${(await ai.text()).slice(0,200)}`, 502);
     const data = await ai.json() as { data?: Array<{ b64_json?: string }> };
     const b64 = data.data?.[0]?.b64_json;
     if (!b64) return fail('Image API returned no file', 502);
-    const id = crypto.randomUUID();
-    if (!env.BUCKET) return fail('Image storage is not provisioned', 503);
     const extension = format === 'jpeg' ? 'jpg' : 'png';
-    await env.BUCKET.put(`generated/${user.userId}/${id}.${extension}`, Uint8Array.from(atob(b64), c => c.charCodeAt(0)), { httpMetadata: { contentType: format === 'jpeg' ? 'image/jpeg' : 'image/png' } });
-    return Response.json({ imageUrl: `/api/images/${id}?format=${extension}` });
+    const imageUrl = `/api/images/${character.id}?format=${extension}`;
+    // A deterministic per-character object key allows recovery if DB persistence fails.
+    await env.BUCKET.put(`generated/${user.userId}/${character.id}.${extension}`, Uint8Array.from(atob(b64), c => c.charCodeAt(0)), { httpMetadata: { contentType: format === 'jpeg' ? 'image/jpeg' : 'image/png' } });
+    character.imageUrl = imageUrl; character.status = 'done'; character.error = '';
+    try {
+      await db.update(projects).set({ data: JSON.stringify(project), updatedAt: Date.now() }).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId)));
+    } catch {
+      return fail('Image stored safely, but collection update failed. Use Recover images in Image Production; do not regenerate yet.', 503);
+    }
+    return Response.json({ imageUrl, persisted: true });
+  }
+  if (body.action === 'recover-images') {
+    if (typeof body.projectId !== 'string' || !env.BUCKET) return fail('Invalid recovery request');
+    const db = getDb();
+    const saved = await db.select().from(projects).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId))).limit(1);
+    if (!saved.length) return fail('Collection not found', 404);
+    const project = JSON.parse(saved[0].data) as { characters?: Array<{ id: string; status: string; imageUrl?: string; error?: string }> };
+    const recovered: Array<{ id: string; imageUrl: string; status: 'done'; error: string }> = [];
+    for (const character of project.characters ?? []) {
+      if (character.imageUrl || !/^[\w-]{8,80}$/.test(character.id)) continue;
+      const candidates = await Promise.all(['png', 'jpg'].map(async extension => ({ extension, object: await env.BUCKET.head(`generated/${user.userId}/${character.id}.${extension}`) })));
+      const latest = candidates.filter(c => c.object).sort((a, b) => (b.object!.uploaded?.getTime() || 0) - (a.object!.uploaded?.getTime() || 0))[0];
+      if (!latest) continue;
+      character.imageUrl = `/api/images/${character.id}?format=${latest.extension}`;
+      character.status = 'done'; character.error = '';
+      recovered.push({ id: character.id, imageUrl: character.imageUrl, status: 'done', error: '' });
+    }
+    if (recovered.length) await db.update(projects).set({ data: JSON.stringify(project), updatedAt: Date.now() }).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId)));
+    return Response.json({ recovered });
   }
   return fail('Unknown action');
 }

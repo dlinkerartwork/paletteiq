@@ -33,6 +33,14 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
   const completedTotal = project.characters.filter(c => c.status === 'done').length;
 
   useEffect(() => { setBatchIds([]); setSingleId(''); setJobs([]); }, [project.id]);
+  const recoverImages = async (quiet = false) => {
+    try {
+      const data = await request('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'recover-images', projectId: project.id }) });
+      for (const asset of data.recovered || []) latestAsset.current(asset.id, { imageUrl: asset.imageUrl, status: 'done', error: '' });
+      if (!quiet) setMessage(data.recovered?.length ? `Recovered ${data.recovered.length} image(s) and saved their records.` : 'No unlinked image files found.');
+    } catch (e) { if (!quiet) setMessage(e instanceof Error ? e.message : String(e)); }
+  };
+  useEffect(() => { void recoverImages(true); }, [project.id]);
   useEffect(() => {
     let closed = false;
     const refresh = async () => {
@@ -55,11 +63,12 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
 
   const generateSingle = async () => {
     if (!chosenSingle) return;
-    setWorking(true); setMessage(`Generating ${chosenSingle.name}...`); setSingleProgress({ done: 0, total: 1 });
+    setWorking(true); setMessage(`Saving collection and generating ${chosenSingle.name}...`); setSingleProgress({ done: 0, total: 1 });
     try {
-      const data = await request('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'generate', model, quality, prompt: chosenSingle.prompt }) });
+      await request('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'save', id: project.id, name: project.name, data: project }) });
+      const data = await request('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'generate', model, quality, projectId: project.id, characterId: chosenSingle.id }) });
       onAsset(chosenSingle.id, { imageUrl: data.imageUrl, status: 'done', error: '' });
-      setSingleProgress({ done: 1, total: 1 }); setMessage(`Image completed: ${chosenSingle.name}. Save the collection to persist its result.`);
+      setSingleProgress({ done: 1, total: 1 }); setMessage(`Image completed and saved: ${chosenSingle.name}. Safe to refresh.`);
     } catch (e) { setMessage(e instanceof Error ? e.message : String(e)); onAsset(chosenSingle.id, { status: 'error', error: String(e) }); }
     finally { setWorking(false); }
   };
@@ -78,7 +87,8 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
 
   return <>
     <section className="panel production-setup">
-      <div className="production-mode-head"><div><h2>Generation mode</h2><p className="sub">Generate one character immediately or submit a discounted OpenAI Batch job.</p></div><div className="mode-switch"><button className={mode === 'single' ? 'active' : ''} onClick={() => setMode('single')}>Single</button><button className={mode === 'batch' ? 'active' : ''} onClick={() => setMode('batch')}>Batch <span>Save ~50%</span></button></div></div>
+      <div className="production-mode-head"><div><h2>Generation mode</h2><p className="sub">Images and their collection records are automatically saved. Generate one character or submit a discounted Batch job.</p></div><div className="mode-switch"><button className={mode === 'single' ? 'active' : ''} onClick={() => setMode('single')}>Single</button><button className={mode === 'batch' ? 'active' : ''} onClick={() => setMode('batch')}>Batch <span>Save ~50%</span></button></div></div>
+      <button className="outline-btn" disabled={working} onClick={() => void recoverImages()}><RefreshCw size={14}/> Recover images</button>
       <div className="production-controls">
         <div><label className="input-label">{mode === 'single' ? 'IMAGE MODEL' : 'BATCH IMAGE MODEL'}</label>{mode === 'single' ? <select value={model} onChange={e => onModel(e.target.value)}><option value="gpt-image-1-mini">GPT Image 1 Mini</option><option value="gpt-image-1">GPT Image 1</option><option value="gpt-image-1.5">GPT Image 1.5</option><option value="gpt-image-2.5-flare">GPT Image 2.5 Flare</option><option value="gpt-image-2.5-sunburst">GPT Image 2.5 Sunburst</option></select> : <select value={batchModel} onChange={e => setBatchModel(e.target.value)}><option value="gpt-image-2.5-flare">GPT Image 2.5 Flare</option><option value="gpt-image-2.5-sunburst">GPT Image 2.5 Sunburst</option></select>}</div>
         <div><label className="input-label">QUALITY</label><select value={quality} onChange={e => onQuality(e.target.value)}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></div>
