@@ -21,10 +21,16 @@ if (-not (Test-Path '.dev.vars')) {
   $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
   try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
   $key = [System.BitConverter]::ToString($bytes).Replace('-', '').ToLowerInvariant()
-  [System.IO.File]::WriteAllText((Join-Path $projectRoot '.dev.vars'), "STUDIO_CREDENTIAL_ENCRYPTION_KEY=$key`n")
+  [System.IO.File]::WriteAllText((Join-Path $projectRoot '.dev.vars'), "STUDIO_CREDENTIAL_ENCRYPTION_KEY=$key`nPALETTEIQ_LOCAL_NO_AUTH=1`n")
   Write-Host 'Generated local encryption key in .dev.vars (do not commit).'
 } else {
   Write-Host 'Keeping existing local .dev.vars encryption key.'
+  $devVarsPath = Join-Path $projectRoot '.dev.vars'
+  $devVarsText = [System.IO.File]::ReadAllText($devVarsPath)
+  if ($devVarsText -notmatch '(?m)^PALETTEIQ_LOCAL_NO_AUTH=1\s*$') {
+    [System.IO.File]::AppendAllText($devVarsPath, "`nPALETTEIQ_LOCAL_NO_AUTH=1`n")
+    Write-Host 'Enabled login-free local development.'
+  }
 }
 
 & npm run build
@@ -44,4 +50,4 @@ if (-not (Test-Path $marker)) {
 
 Write-Host 'Local setup finished.'
 Write-Host 'Run: npm run dev'
-Write-Host 'Then open: http://localhost:5173/signin-with-chatgpt?return_to=/'
+Write-Host 'Then open: http://localhost:5173/'

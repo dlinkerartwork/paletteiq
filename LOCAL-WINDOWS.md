@@ -19,10 +19,10 @@ PowerShell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup-local.ps1
 npm run dev
 ```
 
-4. Open **http://localhost:5173/signin-with-chatgpt?return_to=/**. Local development simulates a user sign-in; no real ChatGPT sign-in is needed.
+4. Open **http://localhost:5173/**. No sign-in is required for local development.
 5. In **Settings**, save your Etsy API key (`keystring:shared_secret`) and OpenAI API key. API keys are encrypted in the local database and never committed or included in JSON backups.
 
-The setup script installs exact dependencies with pnpm on Windows (no Bash/WSL required), creates a random local encryption key in `.dev.vars`, builds the app, and runs local database migrations. It does **not** delete an existing `.dev.vars` or local database. Internet access is required for the initial dependency download.
+The setup script installs exact dependencies with pnpm on Windows (no Bash/WSL required), creates a random local encryption key and enables login-free development in `.dev.vars`, builds the app, and runs local database migrations. It does **not** delete an existing `.dev.vars` or local database. Internet access is required for the initial dependency download. The hosted Site continues to require ChatGPT sign-in.
 
 ## Later sessions
 

@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { env } from "cloudflare:workers";
 
 export type ChatGPTUser = {
   userId: string;
@@ -20,6 +21,21 @@ const CALLBACK_PATH = "/callback";
 
 export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
   const requestHeaders = await headers();
+  // Only the opt-in local development Worker may use an anonymous local identity.
+  // Production retains ChatGPT sign-in even if a request spoofs its Host header.
+  const host = (requestHeaders.get("host") ?? "").toLowerCase().split(":")[0];
+  const localNoAuth =
+    process.env.NODE_ENV === "development" &&
+    (env as unknown as Record<string, string | undefined>).PALETTEIQ_LOCAL_NO_AUTH === "1" &&
+    (host === "localhost" || host === "127.0.0.1" || host === "[::1]");
+  if (localNoAuth) {
+    return {
+      userId: "local_seedy",
+      displayName: "Local paletteIQ User",
+      email: "local@paletteiq.invalid",
+      fullName: "Local paletteIQ User",
+    };
+  }
   const userId = requestHeaders.get(USER_ID_HEADER);
   const email = requestHeaders.get(USER_EMAIL_HEADER);
   if (!userId || !email) return null;
