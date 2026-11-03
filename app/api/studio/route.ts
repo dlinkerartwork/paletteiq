@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers';
-import { eq } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { getDb } from '@/db';
 import { projects, studioSettings } from '@/db/schema';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
@@ -13,7 +13,7 @@ const extractText = (result: any) => result.output?.flatMap((o: any) => o.conten
 export async function GET() {
   const user = await getChatGPTUser();
   if (!user) return fail('Sign in required', 401);
-  const rows = await getDb().select().from(projects).where(eq(projects.owner, user.userId));
+  const rows = await getDb().select().from(projects).where(eq(projects.owner, user.userId)).orderBy(desc(projects.updatedAt));
   return Response.json(rows.map(x => ({ id: x.id, name: x.name, data: JSON.parse(x.data) })));
 }
 
