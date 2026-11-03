@@ -1,0 +1,48 @@
+export type EtsyListingDraft = {
+  title: string;
+  description: string;
+  tags: string[];
+  primaryKeyword: string;
+  secondaryKeywords: string[];
+  longTailKeywords: string[];
+  categorySuggestion: string;
+  attributes: { occasion: string; recipient: string; primaryColor: string; secondaryColor: string; style: string };
+  materials: string[];
+  imageAltTexts: string[];
+  photoPlan: string[];
+  priceSuggestion: string;
+  sku: string;
+  digitalFiles: string[];
+  licenseNotes: string;
+};
+
+const strings = (value: unknown, cap: number) => Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string').map(v => v.trim()).filter(Boolean).slice(0, cap) : [];
+const str = (value: unknown, cap = 500) => typeof value === 'string' ? value.trim().slice(0, cap) : '';
+
+export function normalizeListing(value: unknown): EtsyListingDraft {
+  const v = (value && typeof value === 'object' && !Array.isArray(value) ? value : {}) as Record<string, unknown>;
+  const a = (v.attributes && typeof v.attributes === 'object' && !Array.isArray(v.attributes) ? v.attributes : {}) as Record<string, unknown>;
+  const unique = new Set<string>();
+  const tags = strings(v.tags, 40).map(t => t.replace(/[^\p{L}\p{N} '\-]/gu, '').replace(/^[ '\-]+/, '').slice(0, 20).trim()).filter(t => { const key = t.toLowerCase(); if (!t || unique.has(key)) return false; unique.add(key); return true; }).slice(0, 13);
+  return {
+    title: str(v.title, 140), description: str(v.description, 12000), tags,
+    primaryKeyword: str(v.primaryKeyword), secondaryKeywords: strings(v.secondaryKeywords, 30), longTailKeywords: strings(v.longTailKeywords, 30),
+    categorySuggestion: str(v.categorySuggestion),
+    attributes: { occasion: str(a.occasion), recipient: str(a.recipient), primaryColor: str(a.primaryColor), secondaryColor: str(a.secondaryColor), style: str(a.style) },
+    materials: strings(v.materials, 13), imageAltTexts: strings(v.imageAltTexts, 20), photoPlan: strings(v.photoPlan, 20),
+    priceSuggestion: str(v.priceSuggestion, 100), sku: str(v.sku, 100), digitalFiles: strings(v.digitalFiles, 15), licenseNotes: str(v.licenseNotes, 1000),
+  };
+}
+
+export function listingWarnings(draft: EtsyListingDraft, imageCount: number) {
+  const warnings: string[] = [];
+  if (!draft.title.trim()) warnings.push('Title masih kosong.');
+  if (draft.title.length > 140) warnings.push('Title melebihi 140 karakter.');
+  if (!draft.description.trim()) warnings.push('Description masih kosong.');
+  if (draft.tags.length !== 13) warnings.push(`Isi 13 tags (sekarang ${draft.tags.length}).`);
+  if (draft.tags.some(t => t.length > 20)) warnings.push('Tag melebihi 20 karakter.');
+  if (!draft.categorySuggestion.trim()) warnings.push('Tentukan kategori Etsy.');
+  if (!imageCount) warnings.push('Belum ada gambar produk untuk mockup listing.');
+  warnings.push('Pastikan jumlah file, format, resolusi, lisensi, dan harga sesuai produk akhir sebelum dipublikasikan.');
+  return warnings;
+}

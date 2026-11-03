@@ -4,6 +4,7 @@ import { getDb } from '@/db';
 import { projects, studioSettings } from '@/db/schema';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { userCredential } from '@/lib/credentials';
+import { normalizeListing } from '@/lib/etsy-listing';
 
 const fail = (error: string, status = 400) => Response.json({ error }, { status });
 const secret = (key: string) => (env as unknown as Record<string, string | undefined>)[key];
@@ -56,6 +57,19 @@ export async function POST(req: Request) {
     const ai = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'gpt-4.1-mini', input: `Suggest ${count} DISTINCT original marketable clipart subjects for theme ${String(body.theme).slice(0,200)}. Style: ${String(body.style).slice(0,300)}. Do not repeat: ${JSON.stringify(body.existing ?? []).slice(0,12000)}. Return JSON {"characters":[{"name":"...","description":"..."}]}. No copied proprietary designs.`, text: { format: { type: 'json_object' } } }) });
     if (!ai.ok) return fail(`AI expansion returned ${ai.status}`, 502);
     try { return Response.json(JSON.parse(extractText(await ai.json()))); } catch { return fail('Invalid AI response', 502); }
+  }
+  if (body.action === 'listing-draft') {
+    const aiKey = await userCredential(user.userId, 'openai') || secret('OPENAI_API_KEY');
+    if (!aiKey) return fail('Configure your OpenAI API key in Settings.', 503);
+    const project = body.project;
+    if (!project || typeof project !== 'object' || typeof project.id !== 'string' || typeof project.name !== 'string' || !Array.isArray(project.characters)) return fail('Invalid collection');
+    const subjects = project.characters.slice(0, 200).filter((c: any) => c && typeof c.name === 'string').map((c: any) => ({ name: String(c.name).slice(0, 100), produced: c.status === 'done' }));
+    const produced = subjects.filter((c: { produced: boolean }) => c.produced).length;
+    const brief = { name: String(project.name).slice(0, 150), theme: String(project.theme ?? '').slice(0, 150), subtheme: String(project.subtheme ?? '').slice(0, 150), style: String(project.style ?? '').slice(0, 200), palette: String(project.palette ?? '').slice(0, 200), texture: String(project.texture ?? '').slice(0, 200), keywords: Array.isArray(project.keywords) ? project.keywords.slice(0, 30) : [], subjects, produced, sourceReference: String(project.title ?? '').slice(0, 250) };
+    const instruction = `You are preparing an original, accurate, English-language Etsy DIGITAL CLIPART listing draft. Return a single valid JSON object with precisely these keys: title (natural, clear, <=140 characters, ideally under 15 words), description (scannable, buyer-friendly opening, what's included, potential uses, download and licensing caveats), tags (13 distinct relevant phrases, each <=20 characters), primaryKeyword, secondaryKeywords (array), longTailKeywords (array), categorySuggestion (suggestion only, not taxonomy ID), attributes (object: occasion, recipient, primaryColor, secondaryColor, style), materials (array), imageAltTexts (array for original mockups), photoPlan (array), priceSuggestion (estimated range with currency and clearly marked estimate, not a market fact), sku, digitalFiles (array of proposed filenames/package contents), licenseNotes. Never copy the source listing's wording, SEO tags, or branding; create distinct original copy. Never invent concrete specs such as exact files, DPI, sizes, transparent backgrounds, licenses, or quantities as facts if unknown. Mark such details TO CONFIRM. Do not claim ${subjects.length} images are delivered when only ${produced} are produced. Etsy allows 13 tags of up to 20 characters. No unsupported demand, ranking, sales or ownership claims. Seller will verify before publishing. Collection brief: ${JSON.stringify(brief).slice(0, 21000)}`;
+    const ai = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'gpt-4.1-mini', input: instruction, text: { format: { type: 'json_object' } } }) });
+    if (!ai.ok) return fail(`AI listing draft failed (${ai.status}): ${(await ai.text()).slice(0, 200)}`, 502);
+    try { return Response.json({ draft: normalizeListing(JSON.parse(extractText(await ai.json()))) }); } catch { return fail('AI returned an invalid listing draft', 502); }
   }
   if (body.action === 'generate') {
     const aiKey = await userCredential(user.userId, 'openai') || secret('OPENAI_API_KEY');
