@@ -8,8 +8,10 @@ import { eligibleForBulk, isActiveBatchStatus } from '@/lib/production-rules';
 import { originalImagePrompt } from '@/lib/originality';
 import { reviewImageSimilarity, type SimilarityReview } from '@/lib/similarity-review';
 import { nativeAssetBucket } from '@/lib/native-bridge';
+import { acquireProductionLocks } from '@/lib/production-locks';
 
 const MODELS = ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
+const syncingJobIds = new Set<string>();
 type BatchItem = { id: string; status: 'pending' | 'done' | 'error'; imageUrl?: string; error?: string; similarityReview?: SimilarityReview };
 type OpenAIBatch = { id: string; status: string; output_file_id?: string | null; error_file_id?: string | null; request_counts?: { total: number; completed: number; failed: number } };
 const fail = (message: string, code = 400) => Response.json({ error: message }, { status: code });
@@ -33,6 +35,9 @@ export async function POST(req: Request) {
   const data = await req.json() as { projectId?: string; characterIds?: string[]; model?: string; quality?: string; regenerate?: boolean };
   if (!data.projectId || !Array.isArray(data.characterIds) || !data.characterIds.length || data.characterIds.length > 120 || !MODELS.includes(data.model || '') || !['low','medium','high'].includes(data.quality || '')) return fail('Select 1–120 characters, a Batch model, and quality.');
   if (new Set(data.characterIds).size !== data.characterIds.length) return fail('Duplicate characters are not allowed.');
+  const release = acquireProductionLocks(user.userId, data.projectId, data.characterIds);
+  if (!release) return fail('A generation request for one of these characters is already being submitted.', 409);
+  try {
   const db = getDb();
   const saved = await db.select().from(projects).where(and(eq(projects.id, data.projectId), eq(projects.owner, user.userId))).limit(1);
   if (!saved.length) return fail('Save the collection before submitting a batch.', 404);
@@ -51,17 +56,27 @@ export async function POST(req: Request) {
   const format = prefs.output === 'jpg' ? 'jpeg' : 'png';
   const background = prefs.background === 'opaque' || format === 'jpeg' ? 'opaque' : 'transparent';
   const lines = selected.map(c => JSON.stringify({ custom_id: c!.id, method: 'POST', url: '/v1/images/generations', body: { model: data.model, prompt: originalImagePrompt(c!.prompt, c!.id), quality: data.quality, size: '1024x1024', background, output_format: format, n: 1 } })).join('\n') + '\n';
+  let createdBatchId: string | null = null;
   try {
     const form = new FormData();
     form.set('purpose', 'batch');
     form.set('file', new Blob([lines], { type: 'application/jsonl' }), 'paletteiq-batch.jsonl');
     const uploaded = await (await openai(key, 'files', { method: 'POST', body: form })).json() as { id: string };
     const job = await (await openai(key, 'batches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input_file_id: uploaded.id, endpoint: '/v1/images/generations', completion_window: '24h', metadata: { application: 'paletteiq', project: data.projectId } }) })).json() as OpenAIBatch;
+    createdBatchId = job.id;
     const now = Date.now();
     const record = { id: crypto.randomUUID(), owner: user.userId, projectId: data.projectId, openaiBatchId: job.id, model: data.model!, format, status: job.status, total: selected.length, completed: 0, failed: 0, items: JSON.stringify(data.characterIds.map(id => ({ id, status: 'pending' }))), outputFileId: null, errorFileId: null, createdAt: now, updatedAt: now };
     await db.insert(imageBatches).values(record);
+    createdBatchId = null;
     return Response.json({ job: safeJob(record) });
-  } catch (error) { return fail(error instanceof Error ? error.message : 'Batch submission failed', 502); }
+  } catch (error) {
+    if (createdBatchId) {
+      try { await openai(key, `batches/${encodeURIComponent(createdBatchId)}/cancel`, { method: 'POST' }); }
+      catch { return fail('OpenAI accepted a Batch, but local saving failed and cancellation could not be confirmed. Check OpenAI Batch activity before retrying to avoid duplicate charges.', 503); }
+    }
+    return fail(error instanceof Error ? error.message : 'Batch submission failed', 502);
+  }
+  } finally { release(); }
 }
 
 async function* jsonlLines(stream: ReadableStream<Uint8Array>) {
@@ -85,6 +100,9 @@ async function* jsonlLines(stream: ReadableStream<Uint8Array>) {
 }
 
 async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner: string) {
+  if (syncingJobIds.has(job.id)) return job;
+  syncingJobIds.add(job.id);
+  try {
   const db = getDb();
   const savedProject = await db.select().from(projects).where(and(eq(projects.id, job.projectId), eq(projects.owner, owner))).limit(1);
   const reviewSources = savedProject.length ? JSON.parse(savedProject[0].data) as { selectedImageUrls?: string[]; images?: string[] } : {};
@@ -137,6 +155,7 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
   }
   await db.update(imageBatches).set({ status, completed: Math.max(requestCompleted, newCompleted), failed: Math.max(requestFailed, newFailed), items: JSON.stringify(items), outputFileId: batch.output_file_id ?? null, errorFileId: batch.error_file_id ?? null, updatedAt: Date.now() }).where(and(eq(imageBatches.id, job.id), eq(imageBatches.owner, owner)));
   return { ...job, status, completed: Math.max(requestCompleted, newCompleted), failed: Math.max(requestFailed, newFailed), items: JSON.stringify(items) };
+  } finally { syncingJobIds.delete(job.id); }
 }
 
 export async function GET(req: Request) {

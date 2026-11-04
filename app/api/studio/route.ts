@@ -9,6 +9,7 @@ import { normalizeAiSeoReview } from '@/lib/seo-intelligence';
 import { originalImagePrompt } from '@/lib/originality';
 import { reviewImageSimilarity, type SimilarityReview } from '@/lib/similarity-review';
 import { nativeAssetBucket } from '@/lib/native-bridge';
+import { acquireProductionLocks } from '@/lib/production-locks';
 
 const fail = (error: string, status = 400) => Response.json({ error }, { status });
 const secret = (key: string) => (env as unknown as Record<string, string | undefined>)[key];
@@ -153,6 +154,9 @@ export async function POST(req: Request) {
     const project = JSON.parse(saved[0].data) as { selectedImageUrls?: string[]; images?: string[]; characters?: Array<{ id: string; prompt: string; status: string; imageUrl?: string; error?: string; similarityReview?: SimilarityReview }> };
     const character = project.characters?.find(c => c.id === body.characterId);
     if (!character?.prompt || character.prompt.length > 8000) return fail('Character has no saved valid prompt.');
+    const release = acquireProductionLocks(user.userId, body.projectId, [character.id]);
+    if (!release) return fail('This character is already being generated or submitted.', 409);
+    try {
     const batchJobs = await db.select().from(imageBatches).where(and(eq(imageBatches.projectId, body.projectId), eq(imageBatches.owner, user.userId)));
     if (batchJobs.some(job => !['completed','completed_with_errors','failed','cancelled','expired'].includes(job.status) && (JSON.parse(job.items) as Array<{ id: string; status: string }>).some(item => item.id === character.id && item.status === 'pending'))) return fail('Character has an active Batch job. Wait for it to finish before regenerating.', 409);
     const bucket = nativeAssetBucket() ?? env.BUCKET;
@@ -178,6 +182,7 @@ export async function POST(req: Request) {
       return fail('Image stored safely, but collection update failed. Use Recover images in Image Production; do not regenerate yet.', 503);
     }
     return Response.json({ imageUrl, similarityReview: character.similarityReview, persisted: true });
+    } finally { release(); }
   }
   if (body.action === 'recover-images') {
     const bucket = nativeAssetBucket() ?? env.BUCKET;
