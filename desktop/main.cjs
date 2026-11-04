@@ -43,9 +43,12 @@ function runtimeConfig(directory, secret) {
 function launchWrangler(args, directory, secrets, options = {}) {
   const wrangler = path.join(ROOT, 'node_modules', 'wrangler', 'bin', 'wrangler.js');
   if (!existsSync(wrangler)) throw new Error('Wrangler is missing. Run npm install in the PaletteIQ repository.');
+  // Wrangler's argument parser misreads argv when started through Electron's
+  // ELECTRON_RUN_AS_NODE mode on Windows. The developer preview uses the real
+  // Node.js executable. Standalone installers will bundle their own runtime.
+  const nodeExecutable = process.env.PALETTEIQ_NODE_EXECUTABLE || 'node';
   const env = {
     ...process.env,
-    ELECTRON_RUN_AS_NODE: '1',
     PALETTEIQ_DESKTOP: '1',
     PALETTEIQ_LOCAL_NO_AUTH: '1',
     STUDIO_CREDENTIAL_ENCRYPTION_KEY: secrets,
@@ -55,8 +58,9 @@ function launchWrangler(args, directory, secrets, options = {}) {
     WRANGLER_REGISTRY_PATH: path.join(directory, 'wrangler-registry'),
     MINIFLARE_REGISTRY_PATH: path.join(directory, 'miniflare-registry'),
   };
+  delete env.ELECTRON_RUN_AS_NODE;
   mkdirSync(env.WRANGLER_LOG_PATH, { recursive: true });
-  return spawn(process.execPath, [wrangler, ...args], { cwd: ROOT, env, windowsHide: true, stdio: options.stdio || 'pipe' });
+  return spawn(nodeExecutable, [wrangler, ...args], { cwd: ROOT, env, windowsHide: true, stdio: options.stdio || 'pipe' });
 }
 
 async function invokeWrangler(args, directory, secret) {
