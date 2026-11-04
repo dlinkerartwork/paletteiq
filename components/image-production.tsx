@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, CircleAlert, Clock3, Download, Image as ImageIcon, LoaderCircle, RefreshCw, Sparkles } from 'lucide-react';
+import { eligibleForBulk, isActiveBatchStatus, wasPreviouslyGenerated } from '@/lib/production-rules';
 
 type Character = { id: string; name: string; prompt: string; status: string; imageUrl?: string; error?: string };
 type Project = { id: string; name: string; characters: Character[]; listing?: { title?: string } };
@@ -28,9 +29,9 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
   const latestAsset = useRef(onAsset); latestAsset.current = onAsset;
   const latestProject = useRef(project); latestProject.current = project;
   const syncBusy = useRef(false);
-  const pending = new Set(jobs.filter(j => !['completed', 'completed_with_errors', 'failed', 'cancelled', 'expired'].includes(j.status)).flatMap(j => j.characterIds || []));
-  const everGenerated = (c: Character) => !!c.imageUrl || c.status === 'done' || c.status === 'error';
-  const eligible = project.characters.filter(c => c.prompt && !everGenerated(c) && !pending.has(c.id));
+  const pending = new Set(jobs.filter(j => isActiveBatchStatus(j.status)).flatMap(j => j.characterIds || []));
+  const everGenerated = wasPreviouslyGenerated;
+  const eligible = project.characters.filter(c => eligibleForBulk(c, pending.has(c.id)));
   const chosenSingle = eligible.find(c => c.id === singleId) || eligible[0];
   const selectedBatchIds = selectedIds.length ? eligible.filter(c => selectedIds.includes(c.id)).map(c => c.id) : eligible.map(c => c.id);
   const completedTotal = project.characters.filter(c => c.status === 'done').length;

@@ -3,17 +3,24 @@
 import { useState } from 'react';
 import { Copy, Download, LoaderCircle, Sparkles } from 'lucide-react';
 import { listingWarnings, normalizeListing, type EtsyListingDraft } from '@/lib/etsy-listing';
+import { auditSeo, type AiSeoReview } from '@/lib/seo-intelligence';
 
-type Project = { id: string; name: string; theme: string; characters: Array<{ status: string; imageUrl?: string }>; listing?: EtsyListingDraft };
-type Props = { project: Project; onChange: (draft: EtsyListingDraft) => void; onSave: () => Promise<void> };
+export type SavedSeoReview = AiSeoReview & { sourceFingerprint: string; reviewedAt: number };
+type Project = { id: string; name: string; theme: string; characters: Array<{ status: string; imageUrl?: string }>; listing?: EtsyListingDraft; seoReview?: SavedSeoReview };
+type Props = { project: Project; onChange: (draft: EtsyListingDraft) => void; onSave: () => Promise<void>; onSeoReview: (review: SavedSeoReview) => Promise<void> };
 const download = (name: string, body: string, mime: string) => { const url = URL.createObjectURL(new Blob([body], { type: mime })); const a = document.createElement('a'); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url); };
 const slug = (s: string) => (s || 'paletteiq').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 60);
 
-export default function EtsyListingDraft({ project, onChange, onSave }: Props) {
+export default function EtsyListingDraft({ project, onChange, onSave, onSeoReview }: Props) {
   const [working, setWorking] = useState(false);
   const [notice, setNotice] = useState('');
   const [exporting, setExporting] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
   const draft = project.listing ?? normalizeListing({});
+  const audit = auditSeo(draft);
+  const fingerprint = JSON.stringify({ title: draft.title, description: draft.description, tags: draft.tags, primaryKeyword: draft.primaryKeyword });
+  const review = project.seoReview;
+  const staleReview = !!review && review.sourceFingerprint !== fingerprint;
   const edit = (fields: Partial<EtsyListingDraft>) => onChange({ ...draft, ...fields });
   const listEdit = (key: 'secondaryKeywords' | 'longTailKeywords' | 'materials' | 'imageAltTexts' | 'photoPlan' | 'digitalFiles', value: string) => edit({ [key]: value.split('\n').map(x => x.trim()).filter(Boolean) });
   const produced = project.characters.filter(c => c.status === 'done').length;
@@ -28,6 +35,17 @@ export default function EtsyListingDraft({ project, onChange, onSave }: Props) {
     } catch (e) { setNotice(e instanceof Error ? e.message : 'Generation failed'); } finally { setWorking(false); }
   };
   const copy = async (text: string) => { await navigator.clipboard.writeText(text); setNotice('Copied to clipboard.'); };
+  const reviewWithAi = async () => {
+    setReviewing(true); setNotice('');
+    try {
+      await onSave();
+      const response = await fetch('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'seo-review', projectId: project.id, draft }) });
+      const data = await response.json() as { review?: AiSeoReview; error?: string };
+      if (!response.ok || !data.review) throw new Error(data.error || 'AI SEO review failed');
+      await onSeoReview({ ...data.review, sourceFingerprint: fingerprint, reviewedAt: Date.now() });
+      setNotice('AI SEO suggestions saved. Review before applying. No search-demand statistics are claimed.');
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Review failed'); } finally { setReviewing(false); }
+  };
   const exportPackage = async () => {
     setExporting(true); setNotice('Saving listing draft and preparing collection ZIP…');
     try {
@@ -42,6 +60,7 @@ export default function EtsyListingDraft({ project, onChange, onSave }: Props) {
   return <div className="listing-workspace">
     <div className="panel listing-hero"><div><h2>Etsy Listing Draft Studio</h2><p>Original SEO package based on this collection. Editable and saved in your collection JSON. No listing will be published to Etsy.</p></div><button className="primary-btn" disabled={working} onClick={generate}>{working ? <LoaderCircle size={16} className="spin"/> : <Sparkles size={16}/>} {draft.title ? 'Regenerate SEO draft' : 'Generate complete SEO draft'}</button></div>
     {notice && <div className="panel listing-notice">{notice}</div>}
+    <section className="panel seo-intelligence"><div className="seo-intelligence-head"><div><h2>Advanced SEO Intelligence</h2><p className="sub">Editorial draft-readiness checks — not Etsy ranking, traffic, or sales predictions.</p></div><div className="seo-score"><strong>{audit.score}<small>/100</small></strong><span>{audit.passed}/{audit.total} checks</span></div></div><div className="progress"><i style={{ width: `${audit.score}%` }}/></div><div className="seo-check-grid">{audit.checks.map(check => <div key={check.id} className={`seo-check ${check.passed ? 'passed' : 'missing'}`}><b>{check.passed ? '✓' : '!' } {check.label}</b>{!check.passed && <small>{check.fix}</small>}</div>)}</div><button className="primary-btn" disabled={reviewing || !draft.title.trim()} onClick={() => void reviewWithAi()}>{reviewing ? <LoaderCircle size={15} className="spin"/> : <Sparkles size={15}/>} {reviewing ? 'Reviewing with OpenAI…' : 'Analyze SEO with OpenAI'}</button>{review && <div className="seo-review"><p className="sub">AI review {new Date(review.reviewedAt).toLocaleString()}{staleReview ? ' · Draft changed since analysis — rerun recommended' : ''}</p><p>{review.summary}</p><h3>Alternative titles</h3><div className="seo-suggestions">{review.titleAlternatives.map((title,i) => <button className="outline-btn" key={i} onClick={() => edit({ title })}>{title} <span>Apply</span></button>)}</div><h3>Suggested tags</h3><div className="seo-tag-suggestions">{review.suggestedTags.map((tag,i) => <span key={i}>{tag}</span>)}</div><button className="outline-btn" onClick={() => edit({ tags: review.suggestedTags })}>Use suggested tags</button><h3>Suggested description opening</h3><p>{review.descriptionOpening}</p><button className="outline-btn" onClick={() => edit({ description: `${review.descriptionOpening}\n\n${draft.description}` })}>Prepend opening</button><h3>Keyword gaps</h3><p>{review.keywordGaps.join(' · ') || 'No specific gaps suggested.'}</p><h3>Potential buyers</h3><p>{review.targetBuyers.join(' · ')}</p><h3>Claims to verify</h3><ul>{review.risks.map((risk,i) => <li key={i}>{risk}</li>)}</ul></div>}</section>
     <div className="listing-grid"><section className="panel"><h2>Listing copy</h2><p className="sub">Natural keyword-rich copy for an English-language digital listing.</p>
       <label className="input-label">TITLE · {draft.title.length}/140 CHARACTERS</label><textarea rows={3} maxLength={140} value={draft.title} onChange={e => edit({ title: e.target.value })}/><button className="outline-btn listing-copy" onClick={() => copy(draft.title)}><Copy size={14}/> Copy title</button>
       <label className="input-label">DESCRIPTION</label><textarea rows={16} value={draft.description} onChange={e => edit({ description: e.target.value })}/><button className="outline-btn listing-copy" onClick={() => copy(draft.description)}><Copy size={14}/> Copy description</button>

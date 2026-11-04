@@ -4,6 +4,8 @@ import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { getDb } from '@/db';
 import { projects } from '@/db/schema';
 import { zipStream, type ZipEntry } from '@/lib/zip-stream';
+import { normalizeListing } from '@/lib/etsy-listing';
+import { auditSeo } from '@/lib/seo-intelligence';
 
 const enc = new TextEncoder();
 const slug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'collection';
@@ -17,7 +19,7 @@ export async function POST(request: Request) {
   if (typeof body.projectId !== 'string' || !['selected','all','package'].includes(body.scope || '')) return Response.json({ error: 'Invalid export request' }, { status: 400 });
   const rows = await getDb().select().from(projects).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId))).limit(1);
   if (!rows.length) return Response.json({ error: 'Collection not found' }, { status: 404 });
-  const project = JSON.parse(rows[0].data) as { name: string; listing?: unknown; characters: Array<{ id: string; name: string; imageUrl?: string }> };
+  const project = JSON.parse(rows[0].data) as { name: string; listing?: unknown; seoReview?: unknown; characters: Array<{ id: string; name: string; imageUrl?: string }> };
   if (body.scope === 'package' && !(project.listing && typeof project.listing === 'object' && typeof (project.listing as { title?: string }).title === 'string' && (project.listing as { title: string }).title.trim())) return Response.json({ error: 'Create and save an Etsy listing draft before exporting the final package.' }, { status: 400 });
   const selectedIds = new Set(Array.isArray(body.ids) ? body.ids.filter(v => typeof v === 'string') : []);
   const chosen = project.characters.filter(c => c.imageUrl && (body.scope !== 'selected' || selectedIds.has(c.id)));
@@ -35,6 +37,7 @@ export async function POST(request: Request) {
   }
   if (body.scope === 'package') {
     entries.push({ name: 'etsy-listing-draft.json', stream: file(JSON.stringify(project.listing || {}, null, 2)) });
+    entries.push({ name: 'seo-readiness-report.json', stream: file(JSON.stringify({ editorialAudit: auditSeo(normalizeListing(project.listing)), aiReview: project.seoReview || null, note: 'Editorial completeness only; not an Etsy search ranking, traffic, or sales prediction.' }, null, 2)) });
     const listing = (project.listing || {}) as { title?: string; description?: string; tags?: string[]; primaryKeyword?: string };
     entries.push({ name: 'etsy-listing-draft.txt', stream: file(`TITLE\n${listing.title || ''}\n\nDESCRIPTION\n${listing.description || ''}\n\nTAGS\n${(listing.tags || []).join(', ')}\n\nPRIMARY KEYWORD\n${listing.primaryKeyword || ''}\n`) });
     entries.push({ name: 'collection-manifest.json', stream: file(JSON.stringify({ collection: project.name, images: chosen.map(c => ({ id: c.id, name: c.name, imageUrl: c.imageUrl })) }, null, 2)) });

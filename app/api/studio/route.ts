@@ -5,6 +5,7 @@ import { imageBatches, projects, studioSettings } from '@/db/schema';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { userCredential } from '@/lib/credentials';
 import { normalizeListing } from '@/lib/etsy-listing';
+import { normalizeAiSeoReview } from '@/lib/seo-intelligence';
 
 const fail = (error: string, status = 400) => Response.json({ error }, { status });
 const secret = (key: string) => (env as unknown as Record<string, string | undefined>)[key];
@@ -106,6 +107,19 @@ export async function POST(req: Request) {
     const ai = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'gpt-4.1-mini', input: instruction, text: { format: { type: 'json_object' } } }) });
     if (!ai.ok) return fail(`AI listing draft failed (${ai.status}): ${(await ai.text()).slice(0, 200)}`, 502);
     try { return Response.json({ draft: normalizeListing(JSON.parse(extractText(await ai.json()))) }); } catch { return fail('AI returned an invalid listing draft', 502); }
+  }
+  if (body.action === 'seo-review') {
+    const aiKey = await userCredential(user.userId, 'openai') || secret('OPENAI_API_KEY');
+    if (!aiKey) return fail('Configure your OpenAI API key in Settings.', 503);
+    if (!body.draft || typeof body.draft !== 'object' || typeof body.projectId !== 'string') return fail('Invalid SEO review request');
+    const saved = await getDb().select().from(projects).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId))).limit(1);
+    if (!saved.length) return fail('Save this collection before requesting SEO review.', 404);
+    const project = JSON.parse(saved[0].data) as { name: string; theme?: string; subtheme?: string; characters?: Array<{ name: string }> };
+    const draft = normalizeListing(body.draft);
+    const prompt = `Review this ORIGINAL Etsy digital clipart listing draft as a cautious Etsy SEO editor. Offer practical, buyer-friendly suggestions based on relevant terms and product truth, NOT invented keyword search volume, market demand, competition ratings, Etsy search ranking, sales or performance claims. Never copy the source listing or claim access to Etsy Analytics. Return valid JSON with EXACT keys: summary (short editorial analysis), targetBuyers (array of plausible buyer audiences), keywordGaps (array of missing long-tail search phrases relevant to the actual subject), titleAlternatives (3 naturally phrased unique alternative titles <=140 characters, preferably <=15 words), suggestedTags (up to 13 distinct keyword tags, each <=20 characters), descriptionOpening (improved honest opening), risks (array of unverified claims, missing product details, potential keyword stuffing, vague wording). Avoid promises about file formats, quantities, license and DPI unless explicitly confirmed. Etsy tags must be unique phrases <=20 characters. Title should be clear and concise. Collection: ${JSON.stringify({ name: project.name, theme: project.theme, subtheme: project.subtheme, subjects: (project.characters || []).slice(0, 35).map(c => c.name) }).slice(0, 6000)}. Current draft: ${JSON.stringify(draft).slice(0, 16000)}`;
+    const ai = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'gpt-4.1-mini', input: prompt, text: { format: { type: 'json_object' } } }) });
+    if (!ai.ok) return fail(`OpenAI SEO review failed (${ai.status}): ${(await ai.text()).slice(0, 180)}`, 502);
+    try { return Response.json({ review: normalizeAiSeoReview(JSON.parse(extractText(await ai.json()))) }); } catch { return fail('Invalid AI SEO review response', 502); }
   }
   if (body.action === 'generate') {
     const aiKey = await userCredential(user.userId, 'openai') || secret('OPENAI_API_KEY');

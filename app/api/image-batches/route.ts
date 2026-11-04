@@ -4,6 +4,7 @@ import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { getDb } from '@/db';
 import { imageBatches, projects, studioSettings } from '@/db/schema';
 import { userCredential } from '@/lib/credentials';
+import { eligibleForBulk, isActiveBatchStatus } from '@/lib/production-rules';
 
 const MODELS = ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
 type BatchItem = { id: string; status: 'pending' | 'done' | 'error'; imageUrl?: string; error?: string };
@@ -35,9 +36,9 @@ export async function POST(req: Request) {
   const project = JSON.parse(saved[0].data) as { characters?: Array<{ id: string; prompt: string; status?: string; imageUrl?: string }> };
   const selected = data.characterIds.map(id => project.characters?.find(c => c.id === id));
   if (data.regenerate && data.characterIds.length !== 1) return fail('Regenerate must be submitted for one character at a time.');
-  if (selected.some(c => !c?.prompt || (!data.regenerate && (c.status === 'done' || c.status === 'error' || !!c.imageUrl)))) return fail('Bulk Batch accepts only never-generated prompts. Use per-card Regenerate for existing images.');
+  if (selected.some(c => !c?.prompt || (!data.regenerate && !eligibleForBulk(c)))) return fail('Bulk Batch accepts only never-generated prompts. Use per-card Regenerate for existing images.');
   const previous = await db.select().from(imageBatches).where(and(eq(imageBatches.owner, user.userId), eq(imageBatches.projectId, data.projectId)));
-  const activeIds = new Set(previous.filter(b => !['failed','cancelled','expired','completed','completed_with_errors'].includes(b.status)).flatMap(b => (JSON.parse(b.items) as BatchItem[]).filter(i => i.status === 'pending').map(i => i.id)));
+  const activeIds = new Set(previous.filter(b => isActiveBatchStatus(b.status)).flatMap(b => (JSON.parse(b.items) as BatchItem[]).filter(i => i.status === 'pending').map(i => i.id)));
   if (data.characterIds.some(id => activeIds.has(id))) return fail('Some characters already have a pending Batch job.');
   const secret = (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
   const key = await userCredential(user.userId, 'openai') || secret;
@@ -116,7 +117,8 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
   const status = importedAll ? (newFailed ? 'completed_with_errors' : 'completed') : isTerminal ? 'importing' : batch.status;
   const requestCompleted = batch.request_counts?.completed || 0;
   const requestFailed = batch.request_counts?.failed || 0;
-  await db.update(imageBatches).set({ status, completed: Math.max(requestCompleted, newCompleted), failed: Math.max(requestFailed, newFailed), items: JSON.stringify(items), outputFileId: batch.output_file_id ?? null, errorFileId: batch.error_file_id ?? null, updatedAt: Date.now() }).where(and(eq(imageBatches.id, job.id), eq(imageBatches.owner, owner)));
+  // Persist asset references in the collection BEFORE advancing job bookkeeping.
+  // If this write fails, the job remains retriable rather than incorrectly marked complete.
   if (newCompleted || newFailed) {
     const saved = await db.select().from(projects).where(and(eq(projects.id, job.projectId), eq(projects.owner, owner))).limit(1);
     if (saved.length) {
@@ -125,6 +127,7 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
       await db.update(projects).set({ data: JSON.stringify(project), updatedAt: Date.now() }).where(and(eq(projects.id, job.projectId), eq(projects.owner, owner)));
     }
   }
+  await db.update(imageBatches).set({ status, completed: Math.max(requestCompleted, newCompleted), failed: Math.max(requestFailed, newFailed), items: JSON.stringify(items), outputFileId: batch.output_file_id ?? null, errorFileId: batch.error_file_id ?? null, updatedAt: Date.now() }).where(and(eq(imageBatches.id, job.id), eq(imageBatches.owner, owner)));
   return { ...job, status, completed: Math.max(requestCompleted, newCompleted), failed: Math.max(requestFailed, newFailed), items: JSON.stringify(items) };
 }
 
@@ -139,7 +142,7 @@ export async function GET(req: Request) {
   const rows = await db.select().from(imageBatches).where(and(eq(imageBatches.owner, user.userId), eq(imageBatches.projectId, projectId))).orderBy(desc(imageBatches.createdAt)).limit(20);
   const key = await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
   const sync = new URL(req.url).searchParams.get('sync') === '1';
-  const syncTarget = rows.find(row => !['completed','completed_with_errors'].includes(row.status))?.id;
+  const syncTarget = rows.find(row => isActiveBatchStatus(row.status))?.id;
   const jobs = await Promise.all(rows.map(async row => {
     if (!sync || !key || row.id !== syncTarget) return safeJob(row);
     try { return safeJob(await syncJob(row, key, user.userId)); }
