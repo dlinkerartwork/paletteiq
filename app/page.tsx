@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, BarChart3, BookOpenText, Check, ChevronDown, CircleHelp, Download, ExternalLink, FileSearch, Image, Layers3, LoaderCircle, Plus, Search, Settings2, Sparkles, Trash2, WandSparkles, X } from 'lucide-react';
-import StudioSettings, { defaultPrefs, type StudioPreferences } from '@/components/studio-settings';
+import StudioSettings, { defaultPrefs, defaultSeoPrompts, type StudioPreferences } from '@/components/studio-settings';
 import ImageProduction from '@/components/image-production';
 import EtsyListingDraft, { type SavedSeoReview } from '@/components/etsy-listing-draft';
 import type { EtsyListingDraft as ListingData } from '@/lib/etsy-listing';
@@ -86,10 +86,10 @@ export default function Home() {
     return () => { stopped = true; window.clearInterval(timer); };
   }, [loadDone, tab]);
   useEffect(() => { window.scrollTo({ top: 0, left: 0, behavior: 'instant' }); const main = document.querySelector('.main'); if (main && main.scrollTop) main.scrollTop = 0; document.title = `${['overview','collections','settings'].includes(tab) ? tab[0].toUpperCase() + tab.slice(1) : `${project.name} · ${steps.find(s => s.id === tab)?.label || tab}`} | PaletteIQ`; }, [tab, project.id]);
-  useEffect(() => { fetch('/api/settings').then(r => r.ok ? r.json() : null).then((data: any) => { if (data?.preferences) updatePreferences({ ...defaultPrefs, ...data.preferences }); }).catch(() => {}); }, []);
+  useEffect(() => { fetch('/api/settings').then(r => r.ok ? r.json() : null).then((data: any) => { if (data?.preferences) updatePreferences({ ...defaultPrefs, ...data.preferences, seoPrompts: { ...defaultSeoPrompts, ...data.preferences.seoPrompts } }); }).catch(() => {}); }, []);
   const updatePreferences = (prefs: StudioPreferences) => { setPreferences(prefs); setTarget(prefs.target); setModel(prefs.model); setQuality(prefs.quality); };
   const importAll = async (backup: { projects: unknown[]; preferences: StudioPreferences }) => {
-    const prefs = { ...defaultPrefs, ...backup.preferences };
+    const prefs = { ...defaultPrefs, ...backup.preferences, seoPrompts: { ...defaultSeoPrompts, ...backup.preferences.seoPrompts } };
     const response = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'preferences', preferences: prefs }) });
     if (!response.ok) throw new Error(((await response.json()) as any).error || 'Settings import failed');
     const imported: Project[] = [];
@@ -164,8 +164,17 @@ export default function Home() {
   const expand = async () => { const n = Math.max(0, target - project.characters.length); if (!n) { setMessage('Target already reached.'); return; } setBusy('expand'); let current = project; try { const names = new Set(current.characters.map(c => c.name.trim().toLocaleLowerCase())); let retries = 0; while (current.characters.length < target && retries++ < Math.ceil(n / 10) + 10) { const res = await api({ action: 'expand', count: Math.min(20, target - current.characters.length), theme: current.theme, subtheme: current.subtheme, style: current.style, palette: current.palette, texture: current.texture, notes: current.notes, images: current.selectedImageUrls ?? current.images, existing: current.characters.map(c => c.name) }); const batch: Character[] = (res.characters ?? []).map((v: any) => makeChar(String(v.name || ''), 'ai', String(v.description || ''))).filter((c: Character) => { const k = c.name.trim().toLocaleLowerCase(); if (!k || names.has(k)) return false; names.add(k); return true; }); current = { ...current, characters: [...current.characters, ...batch].slice(0, target) }; setProject(current); } setMessage(`Expanded to ${current.characters.length}/${target} subjects using visual references. Save your collection.`); } catch (e) { setMessage(`Expansion interrupted at ${current.characters.length}/${target}: ${String(e)}`); } finally { setBusy(''); } };
   const generatePrompts = async (ids?: string[]) => {
     if (busy) return;
-    const chosen = project.characters.filter(c => ids ? ids.includes(c.id) : (!selected.length || selected.includes(c.id)));
-    if (!chosen.length) { setMessage('Add characters before generating prompts.'); return; }
+    const scope = project.characters.filter(c => ids ? ids.includes(c.id) : (!selected.length || selected.includes(c.id)));
+    if (!scope.length) { setMessage('Add characters before generating prompts.'); return; }
+    const ungenerated = scope.filter(c => !c.prompt.trim());
+    let chosen = ungenerated;
+    if (!ungenerated.length && !ids?.length) {
+      if (!window.confirm(`All ${scope.length} selected character prompts are already filled. Regenerate them with OpenAI? Existing prompts will be replaced and API charges may apply.`)) return;
+      chosen = scope;
+    } else if (ids?.length && scope.length === 1 && scope[0].prompt.trim()) {
+      // Per-card regeneration is confirmed by the explicit button label.
+      chosen = scope;
+    }
     setBusy('prompts'); setPromptProgress({ done: 0, total: chosen.length }); setMessage('');
     let completed = 0;
     try {

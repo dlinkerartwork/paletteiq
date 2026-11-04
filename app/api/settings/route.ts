@@ -5,7 +5,9 @@ import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { encryptCredential } from '@/lib/credentials';
 
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
-const defaultPrefs = { target: 120, model: 'gpt-image-1-mini', quality: 'low', analysisModel: 'gpt-4.1-mini', output: 'png', background: 'transparent', variations: 1, defaultStyle: 'Soft hand-painted watercolor illustration', autoSave: false };
+const seoPromptFields = ["general","title","description","tags","primaryKeyword","secondaryKeywords","longTailKeywords","categorySuggestion","attributes","materials","imageAltTexts","photoPlan","priceSuggestion","sku","digitalFiles","licenseNotes"] as const;
+const defaultSeoPrompts = Object.fromEntries(seoPromptFields.map(key => [key, '']));
+const defaultPrefs = { target: 120, model: 'gpt-image-1-mini', quality: 'low', analysisModel: 'gpt-4.1-mini', output: 'png', background: 'transparent', variations: 1, defaultStyle: 'Soft hand-painted watercolor illustration', autoSave: false, seoPrompts: defaultSeoPrompts };
 const allowedModels = ['gpt-image-1-mini', 'gpt-image-1', 'gpt-image-1.5', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
 
 export async function GET() {
@@ -29,6 +31,7 @@ export async function POST(req: Request) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return bad('Invalid preferences');
     const prefs = { ...defaultPrefs, ...raw };
     if (!Number.isInteger(prefs.target) || prefs.target < 1 || prefs.target > 1000 || !Number.isInteger(prefs.variations) || prefs.variations < 1 || prefs.variations > 8 || !allowedModels.includes(prefs.model) || !['low','medium','high'].includes(prefs.quality) || prefs.analysisModel !== 'gpt-4.1-mini' || !['png','jpg'].includes(prefs.output) || !['transparent','opaque'].includes(prefs.background) || (prefs.output === 'jpg' && prefs.background === 'transparent') || typeof prefs.defaultStyle !== 'string' || prefs.defaultStyle.length > 500 || typeof prefs.autoSave !== 'boolean') return bad('Invalid settings values');
+    if (!prefs.seoPrompts || typeof prefs.seoPrompts !== 'object' || Array.isArray(prefs.seoPrompts) || Object.keys(prefs.seoPrompts).some(key => !seoPromptFields.includes(key as typeof seoPromptFields[number])) || seoPromptFields.some(key => typeof prefs.seoPrompts[key] !== 'string' || prefs.seoPrompts[key].length > 2000)) return bad('Invalid custom SEO prompts');
     values.preferences = JSON.stringify(prefs);
   } else if (body.action === 'credential') {
     if (!['etsy','openai'].includes(String(body.provider))) return bad('Invalid provider');
