@@ -8,6 +8,7 @@ import { normalizeListing } from '@/lib/etsy-listing';
 import { normalizeAiSeoReview } from '@/lib/seo-intelligence';
 import { originalImagePrompt } from '@/lib/originality';
 import { reviewImageSimilarity, type SimilarityReview } from '@/lib/similarity-review';
+import { nativeAssetBucket } from '@/lib/native-bridge';
 
 const fail = (error: string, status = 400) => Response.json({ error }, { status });
 const secret = (key: string) => (env as unknown as Record<string, string | undefined>)[key];
@@ -141,7 +142,8 @@ export async function POST(req: Request) {
     if (!character?.prompt || character.prompt.length > 8000) return fail('Character has no saved valid prompt.');
     const batchJobs = await db.select().from(imageBatches).where(and(eq(imageBatches.projectId, body.projectId), eq(imageBatches.owner, user.userId)));
     if (batchJobs.some(job => !['completed','completed_with_errors','failed','cancelled','expired'].includes(job.status) && (JSON.parse(job.items) as Array<{ id: string; status: string }>).some(item => item.id === character.id && item.status === 'pending'))) return fail('Character has an active Batch job. Wait for it to finish before regenerating.', 409);
-    if (!env.BUCKET) return fail('Image storage is not provisioned', 503);
+    const bucket = nativeAssetBucket() ?? env.BUCKET;
+    if (!bucket) return fail('Image storage is not provisioned', 503);
     const settings = await getDb().select().from(studioSettings).where(eq(studioSettings.owner, user.userId)).limit(1);
     const preferences = settings[0] ? JSON.parse(settings[0].preferences) as { output?: string; background?: string } : {};
     const format = preferences.output === 'jpg' ? 'jpeg' : 'png';
@@ -154,7 +156,7 @@ export async function POST(req: Request) {
     const extension = format === 'jpeg' ? 'jpg' : 'png';
     const imageUrl = `/api/images/${character.id}?format=${extension}&v=${Date.now()}`;
     // A deterministic per-character object key allows recovery if DB persistence fails.
-    await env.BUCKET.put(`generated/${user.userId}/${character.id}.${extension}`, Uint8Array.from(atob(b64), c => c.charCodeAt(0)), { httpMetadata: { contentType: format === 'jpeg' ? 'image/jpeg' : 'image/png' } });
+    await bucket.put(`generated/${user.userId}/${character.id}.${extension}`, Uint8Array.from(atob(b64), c => c.charCodeAt(0)), { httpMetadata: { contentType: format === 'jpeg' ? 'image/jpeg' : 'image/png' } });
     character.imageUrl = imageUrl; character.status = 'done'; character.error = '';
     character.similarityReview = await reviewImageSimilarity(aiKey, b64, format === 'jpeg' ? 'image/jpeg' : 'image/png', project.selectedImageUrls ?? project.images ?? []);
     try {
@@ -165,8 +167,8 @@ export async function POST(req: Request) {
     return Response.json({ imageUrl, similarityReview: character.similarityReview, persisted: true });
   }
   if (body.action === 'recover-images') {
-    if (typeof body.projectId !== 'string' || !env.BUCKET) return fail('Invalid recovery request');
-    const bucket = env.BUCKET;
+    const bucket = nativeAssetBucket() ?? env.BUCKET;
+    if (typeof body.projectId !== 'string' || !bucket) return fail('Invalid recovery request');
     const db = getDb();
     const saved = await db.select().from(projects).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId))).limit(1);
     if (!saved.length) return fail('Collection not found', 404);

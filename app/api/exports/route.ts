@@ -6,6 +6,7 @@ import { projects } from '@/db/schema';
 import { zipStream, type ZipEntry } from '@/lib/zip-stream';
 import { normalizeListing } from '@/lib/etsy-listing';
 import { auditSeo } from '@/lib/seo-intelligence';
+import { nativeAssetBucket } from '@/lib/native-bridge';
 
 const enc = new TextEncoder();
 const slug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'collection';
@@ -13,8 +14,8 @@ const file = (content: string) => async () => new ReadableStream<Uint8Array>({ s
 export async function POST(request: Request) {
   const user = await getChatGPTUser();
   if (!user) return Response.json({ error: 'Sign in required' }, { status: 401 });
-  if (!env.BUCKET) return Response.json({ error: 'Image storage unavailable' }, { status: 503 });
-  const bucket = env.BUCKET;
+  const bucket = nativeAssetBucket() ?? env.BUCKET;
+  if (!bucket) return Response.json({ error: 'Image storage unavailable' }, { status: 503 });
   const body = await request.json() as { projectId?: string; ids?: string[]; scope?: 'selected' | 'all' | 'package' };
   if (typeof body.projectId !== 'string' || !['selected','all','package'].includes(body.scope || '')) return Response.json({ error: 'Invalid export request' }, { status: 400 });
   const rows = await getDb().select().from(projects).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId))).limit(1);

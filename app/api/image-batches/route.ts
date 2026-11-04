@@ -7,6 +7,7 @@ import { userCredential } from '@/lib/credentials';
 import { eligibleForBulk, isActiveBatchStatus } from '@/lib/production-rules';
 import { originalImagePrompt } from '@/lib/originality';
 import { reviewImageSimilarity, type SimilarityReview } from '@/lib/similarity-review';
+import { nativeAssetBucket } from '@/lib/native-bridge';
 
 const MODELS = ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
 type BatchItem = { id: string; status: 'pending' | 'done' | 'error'; imageUrl?: string; error?: string; similarityReview?: SimilarityReview };
@@ -92,7 +93,8 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
   const items = JSON.parse(job.items) as BatchItem[];
   const byId = new Map(items.map(i => [i.id, i]));
   const isTerminal = ['completed', 'expired', 'cancelled', 'failed'].includes(batch.status);
-  if (isTerminal && env.BUCKET) {
+  const bucket = nativeAssetBucket() ?? env.BUCKET;
+  if (isTerminal && bucket) {
     let handled = 0;
     let interrupted = false;
     for (const fileId of [batch.output_file_id, batch.error_file_id].filter((x): x is string => !!x)) {
@@ -106,7 +108,7 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
         const b64 = record.response?.body?.data?.[0]?.b64_json as string | undefined;
         if (b64) {
           const extension = job.format === 'jpeg' ? 'jpg' : 'png';
-          await env.BUCKET.put(`generated/${owner}/${record.custom_id}.${extension}`, Uint8Array.from(atob(b64), c => c.charCodeAt(0)), { httpMetadata: { contentType: extension === 'jpg' ? 'image/jpeg' : 'image/png' } });
+          await bucket.put(`generated/${owner}/${record.custom_id}.${extension}`, Uint8Array.from(atob(b64), c => c.charCodeAt(0)), { httpMetadata: { contentType: extension === 'jpg' ? 'image/jpeg' : 'image/png' } });
           item.status = 'done'; item.imageUrl = `/api/images/${record.custom_id}?format=${extension}&v=${Date.now()}`;
           item.similarityReview = await reviewImageSimilarity(key, b64, extension === 'jpg' ? 'image/jpeg' : 'image/png', references);
         } else { item.status = 'error'; item.error = String(record.error?.message || record.response?.body?.error?.message || 'Batch item failed').slice(0, 260); }

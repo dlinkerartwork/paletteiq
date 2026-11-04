@@ -3,12 +3,14 @@ const { spawn } = require('node:child_process');
 const { mkdirSync, existsSync, readFileSync, writeFileSync } = require('node:fs');
 const { randomBytes } = require('node:crypto');
 const path = require('node:path');
+const { startNativeStorage } = require('./native-storage.cjs');
 
 const ROOT = path.resolve(__dirname, '..');
 const SERVER_PORT = 18763;
 const SERVER_URL = `http://127.0.0.1:${SERVER_PORT}`;
 app.setName('PaletteIQ Desktop');
 let server = null;
+let nativeStorage = null;
 let closing = false;
 
 function dataDirectory() {
@@ -27,16 +29,16 @@ function ensureCredentials(directory) {
   return config.encryptionKey;
 }
 
-function runtimeConfig(directory, secret) {
+function runtimeConfig(directory, secret, nativeBridge) {
   const original = path.join(ROOT, 'dist', 'server', 'wrangler.json');
   if (!existsSync(original)) throw new Error('PaletteIQ server build is missing. Run npm run build first.');
   const config = JSON.parse(readFileSync(original, 'utf8'));
   config.main = path.join(ROOT, 'dist', 'server', 'index.js');
   config.assets.directory = path.join(ROOT, 'dist', 'client');
-  config.vars = { ...(config.vars || {}), PALETTEIQ_DESKTOP: '1', PALETTEIQ_LOCAL_NO_AUTH: '1' };
+  config.vars = { ...(config.vars || {}), PALETTEIQ_DESKTOP: '1', PALETTEIQ_LOCAL_NO_AUTH: '1', PALETTEIQ_NATIVE_BRIDGE_URL: `http://127.0.0.1:${nativeBridge.port}` };
   const configPath = path.join(directory, 'wrangler.json');
   writeFileSync(configPath, JSON.stringify(config, null, 2));
-  writeFileSync(path.join(directory, '.dev.vars'), `STUDIO_CREDENTIAL_ENCRYPTION_KEY=${secret}\n`, { mode: 0o600 });
+  writeFileSync(path.join(directory, '.dev.vars'), `STUDIO_CREDENTIAL_ENCRYPTION_KEY=${secret}\nPALETTEIQ_NATIVE_BRIDGE_TOKEN=${nativeBridge.token}\n`, { mode: 0o600 });
   return configPath;
 }
 
@@ -66,23 +68,36 @@ function launchWrangler(args, directory, secrets, options = {}) {
 async function invokeWrangler(args, directory, secret) {
   return await new Promise((resolve, reject) => {
     const child = launchWrangler(args, directory, secret);
-    let stderr = '';
+    let stderr = ''; let stdout = '';
     child.stderr.on('data', chunk => { stderr = (stderr + chunk.toString()).slice(-3500); });
+    child.stdout.on('data', chunk => { stdout += chunk.toString(); });
     child.on('error', reject);
-    child.on('exit', code => code === 0 ? resolve() : reject(new Error(`Database initialization failed (${code}). ${stderr}`)));
+    child.on('exit', code => code === 0 ? resolve(stdout) : reject(new Error(`Database initialization failed (${code}). ${stderr}`)));
   });
 }
 
-async function prepareDatabase(directory, secret) {
-  const configPath = runtimeConfig(directory, secret);
+async function migrateLegacyDatabase(directory, secret, configPath, storage) {
+  const doneMarker = path.join(directory, 'legacy-d1-import-complete');
+  if (existsSync(doneMarker)) return;
+  const tables = ['projects', 'studio_settings', 'image_batches'];
+  const nonEmpty = tables.some(table => storage.database.prepare(`SELECT count(*) AS count FROM ${table}`).get().count);
+  if (nonEmpty) return;
   const config = ['--config', configPath, '--persist-to', path.join(directory, 'state')];
-  for (const filename of ['0000_slippery_pyro.sql', '0001_big_bedlam.sql', '0002_fine_red_hulk.sql']) {
-    const marker = path.join(directory, `applied-${filename}`);
-    if (existsSync(marker)) continue;
-    await invokeWrangler(['d1', 'execute', 'DB', '--local', ...config, '--file', path.join(ROOT, 'drizzle', filename)], directory, secret);
-    writeFileSync(marker, 'ok\n');
+  const listOutput = await invokeWrangler(['d1', 'execute', 'DB', '--local', ...config, '--json', '--command', "SELECT name FROM sqlite_master WHERE type='table'"], directory, secret);
+  const oldTables = new Set((JSON.parse(listOutput.slice(listOutput.indexOf('[')))?.[0]?.results ?? []).map(row => row.name));
+  // Read only; never delete or rewrite the original D1/R2 state.
+  for (const table of tables) {
+    if (!oldTables.has(table)) continue;
+    const output = await invokeWrangler(['d1', 'execute', 'DB', '--local', ...config, '--json', '--command', `SELECT * FROM ${table}`], directory, secret);
+    const json = JSON.parse(output.slice(output.indexOf('[')));
+    const rows = json?.[0]?.results ?? [];
+    if (!Array.isArray(rows)) throw new Error(`Unexpected legacy data for ${table}`);
+    if (rows.length) {
+      const reply = await fetch(`http://127.0.0.1:${storage.port}/legacy-import`, { method: 'POST', headers: { Authorization: `Bearer ${storage.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ table, rows }) });
+      if (!reply.ok) throw new Error(`Legacy migration failed for ${table}: ${await reply.text()}`);
+    }
   }
-  return configPath;
+  writeFileSync(doneMarker, 'ok\n');
 }
 
 async function waitForLocalServer(timeoutMs = 30_000) {
@@ -98,7 +113,10 @@ async function waitForLocalServer(timeoutMs = 30_000) {
 async function launch() {
   const directory = dataDirectory();
   const secret = ensureCredentials(directory);
-  const configPath = await prepareDatabase(directory, secret);
+  const nativeBridge = { token: randomBytes(32).toString('hex') };
+  nativeStorage = await startNativeStorage({ directory, migrationsDir: path.join(ROOT, 'drizzle'), token: nativeBridge.token });
+  const configPath = runtimeConfig(directory, secret, { ...nativeBridge, port: nativeStorage.port });
+  await migrateLegacyDatabase(directory, secret, configPath, { ...nativeStorage, token: nativeBridge.token });
   server = launchWrangler(['dev', '--local', '--config', configPath, '--persist-to', path.join(directory, 'state'), '--ip', '127.0.0.1', '--port', String(SERVER_PORT)], directory, secret, { stdio: 'inherit' });
   server.on('exit', () => { server = null; if (!closing) app.quit(); });
   await waitForLocalServer();
@@ -110,4 +128,4 @@ async function launch() {
 
 app.whenReady().then(() => launch().catch(async error => { await dialog.showMessageBox({ type: 'error', title: 'PaletteIQ Desktop', message: error.message || String(error) }); app.quit(); }));
 app.on('window-all-closed', () => app.quit());
-app.on('before-quit', () => { closing = true; if (server && !server.killed) server.kill(); });
+app.on('before-quit', () => { closing = true; if (server && !server.killed) server.kill(); if (nativeStorage) { nativeStorage.server.close(); nativeStorage.database.close(); } });

@@ -11,9 +11,10 @@ test('desktop binds to loopback, stores data in userData, and isolates browser r
   assert.match(desktop, /nodeIntegration: false, contextIsolation: true, sandbox: true/);
 });
 
-test('SQLite D1 and R2 state is persisted under user profile, not repository checkout', () => {
+test('legacy D1 state remains available for one-time native import', () => {
   assert.match(desktop, /path\.join\(directory, 'state'\)/);
   assert.match(desktop, /d1', 'execute'/);
+  assert.match(desktop, /startNativeStorage/);
 });
 
 test('desktop anonymous identity requires explicitly configured desktop mode', () => {
