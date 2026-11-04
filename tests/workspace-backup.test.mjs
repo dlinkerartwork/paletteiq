@@ -19,6 +19,7 @@ test('separate restored workspace rejects credentials in the database', () => {
     assert.doesNotThrow(() => validateWorkspace(directory));
     db.exec("INSERT INTO studio_settings (openai_credential) VALUES ('encrypted-secret')");
     assert.throws(() => validateWorkspace(directory), /credentials/);
+    assert.doesNotThrow(() => validateWorkspace(directory, { requireNoCredentials: false }));
     db.close();
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });

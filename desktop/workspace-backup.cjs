@@ -19,7 +19,7 @@ async function zipCommand(source, destination, extract = false) {
   });
 }
 
-function validateWorkspace(folder) {
+function validateWorkspace(folder, { requireNoCredentials = true } = {}) {
   const manifestPath = path.join(folder, 'manifest.json');
   const dbPath = path.join(folder, 'database', 'paletteiq.db');
   if (!existsSync(manifestPath) || !existsSync(dbPath)) throw new Error('Missing workspace manifest or SQLite database');
@@ -31,7 +31,7 @@ function validateWorkspace(folder) {
       if (!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(table)) throw new Error(`Missing SQLite table: ${table}`);
     }
     const secretCount = db.prepare('SELECT COUNT(*) AS n FROM studio_settings WHERE etsy_credential IS NOT NULL OR openai_credential IS NOT NULL').get().n;
-    if (secretCount) throw new Error('Backup unexpectedly contains encrypted API credentials');
+    if (requireNoCredentials && secretCount) throw new Error('Backup unexpectedly contains encrypted API credentials');
   } finally { db.close(); }
   return manifest;
 }

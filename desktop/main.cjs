@@ -29,7 +29,7 @@ function dataDirectory() {
   const name = JSON.parse(readFileSync(pointer, 'utf8')).name;
   if (typeof name !== 'string' || !/^restored-[0-9]+-[0-9a-f]{8}$/.test(name)) throw new Error('Invalid active workspace selector');
   const directory = path.join(root, 'restored-workspaces', name);
-  validateWorkspace(directory);
+  validateWorkspace(directory, { requireNoCredentials: false });
   return directory;
 }
 
@@ -143,7 +143,7 @@ function configureWorkspaceMenu(directory) {
       const chosen = choice.filePaths[0];
       const name = path.basename(chosen);
       if (!/^restored-[0-9]+-[0-9a-f]{8}$/.test(name) || path.resolve(chosen).toLowerCase() !== path.resolve(root, name).toLowerCase()) throw new Error('Choose a restored workspace inside the PaletteIQ data directory');
-      validateWorkspace(chosen);
+      validateWorkspace(chosen, { requireNoCredentials: false });
       const confirmation = await dialog.showMessageBox({ type: 'question', buttons: ['Cancel', 'Switch and restart'], defaultId: 0, cancelId: 0, message: `Open restored workspace ${name}? Current workspace stays intact.` });
       if (confirmation.response !== 1) return;
       writeFileSync(path.join(workspaceRoot(), 'active-workspace.json'), JSON.stringify({ name }));
@@ -184,5 +184,7 @@ app.on('before-quit', () => {
   if (server && !server.killed) server.kill();
   if (nativeStorage) { nativeStorage.server.close(); nativeStorage.database.close(); }
   // .dev.vars is needed by the local Worker only while the app runs.
-  try { unlinkSync(path.join(activeDirectory || dataDirectory(), '.dev.vars')); } catch (error) { if (error.code !== 'ENOENT') console.error('Could not remove temporary credential environment', error); }
+  if (activeDirectory) {
+    try { unlinkSync(path.join(activeDirectory, '.dev.vars')); } catch (error) { if (error.code !== 'ENOENT') console.error('Could not remove temporary credential environment', error); }
+  }
 });
