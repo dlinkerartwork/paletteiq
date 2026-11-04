@@ -1,8 +1,9 @@
-const { app, BrowserWindow, dialog, shell } = require('electron');
+const { app, BrowserWindow, dialog, shell, safeStorage } = require('electron');
 const { spawn } = require('node:child_process');
-const { mkdirSync, existsSync, readFileSync, writeFileSync } = require('node:fs');
+const { mkdirSync, existsSync, readFileSync, writeFileSync, unlinkSync } = require('node:fs');
 const { randomBytes } = require('node:crypto');
 const path = require('node:path');
+const { loadOrCreateKey } = require('./key-vault.cjs');
 const { startNativeStorage } = require('./native-storage.cjs');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -20,13 +21,7 @@ function dataDirectory() {
 }
 
 function ensureCredentials(directory) {
-  const secrets = path.join(directory, 'desktop-secrets.json');
-  if (!existsSync(secrets)) {
-    writeFileSync(secrets, JSON.stringify({ encryptionKey: randomBytes(32).toString('hex') }), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
-  }
-  const config = JSON.parse(readFileSync(secrets, 'utf8'));
-  if (!/^[a-f0-9]{64}$/.test(config.encryptionKey)) throw new Error('Desktop credential key is invalid');
-  return config.encryptionKey;
+  return loadOrCreateKey(directory, safeStorage);
 }
 
 function runtimeConfig(directory, secret, nativeBridge) {
@@ -128,4 +123,10 @@ async function launch() {
 
 app.whenReady().then(() => launch().catch(async error => { await dialog.showMessageBox({ type: 'error', title: 'PaletteIQ Desktop', message: error.message || String(error) }); app.quit(); }));
 app.on('window-all-closed', () => app.quit());
-app.on('before-quit', () => { closing = true; if (server && !server.killed) server.kill(); if (nativeStorage) { nativeStorage.server.close(); nativeStorage.database.close(); } });
+app.on('before-quit', () => {
+  closing = true;
+  if (server && !server.killed) server.kill();
+  if (nativeStorage) { nativeStorage.server.close(); nativeStorage.database.close(); }
+  // .dev.vars is needed by the local Worker only while the app runs.
+  try { unlinkSync(path.join(dataDirectory(), '.dev.vars')); } catch (error) { if (error.code !== 'ENOENT') console.error('Could not remove temporary credential environment', error); }
+});

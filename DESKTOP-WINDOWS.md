@@ -23,16 +23,17 @@ paletteiq-data/
   database/paletteiq.db-shm
   images/collections/<owner>/<character-id>.png
   state/                         # legacy D1/R2 fallback, kept for migration
-  desktop-secrets.json           # credential encryption key
-  .dev.vars                      # credential encryption key and ephemeral bridge token
+  desktop-secrets.json           # Windows-protected credential encryption key
+  .dev.vars                      # generated only while desktop is running
 ```
 
-Back up the entire `paletteiq-data` folder together. The encryption key is needed to decrypt API credentials. **Never commit or share those files.**
+Back up the entire `paletteiq-data` folder together. On Windows, `desktop-secrets.json` is protected using Electron `safeStorage` (Windows DPAPI). Existing preview keys are upgraded in place without changing the value. **Never commit or share those files.** A backup restored under a different Windows account or machine may require re-entering API keys because DPAPI protection is user-bound. `.dev.vars` temporarily contains the decrypted key while the desktop process runs and is removed on a clean shutdown; unexpected crashes can leave a copy behind, so keep your Windows profile protected.
 
 ## Status and constraints
 
 - Native migrations are tracked in the `__paletteiq_migrations` table. On first launch the desktop attempts to import existing D1 records without deleting the old database; legacy R2 images are copied into the native image folder when accessed.
 - No ChatGPT sign-in is needed when running under the loopback-only desktop server.
+- Outstanding OpenAI Batch jobs are checked periodically from Overview and Collections; reopening the application resumes import into local storage without resubmitting jobs.
 - Browser isolation is enabled: renderer Node integration off, sandbox on, and external HTTPS links open in the system browser.
 - Desktop activation (Standard, no expiration, reset-device) is **planned, not implemented**; this development preview has no license enforcement.
 - No end-user `.exe` is produced yet. A standalone installer needs a fully bundled worker runtime, Windows build verification, and OS-backed secret storage.

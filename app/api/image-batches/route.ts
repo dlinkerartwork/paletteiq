@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, notInArray } from 'drizzle-orm';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { getDb } from '@/db';
 import { imageBatches, projects, studioSettings } from '@/db/schema';
@@ -142,7 +142,23 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
 export async function GET(req: Request) {
   const user = await getChatGPTUser();
   if (!user) return fail('Sign in required', 401);
-  const projectId = new URL(req.url).searchParams.get('projectId');
+  const url = new URL(req.url);
+  if (url.searchParams.get('syncAll') === '1') {
+    // Resume a bounded number of outstanding OpenAI batches after desktop
+    // restart, even when the user is not on the Image Production page.
+    const db = getDb();
+    const active = await db.select().from(imageBatches).where(and(eq(imageBatches.owner, user.userId), notInArray(imageBatches.status, ['completed', 'completed_with_errors', 'failed', 'cancelled', 'expired']))).orderBy(asc(imageBatches.updatedAt)).limit(2);
+    const key = await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
+    if (!key || !active.length) return Response.json({ updatedProjectIds: [], pendingJobs: active.length, credentialMissing: !key && active.length > 0 });
+    const updatedProjectIds: string[] = [];
+    const warnings: string[] = [];
+    for (const row of active) {
+      try { await syncJob(row, key, user.userId); updatedProjectIds.push(row.projectId); }
+      catch (error) { warnings.push(error instanceof Error ? error.message : 'Batch recovery failed'); }
+    }
+    return Response.json({ updatedProjectIds: [...new Set(updatedProjectIds)], pendingJobs: active.length, warnings });
+  }
+  const projectId = url.searchParams.get('projectId');
   if (!projectId) return fail('Missing project ID');
   const db = getDb();
   const saved = await db.select().from(projects).where(and(eq(projects.id, projectId), eq(projects.owner, user.userId))).limit(1);

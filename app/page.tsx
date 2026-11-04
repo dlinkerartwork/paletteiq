@@ -47,6 +47,44 @@ export default function Home() {
     if (restored.tab && validTabs.includes(restored.tab)) setTab(restored.tab);
   }).catch(() => {}).finally(() => setLoadDone(true)); }, []);
   useEffect(() => { if (!loadDone) return; try { localStorage.setItem('paletteiq-last-workspace', JSON.stringify({ id: project.id, tab })); } catch { /* Storage is optional. */ } }, [loadDone, project.id, tab]);
+  useEffect(() => {
+    if (!loadDone || tab === 'production') return;
+    let stopped = false;
+    let polling = false;
+    const resumeBatches = async () => {
+      if (polling) return;
+      polling = true;
+      try {
+        const response = await fetch('/api/image-batches?syncAll=1');
+        if (!response.ok || stopped) return;
+        const result = await response.json() as { updatedProjectIds?: string[] };
+        const ids = result.updatedProjectIds || [];
+        if (!ids.length) return;
+        const recovered = await Promise.all(ids.map(async id => {
+          const response = await fetch(`/api/studio?projectId=${encodeURIComponent(id)}`);
+          return response.ok ? ((await response.json()) as Array<{ data: Project }>)[0]?.data : null;
+        }));
+        if (stopped) return;
+        const fresh = recovered.filter((value): value is Project => Boolean(value));
+        if (!fresh.length) return;
+        const byId = new Map(fresh.map(item => [item.id, item]));
+        setProjects(prev => prev.map(item => byId.get(item.id) ?? item));
+        setProject(prev => {
+          const current = byId.get(prev.id);
+          if (!current) return prev;
+          const recoveredAssets = new Map(current.characters.map(char => [char.id, char]));
+          return { ...prev, characters: prev.characters.map(char => {
+            const stored = recoveredAssets.get(char.id);
+            return stored?.imageUrl && (char.imageUrl !== stored.imageUrl || JSON.stringify(char.similarityReview) !== JSON.stringify(stored.similarityReview)) ? { ...char, imageUrl: stored.imageUrl, status: stored.status, error: stored.error, similarityReview: stored.similarityReview } : char;
+          }) };
+        });
+      } catch { /* Offline is expected; try again on the next interval. */ }
+      finally { polling = false; }
+    };
+    void resumeBatches();
+    const timer = window.setInterval(() => void resumeBatches(), 45000);
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [loadDone, tab]);
   useEffect(() => { window.scrollTo({ top: 0, left: 0, behavior: 'instant' }); const main = document.querySelector('.main'); if (main && main.scrollTop) main.scrollTop = 0; document.title = `${['overview','collections','settings'].includes(tab) ? tab[0].toUpperCase() + tab.slice(1) : `${project.name} · ${steps.find(s => s.id === tab)?.label || tab}`} | PaletteIQ`; }, [tab, project.id]);
   useEffect(() => { fetch('/api/settings').then(r => r.ok ? r.json() : null).then((data: any) => { if (data?.preferences) updatePreferences({ ...defaultPrefs, ...data.preferences }); }).catch(() => {}); }, []);
   const updatePreferences = (prefs: StudioPreferences) => { setPreferences(prefs); setTarget(prefs.target); setModel(prefs.model); setQuality(prefs.quality); };
