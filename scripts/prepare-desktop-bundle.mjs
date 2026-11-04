@@ -1,4 +1,5 @@
-import { cpSync, existsSync, mkdirSync, copyFileSync, rmSync, statSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, copyFileSync, rmSync, statSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 
 const root = process.cwd();
@@ -18,23 +19,35 @@ cpSync(path.join(root, 'dist', 'server'), path.join(stage, 'dist', 'server'), { 
 cpSync(path.join(root, 'dist', 'client'), path.join(stage, 'dist', 'client'), { recursive: true });
 cpSync(path.join(root, 'drizzle'), path.join(stage, 'drizzle'), { recursive: true });
 
-// Wrangler/Miniflare uses platform-specific workerd binaries. Preserve the
-// complete installed dependency tree for this first working installer.
-// Optimization to a pruned runtime can follow verified Windows smoke tests.
-// pnpm creates absolute Windows junction/symlink targets pointing back into the
-// build machine's node_modules/.pnpm directory. Copying links verbatim makes
-// the installed application fail with "Wrangler is missing". Materialize files
-// instead, so the staged runtime is fully self-contained.
-cpSync(path.join(root, 'node_modules'), path.join(stage, 'node_modules'), {
-  recursive: true,
-  dereference: true,
-  filter: source => !source.includes(`${path.sep}.cache${path.sep}`),
+// pnpm uses a virtual .pnpm store and symlinks. Copying its root packages
+// breaks transitive resolution (e.g. Wrangler needs esbuild). Create a fully
+// resolved npm dependency tree in staging on the build machine instead.
+const wranglerPackage = JSON.parse(readFileSync(path.join(root, 'node_modules', 'wrangler', 'package.json'), 'utf8'));
+const version = wranglerPackage.version;
+if (!/^[0-9]+[.][0-9]+[.][0-9]+$/.test(version)) throw new Error('Invalid installed Wrangler version.');
+writeFileSync(path.join(stage, 'package.json'), JSON.stringify({
+  name: 'paletteiq-desktop-runtime', private: true, version: '1.0.0',
+  dependencies: { wrangler: version },
+}, null, 2));
+console.log(`Installing isolated Wrangler ${version} runtime dependencies...`);
+const install = spawnSync('npm.cmd', ['install', '--no-audit', '--no-fund', '--package-lock=false', '--omit=dev'], {
+  cwd: stage, shell: true, stdio: 'inherit',
+  env: { ...process.env, npm_config_update_notifier: 'false' },
 });
+if (install.error || install.status !== 0) {
+  throw new Error(`Bundled Wrangler dependency installation failed (${install.status}): ${install.error?.message || 'npm install failed'}`);
+}
 
 const stagedWrangler = path.join(stage, 'node_modules', 'wrangler', 'bin', 'wrangler.js');
-if (!existsSync(stagedWrangler)) throw new Error('Bundled Wrangler entrypoint is missing after dependency staging.');
-
-const nodeSize = statSync(path.join(stage, 'node', 'node.exe')).size;
-if (nodeSize < 1_000_000) throw new Error('Bundled Node.js executable looks incomplete.');
+if (!existsSync(stagedWrangler)) throw new Error('Bundled Wrangler entrypoint is missing after dependency installation.');
+const nodeExecutable = path.join(stage, 'node', 'node.exe');
+const smokeTest = spawnSync(nodeExecutable, [stagedWrangler, '--version'], {
+  cwd: stage, encoding: 'utf8', windowsHide: true,
+});
+if (smokeTest.error || smokeTest.status !== 0) {
+  throw new Error(`Bundled Wrangler smoke test failed: ${smokeTest.error?.message || smokeTest.stderr || 'nonzero exit'}`);
+}
+console.log(`Isolated Wrangler smoke test passed: ${smokeTest.stdout.trim()}`);
+if (statSync(nodeExecutable).size < 1_000_000) throw new Error('Bundled Node.js executable looks incomplete.');
 console.log('Windows runtime staged. Users will not need Node.js installed.');
 console.log(`Staged runtime: ${stage}`);
