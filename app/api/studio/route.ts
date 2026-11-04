@@ -45,7 +45,7 @@ export async function POST(req: Request) {
     await db.insert(projects).values({ id: body.id, owner: user.userId, name: body.name.slice(0, 160), data, updatedAt: Date.now() }).onConflictDoUpdate({ target: projects.id, set: { name: body.name.slice(0, 160), data, updatedAt: Date.now() } });
     return Response.json({ ok: true });
   }
-  if (body.action === 'analyze') {
+  if (body.action === 'listing-images' || body.action === 'analyze') {
     let url: URL;
     try { url = new URL(body.url); } catch { return fail('Invalid Etsy listing URL'); }
     if (url.protocol !== 'https:' || !['www.etsy.com','etsy.com'].includes(url.hostname)) return fail('Use an Etsy URL');
@@ -56,14 +56,20 @@ export async function POST(req: Request) {
     const listingRes = await fetch(`https://api.etsy.com/v3/application/listings/${listingId}?includes=Images`, { headers: { 'x-api-key': key } });
     if (!listingRes.ok) return fail(`Etsy API request failed (${listingRes.status}). Verify app permissions.`, 502);
     const listing = await listingRes.json() as Record<string, any>;
-    const source = { title: listing.title ?? '', description: listing.description ?? '', tags: listing.tags ?? [], images: (listing.images ?? []).slice(0,5).map((x: any) => x.url_570xN ?? x.url_fullxfull) };
+    const listingImages = Array.isArray(listing.images) ? listing.images : [];
+    const source = { title: listing.title ?? '', description: listing.description ?? '', tags: listing.tags ?? [], images: [...new Set<string>(listingImages.map((x: any) => String(x.url_fullxfull ?? x.url_570xN ?? '')).filter(Boolean))] };
     if (!source.images.some(Boolean)) return fail('Etsy listing returned no reference images. Cannot build a visually grounded collection.', 422);
+    if (body.action === 'listing-images') return Response.json({ source });
+    const chosen = Array.isArray(body.selectedImages) ? body.selectedImages : [];
+    const allowed = new Set(source.images);
+    const selectedImages = [...new Set<string>(chosen.filter((x: unknown): x is string => typeof x === 'string' && allowed.has(x)))];
+    if (!selectedImages.length) return fail('Select at least one image from this Etsy listing before AI analysis.');
     const aiKey = await userCredential(user.userId, 'openai') || secret('OPENAI_API_KEY');
     if (!aiKey) return fail('OpenAI API not connected. Configure it in Settings to analyze images.', 503);
-    const input = [{ role: 'user', content: [{ type: 'input_text', text: `Analyze this Etsy CLIPART listing primarily from the attached product images. Determine the actual subject matter, theme, subtheme, style, palette, texture and SEO keywords. Identify only individual recognizable clipart subjects supported by image evidence, with specific descriptive names and distinguishing visual details. Do not use generic default subjects (women, teddy bears, cats, etc.) unless the images truly contain them. Distinguish a collage/mockup from distinct clipart assets; avoid claiming off-image subjects as observed. Return JSON {"theme":"...","subtheme":"...","style":"...","palette":"...","texture":"...","keywords":["..."],"characters":[{"name":"specific visual subject","description":"visible distinctive visual details"}],"notes":"evidence and uncertainties"}. No copying designs or assuming unseen content. Source listing text (secondary evidence): ${JSON.stringify({ ...source, images: undefined }).slice(0,14000)}` }, ...source.images.slice(0,5).filter(Boolean).map((image_url: string) => ({ type: 'input_image', image_url }))] }];
+    const input = [{ role: 'user', content: [{ type: 'input_text', text: `Analyze this Etsy CLIPART listing ONLY from the SELECTED reference images attached. Determine actual subject matter, theme, subtheme, style, palette, texture and SEO keywords. Identify only individual recognizable clipart subjects supported by SELECTED image evidence, with specific descriptive names and distinguishing visual details. Do not use generic default subjects (women, teddy bears, cats, etc.) unless selected images contain them. Distinguish collage/mockup from actual clipart. Return JSON {"theme":"...","subtheme":"...","style":"...","palette":"...","texture":"...","keywords":["..."],"characters":[{"name":"specific visual subject","description":"visible distinctive visual details"}],"notes":"evidence and uncertainties"}. No copying designs or assuming unseen content. Listing text is secondary evidence; ignore subjects not present in selected images: ${JSON.stringify({ ...source, images: undefined }).slice(0,14000)}` }, ...selectedImages.map((image_url: string) => ({ type: 'input_image', image_url }))] }];
     const ai = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'gpt-4.1-mini', input, text: { format: { type: 'json_object' } } }) });
     if (!ai.ok) return fail(`OpenAI visual analysis failed (${ai.status}): ${(await ai.text()).slice(0,200)}`, 502);
-    try { return Response.json({ source, analysis: JSON.parse(extractText(await ai.json())) }); } catch { return fail('Could not parse OpenAI visual analysis', 502); }
+    try { return Response.json({ source, selectedImages, analysis: JSON.parse(extractText(await ai.json())) }); } catch { return fail('Could not parse OpenAI visual analysis', 502); }
   }
   if (body.action === 'expand') {
     const aiKey = await userCredential(user.userId, 'openai') || secret('OPENAI_API_KEY');
