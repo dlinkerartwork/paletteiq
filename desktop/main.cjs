@@ -1,10 +1,11 @@
-const { app, BrowserWindow, dialog, shell, safeStorage } = require('electron');
+const { app, BrowserWindow, dialog, shell, safeStorage, Menu } = require('electron');
 const { spawn } = require('node:child_process');
 const { mkdirSync, existsSync, readFileSync, writeFileSync, unlinkSync } = require('node:fs');
 const { randomBytes } = require('node:crypto');
 const path = require('node:path');
 const { loadOrCreateKey } = require('./key-vault.cjs');
 const { startNativeStorage } = require('./native-storage.cjs');
+const { backupWorkspace, restoreWorkspaceSeparate, validateWorkspace } = require('./workspace-backup.cjs');
 
 const ROOT = app.isPackaged ? path.join(process.resourcesPath, 'paletteiq-runtime') : path.resolve(__dirname, '..');
 const SERVER_PORT = 18763;
@@ -14,9 +15,20 @@ let server = null;
 let nativeStorage = null;
 let closing = false;
 
-function dataDirectory() {
+function workspaceRoot() {
   const directory = path.join(app.getPath('userData'), 'paletteiq-data');
   mkdirSync(directory, { recursive: true });
+  return directory;
+}
+
+function dataDirectory() {
+  const root = workspaceRoot();
+  const pointer = path.join(root, 'active-workspace.json');
+  if (!existsSync(pointer)) return root;
+  const name = JSON.parse(readFileSync(pointer, 'utf8')).name;
+  if (typeof name !== 'string' || !/^restored-[0-9]+-[0-9a-f]{8}$/.test(name)) throw new Error('Invalid active workspace selector');
+  const directory = path.join(root, 'restored-workspaces', name);
+  validateWorkspace(directory);
   return directory;
 }
 
@@ -106,6 +118,46 @@ async function waitForLocalServer(timeoutMs = 30_000) {
   throw new Error('Local PaletteIQ server did not become ready. Check the terminal for Wrangler errors.');
 }
 
+function configureWorkspaceMenu(directory) {
+  const error = async e => dialog.showMessageBox({ type: 'error', title: 'Workspace backup', message: e instanceof Error ? e.message : String(e) });
+  const selectedName = path.basename(directory);
+  Menu.setApplicationMenu(Menu.buildFromTemplate([{ label: 'Workspace', submenu: [
+    { label: 'Backup active workspace to ZIP…', click: async () => { try {
+      const choice = await dialog.showSaveDialog({ title: 'Backup PaletteIQ workspace', defaultPath: `PaletteIQ-backup-${new Date().toISOString().slice(0, 10)}.zip`, filters: [{ name: 'ZIP archive', extensions: ['zip'] }] });
+      if (choice.canceled || !choice.filePath) return;
+      await backupWorkspace({ directory, database: nativeStorage.database, destination: choice.filePath });
+      await dialog.showMessageBox({ type: 'info', message: 'Workspace backup created. API keys were excluded.', detail: choice.filePath });
+    } catch (e) { await error(e); } } },
+    { label: 'Restore ZIP as separate workspace…', click: async () => { try {
+      const choice = await dialog.showOpenDialog({ properties: ['openFile'], filters: [{ name: 'PaletteIQ ZIP', extensions: ['zip'] }] });
+      if (choice.canceled || !choice.filePaths[0]) return;
+      const restored = await restoreWorkspaceSeparate({ source: choice.filePaths[0], workspaceRoot: workspaceRoot() });
+      await dialog.showMessageBox({ type: 'info', message: 'Backup restored separately. Active workspace was not changed.', detail: `Restored to: ${restored}\nUse Workspace → Switch workspace to open the restored copy.` });
+    } catch (e) { await error(e); } } },
+    { label: 'Switch to restored workspace…', click: async () => { try {
+      const root = path.join(workspaceRoot(), 'restored-workspaces');
+      mkdirSync(root, { recursive: true });
+      const choice = await dialog.showOpenDialog({ defaultPath: root, properties: ['openDirectory'] });
+      if (choice.canceled || !choice.filePaths[0]) return;
+      const chosen = choice.filePaths[0];
+      const name = path.basename(chosen);
+      if (!/^restored-[0-9]+-[0-9a-f]{8}$/.test(name) || path.resolve(chosen).toLowerCase() !== path.resolve(root, name).toLowerCase()) throw new Error('Choose a restored workspace inside the PaletteIQ data directory');
+      validateWorkspace(chosen);
+      const confirmation = await dialog.showMessageBox({ type: 'question', buttons: ['Cancel', 'Switch and restart'], defaultId: 0, cancelId: 0, message: `Open restored workspace ${name}? Current workspace stays intact.` });
+      if (confirmation.response !== 1) return;
+      writeFileSync(path.join(workspaceRoot(), 'active-workspace.json'), JSON.stringify({ name }));
+      app.relaunch(); app.quit();
+    } catch (e) { await error(e); } } },
+    { label: 'Switch to original workspace…', enabled: selectedName !== 'paletteiq-data', click: async () => { try {
+      const confirmation = await dialog.showMessageBox({ type: 'question', buttons: ['Cancel', 'Switch and restart'], defaultId: 0, cancelId: 0, message: 'Return to your original workspace? The restored workspace will remain saved.' });
+      if (confirmation.response !== 1) return;
+      const pointer = path.join(workspaceRoot(), 'active-workspace.json');
+      if (existsSync(pointer)) unlinkSync(pointer);
+      app.relaunch(); app.quit();
+    } catch (e) { await error(e); } } },
+  ] }]));
+}
+
 async function launch() {
   const directory = dataDirectory();
   const secret = ensureCredentials(directory);
@@ -116,6 +168,7 @@ async function launch() {
   server = launchWrangler(['dev', '--local', '--config', configPath, '--persist-to', path.join(directory, 'state'), '--ip', '127.0.0.1', '--port', String(SERVER_PORT)], directory, secret, { stdio: 'inherit' });
   server.on('exit', () => { server = null; if (!closing) app.quit(); });
   await waitForLocalServer();
+  configureWorkspaceMenu(directory);
   const window = new BrowserWindow({ width: 1440, height: 940, minWidth: 1050, minHeight: 680, title: 'PaletteIQ Desktop', webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true } });
   window.webContents.setWindowOpenHandler(({ url }) => { if (url.startsWith('https://')) void shell.openExternal(url); return { action: 'deny' }; });
   window.webContents.on('will-navigate', (event, url) => { if (!url.startsWith(`${SERVER_URL}/`) && url !== SERVER_URL) event.preventDefault(); });
