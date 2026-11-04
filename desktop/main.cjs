@@ -14,6 +14,7 @@ app.setName('PaletteIQ Desktop');
 let server = null;
 let nativeStorage = null;
 let closing = false;
+let activeDirectory = null;
 
 function workspaceRoot() {
   const directory = path.join(app.getPath('userData'), 'paletteiq-data');
@@ -160,6 +161,7 @@ function configureWorkspaceMenu(directory) {
 
 async function launch() {
   const directory = dataDirectory();
+  activeDirectory = directory;
   const secret = ensureCredentials(directory);
   const nativeBridge = { token: randomBytes(32).toString('hex') };
   nativeStorage = await startNativeStorage({ directory, migrationsDir: path.join(ROOT, 'drizzle'), token: nativeBridge.token });
@@ -182,5 +184,5 @@ app.on('before-quit', () => {
   if (server && !server.killed) server.kill();
   if (nativeStorage) { nativeStorage.server.close(); nativeStorage.database.close(); }
   // .dev.vars is needed by the local Worker only while the app runs.
-  try { unlinkSync(path.join(dataDirectory(), '.dev.vars')); } catch (error) { if (error.code !== 'ENOENT') console.error('Could not remove temporary credential environment', error); }
+  try { unlinkSync(path.join(activeDirectory || dataDirectory(), '.dev.vars')); } catch (error) { if (error.code !== 'ENOENT') console.error('Could not remove temporary credential environment', error); }
 });
