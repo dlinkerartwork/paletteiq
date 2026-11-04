@@ -1,11 +1,12 @@
 const { app, BrowserWindow, dialog, shell, safeStorage, Menu } = require('electron');
 const { spawn } = require('node:child_process');
-const { mkdirSync, existsSync, readFileSync, writeFileSync, unlinkSync } = require('node:fs');
+const { mkdirSync, existsSync, readFileSync, writeFileSync, unlinkSync, copyFileSync } = require('node:fs');
 const { randomBytes } = require('node:crypto');
 const path = require('node:path');
 const { loadOrCreateKey } = require('./key-vault.cjs');
 const { startNativeStorage } = require('./native-storage.cjs');
 const { backupWorkspace, restoreWorkspaceSeparate, validateWorkspace } = require('./workspace-backup.cjs');
+const { windowsDeviceCode, readValidLicense } = require('./license.cjs');
 
 const ROOT = app.isPackaged ? path.join(process.resourcesPath, 'paletteiq-runtime') : path.resolve(__dirname, '..');
 const SERVER_PORT = 18763;
@@ -159,7 +160,40 @@ function configureWorkspaceMenu(directory) {
   ] }]));
 }
 
+async function requireActivation() {
+  if (!app.isPackaged) return; // Developer preview remains available for development.
+  const publicKeyFile = path.join(ROOT, 'license-public.pem');
+  if (!existsSync(publicKeyFile)) throw new Error('Desktop license verification key is missing from the installer.');
+  const publicKey = readFileSync(publicKeyFile, 'utf8');
+  const device = windowsDeviceCode();
+  const target = path.join(workspaceRoot(), 'activation-license.json');
+  try { if (existsSync(target)) { readValidLicense(target, publicKey, device); return; } }
+  catch { /* Offer replacement license on changed devices or invalid files. */ }
+  while (true) {
+    const choice = await dialog.showMessageBox({
+      type: 'info', title: 'PaletteIQ activation',
+      message: 'PaletteIQ Desktop requires a license for this Windows device.',
+      detail: `Device code: ${device}\n\nSend this code to the PaletteIQ license issuer and request a non-expiring license file. Press Ctrl+C to copy this dialog text.`,
+      buttons: ['Select license file…', 'Exit'], defaultId: 0, cancelId: 1,
+    });
+    if (choice.response !== 0) throw new Error('Activation is required to launch PaletteIQ Desktop.');
+    const selection = await dialog.showOpenDialog({
+      title: 'Choose your PaletteIQ license',
+      properties: ['openFile'], filters: [{ name: 'PaletteIQ license', extensions: ['json'] }],
+    });
+    if (selection.canceled || !selection.filePaths[0]) continue;
+    try {
+      readValidLicense(selection.filePaths[0], publicKey, device);
+      copyFileSync(selection.filePaths[0], target);
+      return;
+    } catch (error) {
+      await dialog.showMessageBox({ type: 'error', title: 'License rejected', message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+}
+
 async function launch() {
+  await requireActivation();
   const directory = dataDirectory();
   activeDirectory = directory;
   const secret = ensureCredentials(directory);

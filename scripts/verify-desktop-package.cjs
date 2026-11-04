@@ -21,6 +21,7 @@ module.exports = async function verifyDesktopPackage(context) {
 
   const required = [
     'node/node.exe',
+    'license-public.pem',
     'dist/server/index.js',
     'dist/server/wrangler.json',
     'node_modules/wrangler/bin/wrangler.js',

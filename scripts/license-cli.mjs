@@ -1,0 +1,30 @@
+import { createRequire } from 'node:module';
+import { generateKeyPairSync, randomUUID, sign } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+const require = createRequire(import.meta.url);
+const { PRODUCT } = require('../desktop/license.cjs');
+const issuer = path.join(process.cwd(), 'license-issuer');
+const privateFile = path.join(issuer, 'private.pem');
+const publicFile = path.join(issuer, 'public.pem');
+const [action, ...args] = process.argv.slice(2);
+if (action === 'init') {
+  if (existsSync(privateFile) || existsSync(publicFile)) throw new Error('Issuer keys already exist; never overwrite previously issued keys.');
+  mkdirSync(issuer, { recursive: true });
+  const keys = generateKeyPairSync('ed25519', { publicKeyEncoding: { type: 'spki', format: 'pem' }, privateKeyEncoding: { type: 'pkcs8', format: 'pem' } });
+  writeFileSync(privateFile, keys.privateKey, { mode: 0o600, flag: 'wx' });
+  writeFileSync(publicFile, keys.publicKey, { flag: 'wx' });
+  console.log('Issuer keys generated. Keep license-issuer/private.pem secret and backed up.');
+} else if (action === 'issue') {
+  const flag = key => { const i = args.indexOf(key); return i < 0 ? undefined : args[i + 1]; };
+  const device = String(flag('--device') || '').trim().toUpperCase();
+  const name = String(flag('--name') || '').trim();
+  const output = flag('--output');
+  if (!/^[0-9A-F]{32}$/.test(device) || !name || name.length > 120 || !output) throw new Error('Usage: issue --device <32 hex chars> --name <customer> --output <license.json>');
+  if (!existsSync(privateFile)) throw new Error('Missing private issuer key; run license:init on issuer PC.');
+  if (existsSync(output)) throw new Error('Output license already exists.');
+  const payload = { version: 1, product: PRODUCT, type: 'perpetual', deviceCode: device, issuedTo: name, licenseId: randomUUID(), issuedAt: new Date().toISOString() };
+  const signature = sign(null, Buffer.from(JSON.stringify(payload)), readFileSync(privateFile)).toString('base64');
+  writeFileSync(output, JSON.stringify({ payload, signature }, null, 2), { flag: 'wx' });
+  console.log(`Issued license: ${output}`);
+} else throw new Error('Use init or issue --device ... --name ... --output ...');
