@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -31,11 +31,18 @@ test('native SQLite persists records and stores clipart as files in user directo
     assert.equal((await fetch(`${url}/assets/${key}`, { method: 'PUT', headers: auth, body: image })).status, 200);
     const result = await fetch(`${url}/assets/${key}`, { headers: auth });
     assert.deepEqual(new Uint8Array(await result.arrayBuffer()), image);
+    const replacedImage = Uint8Array.from([137, 80, 78, 71, 1, 2, 3]);
+    assert.equal((await fetch(`${url}/assets/${key}`, { method: 'PUT', headers: auth, body: replacedImage })).status, 200);
+    assert.deepEqual(new Uint8Array(await (await fetch(`${url}/assets/${key}`, { headers: auth })).arrayBuffer()), replacedImage);
+    const imageDir = path.join(temp, 'images', 'collections', 'local_seedy');
+    assert.deepEqual(readdirSync(imageDir), ['00000000-0000-4000-8000-000000000001.png']);
     assert.ok(existsSync(path.join(temp, 'database', 'paletteiq.db')));
     assert.ok(existsSync(path.join(temp, 'images', 'collections', 'local_seedy', '00000000-0000-4000-8000-000000000001.png')));
     first.server.close(); first.database.close(); first = null;
     const second = await startNativeStorage({ directory: temp, migrationsDir: migrationDir, token: secret });
     assert.equal(second.database.prepare('SELECT name FROM projects WHERE id=?').get('a1').name, 'Sample');
+    const restored = await fetch(`http://127.0.0.1:${second.port}/assets/${key}`, { headers: auth });
+    assert.deepEqual(new Uint8Array(await restored.arrayBuffer()), replacedImage);
     second.server.close(); second.database.close();
   } finally { if (first) { first.server.close(); first.database.close(); } rmSync(temp, { recursive: true, force: true }); }
 });

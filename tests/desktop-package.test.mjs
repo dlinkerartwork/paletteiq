@@ -17,6 +17,7 @@ test('Windows installer includes local worker, SQLite migrations, and dependenci
   assert.match(builder, /from: dist\/desktop-runtime/);
   assert.match(builder, /target: nsis/);
   assert.match(preparation, /cpSync\(path\.join\(root, 'drizzle'\)/);
-  assert.match(preparation, /cpSync\(path\.join\(root, 'node_modules'\)/);
+  assert.match(preparation, /Installing isolated Wrangler/);
+  assert.match(preparation, /Bundled Wrangler smoke test failed/);
   assert.match(packageFile.scripts['desktop:package:win'], /electron-builder --win nsis/);
 });

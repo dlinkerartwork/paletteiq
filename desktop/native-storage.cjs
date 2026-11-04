@@ -1,6 +1,7 @@
 const { createServer } = require('node:http');
 const { DatabaseSync } = require('node:sqlite');
-const { mkdirSync, readFileSync, writeFileSync, existsSync, createReadStream, statSync } = require('node:fs');
+const { mkdirSync, readFileSync, writeFileSync, existsSync, createReadStream, statSync, openSync, fsyncSync, closeSync, renameSync, unlinkSync } = require('node:fs');
+const { randomUUID } = require('node:crypto');
 const path = require('node:path');
 
 const TABLES = ['projects', 'studio_settings', 'image_batches'];
@@ -10,7 +11,7 @@ function openNativeDb(directory, migrationsDir) {
   const dbDir = path.join(directory, 'database');
   mkdirSync(dbDir, { recursive: true });
   const database = new DatabaseSync(path.join(dbDir, 'paletteiq.db'));
-  database.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;');
+  database.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;');
   database.exec('CREATE TABLE IF NOT EXISTS __paletteiq_migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)');
   for (const file of ['0000_slippery_pyro.sql', '0001_big_bedlam.sql', '0002_fine_red_hulk.sql']) {
     if (database.prepare('SELECT 1 FROM __paletteiq_migrations WHERE name=?').get(file)) continue;
@@ -85,7 +86,21 @@ function startNativeStorage({ directory, migrationsDir, token }) {
         if (req.method === 'PUT') {
           mkdirSync(folder, { recursive: true });
           const content = await readPayload(req);
-          writeFileSync(filename, content);
+          // Never truncate the visible image in place. A crash during writing
+          // must leave the previously saved image intact.
+          const temporary = path.join(folder, `.${id}.${randomUUID()}.tmp`);
+          let file;
+          try {
+            file = openSync(temporary, 'wx');
+            writeFileSync(file, content);
+            fsyncSync(file);
+            closeSync(file);
+            file = undefined;
+            renameSync(temporary, filename);
+          } finally {
+            if (file !== undefined) closeSync(file);
+            if (existsSync(temporary)) unlinkSync(temporary);
+          }
           return finish(200, { success: true });
         }
         if (!existsSync(filename)) return finish(404, { error: 'Not found' });
