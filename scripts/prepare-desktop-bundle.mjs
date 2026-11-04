@@ -21,7 +21,18 @@ cpSync(path.join(root, 'drizzle'), path.join(stage, 'drizzle'), { recursive: tru
 // Wrangler/Miniflare uses platform-specific workerd binaries. Preserve the
 // complete installed dependency tree for this first working installer.
 // Optimization to a pruned runtime can follow verified Windows smoke tests.
-cpSync(path.join(root, 'node_modules'), path.join(stage, 'node_modules'), { recursive: true, dereference: false, filter: source => !source.includes(`${path.sep}.cache${path.sep}`) });
+// pnpm creates absolute Windows junction/symlink targets pointing back into the
+// build machine's node_modules/.pnpm directory. Copying links verbatim makes
+// the installed application fail with "Wrangler is missing". Materialize files
+// instead, so the staged runtime is fully self-contained.
+cpSync(path.join(root, 'node_modules'), path.join(stage, 'node_modules'), {
+  recursive: true,
+  dereference: true,
+  filter: source => !source.includes(`${path.sep}.cache${path.sep}`),
+});
+
+const stagedWrangler = path.join(stage, 'node_modules', 'wrangler', 'bin', 'wrangler.js');
+if (!existsSync(stagedWrangler)) throw new Error('Bundled Wrangler entrypoint is missing after dependency staging.');
 
 const nodeSize = statSync(path.join(stage, 'node', 'node.exe')).size;
 if (nodeSize < 1_000_000) throw new Error('Bundled Node.js executable looks incomplete.');

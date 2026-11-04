@@ -5,6 +5,7 @@ directories:
   output: release
   buildResources: desktop/build-resources
 asar: true
+afterPack: ./scripts/verify-desktop-package.cjs
 files:
   - desktop/**/*.cjs
   - package.json
