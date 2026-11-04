@@ -1,11 +1,13 @@
 {
   "name": "site-creator-vinext-starter",
+  "productName": "PaletteIQ Desktop",
   "version": "0.1.0",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
   },
   "scripts": {
+    "desktop:dev": "npm run build && electron .",
     "install:ci": "npx --yes pnpm@11.25.0 install --frozen-lockfile",
     "dev": "node scripts/run-framework.mjs dev",
     "build": "node scripts/run-framework.mjs build",
@@ -40,6 +42,8 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "electron": "^39.0.0",
+    "electron-builder": "^26.0.0",
     "@cloudflare/vite-plugin": "1.37.1",
     "@cloudflare/workers-types": "4.20260515.1",
     "@tailwindcss/postcss": "4.2.1",
@@ -62,6 +66,7 @@
     "wrangler": "4.92.0"
   },
   "type": "module",
+  "main": "desktop/main.cjs",
   "overrides": {
     "miniflare": {
       "sharp": "0.35.4"

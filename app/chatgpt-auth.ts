@@ -24,9 +24,10 @@ export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
   // Only the opt-in local development Worker may use an anonymous local identity.
   // Production retains ChatGPT sign-in even if a request spoofs its Host header.
   const host = (requestHeaders.get("host") ?? "").toLowerCase().split(":")[0];
+  const localBindings = env as unknown as Record<string, string | undefined>;
   const localNoAuth =
-    process.env.NODE_ENV === "development" &&
-    (env as unknown as Record<string, string | undefined>).PALETTEIQ_LOCAL_NO_AUTH === "1" &&
+    (process.env.NODE_ENV === "development" || localBindings.PALETTEIQ_DESKTOP === "1") &&
+    localBindings.PALETTEIQ_LOCAL_NO_AUTH === "1" &&
     (host === "localhost" || host === "127.0.0.1" || host === "[::1]");
   if (localNoAuth) {
     return {
