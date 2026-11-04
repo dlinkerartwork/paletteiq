@@ -5,6 +5,7 @@ import { getDb } from '@/db';
 import { imageBatches, projects, studioSettings } from '@/db/schema';
 import { userCredential } from '@/lib/credentials';
 import { eligibleForBulk, isActiveBatchStatus } from '@/lib/production-rules';
+import { originalImagePrompt } from '@/lib/originality';
 
 const MODELS = ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
 type BatchItem = { id: string; status: 'pending' | 'done' | 'error'; imageUrl?: string; error?: string };
@@ -47,7 +48,7 @@ export async function POST(req: Request) {
   const prefs = settings[0] ? JSON.parse(settings[0].preferences) as { output?: string; background?: string } : {};
   const format = prefs.output === 'jpg' ? 'jpeg' : 'png';
   const background = prefs.background === 'opaque' || format === 'jpeg' ? 'opaque' : 'transparent';
-  const lines = selected.map(c => JSON.stringify({ custom_id: c!.id, method: 'POST', url: '/v1/images/generations', body: { model: data.model, prompt: c!.prompt, quality: data.quality, size: '1024x1024', background, output_format: format, n: 1 } })).join('\n') + '\n';
+  const lines = selected.map(c => JSON.stringify({ custom_id: c!.id, method: 'POST', url: '/v1/images/generations', body: { model: data.model, prompt: originalImagePrompt(c!.prompt, c!.id), quality: data.quality, size: '1024x1024', background, output_format: format, n: 1 } })).join('\n') + '\n';
   try {
     const form = new FormData();
     form.set('purpose', 'batch');
