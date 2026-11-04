@@ -6,7 +6,7 @@ const path = require('node:path');
 const { loadOrCreateKey } = require('./key-vault.cjs');
 const { startNativeStorage } = require('./native-storage.cjs');
 
-const ROOT = path.resolve(__dirname, '..');
+const ROOT = app.isPackaged ? path.join(process.resourcesPath, 'paletteiq-runtime') : path.resolve(__dirname, '..');
 const SERVER_PORT = 18763;
 const SERVER_URL = `http://127.0.0.1:${SERVER_PORT}`;
 app.setName('PaletteIQ Desktop');
@@ -43,7 +43,8 @@ function launchWrangler(args, directory, secrets, options = {}) {
   // Wrangler's argument parser misreads argv when started through Electron's
   // ELECTRON_RUN_AS_NODE mode on Windows. The developer preview uses the real
   // Node.js executable. Standalone installers will bundle their own runtime.
-  const nodeExecutable = process.env.PALETTEIQ_NODE_EXECUTABLE || 'node';
+  const nodeExecutable = app.isPackaged ? path.join(ROOT, 'node', 'node.exe') : (process.env.PALETTEIQ_NODE_EXECUTABLE || 'node');
+  if (app.isPackaged && !existsSync(nodeExecutable)) throw new Error('Bundled Node.js runtime is missing. Reinstall PaletteIQ Desktop.');
   const env = {
     ...process.env,
     PALETTEIQ_DESKTOP: '1',

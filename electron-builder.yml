@@ -1,0 +1,25 @@
+appId: com.dlinkerartwork.paletteiq
+productName: PaletteIQ Desktop
+artifactName: PaletteIQ-Setup-${version}-${arch}.${ext}
+directories:
+  output: release
+  buildResources: desktop/build-resources
+asar: true
+files:
+  - desktop/**/*.cjs
+  - package.json
+extraResources:
+  - from: dist/desktop-runtime
+    to: paletteiq-runtime
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  executableName: PaletteIQ
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: PaletteIQ Desktop
