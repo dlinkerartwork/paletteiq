@@ -6,8 +6,9 @@ import StudioSettings, { defaultPrefs, type StudioPreferences } from '@/componen
 import ImageProduction from '@/components/image-production';
 import EtsyListingDraft, { type SavedSeoReview } from '@/components/etsy-listing-draft';
 import type { EtsyListingDraft as ListingData } from '@/lib/etsy-listing';
+import type { SimilarityReview } from '@/lib/similarity-review';
 
-type Character = { id: string; name: string; description: string; prompt: string; status: 'draft' | 'ready' | 'done' | 'error'; imageUrl?: string; error?: string; origin: 'listing' | 'ai' | 'manual' };
+type Character = { id: string; name: string; description: string; prompt: string; status: 'draft' | 'ready' | 'done' | 'error'; imageUrl?: string; error?: string; similarityReview?: SimilarityReview; origin: 'listing' | 'ai' | 'manual' };
 type Project = { id: string; name: string; url: string; theme: string; subtheme: string; style: string; palette: string; texture: string; keywords: string[]; characters: Character[]; title: string; images: string[]; selectedImageUrls?: string[]; notes: string; listing?: ListingData; seoReview?: SavedSeoReview };
 const uid = () => crypto.randomUUID();
 const blank = (): Project => ({ id: uid(), name: 'Untitled collection', url: '', theme: '', subtheme: '', style: 'Soft hand-painted watercolor illustration', palette: 'Earthy muted colors', texture: 'Natural watercolor pigment granulation', keywords: [], characters: [], title: '', images: [], notes: '' });

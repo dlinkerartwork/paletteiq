@@ -6,9 +6,10 @@ import { imageBatches, projects, studioSettings } from '@/db/schema';
 import { userCredential } from '@/lib/credentials';
 import { eligibleForBulk, isActiveBatchStatus } from '@/lib/production-rules';
 import { originalImagePrompt } from '@/lib/originality';
+import { reviewImageSimilarity, type SimilarityReview } from '@/lib/similarity-review';
 
 const MODELS = ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
-type BatchItem = { id: string; status: 'pending' | 'done' | 'error'; imageUrl?: string; error?: string };
+type BatchItem = { id: string; status: 'pending' | 'done' | 'error'; imageUrl?: string; error?: string; similarityReview?: SimilarityReview };
 type OpenAIBatch = { id: string; status: string; output_file_id?: string | null; error_file_id?: string | null; request_counts?: { total: number; completed: number; failed: number } };
 const fail = (message: string, code = 400) => Response.json({ error: message }, { status: code });
 const openai = async (key: string, path: string, init: RequestInit = {}) => {
@@ -84,6 +85,9 @@ async function* jsonlLines(stream: ReadableStream<Uint8Array>) {
 
 async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner: string) {
   const db = getDb();
+  const savedProject = await db.select().from(projects).where(and(eq(projects.id, job.projectId), eq(projects.owner, owner))).limit(1);
+  const reviewSources = savedProject.length ? JSON.parse(savedProject[0].data) as { selectedImageUrls?: string[]; images?: string[] } : {};
+  const references = reviewSources.selectedImageUrls ?? reviewSources.images ?? [];
   const batch = await (await openai(key, `batches/${encodeURIComponent(job.openaiBatchId)}`)).json() as OpenAIBatch;
   const items = JSON.parse(job.items) as BatchItem[];
   const byId = new Map(items.map(i => [i.id, i]));
@@ -104,6 +108,7 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
           const extension = job.format === 'jpeg' ? 'jpg' : 'png';
           await env.BUCKET.put(`generated/${owner}/${record.custom_id}.${extension}`, Uint8Array.from(atob(b64), c => c.charCodeAt(0)), { httpMetadata: { contentType: extension === 'jpg' ? 'image/jpeg' : 'image/png' } });
           item.status = 'done'; item.imageUrl = `/api/images/${record.custom_id}?format=${extension}&v=${Date.now()}`;
+          item.similarityReview = await reviewImageSimilarity(key, b64, extension === 'jpg' ? 'image/jpeg' : 'image/png', references);
         } else { item.status = 'error'; item.error = String(record.error?.message || record.response?.body?.error?.message || 'Batch item failed').slice(0, 260); }
         handled++;
         if (handled >= 5) { interrupted = true; break; }
@@ -124,7 +129,7 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
     const saved = await db.select().from(projects).where(and(eq(projects.id, job.projectId), eq(projects.owner, owner))).limit(1);
     if (saved.length) {
       const project = JSON.parse(saved[0].data) as { characters?: Array<Record<string, any>> };
-      project.characters = project.characters?.map(c => { const item = byId.get(c.id); return item?.status === 'done' ? { ...c, imageUrl: item.imageUrl, status: 'done', error: '' } : item?.status === 'error' ? { ...c, status: 'error', error: item.error } : c; });
+      project.characters = project.characters?.map(c => { const item = byId.get(c.id); return item?.status === 'done' ? { ...c, imageUrl: item.imageUrl, status: 'done', error: '', similarityReview: item.similarityReview } : item?.status === 'error' ? { ...c, status: 'error', error: item.error } : c; });
       await db.update(projects).set({ data: JSON.stringify(project), updatedAt: Date.now() }).where(and(eq(projects.id, job.projectId), eq(projects.owner, owner)));
     }
   }

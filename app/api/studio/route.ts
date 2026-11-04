@@ -7,6 +7,7 @@ import { userCredential } from '@/lib/credentials';
 import { normalizeListing } from '@/lib/etsy-listing';
 import { normalizeAiSeoReview } from '@/lib/seo-intelligence';
 import { originalImagePrompt } from '@/lib/originality';
+import { reviewImageSimilarity, type SimilarityReview } from '@/lib/similarity-review';
 
 const fail = (error: string, status = 400) => Response.json({ error }, { status });
 const secret = (key: string) => (env as unknown as Record<string, string | undefined>)[key];
@@ -34,11 +35,11 @@ export async function POST(req: Request) {
     if (current.length && current[0].owner !== user.userId) return fail('Forbidden', 403);
     if (current.length) {
       // An older browser snapshot must not erase assets already persisted by the image worker.
-      const old = JSON.parse(current[0].data) as { characters?: Array<{ id: string; imageUrl?: string; status?: string }> };
+      const old = JSON.parse(current[0].data) as { characters?: Array<{ id: string; imageUrl?: string; status?: string; similarityReview?: SimilarityReview }> };
       const storedImages = new Map((old.characters || []).filter(c => c.imageUrl).map(c => [c.id, c]));
       incoming.characters = incoming.characters.map((c: any) => {
         const persisted = storedImages.get(c.id);
-        return persisted?.imageUrl ? { ...c, imageUrl: persisted.imageUrl, status: 'done', error: '' } : c;
+        return persisted?.imageUrl ? { ...c, imageUrl: persisted.imageUrl, status: 'done', error: '', similarityReview: persisted.similarityReview } : c;
       });
     }
     const data = JSON.stringify(incoming);
@@ -135,7 +136,7 @@ export async function POST(req: Request) {
     const db = getDb();
     const saved = await db.select().from(projects).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId))).limit(1);
     if (!saved.length) return fail('Save the collection before generating images.', 404);
-    const project = JSON.parse(saved[0].data) as { characters?: Array<{ id: string; prompt: string; status: string; imageUrl?: string; error?: string }> };
+    const project = JSON.parse(saved[0].data) as { selectedImageUrls?: string[]; images?: string[]; characters?: Array<{ id: string; prompt: string; status: string; imageUrl?: string; error?: string; similarityReview?: SimilarityReview }> };
     const character = project.characters?.find(c => c.id === body.characterId);
     if (!character?.prompt || character.prompt.length > 8000) return fail('Character has no saved valid prompt.');
     const batchJobs = await db.select().from(imageBatches).where(and(eq(imageBatches.projectId, body.projectId), eq(imageBatches.owner, user.userId)));
@@ -155,12 +156,13 @@ export async function POST(req: Request) {
     // A deterministic per-character object key allows recovery if DB persistence fails.
     await env.BUCKET.put(`generated/${user.userId}/${character.id}.${extension}`, Uint8Array.from(atob(b64), c => c.charCodeAt(0)), { httpMetadata: { contentType: format === 'jpeg' ? 'image/jpeg' : 'image/png' } });
     character.imageUrl = imageUrl; character.status = 'done'; character.error = '';
+    character.similarityReview = await reviewImageSimilarity(aiKey, b64, format === 'jpeg' ? 'image/jpeg' : 'image/png', project.selectedImageUrls ?? project.images ?? []);
     try {
       await db.update(projects).set({ data: JSON.stringify(project), updatedAt: Date.now() }).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId)));
     } catch {
       return fail('Image stored safely, but collection update failed. Use Recover images in Image Production; do not regenerate yet.', 503);
     }
-    return Response.json({ imageUrl, persisted: true });
+    return Response.json({ imageUrl, similarityReview: character.similarityReview, persisted: true });
   }
   if (body.action === 'recover-images') {
     if (typeof body.projectId !== 'string' || !env.BUCKET) return fail('Invalid recovery request');
