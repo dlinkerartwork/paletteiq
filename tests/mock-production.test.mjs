@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { advanceMockJob, inspectMockStorage, mockEligibleIds, mockRetryableIds, readMockJobs, writeMockJobs } from '../lib/mock-production.ts';
+import { advanceMockJob, inspectMockStorage, mockEligibleIds, mockRetryableIds, mockOutcomeCounts, readMockJobs, writeMockJobs } from '../lib/mock-production.ts';
 
 const base = {
   id: 'test-job', projectId: 'collection-a', model: 'TEST model', createdAt: 1000,
@@ -82,4 +82,18 @@ test('simulated retry selects failed prompts but never requeues successful or pe
   assert.deepEqual(mockRetryableIds(chars, [quota, retryPending], 'collection-a'), ['b']);
   const retrySuccess = advanceMockJob({ ...retryPending, scenario: 'success' }, 24000);
   assert.deepEqual(mockRetryableIds(chars, [quota, retrySuccess], 'collection-a'), ['b']);
+});
+
+test('TEST totals update after retry completion without claiming production assets exist', () => {
+  const characters = [
+    { id: 'a', status: 'error' },
+    { id: 'b', status: 'done', imageUrl: '/api/images/b' },
+    { id: 'c', status: 'error' },
+  ];
+  const failed = advanceMockJob({ ...base, scenario: 'quota_error' }, 11000);
+  assert.deepEqual(mockOutcomeCounts(characters, [failed], 'collection-a'), { successful: 1, failed: 2, pending: 0 });
+  const retry = advanceMockJob({ ...base, id: 'retry-all', createdAt: 12000, scenario: 'success' }, 23000);
+  assert.deepEqual(mockOutcomeCounts(characters, [failed, retry], 'collection-a'), { successful: 2, failed: 1, pending: 0 });
+  const waiting = { ...base, id: 'retry-pending', createdAt: 24000, status: 'pending' };
+  assert.deepEqual(mockOutcomeCounts(characters, [failed, waiting], 'collection-a'), { successful: 1, failed: 1, pending: 1 });
 });
