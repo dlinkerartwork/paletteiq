@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { playProductionSound, primeProductionAudio, productionSoundEnabled } from '@/lib/production-sounds';
 import { Copy, Download, LoaderCircle, Sparkles } from 'lucide-react';
 import { listingWarnings, normalizeListing, type EtsyListingDraft } from '@/lib/etsy-listing';
 import { auditSeo, type AiSeoReview } from '@/lib/seo-intelligence';
@@ -11,8 +12,30 @@ type Props = { project: Project; onChange: (draft: EtsyListingDraft) => void; on
 const download = (name: string, body: string, mime: string) => { const url = URL.createObjectURL(new Blob([body], { type: mime })); const a = document.createElement('a'); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url); };
 const slug = (s: string) => (s || 'paletteiq').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 60);
 
+type SeoDone = { projectId: string; draft?: EtsyListingDraft; error?: string };
+const activeSeoRuns = new Map<string, Promise<EtsyListingDraft>>();
+const SEO_DONE_EVENT = 'paletteiq:seo-draft-completed';
+function notifySeoFinished(projectName: string, success: boolean) {
+  if (productionSoundEnabled() && success) playProductionSound('completed');
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    try { new Notification('paletteIQ SEO Draft', { body: success ? `SEO draft ready: ${projectName}` : `SEO draft failed: ${projectName}` }); } catch { /* Browser notifications are optional. */ }
+  }
+}
+
 export default function EtsyListingDraft({ project, onChange, onSave, onSeoReview, seoProvider, seoTitleMaxLength, seoAltTextCount }: Props) {
-  const [working, setWorking] = useState(false);
+  const [working, setWorking] = useState(() => activeSeoRuns.has(project.id));
+  useEffect(() => {
+    setWorking(activeSeoRuns.has(project.id));
+    const onDone = (event: Event) => {
+      const detail = (event as CustomEvent<SeoDone>).detail;
+      if (detail.projectId !== project.id) return;
+      setWorking(false);
+      if (detail.draft) { onChange(normalizeListing(detail.draft)); setNotice('SEO draft completed and saved to this collection.'); }
+      else setNotice(detail.error || 'SEO draft failed.');
+    };
+    window.addEventListener(SEO_DONE_EVENT, onDone);
+    return () => window.removeEventListener(SEO_DONE_EVENT, onDone);
+  }, [project.id, onChange]);
   const [notice, setNotice] = useState('');
   const [exporting, setExporting] = useState(false);
   const [reviewing, setReviewing] = useState(false);
@@ -26,13 +49,35 @@ export default function EtsyListingDraft({ project, onChange, onSave, onSeoRevie
   const produced = project.characters.filter(c => c.status === 'done').length;
   const warnings = listingWarnings(draft, produced);
   const generate = async () => {
+    if (activeSeoRuns.has(project.id)) { setNotice('SEO generation is already running for this collection.'); return; }
     setWorking(true); setNotice('');
+    primeProductionAudio();
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      void Notification.requestPermission().catch(() => {});
+    }
     try {
-      const res = await fetch('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'listing-draft', project }) });
-      const result = await res.json() as { draft?: EtsyListingDraft; error?: string };
-      if (!res.ok || !result.draft) throw new Error(result.error || 'Unable to generate listing');
-      onChange(normalizeListing(result.draft)); setNotice('AI draft ready. Review details and save the collection.');
-    } catch (e) { setNotice(e instanceof Error ? e.message : 'Generation failed'); } finally { setWorking(false); }
+      await onSave();
+      const projectId = project.id;
+      const projectName = project.name;
+      const task = (async (): Promise<EtsyListingDraft> => {
+        const res = await fetch('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'listing-draft', project }) });
+        const result = await res.json() as { draft?: EtsyListingDraft; error?: string };
+        if (!res.ok || !result.draft) throw new Error(result.error || 'Unable to generate listing');
+        return result.draft;
+      })();
+      activeSeoRuns.set(projectId, task);
+      void task.then(draft => {
+        notifySeoFinished(projectName, true);
+        window.dispatchEvent(new CustomEvent<SeoDone>(SEO_DONE_EVENT, { detail: { projectId, draft } }));
+      }).catch(error => {
+        notifySeoFinished(projectName, false);
+        window.dispatchEvent(new CustomEvent<SeoDone>(SEO_DONE_EVENT, { detail: { projectId, error: error instanceof Error ? error.message : String(error) } }));
+      }).finally(() => { activeSeoRuns.delete(projectId); });
+      setNotice('SEO generation started. You can switch sections; completion will be saved and notified.');
+    } catch (error) {
+      setWorking(false);
+      setNotice(error instanceof Error ? error.message : 'Unable to start SEO generation');
+    }
   };
   const copy = async (text: string) => { await navigator.clipboard.writeText(text); setNotice('Copied to clipboard.'); };
   const reviewWithAi = async () => {
