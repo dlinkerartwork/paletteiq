@@ -23,8 +23,8 @@ export async function seoPreferences(owner: string): Promise<SeoGenerationPrefer
   try { stored = rows[0]?.preferences ? JSON.parse(rows[0].preferences) : {}; } catch { /* Legacy defaults. */ }
   return {
     seoProvider: stored.seoProvider === 'gemini' ? 'gemini' : 'openai',
-    seoTitleMaxLength: Number.isInteger(stored.seoTitleMaxLength) && Number(stored.seoTitleMaxLength) >= 1 && Number(stored.seoTitleMaxLength) <= 140 ? Number(stored.seoTitleMaxLength) : defaults.seoTitleMaxLength,
-    seoAltTextCount: Number.isInteger(stored.seoAltTextCount) && Number(stored.seoAltTextCount) >= 1 && Number(stored.seoAltTextCount) <= 20 ? Number(stored.seoAltTextCount) : defaults.seoAltTextCount,
+    seoTitleMaxLength: typeof stored.seoTitleMaxLength === 'number' && Number.isInteger(stored.seoTitleMaxLength) && Number(stored.seoTitleMaxLength) >= 1 && Number(stored.seoTitleMaxLength) <= 140 ? Number(stored.seoTitleMaxLength) : defaults.seoTitleMaxLength,
+    seoAltTextCount: typeof stored.seoAltTextCount === 'number' && Number.isInteger(stored.seoAltTextCount) && Number(stored.seoAltTextCount) >= 1 && Number(stored.seoAltTextCount) <= 20 ? Number(stored.seoAltTextCount) : defaults.seoAltTextCount,
     seoFileNaming: 'generaltheme_imagenumber',
   };
 }
