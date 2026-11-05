@@ -13,7 +13,7 @@ function openNativeDb(directory, migrationsDir) {
   const database = new DatabaseSync(path.join(dbDir, 'paletteiq.db'));
   database.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;');
   database.exec('CREATE TABLE IF NOT EXISTS __paletteiq_migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)');
-  for (const file of ['0000_slippery_pyro.sql', '0001_big_bedlam.sql', '0002_fine_red_hulk.sql']) {
+  for (const file of ['0000_slippery_pyro.sql', '0001_big_bedlam.sql', '0002_fine_red_hulk.sql', '0003_gemini_seo.sql']) {
     if (database.prepare('SELECT 1 FROM __paletteiq_migrations WHERE name=?').get(file)) continue;
     database.exec('BEGIN IMMEDIATE');
     try {
