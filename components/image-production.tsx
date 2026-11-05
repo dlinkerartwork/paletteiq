@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { CheckCircle2, CircleAlert, Clock3, Download, Image as ImageIcon, LoaderCircle, RefreshCw, Sparkles } from 'lucide-react';
 import { eligibleForBulk, isActiveBatchStatus, wasPreviouslyGenerated } from '@/lib/production-rules';
 import type { SimilarityReview } from '@/lib/similarity-review';
+import { isOpenAICreditError, primeProductionAudio, useProductionSounds } from '@/lib/production-sounds';
 
 type Character = { id: string; name: string; prompt: string; status: string; imageUrl?: string; error?: string; similarityReview?: SimilarityReview };
 type Project = { id: string; name: string; characters: Character[]; listing?: { title?: string } };
@@ -28,6 +29,18 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
   const [downloading, setDownloading] = useState(false);
   const [singleProgress, setSingleProgress] = useState({ done: 0, total: 0 });
   const [message, setMessage] = useState('');
+  const [creditAlert, setCreditAlert] = useState('');
+  const { enabled: soundEnabled, toggle: toggleSound, play: playSound } = useProductionSounds();
+  const soundRef = useRef(playSound);
+  useEffect(() => { soundRef.current = playSound; }, [playSound]);
+  const previousBatchStates = useRef<Map<string, string> | null>(null);
+  const lastCreditWarning = useRef('');
+  const reportCredit = useCallback((value: unknown) => {
+    if (!isOpenAICreditError(value)) return;
+    const detail = value instanceof Error ? value.message : String(value);
+    setCreditAlert('OpenAI credits/quota appear exhausted. Check API billing before retrying. ' + detail.slice(0, 240));
+    if (lastCreditWarning.current !== detail) { lastCreditWarning.current = detail; soundRef.current('credits'); }
+  }, []);
   const latestAsset = useRef(onAsset);
   const latestProject = useRef(project);
   useEffect(() => { latestAsset.current = onAsset; latestProject.current = project; }, [onAsset, project]);
@@ -59,7 +72,15 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
       try {
         const data = await request<{ jobs: Job[] }>(`/api/image-batches?projectId=${encodeURIComponent(project.id)}&sync=1`);
         if (closed) return;
-        setJobs(data.jobs || []);
+        const freshJobs = data.jobs || [];
+        if (previousBatchStates.current) {
+          const finished = freshJobs.some(job => isActiveBatchStatus(previousBatchStates.current?.get(job.id) || 'completed') && !isActiveBatchStatus(job.status));
+          if (finished) soundRef.current('completed');
+        }
+        previousBatchStates.current = new Map(freshJobs.map(job => [job.id, job.status]));
+        const warning = freshJobs.find(job => isOpenAICreditError(job.warning))?.warning;
+        if (warning) reportCredit(warning);
+        setJobs(freshJobs);
         // The stored collection is authoritative; historical completed jobs must not
         // overwrite a newer single or batch regeneration on the client.
         const rows = await request<Array<{ id: string; data: Project }>>(`/api/studio?projectId=${encodeURIComponent(project.id)}`);
@@ -69,37 +90,39 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
           if (asset.imageUrl && (asset.imageUrl !== local?.imageUrl || JSON.stringify(asset.similarityReview) !== JSON.stringify(local?.similarityReview))) latestAsset.current(asset.id, { imageUrl: asset.imageUrl, status: 'done', error: '', similarityReview: asset.similarityReview });
         }
         if (manual && !closed) setMessage('Image and Batch job statuses refreshed.');
-      } catch (e) { if (!closed) setMessage(e instanceof Error ? e.message : String(e)); }
+      } catch (e) { if (!closed) { setMessage(e instanceof Error ? e.message : String(e)); reportCredit(e); } }
       finally { syncBusy.current = false; if (!closed) setRefreshing(false); }
     };
     refreshNow.current = () => refresh(true);
     void refresh();
     const interval = setInterval(() => void refresh(), 15000);
     return () => { closed = true; clearInterval(interval); refreshNow.current = async () => {}; };
-  }, [project.id]);
+  }, [project.id, reportCredit]);
 
   const generateSingle = async (character?: Character) => {
     const item = character || chosenSingle;
     if (!item || !item.prompt || pending.has(item.id)) return;
+    if (soundEnabled) primeProductionAudio();
     setWorking(true); setMessage(`Saving collection and generating ${item.name}...`); setSingleProgress({ done: 0, total: 1 });
     try {
       await request('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'save', id: project.id, name: project.name, data: project }) });
       const data = await request<{ imageUrl: string; similarityReview?: SimilarityReview }>('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'generate', model, quality, projectId: project.id, characterId: item.id }) });
       onAsset(item.id, { imageUrl: data.imageUrl, status: 'done', error: '', similarityReview: data.similarityReview });
-      setSingleProgress({ done: 1, total: 1 }); setMessage(`Image completed and saved: ${item.name}. Safe to refresh.`);
-    } catch (e) { setMessage(e instanceof Error ? e.message : String(e)); if (!item.imageUrl) onAsset(item.id, { status: 'error', error: String(e) }); }
+      setSingleProgress({ done: 1, total: 1 }); setMessage(`Image completed and saved: ${item.name}. Safe to refresh.`); playSound('completed');
+    } catch (e) { setMessage(e instanceof Error ? e.message : String(e)); reportCredit(e); if (!item.imageUrl) onAsset(item.id, { status: 'error', error: String(e) }); }
     finally { setWorking(false); }
   };
 
   const submitBatch = async (ids = selectedBatchIds, regenerate = false) => {
     if (!ids.length || ids.length > 120 || ids.some(id => pending.has(id))) return;
+    if (soundEnabled) primeProductionAudio();
     setWorking(true); setMessage('Saving collection and submitting an OpenAI Batch job...');
     try {
       await request('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'save', id: project.id, name: project.name, data: project }) });
       const data = await request<{ job: Job }>('/api/image-batches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId: project.id, characterIds: ids, model: batchModel, quality, regenerate }) });
       setJobs(list => [data.job, ...list]); setSelectedIds([]);
       setMessage(`Batch submitted (${ids.length} characters). OpenAI processes it asynchronously; you can close this tab.`);
-    } catch (e) { setMessage(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setMessage(e instanceof Error ? e.message : String(e)); reportCredit(e); }
     finally { setWorking(false); }
   };
 
@@ -117,7 +140,8 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
   return <>
     <section className="panel production-setup">
       <div className="production-mode-head"><div><h2>Generation mode</h2><p className="sub">Images and their collection records are automatically saved. Generate one character or submit a discounted Batch job.</p></div><div className="mode-switch"><button className={mode === 'single' ? 'active' : ''} onClick={() => setMode('single')}>Single</button><button className={mode === 'batch' ? 'active' : ''} onClick={() => setMode('batch')}>Batch <span>Save ~50%</span></button></div></div>
-      <button className="outline-btn" disabled={working} onClick={() => void recoverImages()}><RefreshCw size={14}/> Recover images</button>
+      <div className="image-download-actions"><button className="outline-btn" disabled={working} onClick={() => void recoverImages()}><RefreshCw size={14}/> Recover images</button><button type="button" className="outline-btn" onClick={toggleSound} aria-label="Toggle generation sound alerts">{soundEnabled ? '🔊 Sound alerts on' : '🔇 Sound alerts off'}</button></div>
+      {creditAlert && <div className="notice production-notice" role="alert"><CircleAlert size={16}/><strong>{creditAlert}</strong><button type="button" onClick={() => setCreditAlert('')}>Dismiss</button></div>
       <div className="production-controls">
         <div><label className="input-label">{mode === 'single' ? 'IMAGE MODEL' : 'BATCH IMAGE MODEL'}</label>{mode === 'single' ? <select value={model} onChange={e => onModel(e.target.value)}><option value="gpt-image-1-mini">GPT Image 1 Mini</option><option value="gpt-image-1">GPT Image 1</option><option value="gpt-image-1.5">GPT Image 1.5</option><option value="gpt-image-2.5-flare">GPT Image 2.5 Flare</option><option value="gpt-image-2.5-sunburst">GPT Image 2.5 Sunburst</option></select> : <select value={batchModel} onChange={e => setBatchModel(e.target.value)}><option value="gpt-image-2.5-flare">GPT Image 2.5 Flare</option><option value="gpt-image-2.5-sunburst">GPT Image 2.5 Sunburst</option></select>}</div>
         <div><label className="input-label">QUALITY</label><select value={quality} onChange={e => onQuality(e.target.value)}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></div>
