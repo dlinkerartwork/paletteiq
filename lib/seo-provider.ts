@@ -48,11 +48,17 @@ export async function generateSeoJson(owner: string, instruction: string, provid
   const key = await userCredential(owner, 'gemini') || secret('GEMINI_API_KEY');
   if (!key) throw new Error('Configure your Gemini API key in Settings before generating SEO.');
   const model = ['gemini-flash-latest', 'gemini-2.5-flash-lite', 'gemini-2.5-flash'].includes(geminiModel) ? geminiModel : 'gemini-flash-latest';
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-    method: 'POST',
-    headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: instruction }] }], generationConfig: { responseMimeType: 'application/json', ...(model.startsWith('gemini-2.5-') ? { thinkingConfig: { thinkingBudget: 0 } } : {}) } }),
-  });
+  let response: Response | undefined;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+      method: 'POST',
+      headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: instruction }] }], generationConfig: { responseMimeType: 'application/json', ...(model.startsWith('gemini-2.5-') ? { thinkingConfig: { thinkingBudget: 0 } } : {}) } }),
+    });
+    if (![429, 503].includes(response.status) || attempt === 2) break;
+    await new Promise(resolve => setTimeout(resolve, 750 * (attempt + 1)));
+  }
+  if (!response) throw new Error('Gemini did not respond');
   if (!response.ok) throw new Error(`Gemini SEO generation failed (${response.status}): ${(await response.text()).slice(0, 200)}`);
   const data = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
   const text = data.candidates?.[0]?.content?.parts?.map(p => p.text ?? '').join('') || '';
