@@ -106,3 +106,30 @@ export function mockRetryableIds(
   return characters.filter(c => !!c.prompt?.trim() && !c.imageUrl &&
     (latest.get(c.id) === 'error' || (!latest.has(c.id) && c.status === 'error'))).map(c => c.id);
 }
+
+export function mockOutcomeCounts(
+  characters: Array<{ id: string; imageUrl?: string; status?: string }>,
+  jobs: MockJob[],
+  projectId: string,
+): { successful: number; failed: number; pending: number } {
+  const latest = new Map<string, 'done' | 'error' | 'pending'>();
+  for (const job of jobs.filter(item => item.projectId === projectId).sort((a, b) => a.createdAt - b.createdAt)) {
+    const assets = new Map(job.assets.map(item => [item.id, item.status]));
+    for (const id of job.characterIds) {
+      const status = assets.get(id);
+      latest.set(id, status === 'done' ? 'done' : status === 'error' ? 'error' : 'pending');
+    }
+  }
+  let successful = 0;
+  let failed = 0;
+  let pending = 0;
+  for (const c of characters) {
+    // Real saved images always take precedence over simulated results.
+    if (c.imageUrl) { successful++; continue; }
+    const status = latest.get(c.id);
+    if (status === 'done') successful++;
+    else if (status === 'error' || (!status && c.status === 'error')) failed++;
+    else if (status === 'pending') pending++;
+  }
+  return { successful, failed, pending };
+}
