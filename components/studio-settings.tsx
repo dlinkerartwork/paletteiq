@@ -12,7 +12,8 @@ export type StudioPreferences = {
 };
 export const defaultPrefs: StudioPreferences = { target: 120, model: 'gpt-image-1-mini', quality: 'low', analysisModel: 'gpt-4.1-mini', output: 'png', background: 'transparent', variations: 1, defaultStyle: 'Soft hand-painted watercolor illustration', autoSave: false, seoPrompts: { ...defaultSeoPrompts } };
 type Props = { preferences: StudioPreferences; onPreferences: (prefs: StudioPreferences) => void; projects: unknown[]; onImport: (data: { projects: unknown[]; preferences: StudioPreferences }) => Promise<void> };
-const request = async (body: object): Promise<any> => { const res = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); const data: any = await res.json(); if (!res.ok) throw new Error(data.error || 'Request failed'); return data; };
+type SettingsResponse = { error?: string; credentials: { etsy: boolean; openai: boolean } };
+const request = async (body: object): Promise<SettingsResponse> => { const res = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); const data = await res.json() as SettingsResponse; if (!res.ok) throw new Error(data.error || 'Request failed'); return data; };
 
 export default function StudioSettings({ preferences, onPreferences, projects, onImport }: Props) {
   const [credentials, setCredentials] = useState({ etsy: false, openai: false });
@@ -21,7 +22,7 @@ export default function StudioSettings({ preferences, onPreferences, projects, o
   const [active, setActive] = useState('');
   const [message, setMessage] = useState('');
   const picker = useRef<HTMLInputElement>(null);
-  useEffect(() => { fetch('/api/settings').then(r => r.json()).then((data: any) => { if (data.credentials) setCredentials(data.credentials); }).catch(() => {}); }, []);
+  useEffect(() => { fetch('/api/settings').then(r => r.json()).then((data: SettingsResponse) => { if (data.credentials) setCredentials(data.credentials); }).catch(() => {}); }, []);
   const edit = (key: keyof StudioPreferences, value: string | number | boolean) => onPreferences({ ...preferences, [key]: value });
   const act = async (action: string, op: () => Promise<unknown>) => { setActive(action); setMessage(''); try { await op(); setMessage('Saved successfully.'); } catch (e) { setMessage(e instanceof Error ? e.message : String(e)); } finally { setActive(''); } };
   const saveKey = (provider: 'etsy' | 'openai', remove = false) => act(provider, async () => { const response = await request({ action: 'credential', provider, ...(remove ? { remove: true } : { key: secrets[provider] }) }); setCredentials(response.credentials); setSecrets(s => ({ ...s, [provider]: '' })); });
