@@ -88,3 +88,21 @@ export function mockEligibleIds(
   const alreadySimulated = new Set(jobs.filter(job => job.projectId === projectId).flatMap(job => job.characterIds));
   return characters.filter(c => !!c.prompt?.trim() && !c.imageUrl && c.status !== 'done' && c.status !== 'error' && !alreadySimulated.has(c.id)).map(c => c.id);
 }
+
+// Explicit TEST-only retries use the latest simulated outcome, without touching saved images.
+export function mockRetryableIds(
+  characters: Array<{ id: string; prompt?: string; imageUrl?: string; status?: string }>,
+  jobs: MockJob[],
+  projectId: string,
+): string[] {
+  const latest = new Map<string, 'pending' | 'done' | 'error'>();
+  for (const job of jobs.filter(j => j.projectId === projectId).sort((a, b) => a.createdAt - b.createdAt)) {
+    const outcomes = new Map(job.assets.map(item => [item.id, item.status]));
+    for (const id of job.characterIds) {
+      const status = outcomes.get(id);
+      latest.set(id, status === 'error' ? 'error' : status === 'done' ? 'done' : 'pending');
+    }
+  }
+  return characters.filter(c => !!c.prompt?.trim() && !c.imageUrl &&
+    (latest.get(c.id) === 'error' || (!latest.has(c.id) && c.status === 'error'))).map(c => c.id);
+}
