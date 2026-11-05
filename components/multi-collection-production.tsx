@@ -104,25 +104,51 @@ export default function MultiCollectionProduction() {
     setProgress({ submitted: 0, total: requestCount });
     setMessage('Submitting separate OpenAI batches per collection...');
     let submitted = 0;
+    const failures: string[] = [];
+    let stoppedForQuota = false;
     try {
-      // Read saved data again so unsaved edits in another window cannot be submitted accidentally.
+      // Re-read saved collections and outstanding jobs. A stale browser view
+      // must never be treated as the authority for paid submissions.
       const freshRows = await jsonRequest<Array<{ data: Collection }>>('/api/studio');
       for (const row of chosen) {
         const fresh = freshRows.find(item => item.data.id === row.collection.id)?.data;
-        if (!fresh) throw new Error('Collection no longer exists: ' + row.collection.name);
-        const eligible = fresh.characters.filter(c => eligibleForBulk(c));
+        if (!fresh) { failures.push(row.collection.name + ': collection no longer exists'); continue; }
+        let pendingIds = new Set<string>();
+        try {
+          const current = await jsonRequest<{ jobs: Job[] }>('/api/image-batches?projectId=' + encodeURIComponent(fresh.id));
+          pendingIds = new Set(current.jobs.filter(j => isActiveBatchStatus(j.status)).flatMap(j => j.characterIds));
+        } catch (error) {
+          failures.push(fresh.name + ': unable to verify pending jobs (' + (error instanceof Error ? error.message : String(error)) + ')');
+          continue;
+        }
+        const eligible = fresh.characters.filter(c => eligibleForBulk(c, pendingIds.has(c.id)));
         for (let i = 0; i < eligible.length; i += 120) {
           const ids = eligible.slice(i, i + 120).map(c => c.id);
-          await jsonRequest('/api/image-batches', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ projectId: fresh.id, characterIds: ids, model, quality }),
-          });
-          submitted += ids.length;
-          setProgress({ submitted, total: requestCount });
+          try {
+            await jsonRequest('/api/image-batches', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ projectId: fresh.id, characterIds: ids, model, quality }),
+            });
+            submitted += ids.length;
+            setProgress({ submitted, total: requestCount });
+          } catch (error) {
+            const detail = error instanceof Error ? error.message : String(error);
+            failures.push(fresh.name + ': ' + detail);
+            reportCredit(error);
+            if (isOpenAICreditError(error)) stoppedForQuota = true;
+            // Do not submit later chunks from this collection after a failed chunk.
+            break;
+          }
         }
+        if (stoppedForQuota) break;
       }
-      setMessage('Submitted ' + submitted + ' images across ' + chosen.length + ' collections. OpenAI will process them asynchronously.');
+      setMessage(
+        'Submitted ' + submitted + ' of ' + requestCount + ' initially eligible images. ' +
+        (failures.length ? 'Some submissions were skipped or failed: ' + failures.slice(0, 4).join(' | ') + '. ' : '') +
+        (stoppedForQuota ? 'Stopped because OpenAI reported insufficient credits/quota. ' : '') +
+        'Refresh statuses before retrying; accepted jobs are saved independently.'
+      );
     } catch (error) {
       setMessage('Submitted ' + submitted + ' images before stopping: ' + (error instanceof Error ? error.message : String(error)) + '. Refresh before retrying.');
       reportCredit(error);
