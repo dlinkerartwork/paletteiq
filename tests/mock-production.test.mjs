@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { advanceMockJob, mockEligibleIds, readMockJobs, writeMockJobs } from '../lib/mock-production.ts';
+import { advanceMockJob, inspectMockStorage, mockEligibleIds, readMockJobs, writeMockJobs } from '../lib/mock-production.ts';
 
 const base = {
   id: 'test-job', projectId: 'collection-a', model: 'TEST model', createdAt: 1000,
@@ -41,4 +41,32 @@ test('simulated jobs survive browser-local persistence and block duplicate submi
   assert.equal(restored[0].status, 'completed');
   assert.deepEqual(mockEligibleIds([{ id: 'a', prompt: 'bear' }, { id: 'b', prompt: 'fox' }, { id: 'c', prompt: 'owl' }], restored, 'collection-a'), ['c']);
   assert.deepEqual(mockEligibleIds([{ id: 'a', prompt: 'new collection bear' }], restored, 'collection-b'), ['a']);
+});
+
+test('corrupt browser history is reported without modifying stored bytes', () => {
+  const storage = new Map([['paletteiq-development-mock-jobs-v1', '{broken-json']]);
+  const adapter = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) };
+  const before = storage.get('paletteiq-development-mock-jobs-v1');
+  const inspected = inspectMockStorage(adapter, 11000);
+  assert.equal(inspected.jobs.length, 0);
+  assert.match(inspected.warning, /could not be read/i);
+  assert.equal(storage.get('paletteiq-development-mock-jobs-v1'), before);
+});
+
+test('invalid or duplicate mock entries are identified while valid jobs remain recoverable', () => {
+  const storage = new Map([['paletteiq-development-mock-jobs-v1', JSON.stringify([base, { ...base }, { id: 'bad', characterIds: 'wrong' }])]]);
+  const adapter = { getItem: key => storage.get(key) ?? null };
+  const inspected = inspectMockStorage(adapter, 11000);
+  assert.equal(inspected.jobs.length, 1);
+  assert.equal(inspected.jobs[0].status, 'completed');
+  assert.match(inspected.warning, /invalid/i);
+});
+
+test('mock recovery does not transform an existing failed quota job into a success', () => {
+  const quota = advanceMockJob({ ...base, scenario: 'quota_error' }, 11000);
+  const storage = new Map([['paletteiq-development-mock-jobs-v1', JSON.stringify([quota])]]);
+  const adapter = { getItem: key => storage.get(key) ?? null };
+  const restored = readMockJobs(adapter, 60000);
+  assert.equal(restored[0].scenario, 'quota_error');
+  assert.equal(restored[0].status, 'failed');
 });
