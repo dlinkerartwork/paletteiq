@@ -89,6 +89,12 @@ async function invokeWrangler(args, directory, secret) {
 async function migrateLegacyDatabase(directory, secret, configPath, storage) {
   const doneMarker = path.join(directory, 'legacy-d1-import-complete');
   if (existsSync(doneMarker)) return;
+  // A newly installed desktop has no legacy Wrangler D1 state. Do not start
+  // workerd merely to probe an empty database: it can crash on some Windows PCs.
+  if (!existsSync(path.join(directory, 'state', 'v3', 'd1'))) {
+    writeFileSync(doneMarker, 'No legacy D1 state found.\n');
+    return;
+  }
   const tables = ['projects', 'studio_settings', 'image_batches'];
   const nonEmpty = tables.some(table => storage.database.prepare(`SELECT count(*) AS count FROM ${table}`).get().count);
   if (nonEmpty) return;
@@ -162,6 +168,11 @@ function configureWorkspaceMenu(directory) {
 
 async function requireActivation() {
   if (!app.isPackaged) return; // Developer preview remains available for development.
+  const licenseModeFile = path.join(ROOT, 'license-mode.json');
+  if (!existsSync(licenseModeFile)) throw new Error('Desktop license mode is missing from the installer.');
+  const licenseMode = JSON.parse(readFileSync(licenseModeFile, 'utf8')).mode;
+  if (licenseMode === 'disabled') return;
+  if (licenseMode !== 'required') throw new Error('Invalid desktop license mode. Reinstall PaletteIQ.');
   const publicKeyFile = path.join(ROOT, 'license-public.pem');
   if (!existsSync(publicKeyFile)) throw new Error('Desktop license verification key is missing from the installer.');
   const publicKey = readFileSync(publicKeyFile, 'utf8');
