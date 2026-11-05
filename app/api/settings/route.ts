@@ -10,7 +10,7 @@ const defaultSeoPrompts = Object.fromEntries(seoPromptFields.map(key => [key, ''
 const defaultPrefs = { target: 120, model: 'gpt-image-1-mini', quality: 'low', analysisModel: 'gpt-4.1-mini', output: 'png', background: 'transparent', variations: 1, defaultStyle: 'Soft hand-painted watercolor illustration', autoSave: false, seoProvider: 'openai', seoTitleMaxLength: 120, seoAltTextCount: 10, seoFileNaming: 'generaltheme_imagenumber', seoPrompts: defaultSeoPrompts };
 const allowedModels = ['gpt-image-1-mini', 'gpt-image-1', 'gpt-image-1.5', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
 
-export async function GET() {
+async function getSettings() {
   const user = await getChatGPTUser();
   if (!user) return bad('Sign in required', 401);
   const rows = await getDb().select().from(studioSettings).where(eq(studioSettings.owner, user.userId)).limit(1);
@@ -18,7 +18,7 @@ export async function GET() {
   return Response.json({ preferences: { ...defaultPrefs, ...(row ? JSON.parse(row.preferences) : {}) }, credentials: { etsy: Boolean(row?.etsyCredential), openai: Boolean(row?.openaiCredential), gemini: Boolean(row?.geminiCredential) } });
 }
 
-export async function POST(req: Request) {
+async function postSettings(req: Request) {
   const user = await getChatGPTUser();
   if (!user) return bad('Sign in required', 401);
   const body = await req.json() as Record<string, unknown>;
@@ -47,4 +47,21 @@ export async function POST(req: Request) {
   } else return bad('Unknown action');
   await db.insert(studioSettings).values(values).onConflictDoUpdate({ target: studioSettings.owner, set: { preferences: values.preferences, etsyCredential: values.etsyCredential, openaiCredential: values.openaiCredential, geminiCredential: values.geminiCredential, updatedAt: Date.now() } });
   return Response.json({ ok: true, credentials: { etsy: Boolean(values.etsyCredential), openai: Boolean(values.openaiCredential), gemini: Boolean(values.geminiCredential) } });
+}
+
+function settingsError(error: unknown): Response {
+  console.error('Settings request failed:', error);
+  const detail = error instanceof Error ? error.message : String(error);
+  if (/gemini_credential|no such column/i.test(detail)) {
+    return bad('Database migration is required: apply drizzle/0003_gemini_seo.sql to the active database, then retry.', 503);
+  }
+  return bad('Settings could not be saved. Check the server logs for details.', 500);
+}
+
+export async function GET() {
+  try { return await getSettings(); } catch (error) { return settingsError(error); }
+}
+
+export async function POST(req: Request) {
+  try { return await postSettings(req); } catch (error) { return settingsError(error); }
 }
