@@ -30,16 +30,50 @@ export function advanceMockJob(job: MockJob, now: number): MockJob {
   };
 }
 
-export function readMockJobs(storage: Pick<Storage, 'getItem'>, now = Date.now()): MockJob[] {
+const SCENARIOS: MockScenario[] = ['success', 'partial_failure', 'quota_error'];
+const STATES = ['pending', 'in_progress', 'completed', 'completed_with_errors', 'failed'];
+
+export function isValidMockJob(item: unknown): item is MockJob {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+  const job = item as Partial<MockJob>;
+  return typeof job.id === 'string' && job.id.length > 0 &&
+    typeof job.projectId === 'string' && job.projectId.length > 0 &&
+    typeof job.model === 'string' &&
+    typeof job.createdAt === 'number' && Number.isSafeInteger(job.createdAt) && job.createdAt > 0 &&
+    typeof job.status === 'string' && STATES.includes(job.status) &&
+    SCENARIOS.includes(job.scenario as MockScenario) &&
+    Array.isArray(job.characterIds) && job.characterIds.length > 0 && job.characterIds.length <= 120 &&
+    job.characterIds.every(id => typeof id === 'string' && id.length > 0) &&
+    new Set(job.characterIds).size === job.characterIds.length &&
+    Number.isSafeInteger(job.total) && job.total === job.characterIds.length &&
+    Number.isSafeInteger(job.completed) && job.completed! >= 0 &&
+    Number.isSafeInteger(job.failed) && job.failed! >= 0 &&
+    job.completed! + job.failed! <= job.total! &&
+    Number.isSafeInteger(job.imported) && job.imported! >= 0 && job.imported! <= job.total! &&
+    Array.isArray(job.assets) && job.assets.every(asset =>
+      !!asset && typeof asset.id === 'string' && ['done', 'error'].includes(asset.status));
+}
+
+export function inspectMockStorage(storage: Pick<Storage, 'getItem'>, now = Date.now()): { jobs: MockJob[]; warning?: string } {
   try {
-    const value = JSON.parse(storage.getItem(MOCK_STORAGE_KEY) || '[]') as unknown;
-    if (!Array.isArray(value)) return [];
-    return value.filter((item): item is MockJob =>
-      !!item && typeof item === 'object' && typeof item.id === 'string' &&
-      typeof item.projectId === 'string' && Array.isArray(item.characterIds) &&
-      typeof item.createdAt === 'number' && typeof item.scenario === 'string'
-    ).slice(-500).map(job => advanceMockJob(job, now));
-  } catch { return []; }
+    const raw = storage.getItem(MOCK_STORAGE_KEY);
+    if (!raw) return { jobs: [] };
+    const value = JSON.parse(raw) as unknown;
+    if (!Array.isArray(value)) return { jobs: [], warning: 'TEST history format is invalid. Clear TEST history to restart.' };
+    const valid = value.filter(isValidMockJob);
+    const warning = valid.length !== value.length
+      ? 'Some TEST history entries are invalid. Existing data was left unchanged; Clear TEST history to restart.'
+      : undefined;
+    const unique = new Map(valid.map(job => [job.id, job]));
+    const jobs = [...unique.values()].slice(-500).map(job => advanceMockJob(job, now));
+    return { jobs, warning: warning || (unique.size !== valid.length ? 'Duplicate TEST job IDs detected; Clear TEST history to restart.' : undefined) };
+  } catch {
+    return { jobs: [], warning: 'TEST history could not be read. Existing storage was left unchanged.' };
+  }
+}
+
+export function readMockJobs(storage: Pick<Storage, 'getItem'>, now = Date.now()): MockJob[] {
+  return inspectMockStorage(storage, now).jobs;
 }
 
 export function writeMockJobs(storage: Pick<Storage, 'setItem'>, jobs: MockJob[]) {
