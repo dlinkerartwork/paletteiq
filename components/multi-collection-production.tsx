@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, CircleAlert, LoaderCircle, RefreshCw, Sparkles } from 'lucide-react';
-import { eligibleForBulk, isActiveBatchStatus } from '@/lib/production-rules';
+import { eligibleForBulk, retryableFailedImage, isActiveBatchStatus } from '@/lib/production-rules';
 import { isOpenAICreditError, primeProductionAudio, useProductionSounds } from '@/lib/production-sounds';
 import { MOCK_STORAGE_KEY, inspectMockStorage, mockEligibleIds, writeMockJobs, type MockJob, type MockScenario } from '@/lib/mock-production';
 
@@ -123,22 +123,26 @@ export default function MultiCollectionProduction() {
   }, [reload, environment]);
 
   const rows = useMemo(() => collections.map(collection => {
-    if (environment === 'mock') {
-      const simulated = mockJobs.filter(job => job.projectId === collection.id);
-      const ids = new Set(mockEligibleIds(collection.characters, mockJobs, collection.id));
-      return { collection, eligible: collection.characters.filter(character => ids.has(character.id)), jobs: simulated as Job[] };
-    }
-    const pending = new Set((jobs[collection.id] || []).filter(job => isActiveBatchStatus(job.status)).flatMap(job => job.characterIds || []));
-    const eligible = collection.characters.filter(character => eligibleForBulk(character, pending.has(character.id)));
-    return { collection, eligible, jobs: jobs[collection.id] || [] };
+    const active = (jobs[collection.id] || []).filter(job => isActiveBatchStatus(job.status));
+    const pending = new Set(active.flatMap(job => job.characterIds || []));
+    const eligible = environment === 'mock'
+      ? collection.characters.filter(c => new Set(mockEligibleIds(collection.characters, mockJobs, collection.id)).has(c.id))
+      : collection.characters.filter(c => eligibleForBulk(c, pending.has(c.id)));
+    const retryable = environment === 'mock' ? [] : collection.characters.filter(c => retryableFailedImage(c, pending.has(c.id)));
+    const successful = collection.characters.filter(c => c.status === 'done' && !!c.imageUrl).length;
+    const failed = collection.characters.filter(c => c.status === 'error' && !c.imageUrl).length;
+    const pendingCount = collection.characters.filter(c => pending.has(c.id)).length;
+    const missingPrompts = collection.characters.filter(c => !c.prompt?.trim() && !c.imageUrl).length;
+    return { collection, eligible, retryable, successful, failed, pendingCount, missingPrompts, jobs: environment === 'mock' ? mockJobs.filter(j => j.projectId === collection.id) as Job[] : jobs[collection.id] || [] };
   }), [collections, jobs, environment, mockJobs]);
   const visible = rows.filter(row => row.collection.name.toLowerCase().includes(search.trim().toLowerCase()));
   const chosen = rows.filter(row => selected.includes(row.collection.id));
   const requestCount = chosen.reduce((sum, row) => sum + row.eligible.length, 0);
+  const retryCount = chosen.reduce((sum, row) => sum + row.retryable.length, 0);
   const activity = rows.flatMap(row => row.jobs.map(job => ({ collection: row.collection.name, job }))).sort((a, b) => b.job.createdAt - a.job.createdAt).slice(0, 30);
 
-  const submit = async () => {
-    if (working || !requestCount) return;
+  const submit = async (kind: 'new' | 'retry' = 'new') => {
+    if (working || !(kind === 'retry' ? retryCount : requestCount)) return;
     if (soundEnabled) primeProductionAudio();
     if (environment === 'mock') {
       try {
@@ -169,7 +173,8 @@ export default function MultiCollectionProduction() {
       return;
     }
     setWorking(true);
-    setProgress({ submitted: 0, total: requestCount });
+    const totalRequested = kind === 'retry' ? retryCount : requestCount;
+    setProgress({ submitted: 0, total: totalRequested });
     setMessage('Submitting every 50-image Batch to OpenAI. Wait for all submissions to finish before shutting down the computer...');
     let submitted = 0;
     const failures: string[] = [];
@@ -189,17 +194,17 @@ export default function MultiCollectionProduction() {
           failures.push(fresh.name + ': unable to verify pending jobs (' + (error instanceof Error ? error.message : String(error)) + ')');
           continue;
         }
-        const eligible = fresh.characters.filter(c => eligibleForBulk(c, pendingIds.has(c.id)));
+        const eligible = fresh.characters.filter(c => kind === 'retry' ? retryableFailedImage(c, pendingIds.has(c.id)) : eligibleForBulk(c, pendingIds.has(c.id)));
         for (let i = 0; i < eligible.length; i += 50) {
           const ids = eligible.slice(i, i + 50).map(c => c.id);
           try {
             await jsonRequest('/api/image-batches', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ projectId: fresh.id, characterIds: ids, model, quality }),
+              body: JSON.stringify({ projectId: fresh.id, characterIds: ids, model, quality, regenerate: kind === 'retry' }),
             });
             submitted += ids.length;
-            setProgress({ submitted, total: requestCount });
+            setProgress({ submitted, total: totalRequested });
           } catch (error) {
             const detail = error instanceof Error ? error.message : String(error);
             failures.push(fresh.name + ': ' + detail);
@@ -212,7 +217,7 @@ export default function MultiCollectionProduction() {
         if (stoppedForQuota) break;
       }
       setMessage(
-        'Submitted ' + submitted + ' of ' + requestCount + ' initially eligible images. ' +
+        'Submitted ' + submitted + ' of ' + totalRequested + (kind === 'retry' ? ' failed-image retries. ' : ' new images. ') +
         (failures.length ? 'Some submissions were skipped or failed: ' + failures.slice(0, 4).join(' | ') + '. ' : '') +
         (stoppedForQuota ? 'Stopped because OpenAI reported insufficient credits/quota. ' : '') +
         'Wait until all requested batches are accepted before shutting down. Accepted jobs keep processing on OpenAI Cloud. Refresh statuses before retrying; accepted jobs are saved independently.'
