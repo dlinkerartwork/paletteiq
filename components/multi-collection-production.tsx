@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, CircleAlert, LoaderCircle, RefreshCw, Sparkles } from 'lucide-react';
 import { eligibleForBulk, retryableFailedImage, isActiveBatchStatus } from '@/lib/production-rules';
 import { isOpenAICreditError, primeProductionAudio, useProductionSounds } from '@/lib/production-sounds';
-import { MOCK_STORAGE_KEY, inspectMockStorage, mockEligibleIds, writeMockJobs, type MockJob, type MockScenario } from '@/lib/mock-production';
+import { MOCK_STORAGE_KEY, inspectMockStorage, mockEligibleIds, mockRetryableIds, writeMockJobs, type MockJob, type MockScenario } from '@/lib/mock-production';
 
 type Character = { id: string; name: string; prompt: string; status: string; imageUrl?: string };
 type Collection = { id: string; name: string; characters: Character[] };
@@ -128,7 +128,10 @@ export default function MultiCollectionProduction({ onGeneratePrompts }: { onGen
     const eligible = environment === 'mock'
       ? collection.characters.filter(c => new Set(mockEligibleIds(collection.characters, mockJobs, collection.id)).has(c.id))
       : collection.characters.filter(c => eligibleForBulk(c, pending.has(c.id)));
-    const retryable = environment === 'mock' ? [] : collection.characters.filter(c => retryableFailedImage(c, pending.has(c.id)));
+    const retryable = environment === 'mock'
+      ? collection.characters.filter(c => new Set(mockRetryableIds(collection.characters, mockJobs, collection.id)).has(c.id))
+      : collection.characters.filter(c => retryableFailedImage(c, pending.has(c.id)));
+
     const successful = collection.characters.filter(c => c.status === 'done' && !!c.imageUrl).length;
     const failed = collection.characters.filter(c => c.status === 'error' && !c.imageUrl).length;
     const pendingCount = collection.characters.filter(c => pending.has(c.id)).length;
@@ -152,7 +155,9 @@ export default function MultiCollectionProduction({ onGeneratePrompts }: { onGen
         const previous = inspected.jobs;
         const createdAt = Date.now();
         const added: MockJob[] = chosen.flatMap(row => {
-          const ids = mockEligibleIds(row.collection.characters, previous, row.collection.id);
+          const ids = kind === 'retry'
+            ? mockRetryableIds(row.collection.characters, previous, row.collection.id)
+            : mockEligibleIds(row.collection.characters, previous, row.collection.id);
           const newJobs: MockJob[] = [];
           for (let i = 0; i < ids.length; i += 50) {
             const characterIds = ids.slice(i, i + 50);
@@ -164,9 +169,9 @@ export default function MultiCollectionProduction({ onGeneratePrompts }: { onGen
         });
         writeMockJobs(window.localStorage, [...previous, ...added]);
         setMockJobs([...previous, ...added]);
-        setProgress({ submitted: added.reduce((sum, job) => sum + job.total, 0), total: requestCount });
+        setProgress({ submitted: added.reduce((sum, job) => sum + job.total, 0), total: kind === 'retry' ? retryCount : requestCount });
         setMessage('TEST MODE — queued ' + added.reduce((sum, job) => sum + job.total, 0) + ' simulated images. No API charges, images, or production writes.');
-        if (!added.length) setMessage('TEST MODE — nothing eligible. Clear mock history to repeat the simulation.');
+        if (!added.length) setMessage('TEST MODE — nothing eligible for this action. Check prompts and failed-job statuses.');
         void reload();
       } catch (error) {
         setMessage('TEST MODE storage unavailable: ' + (error instanceof Error ? error.message : String(error)));
@@ -257,7 +262,7 @@ export default function MultiCollectionProduction({ onGeneratePrompts }: { onGen
       <div><label className="input-label">BATCH IMAGE MODEL</label><select value={model} onChange={e => setModel(e.target.value)}>{!batchImageModels.some(m => m.id === model) && <option value={model}>{model} (saved batch model)</option>}{batchImageModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select>{imageModelError && <p className="sub">{imageModelError}</p>}</div>
       <div><label className="input-label">QUALITY</label><select value={quality} onChange={e => setQuality(e.target.value)}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></div>
       <button className="primary-btn" disabled={working || refreshing || !requestCount} onClick={() => void submit('new')}>{working ? <LoaderCircle className="spin" size={16}/> : <Sparkles size={16}/>} {environment === 'mock' ? 'Simulate' : 'Submit New'} {requestCount} images</button>
-      {environment === 'live' && <button type="button" className="outline-btn" disabled={working || refreshing || !retryCount} onClick={() => void submit('retry')}>Retry Failed {retryCount} images</button>}
+      <button type="button" className="outline-btn" disabled={working || refreshing || !retryCount} onClick={() => void submit('retry')}>{environment === 'mock' ? 'Simulate Retry Failed' : 'Retry Failed'} {retryCount} images</button>
     </div>
     <div className="collections-toolbar">
       <input aria-label="Search collections" placeholder="Search collections..." value={search} onChange={e => setSearch(e.target.value)}/>
