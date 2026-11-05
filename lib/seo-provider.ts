@@ -51,6 +51,7 @@ export async function generateSeoJson(owner: string, instruction: string, provid
   let response: Response | undefined;
   for (let attempt = 0; attempt < 3; attempt++) {
     response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+      signal: AbortSignal.timeout(90_000),
       method: 'POST',
       headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
       body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: instruction }] }], generationConfig: { responseMimeType: 'application/json', ...(model.startsWith('gemini-2.5-') ? { thinkingConfig: { thinkingBudget: 0 } } : {}) } }),
