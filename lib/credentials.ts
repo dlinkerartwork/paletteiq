@@ -28,8 +28,8 @@ export async function decryptCredential(value: string, owner: string) {
   return new TextDecoder().decode(result);
 }
 
-export async function userCredential(owner: string, provider: 'etsy' | 'openai') {
+export async function userCredential(owner: string, provider: 'etsy' | 'openai' | 'gemini') {
   const rows = await getDb().select().from(studioSettings).where(eq(studioSettings.owner, owner)).limit(1);
-  const encrypted = provider === 'etsy' ? rows[0]?.etsyCredential : rows[0]?.openaiCredential;
+  const encrypted = provider === 'etsy' ? rows[0]?.etsyCredential : provider === 'gemini' ? rows[0]?.geminiCredential : rows[0]?.openaiCredential;
   return encrypted ? decryptCredential(encrypted, owner) : null;
 }
