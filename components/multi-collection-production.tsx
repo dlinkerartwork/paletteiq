@@ -50,9 +50,9 @@ export default function MultiCollectionProduction() {
   }, []);
 
   useEffect(() => {
-    void reload();
+    const initialTimer = window.setTimeout(() => void reload(), 0);
     const timer = window.setInterval(() => void reload(true), 45000);
-    return () => window.clearInterval(timer);
+    return () => { window.clearTimeout(initialTimer); window.clearInterval(timer); };
   }, [reload]);
 
   const rows = useMemo(() => collections.map(collection => {
