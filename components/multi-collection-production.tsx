@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, CircleAlert, LoaderCircle, RefreshCw, Sparkles } from 'lucide-react';
 import { eligibleForBulk, isActiveBatchStatus } from '@/lib/production-rules';
 import { isOpenAICreditError, primeProductionAudio, useProductionSounds } from '@/lib/production-sounds';
-import { MOCK_STORAGE_KEY, mockEligibleIds, readMockJobs, writeMockJobs, type MockJob, type MockScenario } from '@/lib/mock-production';
+import { MOCK_STORAGE_KEY, inspectMockStorage, mockEligibleIds, writeMockJobs, type MockJob, type MockScenario } from '@/lib/mock-production';
 
 type Character = { id: string; name: string; prompt: string; status: string; imageUrl?: string };
 type Collection = { id: string; name: string; characters: Character[] };
@@ -57,8 +57,10 @@ export default function MultiCollectionProduction() {
       const fresh: Collection[] = (rows as Array<{ data: Collection }>).map(row => row.data);
       setCollections(fresh);
       if (environment === 'mock') {
-        const simulated = readMockJobs(window.localStorage);
-        writeMockJobs(window.localStorage, simulated);
+        const restored = inspectMockStorage(window.localStorage);
+        const simulated = restored.jobs;
+        if (!restored.warning) writeMockJobs(window.localStorage, simulated);
+        else setMessage(restored.warning);
         const next = new Map(simulated.map(job => [job.id, job.status]));
         if (previousMockStates.current) {
           const changed = simulated.filter(job => isActiveBatchStatus(previousMockStates.current?.get(job.id) || 'completed') && !isActiveBatchStatus(job.status));
@@ -70,7 +72,7 @@ export default function MultiCollectionProduction() {
         }
         previousMockStates.current = next;
         setMockJobs(simulated);
-        if (sync) setMessage('TEST MODE — simulated statuses refreshed; production data unchanged.');
+        if (sync && !restored.warning) setMessage('TEST MODE — simulated statuses refreshed; production data unchanged.');
         return;
       }
       const errors: string[] = [];
@@ -129,7 +131,9 @@ export default function MultiCollectionProduction() {
     if (soundEnabled) primeProductionAudio();
     if (environment === 'mock') {
       try {
-        const previous = readMockJobs(window.localStorage);
+        const inspected = inspectMockStorage(window.localStorage);
+        if (inspected.warning) throw new Error(inspected.warning);
+        const previous = inspected.jobs;
         const createdAt = Date.now();
         const added: MockJob[] = chosen.flatMap(row => {
           const ids = mockEligibleIds(row.collection.characters, previous, row.collection.id);
@@ -258,9 +262,9 @@ export default function MultiCollectionProduction() {
     <section className="production-activity-log" aria-label="Production activity log">
       <h3>Production Activity Log</h3>
       <p className="sub">{environment === 'mock' ? 'TEST ONLY — simulated browser-local jobs; no production records or images.' : 'Latest 30 saved Batch jobs across collections. Refresh to retrieve updated OpenAI results. History survives closing the browser.'}</p>
-      {activity.length ? <div className="table-scroll"><table><thead><tr><th>SUBMITTED</th><th>COLLECTION</th><th>MODEL</th><th>STATUS</th><th>PROCESSED</th><th>IMPORTED</th><th>ERRORS</th></tr></thead><tbody>
+      {activity.length ? <div className="table-scroll"><table><thead><tr><th>SUBMITTED</th><th>COLLECTION</th><th>MODEL</th><th>SCENARIO</th><th>STATUS</th><th>PROCESSED</th><th>IMPORTED</th><th>ERRORS</th></tr></thead><tbody>
         {activity.map(({ collection, job }) => <tr key={job.id}>
-          <td>{new Date(job.createdAt).toLocaleString()}</td><td>{collection}</td><td>{job.model || 'Batch'}</td>
+          <td>{new Date(job.createdAt).toLocaleString()}</td><td>{collection}</td><td>{job.model || 'Batch'}</td><td>{environment === 'mock' ? ((job as MockJob).scenario === 'quota_error' ? 'TEST: credits exhausted' : (job as MockJob).scenario === 'partial_failure' ? 'TEST: partial failure' : 'TEST: success') : 'Live batch'}</td>
           <td><span className={'status ' + (job.status === 'completed' ? 'done' : isActiveBatchStatus(job.status) ? 'ready' : 'error')}>{job.status.replaceAll('_', ' ')}</span></td>
           <td>{job.completed + job.failed}/{job.total}</td><td>{job.imported}/{job.total}</td>
           <td>{job.warning || job.assets?.filter(item => item.status === 'error').slice(0, 2).map(item => item.error || 'Image failed').join('; ') || (job.failed ? job.failed + ' failed' : '—')}</td>
