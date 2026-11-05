@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, BarChart3, BookOpenText, Check, CircleHelp, Download, ExternalLink, FileSearch, Image as ImageIcon, Layers3, LoaderCircle, Plus, Search, Settings2, Sparkles, Trash2, WandSparkles, X } from 'lucide-react';
 import StudioSettings, { defaultPrefs, defaultSeoPrompts, type StudioPreferences } from '@/components/studio-settings';
 import ImageProduction from '@/components/image-production';
+import { isOpenAICreditError, playProductionSound, productionSoundEnabled } from '@/lib/production-sounds';
 import MultiCollectionProduction from '@/components/multi-collection-production';
 import EtsyListingDraft, { type SavedSeoReview } from '@/components/etsy-listing-draft';
 import type { EtsyListingDraft as ListingData } from '@/lib/etsy-listing';
@@ -36,6 +37,8 @@ export default function Home() {
   const [quality, setQuality] = useState('low');
   const [selected, setSelected] = useState<string[]>([]);
   const [loadDone, setLoadDone] = useState(false);
+  const observedBatchStates = useRef<Map<string, string> | null>(null);
+  const lastCreditNotice = useRef('');
   const [sourceUrl, setSourceUrl] = useState('');
   const [preferences, setPreferences] = useState<StudioPreferences>(defaultPrefs);
 
@@ -50,7 +53,7 @@ export default function Home() {
   }).catch(() => {}).finally(() => setLoadDone(true)); }, []);
   useEffect(() => { if (!loadDone) return; try { localStorage.setItem('paletteiq-last-workspace', JSON.stringify({ id: project.id, tab })); } catch { /* Storage is optional. */ } }, [loadDone, project.id, tab]);
   useEffect(() => {
-    if (!loadDone || tab === 'production') return;
+    if (!loadDone || tab === 'production' || tab === 'multi-production') return;
     let stopped = false;
     let polling = false;
     const resumeBatches = async () => {
@@ -59,9 +62,36 @@ export default function Home() {
       try {
         const response = await fetch('/api/image-batches?syncAll=1');
         if (!response.ok || stopped) return;
-        const result = await response.json() as { updatedProjectIds?: string[] };
+        const result = await response.json() as { updatedProjectIds?: string[]; warnings?: string[] };
+        const creditWarning = result.warnings?.find(isOpenAICreditError);
+        if (creditWarning && creditWarning !== lastCreditNotice.current) {
+          lastCreditNotice.current = creditWarning;
+          setMessage('OpenAI credits/quota may be exhausted. Check API billing. ' + creditWarning.slice(0, 240));
+          if (productionSoundEnabled()) playProductionSound('credits');
+        }
         const ids = result.updatedProjectIds || [];
         if (!ids.length) return;
+        const currentStates = new Map(observedBatchStates.current || []);
+        let finished = false;
+        await Promise.all(ids.map(async id => {
+          try {
+            const response = await fetch(`/api/image-batches?projectId=${encodeURIComponent(id)}`);
+            if (!response.ok) return;
+            const data = await response.json() as { jobs?: Array<{ id: string; status: string; warning?: string }> };
+            for (const job of data.jobs || []) {
+              const previous = observedBatchStates.current?.get(job.id);
+              if (previous && !['completed', 'completed_with_errors', 'failed', 'cancelled', 'expired'].includes(previous) && ['completed', 'completed_with_errors', 'failed', 'cancelled', 'expired'].includes(job.status)) finished = true;
+              currentStates.set(job.id, job.status);
+              if (job.warning && isOpenAICreditError(job.warning) && job.warning !== lastCreditNotice.current) {
+                lastCreditNotice.current = job.warning;
+                setMessage('OpenAI credits/quota may be exhausted. Check API billing. ' + job.warning.slice(0, 240));
+                if (productionSoundEnabled()) playProductionSound('credits');
+              }
+            }
+          } catch { /* Keep the next poll available after transient errors. */ }
+        }));
+        observedBatchStates.current = currentStates;
+        if (finished && productionSoundEnabled()) playProductionSound('completed');
         const recovered = await Promise.all(ids.map(async id => {
           const response = await fetch(`/api/studio?projectId=${encodeURIComponent(id)}`);
           return response.ok ? ((await response.json()) as Array<{ data: Project }>)[0]?.data : null;
