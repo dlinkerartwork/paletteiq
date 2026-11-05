@@ -90,7 +90,7 @@ export default function Home() {
   }, [loadDone, tab]);
   useEffect(() => { window.scrollTo({ top: 0, left: 0, behavior: 'instant' }); const main = document.querySelector('.main'); if (main && main.scrollTop) main.scrollTop = 0; document.title = `${['overview','collections','multi-production','settings'].includes(tab) ? tab[0].toUpperCase() + tab.slice(1) : `${project.name} · ${steps.find(s => s.id === tab)?.label || tab}`} | PaletteIQ`; }, [tab, project.id]);
   const updatePreferences = useCallback((prefs: StudioPreferences) => { setPreferences(prefs); setTarget(prefs.target); setModel(prefs.model); setQuality(prefs.quality); }, []);
-  useEffect(() => { fetch('/api/settings').then(r => r.ok ? r.json() : null).then((data: { preferences?: StudioPreferences } | null) => { if (data?.preferences) updatePreferences({ ...defaultPrefs, ...data.preferences, seoPrompts: { ...defaultSeoPrompts, ...data.preferences.seoPrompts } }); }).catch(() => {}); }, [updatePreferences]);
+  useEffect(() => { fetch('/api/settings').then(r => r.ok ? r.json() as Promise<{ preferences?: StudioPreferences }> : null).then((data: { preferences?: StudioPreferences } | null) => { if (data?.preferences) updatePreferences({ ...defaultPrefs, ...data.preferences, seoPrompts: { ...defaultSeoPrompts, ...data.preferences.seoPrompts } }); }).catch(() => {}); }, [updatePreferences]);
 
   const importAll = async (backup: { projects: unknown[]; preferences: StudioPreferences }) => {
     const prefs = { ...defaultPrefs, ...backup.preferences, seoPrompts: { ...defaultSeoPrompts, ...backup.preferences.seoPrompts } };
