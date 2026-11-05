@@ -26,9 +26,10 @@ test('custom smaller title and alt count are respected', () => {
 test('server routes honor configured provider and generation limits', () => {
   const route = readFileSync(new URL('../app/api/studio/route.ts', import.meta.url), 'utf8');
   const provider = readFileSync(new URL('../lib/seo-provider.ts', import.meta.url), 'utf8');
-  assert.match(route, /generateSeoJson\(user\.userId, instruction, seoConfig\.seoProvider\)/);
-  assert.match(route, /generateSeoJson\(user\.userId, prompt, seoConfig\.seoProvider\)/);
-  assert.match(provider, /gemini-flash-latest:generateContent/);
+  assert.match(route, /generateSeoJson\(user\.userId, instruction, seoConfig\.seoProvider, seoConfig\.seoGeminiModel\)/);
+  assert.match(route, /generateSeoJson\(user\.userId, prompt, seoConfig\.seoProvider, seoConfig\.seoGeminiModel\)/);
+  assert.match(provider, /models\/\$\{model\}:generateContent/);
+  assert.match(provider, /thinkingBudget: 0/);
   assert.match(provider, /responseMimeType: 'application\/json'/);
 });
 
