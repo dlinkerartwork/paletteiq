@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import { getDb } from '@/db';
 import { studioSettings } from '@/db/schema';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
-import { encryptCredential } from '@/lib/credentials';
+import { encryptCredential, userCredential } from '@/lib/credentials';
 
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 const seoPromptFields = ["general","title","description","tags","primaryKeyword","secondaryKeywords","longTailKeywords","categorySuggestion","attributes","materials","imageAltTexts","photoPlan","priceSuggestion","sku","digitalFiles","licenseNotes"] as const;
@@ -10,9 +10,22 @@ const defaultSeoPrompts = Object.fromEntries(seoPromptFields.map(key => [key, ''
 const defaultPrefs = { target: 120, model: 'gpt-image-1-mini', quality: 'low', analysisModel: 'gpt-4.1-mini', output: 'png', background: 'transparent', variations: 1, defaultStyle: 'Soft hand-painted watercolor illustration', autoSave: false, seoProvider: 'openai', seoGeminiModel: 'gemini-flash-latest', seoTitleMaxLength: 120, seoAltTextCount: 10, seoFileNaming: 'generaltheme_imagenumber', seoPrompts: defaultSeoPrompts };
 const allowedModels = ['gpt-image-1-mini', 'gpt-image-1', 'gpt-image-1.5', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
 
-async function getSettings() {
+async function getSettings(req: Request) {
   const user = await getChatGPTUser();
   if (!user) return bad('Sign in required', 401);
+  if (new URL(req.url).searchParams.get('models') === 'gemini') {
+    const key = await userCredential(user.userId, 'gemini');
+    if (!key) return bad('Save a Gemini API key first.', 400);
+    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000', {
+      headers: { 'x-goog-api-key': key }, signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) return bad(`Unable to list Gemini models (HTTP ${response.status}).`, 502);
+    const data = await response.json() as { models?: Array<{ name?: string; displayName?: string; supportedGenerationMethods?: string[] }> };
+    const models = (data.models || []).filter(item => item.supportedGenerationMethods?.includes('generateContent'))
+      .map(item => ({ id: (item.name || '').replace(/^models\//, ''), name: item.displayName || item.name || '' }))
+      .filter(item => /^gemini-[a-z0-9.-]{1,80}$/.test(item.id));
+    return Response.json({ models });
+  }
   const rows = await getDb().select().from(studioSettings).where(eq(studioSettings.owner, user.userId)).limit(1);
   const row = rows[0];
   return Response.json({ preferences: { ...defaultPrefs, ...(row ? JSON.parse(row.preferences) : {}) }, credentials: { etsy: Boolean(row?.etsyCredential), openai: Boolean(row?.openaiCredential), gemini: Boolean(row?.geminiCredential) } });
@@ -30,7 +43,7 @@ async function postSettings(req: Request) {
     const raw = body.preferences as Record<string, unknown> | null;
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return bad('Invalid preferences');
     const prefs = { ...defaultPrefs, ...raw };
-    if (!Number.isInteger(prefs.target) || prefs.target < 1 || prefs.target > 1000 || !Number.isInteger(prefs.variations) || prefs.variations < 1 || prefs.variations > 8 || !allowedModels.includes(prefs.model) || !['low','medium','high'].includes(prefs.quality) || prefs.analysisModel !== 'gpt-4.1-mini' || !['png','jpg'].includes(prefs.output) || !['transparent','opaque'].includes(prefs.background) || (prefs.output === 'jpg' && prefs.background === 'transparent') || typeof prefs.defaultStyle !== 'string' || prefs.defaultStyle.length > 500 || typeof prefs.autoSave !== 'boolean' || !['openai','gemini'].includes(prefs.seoProvider) || !['gemini-flash-latest','gemini-2.5-flash-lite','gemini-2.5-flash'].includes(prefs.seoGeminiModel) || !Number.isInteger(prefs.seoTitleMaxLength) || prefs.seoTitleMaxLength < 1 || prefs.seoTitleMaxLength > 140 || !Number.isInteger(prefs.seoAltTextCount) || prefs.seoAltTextCount < 1 || prefs.seoAltTextCount > 20 || prefs.seoFileNaming !== 'generaltheme_imagenumber') return bad('Invalid settings values');
+    if (!Number.isInteger(prefs.target) || prefs.target < 1 || prefs.target > 1000 || !Number.isInteger(prefs.variations) || prefs.variations < 1 || prefs.variations > 8 || !allowedModels.includes(prefs.model) || !['low','medium','high'].includes(prefs.quality) || prefs.analysisModel !== 'gpt-4.1-mini' || !['png','jpg'].includes(prefs.output) || !['transparent','opaque'].includes(prefs.background) || (prefs.output === 'jpg' && prefs.background === 'transparent') || typeof prefs.defaultStyle !== 'string' || prefs.defaultStyle.length > 500 || typeof prefs.autoSave !== 'boolean' || !['openai','gemini'].includes(prefs.seoProvider) || typeof prefs.seoGeminiModel !== 'string' || !/^gemini-[a-z0-9.-]{1,80}$/.test(prefs.seoGeminiModel) || !Number.isInteger(prefs.seoTitleMaxLength) || prefs.seoTitleMaxLength < 1 || prefs.seoTitleMaxLength > 140 || !Number.isInteger(prefs.seoAltTextCount) || prefs.seoAltTextCount < 1 || prefs.seoAltTextCount > 20 || prefs.seoFileNaming !== 'generaltheme_imagenumber') return bad('Invalid settings values');
     if (!prefs.seoPrompts || typeof prefs.seoPrompts !== 'object' || Array.isArray(prefs.seoPrompts) || Object.keys(prefs.seoPrompts).some(key => !seoPromptFields.includes(key as typeof seoPromptFields[number])) || seoPromptFields.some(key => typeof prefs.seoPrompts[key] !== 'string' || prefs.seoPrompts[key].length > 2000)) return bad('Invalid custom SEO prompts');
     values.preferences = JSON.stringify(prefs);
   } else if (body.action === 'credential') {
@@ -58,8 +71,8 @@ function settingsError(error: unknown): Response {
   return bad('Settings could not be saved. Check the server logs for details.', 500);
 }
 
-export async function GET() {
-  try { return await getSettings(); } catch (error) { return settingsError(error); }
+export async function GET(req: Request) {
+  try { return await getSettings(req); } catch (error) { return settingsError(error); }
 }
 
 export async function POST(req: Request) {
