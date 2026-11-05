@@ -148,6 +148,15 @@ export async function POST(req: Request) {
       const raw = await generateSeoJson(user.userId, instruction, seoConfig.seoProvider, seoConfig.seoGeminiModel);
       const draft = applySeoLimits(ensurePrimaryKeywordOpening(normalizeListing(raw)), seoConfig.seoTitleMaxLength, seoConfig.seoAltTextCount);
       if (draft.imageAltTexts.length !== seoConfig.seoAltTextCount) return fail(`SEO model returned ${draft.imageAltTexts.length} alt texts; requested ${seoConfig.seoAltTextCount}. Please regenerate or adjust the count.`, 502);
+      // Save the completed draft to the originating collection, not whichever
+      // collection the user happens to be viewing when the request finishes.
+      const db = getDb();
+      const rows = await db.select().from(projects).where(and(eq(projects.id, project.id), eq(projects.owner, user.userId))).limit(1);
+      if (!rows.length) return fail('Save this collection before generating SEO.', 404);
+      const saved = JSON.parse(rows[0].data) as ProjectInput;
+      saved.listing = draft;
+      await db.update(projects).set({ data: JSON.stringify(saved), updatedAt: Date.now() })
+        .where(and(eq(projects.id, project.id), eq(projects.owner, user.userId)));
       return Response.json({ draft });
     } catch (error) { return fail(error instanceof Error ? error.message.slice(0, 300) : 'Invalid AI listing draft', 502); }
   }
