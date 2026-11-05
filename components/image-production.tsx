@@ -9,7 +9,7 @@ import { isOpenAICreditError, primeProductionAudio, useProductionSounds } from '
 type Character = { id: string; name: string; prompt: string; status: string; imageUrl?: string; error?: string; similarityReview?: SimilarityReview };
 type Project = { id: string; name: string; characters: Character[]; listing?: { title?: string } };
 type Job = { id: string; status: string; model: string; total: number; completed: number; failed: number; imported: number; createdAt: number; characterIds: string[]; assets: Array<{ id: string; status: string; imageUrl?: string; error?: string }>; warning?: string };
-type Props = { project: Project; model: string; quality: string; onModel: (value: string) => void; onQuality: (value: string) => void; onAsset: (id: string, data: { imageUrl?: string; status: 'done' | 'error'; error?: string; similarityReview?: SimilarityReview }) => void };
+type Props = { project: Project; model: string; quality: string; onModel: (value: string) => void; onQuality: (value: string) => void; onDownloaded: (timestamp: number) => void; onAsset: (id: string, data: { imageUrl?: string; status: 'done' | 'error'; error?: string; similarityReview?: SimilarityReview }) => void };
 
 async function request<T = unknown>(url: string, options?: RequestInit): Promise<T> {
   const r = await fetch(url, options);
@@ -18,7 +18,7 @@ async function request<T = unknown>(url: string, options?: RequestInit): Promise
   return result;
 }
 
-export default function ImageProduction({ project, model, quality, onModel, onQuality, onAsset }: Props) {
+export default function ImageProduction({ project, model, quality, onModel, onQuality, onDownloaded, onAsset }: Props) {
   const [mode, setMode] = useState<'single' | 'batch'>('batch');
   const [batchModel, setBatchModel] = useState('gpt-image-2.5-flare');
   const [singleId, setSingleId] = useState('');
@@ -132,7 +132,8 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
       const response = await fetch('/api/exports', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId: project.id, ids: selectedGenerated.map(c => c.id), scope }) });
       if (!response.ok) { const error = await response.json() as { error?: string }; throw new Error(error.error || `Export failed (${response.status})`); }
       const blob = await response.blob(); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url;
-      link.download = `${project.name.replace(/[^a-z0-9-]/gi, '_')}-${scope === 'package' ? 'etsy-package' : 'images'}.zip`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 60000);
+      link.download = `${project.name.replace(/[^a-z0-9-]/gi, '_')}-${scope === 'package' ? 'etsy-package' : 'images'}.zip`; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 60000);
+      try { const receipt = await request<{ lastDownloadedAt: number }>('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'mark-download', projectId: project.id }) }); onDownloaded(receipt.lastDownloadedAt); } catch { setMessage('ZIP downloaded, but download history could not be saved.'); return; }
       setMessage(`ZIP ready: ${scope === 'selected' ? selectedGenerated.length : generated.length} images.`);
     } catch (e) { setMessage(e instanceof Error ? e.message : String(e)); } finally { setDownloading(false); }
   };
