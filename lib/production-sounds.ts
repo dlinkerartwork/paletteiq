@@ -26,27 +26,33 @@ export function primeProductionAudio(): void {
 }
 
 export function playProductionSound(kind: ProductionSound): void {
-  primeProductionAudio();
-  if (!audioContext || audioContext.state !== 'running') return;
+  if (typeof window === 'undefined' || !window.AudioContext) return;
   try {
-    const start = audioContext.currentTime + 0.02;
-    const notes = kind === 'credits'
-      ? [{ frequency: 740, at: 0, length: 0.19 }, { frequency: 470, at: 0.27, length: 0.25 }, { frequency: 370, at: 0.59, length: 0.34 }]
-      : [{ frequency: 523, at: 0, length: 0.13 }, { frequency: 659, at: 0.18, length: 0.13 }, { frequency: 784, at: 0.36, length: 0.24 }];
-    for (const note of notes) {
-      const osc = audioContext.createOscillator();
-      const gain = audioContext.createGain();
-      const at = start + note.at;
-      osc.type = kind === 'credits' ? 'triangle' : 'sine';
-      osc.frequency.value = note.frequency;
-      gain.gain.setValueAtTime(0.0001, at);
-      gain.gain.exponentialRampToValueAtTime(0.11, at + 0.015);
-      gain.gain.exponentialRampToValueAtTime(0.0001, at + note.length);
-      osc.connect(gain);
-      gain.connect(audioContext.destination);
-      osc.start(at);
-      osc.stop(at + note.length + 0.02);
-    }
+    if (audioContext?.state === 'closed') audioContext = null;
+    audioContext ??= new window.AudioContext();
+    const context = audioContext;
+    const schedule = () => {
+      const start = context.currentTime + 0.02;
+      const notes = kind === 'credits'
+        ? [{ frequency: 740, at: 0, length: 0.19 }, { frequency: 470, at: 0.27, length: 0.25 }, { frequency: 370, at: 0.59, length: 0.34 }]
+        : [{ frequency: 523, at: 0, length: 0.13 }, { frequency: 659, at: 0.18, length: 0.13 }, { frequency: 784, at: 0.36, length: 0.24 }];
+      for (const note of notes) {
+        const osc = context.createOscillator();
+        const gain = context.createGain();
+        const at = start + note.at;
+        osc.type = kind === 'credits' ? 'triangle' : 'sine';
+        osc.frequency.value = note.frequency;
+        gain.gain.setValueAtTime(0.0001, at);
+        gain.gain.exponentialRampToValueAtTime(0.11, at + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.0001, at + note.length);
+        osc.connect(gain);
+        gain.connect(context.destination);
+        osc.start(at);
+        osc.stop(at + note.length + 0.02);
+      }
+    };
+    if (context.state === 'suspended') void context.resume().then(schedule).catch(() => {});
+    else if (context.state === 'running') schedule();
   } catch { /* Audio may be unavailable in a restricted desktop session. */ }
 }
 
