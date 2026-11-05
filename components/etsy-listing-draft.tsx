@@ -14,6 +14,7 @@ const slug = (s: string) => (s || 'paletteiq').toLowerCase().replace(/[^a-z0-9]+
 
 type SeoDone = { projectId: string; draft?: EtsyListingDraft; error?: string };
 const activeSeoRuns = new Map<string, Promise<EtsyListingDraft>>();
+const completedSeoDrafts = new Map<string, EtsyListingDraft>();
 const SEO_DONE_EVENT = 'paletteiq:seo-draft-completed';
 function notifySeoFinished(projectName: string, success: boolean) {
   if (productionSoundEnabled() && success) playProductionSound('completed');
@@ -26,11 +27,17 @@ export default function EtsyListingDraft({ project, onChange, onSave, onSeoRevie
   const [working, setWorking] = useState(() => activeSeoRuns.has(project.id));
   useEffect(() => {
     setWorking(activeSeoRuns.has(project.id));
+    const completed = completedSeoDrafts.get(project.id);
+    if (completed) {
+      completedSeoDrafts.delete(project.id);
+      onChange(normalizeListing(completed));
+      setNotice('SEO draft completed while you were away and was saved.');
+    }
     const onDone = (event: Event) => {
       const detail = (event as CustomEvent<SeoDone>).detail;
       if (detail.projectId !== project.id) return;
       setWorking(false);
-      if (detail.draft) { onChange(normalizeListing(detail.draft)); setNotice('SEO draft completed and saved to this collection.'); }
+      if (detail.draft) { completedSeoDrafts.delete(project.id); onChange(normalizeListing(detail.draft)); setNotice('SEO draft completed and saved to this collection.'); }
       else setNotice(detail.error || 'SEO draft failed.');
     };
     window.addEventListener(SEO_DONE_EVENT, onDone);
@@ -67,6 +74,7 @@ export default function EtsyListingDraft({ project, onChange, onSave, onSeoRevie
       })();
       activeSeoRuns.set(projectId, task);
       void task.then(draft => {
+        completedSeoDrafts.set(projectId, draft);
         notifySeoFinished(projectName, true);
         window.dispatchEvent(new CustomEvent<SeoDone>(SEO_DONE_EVENT, { detail: { projectId, draft } }));
       }).catch(error => {
