@@ -182,7 +182,7 @@ export async function GET(req: Request) {
   const db = getDb();
   const saved = await db.select().from(projects).where(and(eq(projects.id, projectId), eq(projects.owner, user.userId))).limit(1);
   if (!saved.length) return fail('Unknown project', 404);
-  const rows = await db.select().from(imageBatches).where(and(eq(imageBatches.owner, user.userId), eq(imageBatches.projectId, projectId))).orderBy(desc(imageBatches.createdAt)).limit(20);
+  const rows = await db.select().from(imageBatches).where(and(eq(imageBatches.owner, user.userId), eq(imageBatches.projectId, projectId))).orderBy(desc(imageBatches.createdAt)).limit(200);
   const key = await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
   const sync = new URL(req.url).searchParams.get('sync') === '1';
   const syncTarget = rows.find(row => isActiveBatchStatus(row.status))?.id;
