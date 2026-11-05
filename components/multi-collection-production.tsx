@@ -1,8 +1,9 @@
  'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, CircleAlert, LoaderCircle, RefreshCw, Sparkles } from 'lucide-react';
 import { eligibleForBulk, isActiveBatchStatus } from '@/lib/production-rules';
+import { isOpenAICreditError, primeProductionAudio, useProductionSounds } from '@/lib/production-sounds';
 
 type Character = { id: string; name: string; prompt: string; status: string; imageUrl?: string };
 type Collection = { id: string; name: string; characters: Character[] };
@@ -26,6 +27,19 @@ export default function MultiCollectionProduction() {
   const [working, setWorking] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [message, setMessage] = useState('');
+  const [creditAlert, setCreditAlert] = useState('');
+  const { enabled: soundEnabled, toggle: toggleSound, play: playSound } = useProductionSounds();
+  const soundRef = useRef(playSound);
+  useEffect(() => { soundRef.current = playSound; }, [playSound]);
+  const lastCreditWarning = useRef('');
+  const previousStates = useRef<Map<string, string> | null>(null);
+  const jobsRef = useRef<CollectionJobs>({});
+  const reportCredit = useCallback((value: unknown) => {
+    if (!isOpenAICreditError(value)) return;
+    const detail = value instanceof Error ? value.message : String(value);
+    setCreditAlert('OpenAI credits/quota appear exhausted. Check API billing before retrying. ' + detail.slice(0, 240));
+    if (lastCreditWarning.current !== detail) { lastCreditWarning.current = detail; soundRef.current('credits'); }
+  }, []);
   const [progress, setProgress] = useState({ submitted: 0, total: 0 });
 
   const reload = useCallback(async (sync = false) => {
@@ -34,20 +48,34 @@ export default function MultiCollectionProduction() {
       const rows = await jsonRequest<Array<{ data: Collection }>>('/api/studio');
       const fresh: Collection[] = (rows as Array<{ data: Collection }>).map(row => row.data);
       setCollections(fresh);
+      const errors: string[] = [];
       const updated = await Promise.all(fresh.map(async collection => {
         try {
           const result = await jsonRequest<{ jobs: Job[] }>('/api/image-batches?projectId=' + encodeURIComponent(collection.id) + (sync ? '&sync=1' : ''));
+          for (const job of result.jobs) if (job.warning) reportCredit(job.warning);
           return [collection.id, result.jobs as Job[]] as const;
-        } catch { return [collection.id, [] as Job[]] as const; }
+        } catch (error) {
+          reportCredit(error);
+          errors.push(collection.name + ': ' + (error instanceof Error ? error.message : String(error)));
+          return [collection.id, jobsRef.current[collection.id] || []] as const;
+        }
       }));
-      setJobs(Object.fromEntries(updated));
-      if (sync) setMessage('Batch status and collection images refreshed.');
+      const incomingJobs = Object.fromEntries(updated) as CollectionJobs;
+      const nextStates = new Map<string, string>();
+      for (const list of Object.values(incomingJobs)) for (const job of list) nextStates.set(job.id, job.status);
+      if (previousStates.current && [...nextStates].some(([id, status]) => isActiveBatchStatus(previousStates.current?.get(id) || 'completed') && !isActiveBatchStatus(status))) soundRef.current('completed');
+      previousStates.current = nextStates;
+      jobsRef.current = incomingJobs;
+      setJobs(incomingJobs);
+      if (errors.length) setMessage('Some collections could not refresh: ' + errors.slice(0, 3).join(' | '));
+      else if (sync) setMessage('Batch status and collection images refreshed.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Refresh failed');
+      reportCredit(error);
     } finally {
       setRefreshing(false);
     }
-  }, []);
+  }, [reportCredit]);
 
   useEffect(() => {
     const initialTimer = window.setTimeout(() => void reload(), 0);
@@ -66,6 +94,7 @@ export default function MultiCollectionProduction() {
 
   const submit = async () => {
     if (working || !requestCount) return;
+    if (soundEnabled) primeProductionAudio();
     setWorking(true);
     setProgress({ submitted: 0, total: requestCount });
     setMessage('Submitting separate OpenAI batches per collection...');
@@ -91,6 +120,7 @@ export default function MultiCollectionProduction() {
       setMessage('Submitted ' + submitted + ' images across ' + chosen.length + ' collections. OpenAI will process them asynchronously.');
     } catch (error) {
       setMessage('Submitted ' + submitted + ' images before stopping: ' + (error instanceof Error ? error.message : String(error)) + '. Refresh before retrying.');
+      reportCredit(error);
     } finally {
       setWorking(false);
       await reload();
@@ -100,7 +130,7 @@ export default function MultiCollectionProduction() {
   return <div className="panel">
     <div className="table-toolbar">
       <div><h2>Multi-Collection Production</h2><p>Each collection gets its own saved Batch jobs and image assets. Previously generated prompts are excluded.</p></div>
-      <button type="button" className="outline-btn" disabled={refreshing || working} onClick={() => void reload(true)}>{refreshing ? <LoaderCircle className="spin" size={16}/> : <RefreshCw size={16}/>} Refresh</button>
+      <div className="image-download-actions"><button type="button" className="outline-btn" disabled={refreshing || working} onClick={() => void reload(true)}>{refreshing ? <LoaderCircle className="spin" size={16}/> : <RefreshCw size={16}/>} Refresh</button><button type="button" className="outline-btn" onClick={toggleSound}>{soundEnabled ? '🔊 Sound alerts on' : '🔇 Sound alerts off'}</button></div>
     </div>
     <div className="production-controls">
       <div><label className="input-label">BATCH IMAGE MODEL</label><select value={model} onChange={e => setModel(e.target.value)}><option value="gpt-image-2.5-flare">GPT Image 2.5 Flare</option><option value="gpt-image-2.5-sunburst">GPT Image 2.5 Sunburst</option></select></div>
@@ -113,6 +143,7 @@ export default function MultiCollectionProduction() {
       <button className="outline-btn" onClick={() => setSelected([])}>Clear selection</button>
     </div>
     <p className="sub">{selected.length} collections selected · {requestCount} new prompts ready · max 120 per OpenAI Batch job.</p>
+    {creditAlert && <div className="notice" role="alert"><CircleAlert size={16}/><strong>{creditAlert}</strong><button type="button" onClick={() => setCreditAlert('')}>Dismiss</button></div>}
     {message && <div className="notice"><CircleAlert size={16}/>{message}</div>}
     {working && <div className="production-progress"><span>Batch submission</span><b>{progress.submitted}/{progress.total}</b><div className="progress"><i style={{ width: (progress.total ? progress.submitted / progress.total * 100 : 0) + '%' }}/></div></div>}
     <div className="table-scroll"><table><thead><tr><th>SELECT</th><th>COLLECTION</th><th>NEW PROMPTS</th><th>GENERATED</th><th>BATCH JOBS</th></tr></thead><tbody>
