@@ -7,6 +7,7 @@ Run in C:\dLinker\paletteIQ after pulling feature/multi-collection-production-re
 
 ```powershell
 npx tsc --noEmit
+npm run test:production
 npx eslint app components lib db --ignore-pattern "dist/**" --ignore-pattern "release/**" --ignore-pattern ".next/**"
 npm run build
 ```
