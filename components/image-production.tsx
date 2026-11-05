@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { CheckCircle2, CircleAlert, Clock3, Download, Image as ImageIcon, LoaderCircle, RefreshCw, Sparkles } from 'lucide-react';
 import { eligibleForBulk, isActiveBatchStatus, wasPreviouslyGenerated } from '@/lib/production-rules';
 import type { SimilarityReview } from '@/lib/similarity-review';
@@ -28,8 +28,9 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
   const [downloading, setDownloading] = useState(false);
   const [singleProgress, setSingleProgress] = useState({ done: 0, total: 0 });
   const [message, setMessage] = useState('');
-  const latestAsset = useRef(onAsset); latestAsset.current = onAsset;
-  const latestProject = useRef(project); latestProject.current = project;
+  const latestAsset = useRef(onAsset);
+  const latestProject = useRef(project);
+  useEffect(() => { latestAsset.current = onAsset; latestProject.current = project; }, [onAsset, project]);
   const syncBusy = useRef(false);
   const refreshNow = useRef<() => Promise<void>>(async () => {});
   const pending = new Set(jobs.filter(j => isActiveBatchStatus(j.status)).flatMap(j => j.characterIds || []));
@@ -41,15 +42,14 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
   const generated = project.characters.filter(c => !!c.imageUrl);
   const selectedGenerated = generated.filter(c => selectedIds.includes(c.id));
 
-  useEffect(() => { setSelectedIds([]); setSingleId(''); setJobs([]); }, [project.id]);
-  const recoverImages = async (quiet = false) => {
+  const recoverImages = useCallback(async (quiet = false) => {
     try {
       const data = await request('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'recover-images', projectId: project.id }) });
       for (const asset of data.recovered || []) latestAsset.current(asset.id, { imageUrl: asset.imageUrl, status: 'done', error: '' });
       if (!quiet) setMessage(data.recovered?.length ? `Recovered ${data.recovered.length} image(s) and saved their records.` : 'No unlinked image files found.');
     } catch (e) { if (!quiet) setMessage(e instanceof Error ? e.message : String(e)); }
-  };
-  useEffect(() => { void recoverImages(true); }, [project.id]);
+  }, [project.id]);
+  useEffect(() => { const timer = window.setTimeout(() => void recoverImages(true), 0); return () => window.clearTimeout(timer); }, [recoverImages]);
   useEffect(() => {
     let closed = false;
     const refresh = async (manual = false) => {
