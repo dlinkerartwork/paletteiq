@@ -7,7 +7,7 @@ import { isOpenAICreditError, primeProductionAudio, useProductionSounds } from '
 
 type Character = { id: string; name: string; prompt: string; status: string; imageUrl?: string };
 type Collection = { id: string; name: string; characters: Character[] };
-type Job = { id: string; status: string; total: number; completed: number; failed: number; imported: number; warning?: string; characterIds: string[] };
+type Job = { id: string; status: string; total: number; completed: number; failed: number; imported: number; warning?: string; characterIds: string[]; createdAt: number; model?: string; assets?: Array<{ id: string; status: string; error?: string }> };
 type CollectionJobs = Record<string, Job[]>;
 
 async function jsonRequest<T = unknown>(url: string, options?: RequestInit): Promise<T> {
@@ -34,6 +34,7 @@ export default function MultiCollectionProduction() {
   const lastCreditWarning = useRef('');
   const previousStates = useRef<Map<string, string> | null>(null);
   const jobsRef = useRef<CollectionJobs>({});
+  const refreshInFlight = useRef(false);
   const reportCredit = useCallback((value: unknown) => {
     if (!isOpenAICreditError(value)) return;
     const detail = value instanceof Error ? value.message : String(value);
@@ -43,6 +44,8 @@ export default function MultiCollectionProduction() {
   const [progress, setProgress] = useState({ submitted: 0, total: 0 });
 
   const reload = useCallback(async (sync = false) => {
+    if (refreshInFlight.current) return;
+    refreshInFlight.current = true;
     setRefreshing(true);
     try {
       const rows = await jsonRequest<Array<{ data: Collection }>>('/api/studio');
@@ -73,6 +76,7 @@ export default function MultiCollectionProduction() {
       setMessage(error instanceof Error ? error.message : 'Refresh failed');
       reportCredit(error);
     } finally {
+      refreshInFlight.current = false;
       setRefreshing(false);
     }
   }, [reportCredit]);
@@ -91,6 +95,7 @@ export default function MultiCollectionProduction() {
   const visible = rows.filter(row => row.collection.name.toLowerCase().includes(search.trim().toLowerCase()));
   const chosen = rows.filter(row => selected.includes(row.collection.id));
   const requestCount = chosen.reduce((sum, row) => sum + row.eligible.length, 0);
+  const activity = rows.flatMap(row => row.jobs.map(job => ({ collection: row.collection.name, job }))).sort((a, b) => b.job.createdAt - a.job.createdAt).slice(0, 30);
 
   const submit = async () => {
     if (working || !requestCount) return;
@@ -155,5 +160,17 @@ export default function MultiCollectionProduction() {
       </tr>)}
     </tbody></table></div>
     {!visible.length && <p className="sub">No collections match your search.</p>}
+    <section className="production-activity-log" aria-label="Production activity log">
+      <h3>Production Activity Log</h3>
+      <p className="sub">Latest 30 saved Batch jobs across collections. Refresh to retrieve updated OpenAI results. History survives closing the browser.</p>
+      {activity.length ? <div className="table-scroll"><table><thead><tr><th>SUBMITTED</th><th>COLLECTION</th><th>MODEL</th><th>STATUS</th><th>PROCESSED</th><th>IMPORTED</th><th>ERRORS</th></tr></thead><tbody>
+        {activity.map(({ collection, job }) => <tr key={job.id}>
+          <td>{new Date(job.createdAt).toLocaleString()}</td><td>{collection}</td><td>{job.model || 'Batch'}</td>
+          <td><span className={'status ' + (job.status === 'completed' ? 'done' : isActiveBatchStatus(job.status) ? 'ready' : 'error')}>{job.status.replaceAll('_', ' ')}</span></td>
+          <td>{job.completed + job.failed}/{job.total}</td><td>{job.imported}/{job.total}</td>
+          <td>{job.warning || job.assets?.filter(item => item.status === 'error').slice(0, 2).map(item => item.error || 'Image failed').join('; ') || (job.failed ? job.failed + ' failed' : '—')}</td>
+        </tr>)}
+      </tbody></table></div> : <p className="sub">No Batch activity recorded yet.</p>}
+    </section>
   </div>;
 }
