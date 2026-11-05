@@ -22,7 +22,7 @@ export default function StudioSettings({ preferences, onPreferences, projects, o
   const [active, setActive] = useState('');
   const [message, setMessage] = useState('');
   const picker = useRef<HTMLInputElement>(null);
-  useEffect(() => { fetch('/api/settings').then(r => r.json()).then((data: SettingsResponse) => { if (data.credentials) setCredentials(data.credentials); }).catch(() => {}); }, []);
+  useEffect(() => { fetch('/api/settings').then(r => r.json() as Promise<SettingsResponse>).then((data: SettingsResponse) => { if (data.credentials) setCredentials(data.credentials); }).catch(() => {}); }, []);
   const edit = (key: keyof StudioPreferences, value: string | number | boolean) => onPreferences({ ...preferences, [key]: value });
   const act = async (action: string, op: () => Promise<unknown>) => { setActive(action); setMessage(''); try { await op(); setMessage('Saved successfully.'); } catch (e) { setMessage(e instanceof Error ? e.message : String(e)); } finally { setActive(''); } };
   const saveKey = (provider: 'etsy' | 'openai', remove = false) => act(provider, async () => { const response = await request({ action: 'credential', provider, ...(remove ? { remove: true } : { key: secrets[provider] }) }); setCredentials(response.credentials); setSecrets(s => ({ ...s, [provider]: '' })); });
