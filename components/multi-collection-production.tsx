@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, CircleAlert, LoaderCircle, RefreshCw, Sparkles } from 'lucide-react';
 import { eligibleForBulk, retryableFailedImage, isActiveBatchStatus } from '@/lib/production-rules';
 import { isOpenAICreditError, primeProductionAudio, useProductionSounds } from '@/lib/production-sounds';
-import { MOCK_STORAGE_KEY, inspectMockStorage, mockEligibleIds, mockRetryableIds, writeMockJobs, type MockJob, type MockScenario } from '@/lib/mock-production';
+import { MOCK_STORAGE_KEY, inspectMockStorage, mockEligibleIds, mockRetryableIds, mockOutcomeCounts, writeMockJobs, type MockJob, type MockScenario } from '@/lib/mock-production';
 
 type Character = { id: string; name: string; prompt: string; status: string; imageUrl?: string };
 type Collection = { id: string; name: string; characters: Character[] };
@@ -137,7 +137,8 @@ export default function MultiCollectionProduction({ onGeneratePrompts }: { onGen
     const pendingCount = collection.characters.filter(c => pending.has(c.id)).length;
     const missingPrompts = collection.characters.filter(c => !c.prompt?.trim() && !c.imageUrl).length;
     const incomplete = successful < collection.characters.length;
-    return { collection, eligible, retryable, successful, failed, pendingCount, missingPrompts, incomplete, jobs: environment === 'mock' ? mockJobs.filter(j => j.projectId === collection.id) as Job[] : jobs[collection.id] || [] };
+    const simulated = environment === 'mock' ? mockOutcomeCounts(collection.characters, mockJobs, collection.id) : null;
+    return { collection, eligible, retryable, successful, failed, pendingCount, missingPrompts, incomplete, simulated, jobs: environment === 'mock' ? mockJobs.filter(j => j.projectId === collection.id) as Job[] : jobs[collection.id] || [] };
   }), [collections, jobs, environment, mockJobs]);
   const visible = rows.filter(row => row.collection.name.toLowerCase().includes(search.trim().toLowerCase()));
   const chosen = rows.filter(row => selected.includes(row.collection.id));
@@ -274,10 +275,10 @@ export default function MultiCollectionProduction({ onGeneratePrompts }: { onGen
     {message && <div className="notice"><CircleAlert size={16}/>{message}</div>}
     {working && <div className="production-progress"><span>Batch submission</span><b>{progress.submitted}/{progress.total}</b><div className="progress"><i style={{ width: (progress.total ? progress.submitted / progress.total * 100 : 0) + '%' }}/></div></div>}
     <div className="table-scroll" style={{ overflowX: 'auto' }}><table style={{ tableLayout: 'fixed', minWidth: 1120, width: '100%' }}><colgroup><col style={{ width: 60 }}/><col style={{ width: 350 }}/><col style={{ width: 100 }}/><col style={{ width: 120 }}/><col style={{ width: 100 }}/><col style={{ width: 100 }}/><col style={{ width: 115 }}/><col style={{ width: 175 }}/></colgroup><thead><tr><th>SELECT</th><th>COLLECTION</th><th>NEW PROMPTS</th><th>SUCCESSFUL</th><th>FAILED</th><th>PENDING</th><th>MISSING PROMPTS</th><th>BATCH JOBS</th></tr></thead><tbody>
-      {visible.map(({ collection, eligible, retryable, successful, failed, pendingCount, missingPrompts, incomplete, jobs: batchJobs }) => <tr key={collection.id}>
+      {visible.map(({ collection, eligible, retryable, successful, failed, pendingCount, missingPrompts, incomplete, simulated, jobs: batchJobs }) => <tr key={collection.id}>
         <td><input type="checkbox" aria-label={'Select ' + collection.name} disabled={!incomplete || working} checked={selected.includes(collection.id)} onChange={e => setSelected(old => e.target.checked ? [...old, collection.id] : old.filter(id => id !== collection.id))}/></td>
         <td style={{ overflowWrap: 'anywhere' }}><b>{collection.name}</b>{missingPrompts > 0 && <div><button type="button" className="outline-btn" disabled={working} onClick={() => onGeneratePrompts(collection.id)}>Generate {missingPrompts} missing prompts</button></div>}</td><td>{eligible.length}</td>
-        <td>{successful}/{collection.characters.length}</td><td>{failed}{retryable.length ? ' (' + retryable.length + ' retryable)' : ''}</td><td>{pendingCount}</td><td>{missingPrompts}</td>
+        <td>{simulated ? <><strong>TEST {simulated.successful}/{collection.characters.length}</strong><div className="sub">Real {successful}/{collection.characters.length}</div></> : <>{successful}/{collection.characters.length}</>}</td><td>{simulated ? <><strong>TEST {simulated.failed}</strong><div className="sub">Real {failed}</div></> : failed}{retryable.length ? <div className="sub">{retryable.length} retryable</div> : null}</td><td>{simulated ? <><strong>TEST {simulated.pending}</strong><div className="sub">Real {pendingCount}</div></> : pendingCount}</td><td>{missingPrompts}</td>
         <td>{batchJobs.length ? batchJobs.slice(0, 2).map(job => <div key={job.id}><CheckCircle2 size={13}/> {job.status.replaceAll('_', ' ')} · {job.imported}/{job.total} imported {job.warning && <span className="asset-error">{job.warning}</span>}</div>) : 'No jobs yet'}</td>
       </tr>)}
     </tbody></table></div>
