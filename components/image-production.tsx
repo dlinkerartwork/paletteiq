@@ -10,9 +10,9 @@ type Project = { id: string; name: string; characters: Character[]; listing?: { 
 type Job = { id: string; status: string; model: string; total: number; completed: number; failed: number; imported: number; createdAt: number; characterIds: string[]; assets: Array<{ id: string; status: string; imageUrl?: string; error?: string }>; warning?: string };
 type Props = { project: Project; model: string; quality: string; onModel: (value: string) => void; onQuality: (value: string) => void; onAsset: (id: string, data: { imageUrl?: string; status: 'done' | 'error'; error?: string; similarityReview?: SimilarityReview }) => void };
 
-async function request(url: string, options?: RequestInit) {
+async function request<T = unknown>(url: string, options?: RequestInit): Promise<T> {
   const r = await fetch(url, options);
-  const result: any = await r.json();
+  const result = await r.json() as T & { error?: string };
   if (!r.ok) throw new Error(result.error || `Request failed (${r.status})`);
   return result;
 }
@@ -44,7 +44,7 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
 
   const recoverImages = useCallback(async (quiet = false) => {
     try {
-      const data = await request('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'recover-images', projectId: project.id }) });
+      const data = await request<{ recovered?: Array<{ id: string; imageUrl: string }> }>('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'recover-images', projectId: project.id }) });
       for (const asset of data.recovered || []) latestAsset.current(asset.id, { imageUrl: asset.imageUrl, status: 'done', error: '' });
       if (!quiet) setMessage(data.recovered?.length ? `Recovered ${data.recovered.length} image(s) and saved their records.` : 'No unlinked image files found.');
     } catch (e) { if (!quiet) setMessage(e instanceof Error ? e.message : String(e)); }
@@ -57,12 +57,12 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
       syncBusy.current = true;
       setRefreshing(true);
       try {
-        const data = await request(`/api/image-batches?projectId=${encodeURIComponent(project.id)}&sync=1`);
+        const data = await request<{ jobs: Job[] }>(`/api/image-batches?projectId=${encodeURIComponent(project.id)}&sync=1`);
         if (closed) return;
         setJobs(data.jobs || []);
         // The stored collection is authoritative; historical completed jobs must not
         // overwrite a newer single or batch regeneration on the client.
-        const rows = await request(`/api/studio?projectId=${encodeURIComponent(project.id)}`);
+        const rows = await request<Array<{ id: string; data: Project }>>(`/api/studio?projectId=${encodeURIComponent(project.id)}`);
         const stored = (rows as Array<{ id: string; data: Project }>).find(r => r.id === project.id)?.data;
         for (const asset of stored?.characters || []) {
           const local = latestProject.current.characters.find(c => c.id === asset.id);
@@ -84,7 +84,7 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
     setWorking(true); setMessage(`Saving collection and generating ${item.name}...`); setSingleProgress({ done: 0, total: 1 });
     try {
       await request('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'save', id: project.id, name: project.name, data: project }) });
-      const data = await request('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'generate', model, quality, projectId: project.id, characterId: item.id }) });
+      const data = await request<{ imageUrl: string; similarityReview?: SimilarityReview }>('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'generate', model, quality, projectId: project.id, characterId: item.id }) });
       onAsset(item.id, { imageUrl: data.imageUrl, status: 'done', error: '', similarityReview: data.similarityReview });
       setSingleProgress({ done: 1, total: 1 }); setMessage(`Image completed and saved: ${item.name}. Safe to refresh.`);
     } catch (e) { setMessage(e instanceof Error ? e.message : String(e)); if (!item.imageUrl) onAsset(item.id, { status: 'error', error: String(e) }); }
@@ -96,7 +96,7 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
     setWorking(true); setMessage('Saving collection and submitting an OpenAI Batch job...');
     try {
       await request('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'save', id: project.id, name: project.name, data: project }) });
-      const data = await request('/api/image-batches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId: project.id, characterIds: ids, model: batchModel, quality, regenerate }) });
+      const data = await request<{ job: Job }>('/api/image-batches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId: project.id, characterIds: ids, model: batchModel, quality, regenerate }) });
       setJobs(list => [data.job, ...list]); setSelectedIds([]);
       setMessage(`Batch submitted (${ids.length} characters). OpenAI processes it asynchronously; you can close this tab.`);
     } catch (e) { setMessage(e instanceof Error ? e.message : String(e)); }
