@@ -119,9 +119,9 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
       const result = await openai(key, `files/${encodeURIComponent(fileId)}/content`);
       if (!result.body) continue;
       for await (const line of jsonlLines(result.body)) {
-        let record: any;
+        let record: { custom_id?: string; response?: { body?: { data?: Array<{ b64_json?: string }>; error?: { message?: string } } }; error?: { message?: string } };
         try { record = JSON.parse(line); } catch { continue; }
-        const item = byId.get(record.custom_id);
+        const item = record.custom_id ? byId.get(record.custom_id) : undefined;
         if (!item || item.status !== 'pending') continue;
         const b64 = record.response?.body?.data?.[0]?.b64_json as string | undefined;
         if (b64) {
@@ -148,7 +148,7 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
   if (newCompleted || newFailed) {
     const saved = await db.select().from(projects).where(and(eq(projects.id, job.projectId), eq(projects.owner, owner))).limit(1);
     if (saved.length) {
-      const project = JSON.parse(saved[0].data) as { characters?: Array<Record<string, any>> };
+      const project = JSON.parse(saved[0].data) as { characters?: Array<{ id: string; imageUrl?: string; status?: string; error?: string; similarityReview?: SimilarityReview }> };
       project.characters = project.characters?.map(c => { const item = byId.get(c.id); return item?.status === 'done' ? { ...c, imageUrl: item.imageUrl, status: 'done', error: '', similarityReview: item.similarityReview } : item?.status === 'error' ? { ...c, status: 'error', error: item.error } : c; });
       await db.update(projects).set({ data: JSON.stringify(project), updatedAt: Date.now() }).where(and(eq(projects.id, job.projectId), eq(projects.owner, owner)));
     }
