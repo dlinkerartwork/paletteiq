@@ -27,6 +27,17 @@ export default function MultiCollectionProduction() {
   const [selected, setSelected] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [model, setModel] = useState('gpt-image-2.5-flare');
+  const [batchImageModels, setBatchImageModels] = useState<Array<{ id: string; name: string }>>([]);
+  const [imageModelError, setImageModelError] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    void fetch('/api/settings?models=openai').then(async response => {
+      const body = await response.json() as { models?: Array<{ id: string; name: string; batchSupported: boolean }>; error?: string };
+      if (!response.ok) throw new Error(body.error || 'Could not load Batch image models');
+      if (!cancelled) setBatchImageModels((body.models || []).filter(item => item.batchSupported));
+    }).catch(error => { if (!cancelled) setImageModelError(error instanceof Error ? error.message : String(error)); });
+    return () => { cancelled = true; };
+  }, []);
   const [quality, setQuality] = useState('low');
   const [jobs, setJobs] = useState<CollectionJobs>({});
   const [working, setWorking] = useState(false);
@@ -237,7 +248,7 @@ export default function MultiCollectionProduction() {
       <div className="image-download-actions"><button type="button" className="outline-btn" disabled={refreshing || working} onClick={() => void reload(true)}>{refreshing ? <LoaderCircle className="spin" size={16}/> : <RefreshCw size={16}/>} Refresh</button><button type="button" className="outline-btn" onClick={toggleSound}>{soundEnabled ? '🔊 Sound alerts on' : '🔇 Sound alerts off'}</button></div>
     </div>
     <div className="production-controls">
-      <div><label className="input-label">BATCH IMAGE MODEL</label><select value={model} onChange={e => setModel(e.target.value)}><option value="gpt-image-2.5-flare">GPT Image 2.5 Flare</option><option value="gpt-image-2.5-sunburst">GPT Image 2.5 Sunburst</option></select></div>
+      <div><label className="input-label">BATCH IMAGE MODEL</label><select value={model} onChange={e => setModel(e.target.value)}>{!batchImageModels.some(m => m.id === model) && <option value={model}>{model} (saved batch model)</option>}{batchImageModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select>{imageModelError && <p className="sub">{imageModelError}</p>}</div>
       <div><label className="input-label">QUALITY</label><select value={quality} onChange={e => setQuality(e.target.value)}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></div>
       <button className="primary-btn" disabled={working || refreshing || !requestCount} onClick={() => void submit()}>{working ? <LoaderCircle className="spin" size={16}/> : <Sparkles size={16}/>} {environment === 'mock' ? 'Simulate' : 'Submit'} {requestCount} images</button>
     </div>
