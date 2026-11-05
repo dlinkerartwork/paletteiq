@@ -183,7 +183,7 @@ export async function POST(req: Request) {
     const preferences = settings[0] ? JSON.parse(settings[0].preferences) as { output?: string; background?: string } : {};
     const format = preferences.output === 'jpg' ? 'jpeg' : 'png';
     const background = preferences.background === 'opaque' || format === 'jpeg' ? 'opaque' : 'transparent';
-    const ai = await fetch('https://api.openai.com/v1/images/generations', { method: 'POST', headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: body.model, quality: body.quality, size: '1024x1024', background, output_format: format, n: 1, prompt: originalImagePrompt(character.prompt, character.id) }) });
+    const ai = await fetch('https://api.openai.com/v1/images/generations', { method: 'POST', headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: body.model, quality: body.quality, size: '1024x1024', background, output_format: format, n: 1, prompt: originalImagePrompt(character.prompt, character.id, crypto.randomUUID()) }) });
     if (!ai.ok) return fail(`OpenAI image generation failed (${ai.status}): ${(await ai.text()).slice(0,200)}`, 502);
     const data = await ai.json() as { data?: Array<{ b64_json?: string }> };
     const b64 = data.data?.[0]?.b64_json;
