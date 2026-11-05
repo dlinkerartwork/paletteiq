@@ -255,22 +255,23 @@ export default function MultiCollectionProduction() {
     <div className="production-controls">
       <div><label className="input-label">BATCH IMAGE MODEL</label><select value={model} onChange={e => setModel(e.target.value)}>{!batchImageModels.some(m => m.id === model) && <option value={model}>{model} (saved batch model)</option>}{batchImageModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select>{imageModelError && <p className="sub">{imageModelError}</p>}</div>
       <div><label className="input-label">QUALITY</label><select value={quality} onChange={e => setQuality(e.target.value)}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></div>
-      <button className="primary-btn" disabled={working || refreshing || !requestCount} onClick={() => void submit()}>{working ? <LoaderCircle className="spin" size={16}/> : <Sparkles size={16}/>} {environment === 'mock' ? 'Simulate' : 'Submit'} {requestCount} images</button>
+      <button className="primary-btn" disabled={working || refreshing || !requestCount} onClick={() => void submit('new')}>{working ? <LoaderCircle className="spin" size={16}/> : <Sparkles size={16}/>} {environment === 'mock' ? 'Simulate' : 'Submit New'} {requestCount} images</button>
+      {environment === 'live' && <button type="button" className="outline-btn" disabled={working || refreshing || !retryCount} onClick={() => void submit('retry')}>Retry Failed {retryCount} images</button>}
     </div>
     <div className="collections-toolbar">
       <input aria-label="Search collections" placeholder="Search collections..." value={search} onChange={e => setSearch(e.target.value)}/>
-      <button className="outline-btn" onClick={() => setSelected(visible.filter(row => row.eligible.length).map(row => row.collection.id))}>Select eligible</button>
+      <button className="outline-btn" onClick={() => setSelected(visible.filter(row => row.eligible.length || row.retryable.length).map(row => row.collection.id))}>Select eligible</button>
       <button className="outline-btn" onClick={() => setSelected([])}>Clear selection</button>
     </div>
-    <p className="sub">{selected.length} collections selected · {requestCount} new prompts ready · max 120 per OpenAI Batch job.</p>
+    <p className="sub">{selected.length} collections selected · {requestCount} new prompts · {retryCount} safe failed-image retries · 50 images per OpenAI Batch job. Missing prompts require prompt creation in the collection first.</p>
     {creditAlert && <div className="notice" role="alert"><CircleAlert size={16}/><strong>{creditAlert}</strong><button type="button" onClick={() => setCreditAlert('')}>Dismiss</button></div>}
     {message && <div className="notice"><CircleAlert size={16}/>{message}</div>}
     {working && <div className="production-progress"><span>Batch submission</span><b>{progress.submitted}/{progress.total}</b><div className="progress"><i style={{ width: (progress.total ? progress.submitted / progress.total * 100 : 0) + '%' }}/></div></div>}
-    <div className="table-scroll"><table><thead><tr><th>SELECT</th><th>COLLECTION</th><th>NEW PROMPTS</th><th>GENERATED</th><th>BATCH JOBS</th></tr></thead><tbody>
-      {visible.map(({ collection, eligible, jobs: batchJobs }) => <tr key={collection.id}>
-        <td><input type="checkbox" aria-label={'Select ' + collection.name} disabled={!eligible.length || working} checked={selected.includes(collection.id)} onChange={e => setSelected(old => e.target.checked ? [...old, collection.id] : old.filter(id => id !== collection.id))}/></td>
+    <div className="table-scroll"><table><thead><tr><th>SELECT</th><th>COLLECTION</th><th>NEW PROMPTS</th><th>SUCCESSFUL</th><th>FAILED</th><th>PENDING</th><th>MISSING PROMPTS</th><th>BATCH JOBS</th></tr></thead><tbody>
+      {visible.map(({ collection, eligible, retryable, successful, failed, pendingCount, missingPrompts, jobs: batchJobs }) => <tr key={collection.id}>
+        <td><input type="checkbox" aria-label={'Select ' + collection.name} disabled={(!eligible.length && !retryable.length) || working} checked={selected.includes(collection.id)} onChange={e => setSelected(old => e.target.checked ? [...old, collection.id] : old.filter(id => id !== collection.id))}/></td>
         <td><b>{collection.name}</b></td><td>{eligible.length}</td>
-        <td>{collection.characters.filter(c => c.status === 'done').length}/{collection.characters.length}</td>
+        <td>{successful}/{collection.characters.length}</td><td>{failed}{retryable.length ? ' (' + retryable.length + ' retryable)' : ''}</td><td>{pendingCount}</td><td>{missingPrompts}</td>
         <td>{batchJobs.length ? batchJobs.slice(0, 2).map(job => <div key={job.id}><CheckCircle2 size={13}/> {job.status.replaceAll('_', ' ')} · {job.imported}/{job.total} imported {job.warning && <span className="asset-error">{job.warning}</span>}</div>) : 'No jobs yet'}</td>
       </tr>)}
     </tbody></table></div>
