@@ -169,7 +169,7 @@ export async function POST(req: Request) {
   if (body.action === 'generate') {
     const aiKey = await userCredential(user.userId, 'openai') || secret('OPENAI_API_KEY');
     if (!aiKey) return fail('OpenAI API not connected.', 503);
-    if (!['gpt-image-1-mini','gpt-image-1','gpt-image-1.5','gpt-image-2.5-flare','gpt-image-2.5-sunburst'].includes(body.model) || !['low','medium','high'].includes(body.quality) || typeof body.projectId !== 'string' || typeof body.characterId !== 'string') return fail('Invalid image settings');
+    if (!(typeof body.model === 'string' && /^gpt-image-[a-z0-9.-]{1,80}$/.test(body.model)) || !['low','medium','high'].includes(body.quality) || typeof body.projectId !== 'string' || typeof body.characterId !== 'string') return fail('Invalid image settings');
     const db = getDb();
     const saved = await db.select().from(projects).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId))).limit(1);
     if (!saved.length) return fail('Save the collection before generating images.', 404);
