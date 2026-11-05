@@ -6,7 +6,7 @@ import { userCredential } from '@/lib/credentials';
 
 export type SeoGenerationPreferences = {
   seoProvider: 'openai' | 'gemini';
-  seoGeminiModel: 'gemini-flash-latest' | 'gemini-2.5-flash-lite' | 'gemini-2.5-flash';
+  seoGeminiModel: string;
   seoTitleMaxLength: number;
   seoAltTextCount: number;
   seoFileNaming: 'generaltheme_imagenumber';
@@ -24,7 +24,7 @@ export async function seoPreferences(owner: string): Promise<SeoGenerationPrefer
   try { stored = rows[0]?.preferences ? JSON.parse(rows[0].preferences) : {}; } catch { /* Legacy defaults. */ }
   return {
     seoProvider: stored.seoProvider === 'gemini' ? 'gemini' : 'openai',
-    seoGeminiModel: stored.seoGeminiModel === 'gemini-2.5-flash-lite' || stored.seoGeminiModel === 'gemini-2.5-flash' ? stored.seoGeminiModel : 'gemini-flash-latest',
+    seoGeminiModel: typeof stored.seoGeminiModel === 'string' && /^gemini-[a-z0-9.-]{1,80}$/.test(stored.seoGeminiModel) ? stored.seoGeminiModel : 'gemini-flash-latest',
     seoTitleMaxLength: typeof stored.seoTitleMaxLength === 'number' && Number.isInteger(stored.seoTitleMaxLength) && Number(stored.seoTitleMaxLength) >= 1 && Number(stored.seoTitleMaxLength) <= 140 ? Number(stored.seoTitleMaxLength) : defaults.seoTitleMaxLength,
     seoAltTextCount: typeof stored.seoAltTextCount === 'number' && Number.isInteger(stored.seoAltTextCount) && Number(stored.seoAltTextCount) >= 1 && Number(stored.seoAltTextCount) <= 20 ? Number(stored.seoAltTextCount) : defaults.seoAltTextCount,
     seoFileNaming: 'generaltheme_imagenumber',
@@ -47,7 +47,7 @@ export async function generateSeoJson(owner: string, instruction: string, provid
   }
   const key = await userCredential(owner, 'gemini') || secret('GEMINI_API_KEY');
   if (!key) throw new Error('Configure your Gemini API key in Settings before generating SEO.');
-  const model = ['gemini-flash-latest', 'gemini-2.5-flash-lite', 'gemini-2.5-flash'].includes(geminiModel) ? geminiModel : 'gemini-flash-latest';
+  const model = /^gemini-[a-z0-9.-]{1,80}$/.test(geminiModel) ? geminiModel : 'gemini-flash-latest';
   let response: Response | undefined;
   for (let attempt = 0; attempt < 3; attempt++) {
     response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
