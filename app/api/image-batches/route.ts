@@ -166,7 +166,14 @@ export async function GET(req: Request) {
     // Resume a bounded number of outstanding OpenAI batches after desktop
     // restart, even when the user is not on the Image Production page.
     const db = getDb();
-    const active = await db.select().from(imageBatches).where(and(eq(imageBatches.owner, user.userId), notInArray(imageBatches.status, ['completed', 'completed_with_errors', 'failed', 'cancelled', 'expired']))).orderBy(asc(imageBatches.updatedAt)).limit(2);
+    const activeCandidates = await db.select().from(imageBatches).where(and(eq(imageBatches.owner, user.userId), notInArray(imageBatches.status, ['completed', 'completed_with_errors', 'failed', 'cancelled', 'expired']))).orderBy(asc(imageBatches.updatedAt)).limit(30);
+    // Fair polling across collections, while serializing updates within each collection.
+    const seenProjects = new Set<string>();
+    const active = activeCandidates.filter(row => {
+      if (seenProjects.has(row.projectId) || seenProjects.size >= 2) return false;
+      seenProjects.add(row.projectId);
+      return true;
+    });
     const key = await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
     if (!key || !active.length) return Response.json({ updatedProjectIds: [], pendingJobs: active.length, credentialMissing: !key && active.length > 0 });
     const updatedProjectIds: string[] = [];
