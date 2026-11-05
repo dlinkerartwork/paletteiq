@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { eligibleForBulk, isActiveBatchStatus, wasPreviouslyGenerated } from '../lib/production-rules.ts';
+import { eligibleForBulk, isActiveBatchStatus, retryableFailedImage, wasPreviouslyGenerated } from '../lib/production-rules.ts';
 
 test('only nonempty prompts without previous results enter bulk generation', () => {
   assert.equal(eligibleForBulk({ prompt: 'watercolor bunny' }), true);
@@ -36,4 +36,14 @@ test('collection eligibility is isolated by each collection pending IDs', () => 
   const pendingB = new Set();
   assert.deepEqual(collectionA.filter(c => eligibleForBulk(c, pendingA.has(c.id))).map(c => c.id), ['a2']);
   assert.deepEqual(collectionB.filter(c => eligibleForBulk(c, pendingB.has(c.id))).map(c => c.id), ['b1']);
+});
+
+test('explicit failed-image retry never includes completed or pending items', () => {
+  assert.equal(retryableFailedImage({ prompt: 'bear', status: 'error' }), true);
+  assert.equal(retryableFailedImage({ prompt: 'bear', status: 'error', imageUrl: '/api/images/123' }), false);
+  assert.equal(retryableFailedImage({ prompt: 'bear', status: 'error' }, true), false);
+  assert.equal(retryableFailedImage({ prompt: 'bear', status: 'done' }), false);
+  assert.equal(retryableFailedImage({ prompt: 'bear', status: 'ready' }), false);
+  assert.equal(retryableFailedImage({ prompt: '  ', status: 'error' }), false);
+  assert.equal(eligibleForBulk({ prompt: 'bear', status: 'error' }), false);
 });
