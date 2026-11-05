@@ -48,3 +48,11 @@ Use three test collections, two fresh image prompts per collection (6 images tot
 9. Do not use mock results to verify actual API billing, real OpenAI Batch output, image storage or production backend recovery; those still require a small controlled live test.
 
 Mock Mode is hidden in production builds and must be removed before shipping the desktop installer. Its status is not a claim of real image production.
+
+## Step 5B: Mock Data Integrity & Recovery
+
+- Browser-local history is validated before it is used; malformed entries produce a warning and are not overwritten automatically.
+- Activity Log displays each TEST scenario. A previously failed `quota_error` job should remain failed after reopening; it is not a recovery failure.
+- To test recovery of a successful job, click **Clear TEST history**, choose **Simulate success**, submit new TEST jobs, close the browser while pending, wait 15 seconds, then reopen.
+- Do not clear or repair real collection data as part of this test.
+- `npm run test:production` includes malformed history, partial recovery, scenario persistence, and duplicate eligibility checks.
