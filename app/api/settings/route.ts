@@ -25,7 +25,7 @@ async function getSettings(req: Request) {
     // The models endpoint returns IDs, not transparency capability flags.
     // Limit options to the GPT Image family; the image API validates capabilities on use.
     return Response.json({ models: (payload.data || []).filter(row => isImageModel(row.id))
-      .map(row => ({ id: row.id!, name: row.id! })).sort((left, right) => left.id.localeCompare(right.id)) });
+      .map(row => ({ id: row.id!, name: row.id!, batchSupported: ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'].includes(row.id!) })).sort((left, right) => left.id.localeCompare(right.id)) });
   }
     if (new URL(req.url).searchParams.get('models') === 'gemini') {
     const key = await userCredential(user.userId, 'gemini');
@@ -37,7 +37,7 @@ async function getSettings(req: Request) {
     const data = await response.json() as { models?: Array<{ name?: string; displayName?: string; supportedGenerationMethods?: string[] }> };
     const models = (data.models || []).filter(item => item.supportedGenerationMethods?.includes('generateContent'))
       .map(item => ({ id: (item.name || '').replace(/^models\//, ''), name: item.displayName || item.name || '' }))
-      .filter(item => /^gemini-[a-z0-9.-]{1,80}$/.test(item.id) && !/(?:image|imagen|banana|veo|video)/i.test(item.id + ' ' + item.name));
+      .filter(item => /^gemini-(?:(?:\d+(?:\.\d+)?)-)?(?:flash|pro)(?:-lite)?(?:-|$)/.test(item.id) && !/(?:image|imagen|banana|veo|video|tts|speech|audio|live|robot|argon|embedding|experimental|research|computer)/i.test(item.id + ' ' + item.name));
     return Response.json({ models });
   }
   const rows = await getDb().select().from(studioSettings).where(eq(studioSettings.owner, user.userId)).limit(1);
