@@ -149,8 +149,8 @@ export default function MultiCollectionProduction() {
         const added: MockJob[] = chosen.flatMap(row => {
           const ids = mockEligibleIds(row.collection.characters, previous, row.collection.id);
           const newJobs: MockJob[] = [];
-          for (let i = 0; i < ids.length; i += 120) {
-            const characterIds = ids.slice(i, i + 120);
+          for (let i = 0; i < ids.length; i += 50) {
+            const characterIds = ids.slice(i, i + 50);
             newJobs.push({ id: crypto.randomUUID(), projectId: row.collection.id, model: 'TEST: ' + model, createdAt,
               status: 'pending', total: characterIds.length, completed: 0, failed: 0, imported: 0,
               characterIds, assets: [], scenario: mockScenario });
@@ -170,7 +170,7 @@ export default function MultiCollectionProduction() {
     }
     setWorking(true);
     setProgress({ submitted: 0, total: requestCount });
-    setMessage('Submitting separate OpenAI batches per collection...');
+    setMessage('Submitting every 50-image Batch to OpenAI. Wait for all submissions to finish before shutting down the computer...');
     let submitted = 0;
     const failures: string[] = [];
     let stoppedForQuota = false;
@@ -190,8 +190,8 @@ export default function MultiCollectionProduction() {
           continue;
         }
         const eligible = fresh.characters.filter(c => eligibleForBulk(c, pendingIds.has(c.id)));
-        for (let i = 0; i < eligible.length; i += 120) {
-          const ids = eligible.slice(i, i + 120).map(c => c.id);
+        for (let i = 0; i < eligible.length; i += 50) {
+          const ids = eligible.slice(i, i + 50).map(c => c.id);
           try {
             await jsonRequest('/api/image-batches', {
               method: 'POST',
@@ -215,7 +215,7 @@ export default function MultiCollectionProduction() {
         'Submitted ' + submitted + ' of ' + requestCount + ' initially eligible images. ' +
         (failures.length ? 'Some submissions were skipped or failed: ' + failures.slice(0, 4).join(' | ') + '. ' : '') +
         (stoppedForQuota ? 'Stopped because OpenAI reported insufficient credits/quota. ' : '') +
-        'Refresh statuses before retrying; accepted jobs are saved independently.'
+        'Wait until all requested batches are accepted before shutting down. Accepted jobs keep processing on OpenAI Cloud. Refresh statuses before retrying; accepted jobs are saved independently.'
       );
     } catch (error) {
       setMessage('Submitted ' + submitted + ' images before stopping: ' + (error instanceof Error ? error.message : String(error)) + '. Refresh before retrying.');
