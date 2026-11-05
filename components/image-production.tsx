@@ -127,16 +127,25 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
   };
 
   const submitBatch = async (ids = selectedBatchIds, regenerate = false) => {
-    if (!ids.length || ids.length > 120 || ids.some(id => pending.has(id))) return;
+    if (!ids.length || ids.some(id => pending.has(id))) return;
     if (soundEnabled) primeProductionAudio();
-    setWorking(true); setMessage('Saving collection and submitting an OpenAI Batch job...');
+    setWorking(true); setMessage('Submitting batches of up to 50 images to OpenAI. Keep the application open until every batch is accepted...');
+    let submitted = 0;
     try {
       await request('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'save', id: project.id, name: project.name, data: project }) });
-      const data = await request<{ job: Job }>('/api/image-batches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId: project.id, characterIds: ids, model: batchModel, quality, regenerate }) });
-      setJobs(list => [data.job, ...list]); setSelectedIds([]);
-      setMessage(`Batch submitted (${ids.length} characters). OpenAI processes it asynchronously; you can close this tab.`);
-    } catch (e) { setMessage(e instanceof Error ? e.message : String(e)); reportCredit(e); }
-    finally { setWorking(false); }
+      for (let offset = 0; offset < ids.length; offset += 50) {
+        const chunk = ids.slice(offset, offset + 50);
+        const data = await request<{ job: Job }>('/api/image-batches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId: project.id, characterIds: chunk, model: batchModel, quality, regenerate }) });
+        setJobs(list => [data.job, ...list]);
+        submitted += chunk.length;
+        setMessage(`Submitted ${submitted}/${ids.length} images to OpenAI. Do not shut down until all batches are accepted.`);
+      }
+      setSelectedIds([]);
+      setMessage(`All ${submitted} images submitted across ${Math.ceil(ids.length / 50)} OpenAI batches. Safe to shut down; reopen paletteIQ later to import results.`);
+    } catch (e) {
+      setMessage(`Submitted ${submitted}/${ids.length} images before an error: ${e instanceof Error ? e.message : String(e)}. Check Batch activity before retrying to prevent duplicate charges.`);
+      reportCredit(e);
+    } finally { setWorking(false); }
   };
 
   const downloadZip = async (scope: 'selected' | 'all' | 'package') => {
@@ -160,9 +169,9 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
         <div><label className="input-label">{mode === 'single' ? 'IMAGE MODEL' : 'BATCH IMAGE MODEL'}</label>{mode === 'single' ? <select value={model} onChange={e => onModel(e.target.value)}>{!imageModels.some(m => m.id === model) && <option value={model}>{model} (saved model)</option>}{imageModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select> : <select value={batchModel} onChange={e => setBatchModel(e.target.value)}>{!imageModels.some(m => m.id === batchModel && m.batchSupported) && <option value={batchModel}>{batchModel} (saved batch model)</option>}{imageModels.filter(m => m.batchSupported).map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select>}{imageModelError && <p className="sub">{imageModelError}</p>}</div>
         <div><label className="input-label">QUALITY</label><select value={quality} onChange={e => onQuality(e.target.value)}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></div>
         {mode === 'single' && <div className="character-choice"><label className="input-label">CHOOSE NEVER-GENERATED CHARACTER</label><select value={chosenSingle?.id ?? ''} onChange={e => setSingleId(e.target.value)}><option value="" disabled>Select a character...</option>{eligible.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>}
-        <button className="primary-btn" disabled={working || downloading || (mode === 'single' ? !chosenSingle : !selectedBatchIds.length || selectedBatchIds.length > 120)} onClick={() => mode === 'single' ? void generateSingle() : void submitBatch()}>{working ? <LoaderCircle size={17} className="spin"/> : <Sparkles size={17}/>} {mode === 'single' ? 'Generate single image' : `Submit ${selectedBatchIds.length} new prompts to Batch`}</button>
+        <button className="primary-btn" disabled={working || downloading || (mode === 'single' ? !chosenSingle : !selectedBatchIds.length)} onClick={() => mode === 'single' ? void generateSingle() : void submitBatch()}>{working ? <LoaderCircle size={17} className="spin"/> : <Sparkles size={17}/>} {mode === 'single' ? 'Generate single image' : `Submit ${selectedBatchIds.length} new prompts to Batch`}</button>
       </div>
-      {mode === 'batch' && <div className="batch-selector"><div className="batch-selector-head"><div><b>New prompt submission</b><small>{eligible.length} never-generated prompts available. Selected cards limit submission to eligible prompts; otherwise all eligible prompts are submitted (max 120).</small></div><button onClick={() => setSelectedIds([])}>Clear selection</button></div><p className="batch-hint"><Clock3 size={15}/> Previously generated items are never included in bulk submission. Use per-card Regenerate for an explicit rerun. Batch jobs continue after closing the browser.</p></div>}
+      {mode === 'batch' && <div className="batch-selector"><div className="batch-selector-head"><div><b>New prompt submission</b><small>{eligible.length} never-generated prompts available. Selected cards limit submission to eligible prompts; otherwise all eligible prompts are submitted (automatically split into groups of 50).</small></div><button onClick={() => setSelectedIds([])}>Clear selection</button></div><p className="batch-hint"><Clock3 size={15}/> Previously generated items are never included in bulk submission. Use per-card Regenerate for an explicit rerun. Batch jobs continue after closing the browser.</p></div>}
       {message && <div className="notice production-notice"><CircleAlert size={16}/>{message}</div>}
       <div className="production-progress"><div><span>Collection images produced</span><b>{completedTotal} / {project.characters.length}</b></div><div className="progress"><i style={{ width: `${project.characters.length ? completedTotal / project.characters.length * 100 : 0}%` }}/></div></div>
       {mode === 'single' && working && <div className="single-loading"><LoaderCircle className="spin" size={16}/> Single image in progress · {singleProgress.done}/{singleProgress.total} completed</div>}
