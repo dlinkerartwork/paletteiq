@@ -4,7 +4,7 @@ import { getDb } from '@/db';
 import { imageBatches, projects, studioSettings } from '@/db/schema';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { userCredential } from '@/lib/credentials';
-import { normalizeListing } from '@/lib/etsy-listing';
+import { ensurePrimaryKeywordOpening, normalizeListing } from '@/lib/etsy-listing';
 import { normalizeAiSeoReview } from '@/lib/seo-intelligence';
 import { originalImagePrompt } from '@/lib/originality';
 import { reviewImageSimilarity, type SimilarityReview } from '@/lib/similarity-review';
@@ -43,6 +43,18 @@ export async function POST(req: Request) {
   const user = await getChatGPTUser();
   if (!user) return fail('Sign in required', 401);
   const body = await req.json() as StudioRequest;
+  if (body.action === 'mark-download') {
+    if (typeof body.projectId !== 'string' || !/^[\\w-]{8,80}$/.test(body.projectId)) return fail('Invalid collection');
+    const db = getDb();
+    const rows = await db.select().from(projects).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId))).limit(1);
+    if (!rows.length) return fail('Collection not found', 404);
+    const stored = JSON.parse(rows[0].data) as ProjectInput & { lastDownloadedAt?: number; downloadCount?: number };
+    const now = Date.now();
+    stored.lastDownloadedAt = now;
+    stored.downloadCount = (Number.isSafeInteger(stored.downloadCount) && (stored.downloadCount ?? 0) >= 0 ? stored.downloadCount! : 0) + 1;
+    await db.update(projects).set({ data: JSON.stringify(stored), updatedAt: now }).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId)));
+    return Response.json({ lastDownloadedAt: now, downloadCount: stored.downloadCount });
+  }
   if (body.action === 'save') {
     if (typeof body.id !== 'string' || !/^[\w-]{8,80}$/.test(body.id) || typeof body.name !== 'string' || !body.data) return fail('Invalid project');
     const incoming = body.data;
@@ -52,7 +64,9 @@ export async function POST(req: Request) {
     if (current.length && current[0].owner !== user.userId) return fail('Forbidden', 403);
     if (current.length) {
       // An older browser snapshot must not erase assets already persisted by the image worker.
-      const old = JSON.parse(current[0].data) as { characters?: Array<{ id: string; imageUrl?: string; status?: string; similarityReview?: SimilarityReview }> };
+      const old = JSON.parse(current[0].data) as { characters?: Array<{ id: string; imageUrl?: string; status?: string; similarityReview?: SimilarityReview }>; lastDownloadedAt?: number; downloadCount?: number };
+      // Download history belongs to the persisted collection, not a potentially stale browser snapshot.
+      if (old.lastDownloadedAt) { incoming.lastDownloadedAt = old.lastDownloadedAt; incoming.downloadCount = old.downloadCount ?? 1; }
       const storedImages = new Map((old.characters || []).filter(c => c.imageUrl).map(c => [c.id, c]));
       incoming.characters = incoming.characters.map((c: SubjectInput) => {
         const persisted = storedImages.get(c.id);
@@ -129,10 +143,10 @@ export async function POST(req: Request) {
     const produced = subjects.filter((c: { produced: boolean }) => c.produced).length;
     const brief = { name: String(project.name).slice(0, 150), theme: String(project.theme ?? '').slice(0, 150), subtheme: String(project.subtheme ?? '').slice(0, 150), style: String(project.style ?? '').slice(0, 200), palette: String(project.palette ?? '').slice(0, 200), texture: String(project.texture ?? '').slice(0, 200), keywords: Array.isArray(project.keywords) ? project.keywords.slice(0, 30) : [], subjects, produced, sourceReference: String(project.title ?? '').slice(0, 250) };
     const customSeo = await customSeoInstructions(user.userId);
-    const instruction = `You are preparing an original, accurate, English-language Etsy DIGITAL CLIPART listing draft. Return a single valid JSON object with precisely these keys: title (natural, clear, <=140 characters, ideally under 15 words), description (scannable, buyer-friendly opening, what's included, potential uses, download and licensing caveats), tags (13 distinct relevant phrases, each <=20 characters), primaryKeyword, secondaryKeywords (array), longTailKeywords (array), categorySuggestion (suggestion only, not taxonomy ID), attributes (object: occasion, recipient, primaryColor, secondaryColor, style), materials (array), imageAltTexts (array for original mockups), photoPlan (array), priceSuggestion (estimated range with currency and clearly marked estimate, not a market fact), sku, digitalFiles (array of proposed filenames/package contents), licenseNotes. Never copy the source listing's wording, SEO tags, or branding; create distinct original copy. Never invent concrete specs such as exact files, DPI, sizes, transparent backgrounds, licenses, or quantities as facts if unknown. Mark such details TO CONFIRM. Do not claim ${subjects.length} images are delivered when only ${produced} are produced. Etsy allows 13 tags of up to 20 characters. No unsupported demand, ranking, sales or ownership claims. Seller will verify before publishing. Collection brief: ${JSON.stringify(brief).slice(0, 21000)}${customSeo}`;
+    const instruction = `You are preparing an original, accurate, English-language Etsy DIGITAL CLIPART listing draft. Return a single valid JSON object with precisely these keys: title (natural, clear, <=140 characters, ideally under 15 words), description (scannable, buyer-friendly opening, what's included, potential uses, download and licensing caveats), tags (13 distinct relevant phrases, each <=20 characters), primaryKeyword, secondaryKeywords (array), longTailKeywords (array), categorySuggestion (suggestion only, not taxonomy ID), attributes (object: occasion, recipient, primaryColor, secondaryColor, style), materials (array), imageAltTexts (array for original mockups), photoPlan (array), priceSuggestion (estimated range with currency and clearly marked estimate, not a market fact), sku, digitalFiles (array of proposed filenames/package contents), licenseNotes. Select one precise primaryKeyword that describes the actual product; put that exact phrase naturally within the first 250 characters of the description, ideally in the first sentence, and introduce the product clearly. Do not stuff or repeat the phrase unnaturally. Never copy the source listing's wording, SEO tags, or branding; create distinct original copy. Never invent concrete specs such as exact files, DPI, sizes, transparent backgrounds, licenses, or quantities as facts if unknown. Mark such details TO CONFIRM. Do not claim ${subjects.length} images are delivered when only ${produced} are produced. Etsy allows 13 tags of up to 20 characters. No unsupported demand, ranking, sales or ownership claims. Seller will verify before publishing. Collection brief: ${JSON.stringify(brief).slice(0, 21000)}${customSeo}`;
     const ai = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'gpt-4.1-mini', input: instruction, text: { format: { type: 'json_object' } } }) });
     if (!ai.ok) return fail(`AI listing draft failed (${ai.status}): ${(await ai.text()).slice(0, 200)}`, 502);
-    try { return Response.json({ draft: normalizeListing(JSON.parse(extractText(await ai.json()))) }); } catch { return fail('AI returned an invalid listing draft', 502); }
+    try { return Response.json({ draft: ensurePrimaryKeywordOpening(normalizeListing(JSON.parse(extractText(await ai.json())))) }); } catch { return fail('AI returned an invalid listing draft', 502); }
   }
   if (body.action === 'seo-review') {
     const aiKey = await userCredential(user.userId, 'openai') || secret('OPENAI_API_KEY');
