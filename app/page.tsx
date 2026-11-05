@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowRight, BarChart3, BookOpenText, Check, ChevronDown, CircleHelp, Download, ExternalLink, FileSearch, Image, Layers3, LoaderCircle, Plus, Search, Settings2, Sparkles, Trash2, WandSparkles, X } from 'lucide-react';
 import StudioSettings, { defaultPrefs, defaultSeoPrompts, type StudioPreferences } from '@/components/studio-settings';
 import ImageProduction from '@/components/image-production';
@@ -87,8 +87,9 @@ export default function Home() {
     return () => { stopped = true; window.clearInterval(timer); };
   }, [loadDone, tab]);
   useEffect(() => { window.scrollTo({ top: 0, left: 0, behavior: 'instant' }); const main = document.querySelector('.main'); if (main && main.scrollTop) main.scrollTop = 0; document.title = `${['overview','collections','multi-production','settings'].includes(tab) ? tab[0].toUpperCase() + tab.slice(1) : `${project.name} · ${steps.find(s => s.id === tab)?.label || tab}`} | PaletteIQ`; }, [tab, project.id]);
-  useEffect(() => { fetch('/api/settings').then(r => r.ok ? r.json() : null).then((data: any) => { if (data?.preferences) updatePreferences({ ...defaultPrefs, ...data.preferences, seoPrompts: { ...defaultSeoPrompts, ...data.preferences.seoPrompts } }); }).catch(() => {}); }, []);
-  const updatePreferences = (prefs: StudioPreferences) => { setPreferences(prefs); setTarget(prefs.target); setModel(prefs.model); setQuality(prefs.quality); };
+  const updatePreferences = useCallback((prefs: StudioPreferences) => { setPreferences(prefs); setTarget(prefs.target); setModel(prefs.model); setQuality(prefs.quality); }, []);
+  useEffect(() => { fetch('/api/settings').then(r => r.ok ? r.json() : null).then((data: any) => { if (data?.preferences) updatePreferences({ ...defaultPrefs, ...data.preferences, seoPrompts: { ...defaultSeoPrompts, ...data.preferences.seoPrompts } }); }).catch(() => {}); }, [updatePreferences]);
+
   const importAll = async (backup: { projects: unknown[]; preferences: StudioPreferences }) => {
     const prefs = { ...defaultPrefs, ...backup.preferences, seoPrompts: { ...defaultSeoPrompts, ...backup.preferences.seoPrompts } };
     const response = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'preferences', preferences: prefs }) });
