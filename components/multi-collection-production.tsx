@@ -9,11 +9,11 @@ type Collection = { id: string; name: string; characters: Character[] };
 type Job = { id: string; status: string; total: number; completed: number; failed: number; imported: number; warning?: string; characterIds: string[] };
 type CollectionJobs = Record<string, Job[]>;
 
-async function jsonRequest(url: string, options?: RequestInit) {
+async function jsonRequest<T = unknown>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, { ...options, cache: 'no-store' });
-  const body = await response.json();
-  if (!response.ok) throw new Error(body.error || 'Request failed');
-  return body;
+  const body = await response.json() as Record<string, unknown>;
+  if (!response.ok) throw new Error(typeof body.error === 'string' ? body.error : 'Request failed');
+  return body as T;
 }
 
 export default function MultiCollectionProduction() {
@@ -31,12 +31,12 @@ export default function MultiCollectionProduction() {
   const reload = useCallback(async (sync = false) => {
     setRefreshing(true);
     try {
-      const rows = await jsonRequest('/api/studio');
+      const rows = await jsonRequest<Array<{ data: Collection }>>('/api/studio');
       const fresh: Collection[] = (rows as Array<{ data: Collection }>).map(row => row.data);
       setCollections(fresh);
       const updated = await Promise.all(fresh.map(async collection => {
         try {
-          const result = await jsonRequest('/api/image-batches?projectId=' + encodeURIComponent(collection.id) + (sync ? '&sync=1' : ''));
+          const result = await jsonRequest<{ jobs: Job[] }>('/api/image-batches?projectId=' + encodeURIComponent(collection.id) + (sync ? '&sync=1' : ''));
           return [collection.id, result.jobs as Job[]] as const;
         } catch { return [collection.id, [] as Job[]] as const; }
       }));
@@ -72,7 +72,7 @@ export default function MultiCollectionProduction() {
     let submitted = 0;
     try {
       // Read saved data again so unsaved edits in another window cannot be submitted accidentally.
-      const freshRows = await jsonRequest('/api/studio') as Array<{ data: Collection }>;
+      const freshRows = await jsonRequest<Array<{ data: Collection }>>('/api/studio');
       for (const row of chosen) {
         const fresh = freshRows.find(item => item.data.id === row.collection.id)?.data;
         if (!fresh) throw new Error('Collection no longer exists: ' + row.collection.name);
