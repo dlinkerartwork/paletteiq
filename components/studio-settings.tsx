@@ -8,7 +8,7 @@ export type SeoPromptSettings = Record<SeoPromptKey, string>;
 export const defaultSeoPrompts: SeoPromptSettings = { general: '', title: '', description: '', tags: '', primaryKeyword: '', secondaryKeywords: '', longTailKeywords: '', categorySuggestion: '', attributes: '', materials: '', imageAltTexts: '', photoPlan: '', priceSuggestion: '', sku: '', digitalFiles: '', licenseNotes: '' };
 
 export type StudioPreferences = {
-  target: number; model: string; quality: string; analysisModel: string; output: string; background: string; variations: number; defaultStyle: string; autoSave: boolean; seoProvider: 'openai' | 'gemini'; seoGeminiModel: 'gemini-flash-latest' | 'gemini-2.5-flash-lite' | 'gemini-2.5-flash'; seoTitleMaxLength: number; seoAltTextCount: number; seoFileNaming: 'generaltheme_imagenumber'; seoPrompts: SeoPromptSettings;
+  target: number; model: string; quality: string; analysisModel: string; output: string; background: string; variations: number; defaultStyle: string; autoSave: boolean; seoProvider: 'openai' | 'gemini'; seoGeminiModel: string; seoTitleMaxLength: number; seoAltTextCount: number; seoFileNaming: 'generaltheme_imagenumber'; seoPrompts: SeoPromptSettings;
 };
 export const defaultPrefs: StudioPreferences = { target: 120, model: 'gpt-image-1-mini', quality: 'low', analysisModel: 'gpt-4.1-mini', output: 'png', background: 'transparent', variations: 1, defaultStyle: 'Soft hand-painted watercolor illustration', autoSave: false, seoProvider: 'openai', seoGeminiModel: 'gemini-flash-latest', seoTitleMaxLength: 120, seoAltTextCount: 10, seoFileNaming: 'generaltheme_imagenumber', seoPrompts: { ...defaultSeoPrompts } };
 type Props = { preferences: StudioPreferences; onPreferences: (prefs: StudioPreferences) => void; projects: unknown[]; onImport: (data: { projects: unknown[]; preferences: StudioPreferences }) => Promise<void> };
@@ -32,8 +32,20 @@ export default function StudioSettings({ preferences, onPreferences, projects, o
   const [visible, setVisible] = useState({ etsy: false, openai: false, gemini: false });
   const [active, setActive] = useState('');
   const [message, setMessage] = useState('');
+  const [geminiModels, setGeminiModels] = useState<Array<{ id: string; name: string }>>([]);
+  const [modelsError, setModelsError] = useState('');
   const picker = useRef<HTMLInputElement>(null);
   useEffect(() => { fetch('/api/settings').then(readSettingsResponse).then(data => setCredentials(data.credentials)).catch(e => setMessage(e instanceof Error ? e.message : String(e))); }, []);
+  const loadGeminiModels = async () => {
+    setModelsError('');
+    try {
+      const response = await fetch('/api/settings?models=gemini');
+      const data = await response.json() as { models?: Array<{ id: string; name: string }>; error?: string };
+      if (!response.ok) throw new Error(data.error || 'Unable to fetch Gemini models');
+      setGeminiModels(data.models || []);
+    } catch (error) { setModelsError(error instanceof Error ? error.message : String(error)); }
+  };
+  useEffect(() => { if (credentials.gemini) void loadGeminiModels(); }, [credentials.gemini]);
   const edit = (key: keyof StudioPreferences, value: string | number | boolean) => onPreferences({ ...preferences, [key]: value });
   const act = async (action: string, op: () => Promise<unknown>) => { setActive(action); setMessage(''); try { await op(); setMessage('Saved successfully.'); } catch (e) { setMessage(e instanceof Error ? e.message : String(e)); } finally { setActive(''); } };
   const saveKey = (provider: 'etsy' | 'openai' | 'gemini', remove = false) => act(provider, async () => { const response = await request({ action: 'credential', provider, ...(remove ? { remove: true } : { key: secrets[provider] }) }); setCredentials(response.credentials); setSecrets(s => ({ ...s, [provider]: '' })); });
@@ -81,7 +93,7 @@ export default function StudioSettings({ preferences, onPreferences, projects, o
     <section className="panel settings-panel settings-wide settings-seo"><div className="settings-header"><div className="heading-icon violet"><Settings2 size={21}/></div><div><h2>SEO generation settings & custom prompts</h2><p>Instructions below are included when generating the Etsy listing draft and running Advanced SEO Intelligence. Leave fields blank to use built-in guidance.</p></div></div>
       <div className="settings-fields seo-generation-options">
         <div><label className="input-label">SEO AI PROVIDER</label><select value={preferences.seoProvider ?? 'openai'} onChange={e => edit('seoProvider', e.target.value)}><option value="openai">OpenAI</option><option value="gemini">Google Gemini</option></select><p className="sub">Only SEO draft and AI SEO review use this provider; image generation is unchanged.</p></div>
-        <div><label className="input-label">GEMINI SEO MODEL</label><select value={preferences.seoGeminiModel ?? 'gemini-flash-latest'} onChange={e => edit('seoGeminiModel', e.target.value)} disabled={preferences.seoProvider !== 'gemini'}><option value="gemini-flash-latest">Gemini Flash (latest)</option><option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite (fast, if accessible)</option><option value="gemini-2.5-flash">Gemini 2.5 Flash (if accessible)</option></select><p className="sub">Model availability depends on your Gemini API project. Flash-Lite prioritizes speed; verify SEO quality before publishing.</p></div>
+        <div><label className="input-label">GEMINI SEO MODEL</label><select value={preferences.seoGeminiModel ?? 'gemini-flash-latest'} onChange={e => edit('seoGeminiModel', e.target.value)} disabled={preferences.seoProvider !== 'gemini'}>{!geminiModels.some(m => m.id === (preferences.seoGeminiModel ?? 'gemini-flash-latest')) && <option value={preferences.seoGeminiModel ?? 'gemini-flash-latest'}>{preferences.seoGeminiModel ?? 'gemini-flash-latest'} (saved model)</option>}{geminiModels.map(m => <option key={m.id} value={m.id}>{m.name} ({m.id})</option>)}</select><button type="button" onClick={() => void loadGeminiModels()} disabled={preferences.seoProvider !== 'gemini'}>Refresh Gemini models</button><p className="sub">{modelsError || 'Model list is fetched from your Gemini API key. Model availability depends on the account.'}</p></div>
         <div><label className="input-label">TITLE MAX CHARACTERS (1–140)</label><input type="number" min={1} max={140} value={preferences.seoTitleMaxLength ?? 120} onChange={e => edit('seoTitleMaxLength', Number(e.target.value))}/><p className="sub">Default: 120 characters.</p></div>
         <div><label className="input-label">NUMBER OF IMAGE ALT TEXTS (1–20)</label><input type="number" min={1} max={20} value={preferences.seoAltTextCount ?? 10} onChange={e => edit('seoAltTextCount', Number(e.target.value))}/><p className="sub">Maximum 450 characters per alt text.</p></div>
         <div><label className="input-label">IMAGE FILE NAMING</label><input readOnly value="generaltheme_imagenumber" /><p className="sub">Example: flowers_blossoms_001.png. Applied to ZIP image exports.</p></div>
