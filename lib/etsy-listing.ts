@@ -58,3 +58,13 @@ export function ensurePrimaryKeywordOpening(draft: EtsyListingDraft): EtsyListin
   const opening = `Explore this ${keyword} collection. `;
   return { ...draft, description: (opening + draft.description.trim()).slice(0, 12000) };
 }
+
+/** Apply saved Etsy SEO output limits after normalizing either AI provider's JSON. */
+export function applySeoLimits(draft: EtsyListingDraft, maxTitleCharacters: number, altTextCount: number): EtsyListingDraft {
+  const titleLimit = Math.min(140, Math.max(1, Math.trunc(maxTitleCharacters) || 120));
+  const count = Math.min(20, Math.max(1, Math.trunc(altTextCount) || 10));
+  const title = draft.title.length > titleLimit
+    ? draft.title.slice(0, titleLimit).replace(/\s+\S*$/, '').trim() || draft.title.slice(0, titleLimit)
+    : draft.title;
+  return { ...draft, title, imageAltTexts: draft.imageAltTexts.slice(0, count).map(text => text.slice(0, 450).trim()) };
+}
