@@ -290,3 +290,5 @@ h1,h2,.stat strong,.step b,.source-card strong,.asset-meta b { color:#302721; }
 .similarity-note small { display:block; margin-top:4px; line-height:1.35; }
 .similarity-clear { background:#eaf7ef; color:#226c40; }
 .similarity-needs_review { background:#fff0e9; color:#a64016; border:1px solid #f1b69e; }
+
+.collection-downloaded-badge{display:inline-flex;align-items:center;gap:5px;width:max-content;border-radius:999px;padding:4px 9px;margin:6px 0;background:#e8f7ee;color:#17663b;font-size:11px;font-weight:700;border:1px solid #b4e0c2}
