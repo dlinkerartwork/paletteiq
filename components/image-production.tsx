@@ -23,6 +23,17 @@ async function request<T = unknown>(url: string, options?: RequestInit): Promise
 export default function ImageProduction({ project, model, quality, onModel, onQuality, onDownloaded, onAsset }: Props) {
   const [mode, setMode] = useState<'single' | 'batch'>('batch');
   const [batchModel, setBatchModel] = useState('gpt-image-2.5-flare');
+  const [imageModels, setImageModels] = useState<Array<{ id: string; name: string; batchSupported: boolean }>>([]);
+  const [imageModelError, setImageModelError] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    void fetch('/api/settings?models=openai').then(async response => {
+      const body = await response.json() as { models?: Array<{ id: string; name: string; batchSupported: boolean }>; error?: string };
+      if (!response.ok) throw new Error(body.error || 'Could not load image models');
+      if (!cancelled) setImageModels(body.models || []);
+    }).catch(error => { if (!cancelled) setImageModelError(error instanceof Error ? error.message : String(error)); });
+    return () => { cancelled = true; };
+  }, []);
   const [singleId, setSingleId] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -146,7 +157,7 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
       <div className="image-download-actions"><button className="outline-btn" disabled={working} onClick={() => void recoverImages()}><RefreshCw size={14}/> Recover images</button><button type="button" className="outline-btn" onClick={toggleSound} aria-label="Toggle generation sound alerts">{soundEnabled ? '🔊 Sound alerts on' : '🔇 Sound alerts off'}</button></div>
       {creditAlert && <div className="notice production-notice" role="alert"><CircleAlert size={16}/><strong>{creditAlert}</strong><button type="button" onClick={() => setCreditAlert('')}>Dismiss</button></div>}
       <div className="production-controls">
-        <div><label className="input-label">{mode === 'single' ? 'IMAGE MODEL' : 'BATCH IMAGE MODEL'}</label>{mode === 'single' ? <select value={model} onChange={e => onModel(e.target.value)}><option value="gpt-image-1-mini">GPT Image 1 Mini</option><option value="gpt-image-1">GPT Image 1</option><option value="gpt-image-1.5">GPT Image 1.5</option><option value="gpt-image-2.5-flare">GPT Image 2.5 Flare</option><option value="gpt-image-2.5-sunburst">GPT Image 2.5 Sunburst</option></select> : <select value={batchModel} onChange={e => setBatchModel(e.target.value)}><option value="gpt-image-2.5-flare">GPT Image 2.5 Flare</option><option value="gpt-image-2.5-sunburst">GPT Image 2.5 Sunburst</option></select>}</div>
+        <div><label className="input-label">{mode === 'single' ? 'IMAGE MODEL' : 'BATCH IMAGE MODEL'}</label>{mode === 'single' ? <select value={model} onChange={e => onModel(e.target.value)}>{!imageModels.some(m => m.id === model) && <option value={model}>{model} (saved model)</option>}{imageModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select> : <select value={batchModel} onChange={e => setBatchModel(e.target.value)}>{!imageModels.some(m => m.id === batchModel && m.batchSupported) && <option value={batchModel}>{batchModel} (saved batch model)</option>}{imageModels.filter(m => m.batchSupported).map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select>}{imageModelError && <p className="sub">{imageModelError}</p>}}</div>
         <div><label className="input-label">QUALITY</label><select value={quality} onChange={e => onQuality(e.target.value)}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></div>
         {mode === 'single' && <div className="character-choice"><label className="input-label">CHOOSE NEVER-GENERATED CHARACTER</label><select value={chosenSingle?.id ?? ''} onChange={e => setSingleId(e.target.value)}><option value="" disabled>Select a character...</option>{eligible.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>}
         <button className="primary-btn" disabled={working || downloading || (mode === 'single' ? !chosenSingle : !selectedBatchIds.length || selectedBatchIds.length > 120)} onClick={() => mode === 'single' ? void generateSingle() : void submitBatch()}>{working ? <LoaderCircle size={17} className="spin"/> : <Sparkles size={17}/>} {mode === 'single' ? 'Generate single image' : `Submit ${selectedBatchIds.length} new prompts to Batch`}</button>
