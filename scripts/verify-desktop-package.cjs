@@ -1,4 +1,4 @@
-const { cpSync, existsSync, lstatSync, realpathSync, statSync } = require('node:fs');
+const { cpSync, existsSync, lstatSync, realpathSync, statSync, readFileSync } = require('node:fs');
 const path = require('node:path');
 
 // electron-builder excludes node_modules from some extraResources file matching
@@ -19,9 +19,14 @@ module.exports = async function verifyDesktopPackage(context) {
   console.log('Copying standalone desktop dependencies into win-unpacked...');
   cpSync(stagingDependencies, packagedDependencies, { recursive: true, dereference: true, force: true });
 
+  const modeFile = path.join(runtime, 'license-mode.json');
+  if (!existsSync(modeFile)) throw new Error('Desktop package is missing its license mode.');
+  const mode = JSON.parse(readFileSync(modeFile, 'utf8')).mode;
+  if (!['required', 'disabled'].includes(mode)) throw new Error('Desktop package has invalid license mode.');
   const required = [
     'node/node.exe',
-    'license-public.pem',
+    'license-mode.json',
+    ...(mode === 'required' ? ['license-public.pem'] : []),
     'dist/server/index.js',
     'dist/server/wrangler.json',
     'node_modules/wrangler/bin/wrangler.js',
