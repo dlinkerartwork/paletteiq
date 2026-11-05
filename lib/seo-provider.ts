@@ -6,13 +6,14 @@ import { userCredential } from '@/lib/credentials';
 
 export type SeoGenerationPreferences = {
   seoProvider: 'openai' | 'gemini';
+  seoGeminiModel: 'gemini-flash-latest' | 'gemini-2.5-flash-lite' | 'gemini-2.5-flash';
   seoTitleMaxLength: number;
   seoAltTextCount: number;
   seoFileNaming: 'generaltheme_imagenumber';
 };
 
 const defaults: SeoGenerationPreferences = {
-  seoProvider: 'openai', seoTitleMaxLength: 120,
+  seoProvider: 'openai', seoGeminiModel: 'gemini-flash-latest', seoTitleMaxLength: 120,
   seoAltTextCount: 10, seoFileNaming: 'generaltheme_imagenumber',
 };
 const secret = (key: string) => (env as unknown as Record<string, string | undefined>)[key];
@@ -23,13 +24,14 @@ export async function seoPreferences(owner: string): Promise<SeoGenerationPrefer
   try { stored = rows[0]?.preferences ? JSON.parse(rows[0].preferences) : {}; } catch { /* Legacy defaults. */ }
   return {
     seoProvider: stored.seoProvider === 'gemini' ? 'gemini' : 'openai',
+    seoGeminiModel: stored.seoGeminiModel === 'gemini-2.5-flash-lite' || stored.seoGeminiModel === 'gemini-2.5-flash' ? stored.seoGeminiModel : 'gemini-flash-latest',
     seoTitleMaxLength: typeof stored.seoTitleMaxLength === 'number' && Number.isInteger(stored.seoTitleMaxLength) && Number(stored.seoTitleMaxLength) >= 1 && Number(stored.seoTitleMaxLength) <= 140 ? Number(stored.seoTitleMaxLength) : defaults.seoTitleMaxLength,
     seoAltTextCount: typeof stored.seoAltTextCount === 'number' && Number.isInteger(stored.seoAltTextCount) && Number(stored.seoAltTextCount) >= 1 && Number(stored.seoAltTextCount) <= 20 ? Number(stored.seoAltTextCount) : defaults.seoAltTextCount,
     seoFileNaming: 'generaltheme_imagenumber',
   };
 }
 
-export async function generateSeoJson(owner: string, instruction: string, provider: 'openai' | 'gemini'): Promise<unknown> {
+export async function generateSeoJson(owner: string, instruction: string, provider: 'openai' | 'gemini', geminiModel = 'gemini-flash-latest'): Promise<unknown> {
   if (provider === 'openai') {
     const key = await userCredential(owner, 'openai') || secret('OPENAI_API_KEY');
     if (!key) throw new Error('Configure your OpenAI API key in Settings before generating SEO.');
@@ -45,10 +47,11 @@ export async function generateSeoJson(owner: string, instruction: string, provid
   }
   const key = await userCredential(owner, 'gemini') || secret('GEMINI_API_KEY');
   if (!key) throw new Error('Configure your Gemini API key in Settings before generating SEO.');
-  const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent', {
+  const model = ['gemini-flash-latest', 'gemini-2.5-flash-lite', 'gemini-2.5-flash'].includes(geminiModel) ? geminiModel : 'gemini-flash-latest';
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: 'POST',
     headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: instruction }] }], generationConfig: { responseMimeType: 'application/json' } }),
+    body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: instruction }] }], generationConfig: { responseMimeType: 'application/json', ...(model.startsWith('gemini-2.5-') ? { thinkingConfig: { thinkingBudget: 0 } } : {}) } }),
   });
   if (!response.ok) throw new Error(`Gemini SEO generation failed (${response.status}): ${(await response.text()).slice(0, 200)}`);
   const data = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
