@@ -33,10 +33,21 @@ export default function StudioSettings({ preferences, onPreferences, projects, o
   const [active, setActive] = useState('');
   const [message, setMessage] = useState('');
   const [geminiModels, setGeminiModels] = useState<Array<{ id: string; name: string }>>([]);
+  const [openaiImageModels, setOpenaiImageModels] = useState<Array<{ id: string; name: string }>>([]);
+  const [openaiModelsError, setOpenaiModelsError] = useState('');
   const [modelsError, setModelsError] = useState('');
   const picker = useRef<HTMLInputElement>(null);
   useEffect(() => { fetch('/api/settings').then(readSettingsResponse).then(data => setCredentials(data.credentials)).catch(e => setMessage(e instanceof Error ? e.message : String(e))); }, []);
-  const loadGeminiModels = async () => {
+  const loadOpenaiModels = async () => {
+    setOpenaiModelsError('');
+    try {
+      const response = await fetch('/api/settings?models=openai');
+      const data = await response.json() as { models?: Array<{ id: string; name: string }>; error?: string };
+      if (!response.ok) throw new Error(data.error || 'Unable to fetch OpenAI models');
+      setOpenaiImageModels(data.models || []);
+    } catch (error) { setOpenaiModelsError(error instanceof Error ? error.message : String(error)); }
+  };
+    const loadGeminiModels = async () => {
     setModelsError('');
     try {
       const response = await fetch('/api/settings?models=gemini');
@@ -46,6 +57,7 @@ export default function StudioSettings({ preferences, onPreferences, projects, o
     } catch (error) { setModelsError(error instanceof Error ? error.message : String(error)); }
   };
   useEffect(() => { if (credentials.gemini) void loadGeminiModels(); }, [credentials.gemini]);
+  useEffect(() => { if (credentials.openai) void loadOpenaiModels(); }, [credentials.openai]);
   const edit = (key: keyof StudioPreferences, value: string | number | boolean) => onPreferences({ ...preferences, [key]: value });
   const act = async (action: string, op: () => Promise<unknown>) => { setActive(action); setMessage(''); try { await op(); setMessage('Saved successfully.'); } catch (e) { setMessage(e instanceof Error ? e.message : String(e)); } finally { setActive(''); } };
   const saveKey = (provider: 'etsy' | 'openai' | 'gemini', remove = false) => act(provider, async () => { const response = await request({ action: 'credential', provider, ...(remove ? { remove: true } : { key: secrets[provider] }) }); setCredentials(response.credentials); setSecrets(s => ({ ...s, [provider]: '' })); });
@@ -81,7 +93,7 @@ export default function StudioSettings({ preferences, onPreferences, projects, o
     <section className="panel settings-panel settings-production"><div className="settings-header"><div className="heading-icon violet"><Settings2 size={21}/></div><div><h2>Production defaults</h2><p>Applied when opening the studio and creating new collections.</p></div></div><div className="settings-fields">
       <div><label className="input-label">TARGET CHARACTERS</label><input type="number" min={1} max={1000} value={preferences.target} onChange={e => edit('target', Number(e.target.value))}/></div>
       <div><label className="input-label">VARIATIONS (RESERVED FOR BULK QUEUE)</label><input type="number" min={1} max={8} value={preferences.variations} onChange={e => edit('variations', Number(e.target.value))}/></div>
-      <div><label className="input-label">IMAGE GENERATION MODEL</label><select value={preferences.model} onChange={e => edit('model', e.target.value)}><option value="gpt-image-1-mini">GPT Image 1 Mini</option><option value="gpt-image-1">GPT Image 1</option><option value="gpt-image-1.5">GPT Image 1.5</option><option value="gpt-image-2.5-flare">GPT Image 2.5 Flare</option><option value="gpt-image-2.5-sunburst">GPT Image 2.5 Sunburst</option></select></div>
+      <div><label className="input-label">IMAGE GENERATION MODEL</label><select value={preferences.model} onChange={e => edit('model', e.target.value)}>{!openaiImageModels.some(m => m.id === preferences.model) && <option value={preferences.model}>{preferences.model} (saved model)</option>}{openaiImageModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select><button type="button" onClick={() => void loadOpenaiModels()}>Refresh OpenAI image models</button><p className="sub">{openaiModelsError || "Models are fetched from OpenAI. Only GPT Image family IDs are shown; transparency requires PNG and model API support."}</p></div>
       <div><label className="input-label">DEFAULT IMAGE QUALITY</label><select value={preferences.quality} onChange={e => edit('quality', e.target.value)}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></div>
       <div><label className="input-label">IMAGE FILE FORMAT</label><select value={preferences.output} onChange={e => edit('output', e.target.value)}><option value="png">PNG</option><option value="jpg">JPG</option></select></div>
       <div><label className="input-label">BACKGROUND</label><select value={preferences.background} onChange={e => edit('background', e.target.value)}><option value="transparent">Transparent</option><option value="opaque">Opaque</option></select></div>
