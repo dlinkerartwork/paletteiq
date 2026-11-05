@@ -8,6 +8,7 @@ export const studioSettings = sqliteTable('studio_settings', {
   preferences: text('preferences').notNull().default('{}'),
   etsyCredential: text('etsy_credential'),
   openaiCredential: text('openai_credential'),
+  geminiCredential: text('gemini_credential'),
   updatedAt: integer('updated_at').notNull(),
 });
 
