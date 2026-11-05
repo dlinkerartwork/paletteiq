@@ -294,3 +294,5 @@ h1,h2,.stat strong,.step b,.source-card strong,.asset-meta b { color:#302721; }
 .collection-downloaded-badge{display:inline-flex;align-items:center;gap:5px;width:max-content;border-radius:999px;padding:4px 9px;margin:6px 0;background:#e8f7ee;color:#17663b;font-size:11px;font-weight:700;border:1px solid #b4e0c2}
 
 .production-activity-log{margin-top:24px;border-top:1px solid #e7ddd3;padding-top:20px}.production-activity-log h3{font-size:15px;font-weight:700;margin:0 0 7px}.production-activity-log .table-scroll{margin-top:12px;max-height:440px;overflow:auto}.production-activity-log td{max-width:290px;overflow-wrap:anywhere;font-size:12px}
+
+.mock-mode-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 14px;margin-bottom:12px;background:#f9f5ff;border:1px solid #cfb9ff;border-radius:12px}.mock-mode-toolbar strong{font-size:13px}.mock-mode-toolbar select{max-width:100%;min-height:36px;padding:6px;border-radius:8px;background:white;border:1px solid #cfb9ff}.mock-mode-disclaimer{padding:10px 12px;margin-bottom:16px;background:#fff0e5;color:#82420c;border-radius:8px;border:1px solid #efc2a0;font-size:12px;font-weight:600}
