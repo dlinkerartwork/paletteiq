@@ -34,3 +34,17 @@ Use three test collections, two fresh image prompts per collection (6 images tot
 - Activity Log uses the latest 20 stored jobs per collection; it is not an immutable event-by-event audit trail.
 - If the OpenAI Batch succeeds but the local database insert fails and remote cancellation cannot be confirmed, operators must inspect OpenAI Batch activity before retrying.
 - Do not merge or build a desktop installer until TypeScript, ESLint, build and controlled tests above pass.
+
+## Temporary Mock Mode (development only)
+
+1. Run `npm run dev` and open **Multi-Collection Production**.
+2. Set Generation environment to **TEST / Mock** (default in development).
+3. Select 2–3 collections containing saved prompts and choose **Simulate success**.
+4. Submit. Pending changes to In progress after about 2 seconds and Completed after about 10 seconds; no images are generated.
+5. Refresh or close/reopen the browser and confirm the Activity Log and test statuses persist in this browser.
+6. Repeat using **Simulate one failed image per batch** and **Simulate insufficient OpenAI credits**; verify the alert and sound if enabled.
+7. Confirm that no real OpenAI batches, stored image assets, or production collection data changed.
+8. Use **Clear TEST history** to repeat from scratch. This clears only browser-local mock jobs.
+9. Do not use mock results to verify actual API billing, real OpenAI Batch output, image storage or production backend recovery; those still require a small controlled live test.
+
+Mock Mode is hidden in production builds and must be removed before shipping the desktop installer. Its status is not a claim of real image production.
