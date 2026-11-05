@@ -46,3 +46,15 @@ export function listingWarnings(draft: EtsyListingDraft, imageCount: number) {
   warnings.push('Pastikan jumlah file, format, resolusi, lisensi, dan harga sesuai produk akhir sebelum dipublikasikan.');
   return warnings;
 }
+
+/**
+ * Keep the generated listing and its primary search phrase consistent.
+ * This is a deterministic fallback when the AI misses its opening-phrase instruction.
+ */
+export function ensurePrimaryKeywordOpening(draft: EtsyListingDraft): EtsyListingDraft {
+  const keyword = draft.primaryKeyword.trim().replace(/\s+/g, ' ');
+  if (!keyword || !draft.description.trim()) return draft;
+  if (draft.description.slice(0, 250).toLocaleLowerCase().includes(keyword.toLocaleLowerCase())) return draft;
+  const opening = `Explore this ${keyword} collection. `;
+  return { ...draft, description: (opening + draft.description.trim()).slice(0, 12000) };
+}
