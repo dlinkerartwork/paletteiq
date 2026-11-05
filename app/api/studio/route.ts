@@ -44,7 +44,7 @@ export async function POST(req: Request) {
   if (!user) return fail('Sign in required', 401);
   const body = await req.json() as StudioRequest;
   if (body.action === 'mark-download') {
-    if (typeof body.projectId !== 'string' || !/^[\\w-]{8,80}$/.test(body.projectId)) return fail('Invalid collection');
+    if (typeof body.projectId !== 'string' || !/^[\w-]{8,80}$/.test(body.projectId)) return fail('Invalid collection');
     const db = getDb();
     const rows = await db.select().from(projects).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId))).limit(1);
     if (!rows.length) return fail('Collection not found', 404);
