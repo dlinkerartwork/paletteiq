@@ -10,19 +10,42 @@ const assetKey = /^generated\/([\w-]{1,120})\/([0-9a-f-]{36})\.(png|jpg)$/;
 function openNativeDb(directory, migrationsDir) {
   const dbDir = path.join(directory, 'database');
   mkdirSync(dbDir, { recursive: true });
-  const database = new DatabaseSync(path.join(dbDir, 'paletteiq.db'));
-  database.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;');
-  database.exec('CREATE TABLE IF NOT EXISTS __paletteiq_migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)');
-  for (const file of ['0000_slippery_pyro.sql', '0001_big_bedlam.sql', '0002_fine_red_hulk.sql', '0003_gemini_seo.sql']) {
-    if (database.prepare('SELECT 1 FROM __paletteiq_migrations WHERE name=?').get(file)) continue;
-    database.exec('BEGIN IMMEDIATE');
-    try {
-      database.exec(readFileSync(path.join(migrationsDir, file), 'utf8'));
-      database.prepare('INSERT INTO __paletteiq_migrations (name, applied_at) VALUES (?, ?)').run(file, Date.now());
-      database.exec('COMMIT');
-    } catch (error) { database.exec('ROLLBACK'); throw error; }
+  const dbPath = path.join(dbDir, 'paletteiq.db');
+  const existingDatabase = existsSync(dbPath) && statSync(dbPath).size > 0;
+  const database = new DatabaseSync(dbPath);
+  try {
+    database.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;');
+    database.exec('CREATE TABLE IF NOT EXISTS __paletteiq_migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)');
+    const migrations = ['0000_slippery_pyro.sql', '0001_big_bedlam.sql', '0002_fine_red_hulk.sql', '0003_gemini_seo.sql'];
+    const pending = migrations.filter(file => !database.prepare('SELECT 1 FROM __paletteiq_migrations WHERE name=?').get(file));
+    if (existingDatabase && pending.length) {
+      // VACUUM INTO makes a consistent SQLite snapshot even when WAL is active.
+      // Keep this outside the data directory's live database filename and never overwrite a backup.
+      const backupDir = path.join(dbDir, 'upgrade-backups');
+      mkdirSync(backupDir, { recursive: true });
+      const backupPath = path.join(backupDir, `before-${Date.now()}-${randomUUID()}.db`);
+      database.prepare('VACUUM main INTO ?').run(backupPath);
+    }
+    for (const file of pending) {
+      database.exec('BEGIN IMMEDIATE');
+      try {
+        // A previous version may have added this column before the migration
+        // ledger was introduced. Reconcile the ledger without altering data.
+        const alreadyHasGemini = file === '0003_gemini_seo.sql'
+          && database.prepare('PRAGMA table_info(studio_settings)').all().some(column => column.name === 'gemini_credential');
+        if (!alreadyHasGemini) database.exec(readFileSync(path.join(migrationsDir, file), 'utf8'));
+        database.prepare('INSERT INTO __paletteiq_migrations (name, applied_at) VALUES (?, ?)').run(file, Date.now());
+        database.exec('COMMIT');
+      } catch (error) {
+        database.exec('ROLLBACK');
+        throw error;
+      }
+    }
+    return database;
+  } catch (error) {
+    database.close();
+    throw error;
   }
-  return database;
 }
 
 function insertLegacyRows(database, table, rows) {
