@@ -20,6 +20,9 @@ async function request<T = unknown>(url: string, options?: RequestInit): Promise
   return result;
 }
 
+// Keep the last known job progress visible immediately when switching tabs.
+const batchJobSnapshot = new Map<string, Job[]>();
+
 export default function ImageProduction({ project, model, quality, onModel, onQuality, onDownloaded, onAsset }: Props) {
   const [mode, setMode] = useState<'single' | 'batch'>('batch');
   const [batchModel, setBatchModel] = useState('gpt-image-2.5-flare');
@@ -36,7 +39,9 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
   }, []);
   const [singleId, setSingleId] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [jobs, setJobs] = useState<Job[]>([]);
+  const [jobs, setJobs] = useState<Job[]>(() => batchJobSnapshot.get(project.id) || []);
+  const [jobsLoaded, setJobsLoaded] = useState(() => batchJobSnapshot.has(project.id));
+  useEffect(() => { batchJobSnapshot.set(project.id, jobs); }, [project.id, jobs]);
   const [working, setWorking] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -78,12 +83,12 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
   useEffect(() => { const timer = window.setTimeout(() => void recoverImages(true), 0); return () => window.clearTimeout(timer); }, [recoverImages]);
   useEffect(() => {
     let closed = false;
-    const refresh = async (manual = false) => {
+    const refresh = async (manual = false, sync = true) => {
       if (syncBusy.current) { if (manual) setMessage('A refresh is already in progress.'); return; }
       syncBusy.current = true;
       setRefreshing(true);
       try {
-        const data = await request<{ jobs: Job[] }>(`/api/image-batches?projectId=${encodeURIComponent(project.id)}&sync=1`);
+        const data = await request<{ jobs: Job[] }>(`/api/image-batches?projectId=${encodeURIComponent(project.id)}&sync=${sync ? '1' : '0'}`);
         if (closed) return;
         const freshJobs = data.jobs || [];
         if (previousBatchStates.current) {
@@ -94,6 +99,7 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
         const warning = freshJobs.find(job => isOpenAICreditError(job.warning))?.warning;
         if (warning) reportCredit(warning);
         setJobs(freshJobs);
+        setJobsLoaded(true);
         // The stored collection is authoritative; historical completed jobs must not
         // overwrite a newer single or batch regeneration on the client.
         const rows = await request<Array<{ id: string; data: Project }>>(`/api/studio?projectId=${encodeURIComponent(project.id)}`);
@@ -106,9 +112,11 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
       } catch (e) { if (!closed) { setMessage(e instanceof Error ? e.message : String(e)); reportCredit(e); } }
       finally { syncBusy.current = false; if (!closed) setRefreshing(false); }
     };
-    refreshNow.current = () => refresh(true);
-    void refresh();
-    const interval = setInterval(() => void refresh(), 15000);
+    refreshNow.current = () => refresh(true, true);
+    // Read locally persisted batch status first. OpenAI polling/import must not
+    // delay rendering progress after returning to this tab.
+    void (async () => { await refresh(false, false); if (!closed) await refresh(false, true); })();
+    const interval = setInterval(() => void refresh(false, true), 15000);
     return () => { closed = true; clearInterval(interval); refreshNow.current = async () => {}; };
   }, [project.id, reportCredit]);
 
@@ -127,7 +135,7 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
   };
 
   const submitBatch = async (ids = selectedBatchIds, regenerate = false) => {
-    if (!ids.length || ids.some(id => pending.has(id))) return;
+    if (!jobsLoaded || !ids.length || ids.some(id => pending.has(id))) return;
     if (soundEnabled) primeProductionAudio();
     setWorking(true); setMessage('Submitting batches of up to 50 images to OpenAI. Keep the application open until every batch is accepted...');
     let submitted = 0;
@@ -169,13 +177,14 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
         <div><label className="input-label">{mode === 'single' ? 'IMAGE MODEL' : 'BATCH IMAGE MODEL'}</label>{mode === 'single' ? <select value={model} onChange={e => onModel(e.target.value)}>{!imageModels.some(m => m.id === model) && <option value={model}>{model} (saved model)</option>}{imageModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select> : <select value={batchModel} onChange={e => setBatchModel(e.target.value)}>{!imageModels.some(m => m.id === batchModel && m.batchSupported) && <option value={batchModel}>{batchModel} (saved batch model)</option>}{imageModels.filter(m => m.batchSupported).map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select>}{imageModelError && <p className="sub">{imageModelError}</p>}</div>
         <div><label className="input-label">QUALITY</label><select value={quality} onChange={e => onQuality(e.target.value)}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></div>
         {mode === 'single' && <div className="character-choice"><label className="input-label">CHOOSE NEVER-GENERATED CHARACTER</label><select value={chosenSingle?.id ?? ''} onChange={e => setSingleId(e.target.value)}><option value="" disabled>Select a character...</option>{eligible.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>}
-        <button className="primary-btn" disabled={working || downloading || (mode === 'single' ? !chosenSingle : !selectedBatchIds.length)} onClick={() => mode === 'single' ? void generateSingle() : void submitBatch()}>{working ? <LoaderCircle size={17} className="spin"/> : <Sparkles size={17}/>} {mode === 'single' ? 'Generate single image' : `Submit ${selectedBatchIds.length} new prompts to Batch`}</button>
+        <button className="primary-btn" disabled={working || downloading || !jobsLoaded || (mode === 'single' ? !chosenSingle : !selectedBatchIds.length)} onClick={() => mode === 'single' ? void generateSingle() : void submitBatch()}>{working ? <LoaderCircle size={17} className="spin"/> : <Sparkles size={17}/>} {mode === 'single' ? 'Generate single image' : `Submit ${selectedBatchIds.length} new prompts to Batch`}</button>
       </div>
       {mode === 'batch' && <div className="batch-selector"><div className="batch-selector-head"><div><b>New prompt submission</b><small>{eligible.length} never-generated prompts available. Selected cards limit submission to eligible prompts; otherwise all eligible prompts are submitted (automatically split into groups of 50).</small></div><button onClick={() => setSelectedIds([])}>Clear selection</button></div><p className="batch-hint"><Clock3 size={15}/> Previously generated items are never included in bulk submission. Use per-card Regenerate for an explicit rerun. Batch jobs continue after closing the browser.</p></div>}
       {message && <div className="notice production-notice"><CircleAlert size={16}/>{message}</div>}
       <div className="production-progress"><div><span>Collection images produced</span><b>{completedTotal} / {project.characters.length}</b></div><div className="progress"><i style={{ width: `${project.characters.length ? completedTotal / project.characters.length * 100 : 0}%` }}/></div></div>
       {mode === 'single' && working && <div className="single-loading"><LoaderCircle className="spin" size={16}/> Single image in progress · {singleProgress.done}/{singleProgress.total} completed</div>}
     </section>
+    {!jobsLoaded && <section className="panel batch-jobs" role="status"><LoaderCircle size={16} className="spin"/> Loading saved Batch progress…</section>}
     {jobs.length > 0 && <section className="panel batch-jobs"><div className="table-toolbar"><div><h2>OpenAI Batch jobs</h2><p>Jobs update automatically every 15 seconds when this page is open.</p></div><button type="button" className="outline-btn" disabled={refreshing} onClick={() => void refreshNow.current()}>{refreshing ? <LoaderCircle className="spin" size={17}/> : <RefreshCw size={17}/>} Refresh</button></div>{jobs.map(job => <div key={job.id} className="batch-job"><div className="batch-job-top"><div><b>{job.model}</b><small>{new Date(job.createdAt).toLocaleString()} · {job.total} requests</small></div><span className={`status ${job.status === 'completed' ? 'done' : job.status.includes('failed') ? 'error' : 'ready'}`}>{job.status.replaceAll('_',' ')}</span></div><div className="batch-job-counts"><span><CheckCircle2 size={14}/> {job.completed} processed by OpenAI</span><span><CircleAlert size={14}/> {job.failed} failed</span><span><ImageIcon size={14}/> {job.imported} imported</span></div><div className="progress"><i style={{ width: `${job.total ? Math.round((job.completed + job.failed) / job.total * 100) : 0}%` }}/></div>{job.warning && <p className="asset-error">{job.warning}</p>}</div>)}</section>}
     <section className="panel image-download-toolbar"><div><h2>Collection images</h2><p className="sub">{selectedIds.length} cards selected · {generated.length} images available · {eligible.length} prompts not yet generated</p></div><div className="image-download-actions"><button className="outline-btn" onClick={() => setSelectedIds(project.characters.map(c => c.id))}>Select all</button><button className="outline-btn" onClick={() => setSelectedIds([])}>Clear</button><button className="outline-btn" disabled={downloading || !selectedGenerated.length} onClick={() => void downloadZip('selected')}><Download size={15}/> Download selected ZIP</button><button className="outline-btn" disabled={downloading || !generated.length} onClick={() => void downloadZip('all')}><Download size={15}/> Download all ZIP</button><button className="primary-btn" title={!project.listing?.title ? 'Create and save an Etsy listing draft first.' : ''} disabled={downloading || !generated.length || !project.listing?.title} onClick={() => void downloadZip('package')}><Download size={15}/> Images + listing draft ZIP</button></div></section>
     <div className="assets-grid">{project.characters.map(c => <div className={`asset-card image-select-card ${selectedIds.includes(c.id) ? 'selected' : ''}`} key={c.id}><label className="asset-select"><input type="checkbox" aria-label={`Select ${c.name}`} checked={selectedIds.includes(c.id)} onChange={e => setSelectedIds(ids => e.target.checked ? [...ids, c.id] : ids.filter(id => id !== c.id))}/><span>Select</span></label><div className="asset-image">{c.imageUrl ? <Image unoptimized width={1024} height={1024} src={c.imageUrl} alt={c.name}/> : <ImageIcon size={36}/>}</div><div className="asset-meta"><b>{c.name}</b><span className={`status ${c.status}`}>{c.status}</span></div>{pending.has(c.id) && <p className="asset-pending">Batch pending</p>}{c.imageUrl && <div className={`similarity-note similarity-${c.similarityReview?.status || 'unverified'}`} title={c.similarityReview?.reason || 'Not checked yet'}>{c.similarityReview?.status === 'needs_review' ? `⚠ Similar to reference (${c.similarityReview.score}%) — review / regenerate` : c.similarityReview?.status === 'clear' ? `✓ AI visual review: low similarity (${c.similarityReview.score}%)` : 'Similarity not verified'}{c.similarityReview?.reason && <small>{c.similarityReview.reason}</small>}</div>}{c.error && <p className="asset-error">{c.error}</p>}<div className="asset-card-actions"><button className="outline-btn" disabled={working || pending.has(c.id) || !c.prompt} onClick={() => mode === 'single' ? void generateSingle(c) : void submitBatch([c.id], everGenerated(c))}>{working ? <LoaderCircle size={14} className="spin"/> : <Sparkles size={14}/>} {everGenerated(c) ? 'Regenerate' : 'Generate'} {mode === 'batch' ? '(Batch)' : '(Single)'}</button>{c.imageUrl && <a className="outline-btn" href={`${c.imageUrl}&download=1`} download><Download size={14}/> Download</a>}</div></div>)}</div>
