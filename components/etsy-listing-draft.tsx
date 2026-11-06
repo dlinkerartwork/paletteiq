@@ -17,7 +17,7 @@ const activeSeoRuns = new Map<string, Promise<EtsyListingDraft>>();
 const completedSeoDrafts = new Map<string, EtsyListingDraft>();
 const SEO_DONE_EVENT = 'paletteiq:seo-draft-completed';
 function notifySeoFinished(projectName: string, success: boolean) {
-  if (productionSoundEnabled() && success) playProductionSound('completed');
+  if (productionSoundEnabled()) playProductionSound(success ? 'completed' : 'error');
   if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
     try { new Notification('paletteIQ SEO Draft', { body: success ? `SEO draft ready: ${projectName}` : `SEO draft failed: ${projectName}` }); } catch { /* Browser notifications are optional. */ }
   }
@@ -28,16 +28,18 @@ export default function EtsyListingDraft({ project, onChange, onSave, onSeoRevie
   const [selectedGeminiModel, setSelectedGeminiModel] = useState(seoGeminiModel);
   const [geminiModels, setGeminiModels] = useState<Array<{ id: string; name: string }>>([]);
   const [geminiModelsError, setGeminiModelsError] = useState('');
+  const [geminiModelsLoaded, setGeminiModelsLoaded] = useState(false);
   useEffect(() => { setSelectedGeminiModel(seoGeminiModel); }, [seoGeminiModel]);
   useEffect(() => {
     if (seoProvider !== 'gemini') return;
+    setGeminiModelsLoaded(false);
     let cancelled = false;
     void (async () => {
       try {
         const response = await fetch('/api/settings?models=gemini', { cache: 'no-store' });
         const data = await response.json() as { models?: Array<{ id: string; name: string }>; error?: string };
         if (!response.ok) throw new Error(data.error || 'Unable to load Gemini models');
-        if (!cancelled) { setGeminiModels(data.models || []); setGeminiModelsError(''); }
+        if (!cancelled) { setGeminiModels(data.models || []); setGeminiModelsLoaded(true); setGeminiModelsError(''); }
       } catch (error) { if (!cancelled) setGeminiModelsError(error instanceof Error ? error.message : String(error)); }
     })();
     return () => { cancelled = true; };
@@ -74,6 +76,7 @@ export default function EtsyListingDraft({ project, onChange, onSave, onSeoRevie
   const warnings = listingWarnings(draft, produced);
   const generate = async () => {
     if (activeSeoRuns.has(project.id)) { setNotice('SEO generation is already running for this collection.'); return; }
+    if (seoProvider === 'gemini' && geminiModelsLoaded && !geminiModels.some(model => model.id === selectedGeminiModel)) { setNotice('Choose an available Gemini SEO model before generating.'); return; }
     setWorking(true); setNotice('');
     primeProductionAudio();
     if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
@@ -106,6 +109,7 @@ export default function EtsyListingDraft({ project, onChange, onSave, onSeoRevie
   };
   const copy = async (text: string) => { await navigator.clipboard.writeText(text); setNotice('Copied to clipboard.'); };
   const reviewWithAi = async () => {
+    if (seoProvider === 'gemini' && geminiModelsLoaded && !geminiModels.some(model => model.id === selectedGeminiModel)) { setNotice('Choose an available Gemini SEO model before analyzing.'); return; }
     setReviewing(true); setNotice('');
     try {
       await onSave();
@@ -128,9 +132,9 @@ export default function EtsyListingDraft({ project, onChange, onSave, onSeoRevie
   };
   const formatted = () => `TITLE\n${draft.title}\n\nDESCRIPTION\n${draft.description}\n\nTAGS\n${draft.tags.join(', ')}\n\nPRIMARY KEYWORD\n${draft.primaryKeyword}\n\nSECONDARY KEYWORDS\n${draft.secondaryKeywords.join(', ')}\n\nLONG-TAIL KEYWORDS\n${draft.longTailKeywords.join(', ')}\n\nCATEGORY SUGGESTION\n${draft.categorySuggestion}\n\nATTRIBUTES\n${JSON.stringify(draft.attributes, null, 2)}\n\nMATERIALS\n${draft.materials.join(', ')}\n\nIMAGE ALT TEXT\n${draft.imageAltTexts.join('\n')}\n\nPHOTO PLAN\n${draft.photoPlan.join('\n')}\n\nPRICE SUGGESTION\n${draft.priceSuggestion}\n\nSKU\n${draft.sku}\n\nDIGITAL FILES\n${draft.digitalFiles.join('\n')}\n\nLICENSE NOTES\n${draft.licenseNotes}`;
   return <div className="listing-workspace">
-    {seoProvider === 'gemini' && <div className="panel"><label className="input-label" htmlFor="listing-gemini-model">GEMINI SEO MODEL</label><select id="listing-gemini-model" value={selectedGeminiModel} disabled={working || reviewing} onChange={event => setSelectedGeminiModel(event.target.value)}>{!geminiModels.some(model => model.id === selectedGeminiModel) && <option value={selectedGeminiModel}>{selectedGeminiModel} (saved model)</option>}{geminiModels.map(model => <option key={model.id} value={model.id}>{model.name} ({model.id})</option>)}</select>{geminiModelsError && <p className="sub" role="alert">{geminiModelsError}</p>}<p className="sub">Choose a model for Generate, Regenerate, and Analyze SEO. The provider and custom SEO prompts remain configured in Settings.</p></div>}
+    {seoProvider === 'gemini' && <div className="panel"><label className="input-label" htmlFor="listing-gemini-model">GEMINI SEO MODEL</label><select id="listing-gemini-model" value={selectedGeminiModel} disabled={working || reviewing} onChange={event => setSelectedGeminiModel(event.target.value)}>{!geminiModelsLoaded && <option value={selectedGeminiModel}>{selectedGeminiModel} (loading saved selection)</option>}{geminiModelsLoaded && !geminiModels.some(model => model.id === selectedGeminiModel) && <option value={selectedGeminiModel} disabled>Select a supported Gemini model</option>}{geminiModels.map(model => <option key={model.id} value={model.id}>{model.name} ({model.id})</option>)}</select>{geminiModelsError && <p className="sub" role="alert">{geminiModelsError}</p>}<p className="sub">Choose a model for Generate, Regenerate, and Analyze SEO. The provider and custom SEO prompts remain configured in Settings.</p></div>}
     <div className="panel listing-hero"><div><h2>Etsy Listing Draft Studio</h2><p>Original SEO package based on this collection. Editable and saved in your collection JSON. No listing will be published to Etsy.</p></div><button className="primary-btn" disabled={working} onClick={generate}>{working ? <LoaderCircle size={16} className="spin"/> : <Sparkles size={16}/>} {draft.title ? 'Regenerate SEO draft' : 'Generate complete SEO draft'}</button></div>
-    {notice && <div className="panel listing-notice">{notice}</div>}
+    {notice && <div className="panel listing-notice" style={{ color: /failed|error|unable|invalid/i.test(notice) ? '#b42318' : '#1769c2' }}>{notice}</div>}
     <section className="panel seo-intelligence"><div className="seo-intelligence-head"><div><h2>Advanced SEO Intelligence</h2><p className="sub">Editorial draft-readiness checks — not Etsy ranking, traffic, or sales predictions.</p></div><div className="seo-score"><strong>{audit.score}<small>/100</small></strong><span>{audit.passed}/{audit.total} checks</span></div></div><div className="progress"><i style={{ width: `${audit.score}%` }}/></div><div className="seo-check-grid">{audit.checks.map(check => <div key={check.id} className={`seo-check ${check.passed ? 'passed' : 'missing'}`}><b>{check.passed ? '✓' : '!' } {check.label}</b>{!check.passed && <small>{check.fix}</small>}</div>)}</div><button className="primary-btn" disabled={reviewing || !draft.title.trim()} onClick={() => void reviewWithAi()}>{reviewing ? <LoaderCircle size={15} className="spin"/> : <Sparkles size={15}/>} {reviewing ? 'Reviewing with ' + (seoProvider === 'gemini' ? 'Gemini' : 'OpenAI') + '…' : 'Analyze SEO with ' + (seoProvider === 'gemini' ? 'Gemini' : 'OpenAI')}</button>{review && <div className="seo-review"><p className="sub">AI review {new Date(review.reviewedAt).toLocaleString()}{staleReview ? ' · Draft changed since analysis — rerun recommended' : ''}</p><p>{review.summary}</p><h3>Alternative titles</h3><div className="seo-suggestions">{review.titleAlternatives.map((title,i) => <button className="outline-btn" key={i} onClick={() => edit({ title })}>{title} <span>Apply</span></button>)}</div><h3>Suggested tags</h3><div className="seo-tag-suggestions">{review.suggestedTags.map((tag,i) => <span key={i}>{tag}</span>)}</div><button className="outline-btn" onClick={() => edit({ tags: review.suggestedTags })}>Use suggested tags</button><h3>Suggested description opening</h3><p>{review.descriptionOpening}</p><button className="outline-btn" onClick={() => edit({ description: `${review.descriptionOpening}\n\n${draft.description}` })}>Prepend opening</button><h3>Keyword gaps</h3><p>{review.keywordGaps.join(' · ') || 'No specific gaps suggested.'}</p><h3>Potential buyers</h3><p>{review.targetBuyers.join(' · ')}</p><h3>Claims to verify</h3><ul>{review.risks.map((risk,i) => <li key={i}>{risk}</li>)}</ul></div>}</section>
     <div className="listing-grid"><section className="panel"><h2>Listing copy</h2><p className="sub">Natural keyword-rich copy for an English-language digital listing.</p>
       <label className="input-label">TITLE · {draft.title.length}/{seoTitleMaxLength} CHARACTERS</label><textarea rows={3} maxLength={seoTitleMaxLength} value={draft.title} onChange={e => edit({ title: e.target.value })}/><button className="outline-btn listing-copy" onClick={() => copy(draft.title)}><Copy size={14}/> Copy title</button>
