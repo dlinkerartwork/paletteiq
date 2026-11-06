@@ -9,6 +9,7 @@
   "scripts": {
     "desktop:dev": "npm run build && electron .",
     "desktop:package:win": "npm run build && node scripts/prepare-desktop-bundle.mjs && node scripts/prepare-brand-icon.mjs && electron-builder --win nsis --x64 --publish never",
+    "desktop:package:win:no-license": "npm run build && node scripts/prepare-desktop-bundle.mjs --no-license && node scripts/prepare-brand-icon.mjs && electron-builder --config electron-builder.no-license.yml --win nsis --x64 --publish never",
     "desktop:unpacked:win": "npm run build && node scripts/prepare-desktop-bundle.mjs && node scripts/prepare-brand-icon.mjs && electron-builder --win dir --x64 --publish never",
     "install:ci": "npx --yes pnpm@11.25.0 install --frozen-lockfile",
     "dev": "node scripts/run-framework.mjs dev",
