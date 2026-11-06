@@ -115,6 +115,9 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
   const changedIds = new Set<string>();
   const isTerminal = ['completed', 'expired', 'cancelled', 'failed'].includes(batch.status);
   const bucket = nativeAssetBucket() ?? env.BUCKET;
+  // Never mark a terminal Batch as imported when its image storage is offline.
+  // Leave its item records pending so the next recovery attempt can succeed.
+  if (isTerminal && !bucket) throw new Error('Batch recovery paused: image storage is unavailable. Retry when storage is restored.');
   if (isTerminal && bucket) {
     let handled = 0;
     let interrupted = false;
