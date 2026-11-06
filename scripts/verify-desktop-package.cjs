@@ -21,11 +21,12 @@ module.exports = async function verifyDesktopPackage(context) {
 
   const required = [
     'node/node.exe',
-    'license-public.pem',
     'dist/server/index.js',
     'dist/server/wrangler.json',
     'node_modules/wrangler/bin/wrangler.js',
   ];
+  const edition = context.packager.config?.extraMetadata?.paletteiqEdition;
+  if (edition !== 'unlicensed') required.push('license-public.pem');
   const base = realpathSync(runtime) + path.sep;
   for (const relative of required) {
     const file = path.join(runtime, relative);
