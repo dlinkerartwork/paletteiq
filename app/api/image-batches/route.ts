@@ -10,6 +10,7 @@ import { reviewImageSimilarity, type SimilarityReview } from '@/lib/similarity-r
 import { nativeAssetBucket } from '@/lib/native-bridge';
 import { acquireProductionLocks } from '@/lib/production-locks';
 import { mergeNewBatchResults } from '@/lib/batch-recovery';
+import { batchAssetKey, batchAssetUrl } from '@/lib/batch-assets';
 
 const MODELS = ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
 const syncingJobIds = new Set<string>();
@@ -128,8 +129,8 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
         const b64 = record.response?.body?.data?.[0]?.b64_json as string | undefined;
         if (b64) {
           const extension = job.format === 'jpeg' ? 'jpg' : 'png';
-          await bucket.put(`generated/${owner}/${record.custom_id}.${extension}`, Uint8Array.from(atob(b64), c => c.charCodeAt(0)), { httpMetadata: { contentType: extension === 'jpg' ? 'image/jpeg' : 'image/png' } });
-          item.status = 'done'; item.imageUrl = `/api/images/${record.custom_id}?format=${extension}&v=${Date.now()}`;
+          await bucket.put(batchAssetKey(owner, record.custom_id!, extension, job.id), Uint8Array.from(atob(b64), c => c.charCodeAt(0)), { httpMetadata: { contentType: extension === 'jpg' ? 'image/jpeg' : 'image/png' } });
+          item.status = 'done'; item.imageUrl = batchAssetUrl(record.custom_id!, extension, job.id);
           item.similarityReview = await reviewImageSimilarity(key, b64, extension === 'jpg' ? 'image/jpeg' : 'image/png', references);
         } else { item.status = 'error'; item.error = String(record.error?.message || record.response?.body?.error?.message || 'Batch item failed').slice(0, 260); }
         changedIds.add(item.id);
