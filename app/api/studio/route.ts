@@ -137,6 +137,12 @@ export async function POST(req: Request) {
   }
   if (body.action === 'listing-draft') {
     const seoConfig = await seoPreferences(user.userId);
+    // Optional per-run selection from Etsy Listing Draft; all other SEO preferences
+    // and custom instructions still come from the saved Settings record.
+    if (body.seoGeminiModel !== undefined && seoConfig.seoProvider === 'gemini') {
+      if (typeof body.seoGeminiModel !== 'string' || !/^gemini-[a-z0-9.-]{1,80}$/.test(body.seoGeminiModel)) return fail('Invalid Gemini SEO model');
+      seoConfig.seoGeminiModel = body.seoGeminiModel;
+    }
     const project = body.project;
     if (!project || typeof project !== 'object' || typeof project.id !== 'string' || typeof project.name !== 'string' || !Array.isArray(project.characters)) return fail('Invalid collection');
     const subjects = project.characters.slice(0, 200).filter(c => c && typeof c.name === 'string').map(c => ({ name: String(c.name).slice(0, 100), produced: c.status === 'done' }));
@@ -162,6 +168,12 @@ export async function POST(req: Request) {
   }
   if (body.action === 'seo-review') {
     const seoConfig = await seoPreferences(user.userId);
+    // Optional per-run selection from Etsy Listing Draft; all other SEO preferences
+    // and custom instructions still come from the saved Settings record.
+    if (body.seoGeminiModel !== undefined && seoConfig.seoProvider === 'gemini') {
+      if (typeof body.seoGeminiModel !== 'string' || !/^gemini-[a-z0-9.-]{1,80}$/.test(body.seoGeminiModel)) return fail('Invalid Gemini SEO model');
+      seoConfig.seoGeminiModel = body.seoGeminiModel;
+    }
     if (!body.draft || typeof body.draft !== 'object' || typeof body.projectId !== 'string') return fail('Invalid SEO review request');
     const saved = await getDb().select().from(projects).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId))).limit(1);
     if (!saved.length) return fail('Save this collection before requesting SEO review.', 404);
