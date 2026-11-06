@@ -29,10 +29,9 @@ export default function EtsyListingDraft({ project, onChange, onSave, onSeoRevie
   const [geminiModels, setGeminiModels] = useState<Array<{ id: string; name: string }>>([]);
   const [geminiModelsError, setGeminiModelsError] = useState('');
   const [geminiModelsLoaded, setGeminiModelsLoaded] = useState(false);
-  useEffect(() => { setSelectedGeminiModel(seoGeminiModel); }, [seoGeminiModel]);
+  // The Settings default changes via props; preserve an explicit user selection until this component is remounted.
   useEffect(() => {
     if (seoProvider !== 'gemini') return;
-    setGeminiModelsLoaded(false);
     let cancelled = false;
     void (async () => {
       try {
@@ -44,14 +43,19 @@ export default function EtsyListingDraft({ project, onChange, onSave, onSeoRevie
     })();
     return () => { cancelled = true; };
   }, [seoProvider]);
+  const [notice, setNotice] = useState('');
   useEffect(() => {
-    setWorking(activeSeoRuns.has(project.id));
-    const completed = completedSeoDrafts.get(project.id);
-    if (completed) {
-      completedSeoDrafts.delete(project.id);
-      onChange(normalizeListing(completed));
-      setNotice('SEO draft completed while you were away and was saved.');
-    }
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setWorking(activeSeoRuns.has(project.id));
+      const completed = completedSeoDrafts.get(project.id);
+      if (completed) {
+        completedSeoDrafts.delete(project.id);
+        onChange(normalizeListing(completed));
+        setNotice('SEO draft completed while you were away and was saved.');
+      }
+    });
     const onDone = (event: Event) => {
       const detail = (event as CustomEvent<SeoDone>).detail;
       if (detail.projectId !== project.id) return;
@@ -60,9 +64,8 @@ export default function EtsyListingDraft({ project, onChange, onSave, onSeoRevie
       else setNotice(detail.error || 'SEO draft failed.');
     };
     window.addEventListener(SEO_DONE_EVENT, onDone);
-    return () => window.removeEventListener(SEO_DONE_EVENT, onDone);
+    return () => { cancelled = true; window.removeEventListener(SEO_DONE_EVENT, onDone); };
   }, [project.id, onChange]);
-  const [notice, setNotice] = useState('');
   const [exporting, setExporting] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const draft = project.listing ?? normalizeListing({});
