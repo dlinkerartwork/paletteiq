@@ -339,6 +339,7 @@ h1,h2,.stat strong,.step b,.source-card strong,.asset-meta b { color:#302721; }
   border-bottom: 1px solid #eadfd7;
 }
 .production-activity-table td {
+  max-width: none;
   padding: 12px 14px;
   border-bottom: 1px solid #eee8e3;
   overflow-wrap: anywhere;
