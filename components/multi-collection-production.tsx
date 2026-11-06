@@ -5,7 +5,7 @@ import { CheckCircle2, CircleAlert, LoaderCircle, RefreshCw, Sparkles } from 'lu
 import TablePagination from '@/components/table-pagination';
 import { eligibleForBulk, retryableFailedImage, isActiveBatchStatus } from '@/lib/production-rules';
 import { isOpenAICreditError, primeProductionAudio, useProductionSounds } from '@/lib/production-sounds';
-import { MOCK_STORAGE_KEY, inspectMockStorage, mockEligibleIds, mockRetryableIds, mockOutcomeCounts, writeMockJobs, type MockJob, type MockScenario } from '@/lib/mock-production';
+import { inspectMockStorage, mockEligibleIds, mockRetryableIds, mockOutcomeCounts, writeMockJobs, type MockJob, type MockScenario } from '@/lib/mock-production';
 
 type Character = { id: string; name: string; prompt: string; status: string; imageUrl?: string };
 type Collection = { id: string; name: string; characters: Character[] };
@@ -21,8 +21,8 @@ async function jsonRequest<T = unknown>(url: string, options?: RequestInit): Pro
 
 export default function MultiCollectionProduction({ onGeneratePrompts }: { onGeneratePrompts: (collectionId: string) => void }) {
   const [collections, setCollections] = useState<Collection[]>([]);
-  const [environment, setEnvironment] = useState<'mock' | 'live'>(process.env.NODE_ENV === 'production' ? 'live' : 'mock');
-  const [mockScenario, setMockScenario] = useState<MockScenario>('success');
+  const [environment] = useState<'mock' | 'live'>('live');
+  const [mockScenario] = useState<MockScenario>('success');
   const [mockJobs, setMockJobs] = useState<MockJob[]>([]);
   const previousMockStates = useRef<Map<string, string> | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
@@ -277,22 +277,6 @@ export default function MultiCollectionProduction({ onGeneratePrompts }: { onGen
   };
 
   return <div className="panel">
-    {process.env.NODE_ENV !== 'production' && <div className="mock-mode-toolbar">
-      <strong>Generation environment</strong>
-      <select aria-label="Generation environment" value={environment} disabled={working} onChange={e => { setEnvironment(e.target.value as 'mock' | 'live'); setActivityPage(1); setSelected([]); setMessage(''); setCreditAlert(''); }}>
-        <option value="mock">TEST / Mock — no OpenAI charges</option>
-        <option value="live">LIVE — real OpenAI API requests</option>
-      </select>
-      {environment === 'mock' && <>
-        <select aria-label="Simulation scenario" value={mockScenario} onChange={e => setMockScenario(e.target.value as MockScenario)}>
-          <option value="success">Simulate success</option>
-          <option value="partial_failure">Simulate one failed image per batch</option>
-          <option value="quota_error">Simulate insufficient OpenAI credits</option>
-        </select>
-        <button className="outline-btn" type="button" disabled={working} onClick={() => { window.localStorage.removeItem(MOCK_STORAGE_KEY); setMockJobs([]); previousMockStates.current = null; setCreditAlert(''); setMessage('TEST MODE history cleared. Live collections and images were not changed.'); }}>Clear TEST history</button>
-      </>}
-    </div>}
-    {environment === 'mock' && <p className="mock-mode-disclaimer" role="status">TEST MODE — simulated jobs stay in this browser only. No OpenAI requests, real image files, or production database updates. This mode is temporary and unavailable in production builds.</p>}
     <div className="table-toolbar">
       <div><h2>Multi-Collection Production</h2><p>Each collection gets its own saved Batch jobs and image assets. Previously generated prompts are excluded.</p></div>
       <div className="image-download-actions"><button type="button" className="outline-btn" disabled={refreshing || working} onClick={() => void reload(true)}>{refreshing ? <LoaderCircle className="spin" size={16}/> : <RefreshCw size={16}/>} Refresh</button><button type="button" className="outline-btn" onClick={toggleSound}>{soundEnabled ? '🔊 Sound alerts on' : '🔇 Sound alerts off'}</button></div>
