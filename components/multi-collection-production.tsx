@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, CircleAlert, LoaderCircle, RefreshCw, Sparkles } from 'lucide-react';
+import TablePagination from '@/components/table-pagination';
 import { eligibleForBulk, retryableFailedImage, isActiveBatchStatus } from '@/lib/production-rules';
 import { isOpenAICreditError, primeProductionAudio, useProductionSounds } from '@/lib/production-sounds';
 import { MOCK_STORAGE_KEY, inspectMockStorage, mockEligibleIds, mockRetryableIds, mockOutcomeCounts, writeMockJobs, type MockJob, type MockScenario } from '@/lib/mock-production';
@@ -26,6 +27,14 @@ export default function MultiCollectionProduction({ onGeneratePrompts }: { onGen
   const previousMockStates = useRef<Map<string, string> | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [search, setSearch] = useState('');
+  const [collectionPage, setCollectionPage] = useState(1);
+  const [collectionPageSize, setCollectionPageSize] = useState(25);
+  const [activityPage, setActivityPage] = useState(1);
+  const [activityPageSize, setActivityPageSize] = useState(25);
+  const [activityRefresh, setActivityRefresh] = useState(0);
+  const [liveActivity, setLiveActivity] = useState<Array<{ collection: string; job: Job }>>([]);
+  const [liveActivityTotal, setLiveActivityTotal] = useState(0);
+  const [activityError, setActivityError] = useState('');
   const [model, setModel] = useState('gpt-image-2.5-flare');
   const [batchImageModels, setBatchImageModels] = useState<Array<{ id: string; name: string }>>([]);
   const [imageModelError, setImageModelError] = useState('');
@@ -110,6 +119,7 @@ export default function MultiCollectionProduction({ onGeneratePrompts }: { onGen
       previousStates.current = nextStates;
       jobsRef.current = incomingJobs;
       setJobs(incomingJobs);
+      setActivityRefresh(version => version + 1);
       if (errors.length) setMessage('Some collections could not refresh: ' + errors.slice(0, 3).join(' | '));
       else if (sync) setMessage('Batch status and collection images refreshed.');
     } catch (error) {
@@ -146,10 +156,35 @@ export default function MultiCollectionProduction({ onGeneratePrompts }: { onGen
     return { collection, eligible, retryable, successful, failed, pendingCount, missingPrompts, incomplete, simulated, jobs: environment === 'mock' ? mockJobs.filter(j => j.projectId === collection.id) as Job[] : jobs[collection.id] || [] };
   }), [collections, jobs, environment, mockJobs]);
   const visible = rows.filter(row => row.collection.name.toLowerCase().includes(search.trim().toLowerCase()));
+  const totalCollectionPages = Math.max(1, Math.ceil(visible.length / collectionPageSize));
+  const currentCollectionPage = Math.min(collectionPage, totalCollectionPages);
+  const pagedCollections = visible.slice((currentCollectionPage - 1) * collectionPageSize, currentCollectionPage * collectionPageSize);
+  useEffect(() => { setCollectionPage(1); }, [search, collectionPageSize]);
   const chosen = rows.filter(row => selected.includes(row.collection.id));
   const requestCount = chosen.reduce((sum, row) => sum + row.eligible.length, 0);
   const retryCount = chosen.reduce((sum, row) => sum + row.retryable.length, 0);
-  const activity = rows.flatMap(row => row.jobs.map(job => ({ collection: row.collection.name, job }))).sort((a, b) => b.job.createdAt - a.job.createdAt).slice(0, 30);
+  const mockActivity = rows.flatMap(row => row.jobs.map(job => ({ collection: row.collection.name, job }))).sort((a, b) => b.job.createdAt - a.job.createdAt);
+  const mockTotalPages = Math.max(1, Math.ceil(mockActivity.length / activityPageSize));
+  const currentMockActivityPage = Math.min(activityPage, mockTotalPages);
+  const activity = environment === 'mock'
+    ? mockActivity.slice((currentMockActivityPage - 1) * activityPageSize, currentMockActivityPage * activityPageSize)
+    : liveActivity;
+  const activityTotal = environment === 'mock' ? mockActivity.length : liveActivityTotal;
+  const currentActivityPage = Math.min(activityPage, Math.max(1, Math.ceil(activityTotal / activityPageSize)));
+  useEffect(() => {
+    if (environment !== 'live') return;
+    let cancelled = false;
+    void jsonRequest<{ activities: Array<{ collection: string; job: Job }>; total: number }>(
+      '/api/image-batches?activity=1&limit=' + activityPageSize + '&offset=' + ((activityPage - 1) * activityPageSize)
+    ).then(result => {
+      if (cancelled) return;
+      setLiveActivity(result.activities || []);
+      setLiveActivityTotal(result.total);
+      setActivityError('');
+    }).catch(error => { if (!cancelled) setActivityError(error instanceof Error ? error.message : String(error)); });
+    return () => { cancelled = true; };
+  }, [environment, activityPage, activityPageSize, activityRefresh]);
+  useEffect(() => { setActivityPage(1); }, [environment, activityPageSize]);
 
   const submit = async (kind: 'new' | 'retry' = 'new') => {
     if (working || !(kind === 'retry' ? retryCount : requestCount)) return;
@@ -280,7 +315,7 @@ export default function MultiCollectionProduction({ onGeneratePrompts }: { onGen
     {message && <div className="notice"><CircleAlert size={16}/>{message}</div>}
     {working && <div className="production-progress"><span>Batch submission</span><b>{progress.submitted}/{progress.total}</b><div className="progress"><i style={{ width: (progress.total ? progress.submitted / progress.total * 100 : 0) + '%' }}/></div></div>}
     <div className="table-scroll" style={{ overflowX: 'auto' }}><table style={{ tableLayout: 'fixed', minWidth: 1120, width: '100%' }}><colgroup><col style={{ width: 60 }}/><col style={{ width: 350 }}/><col style={{ width: 100 }}/><col style={{ width: 120 }}/><col style={{ width: 100 }}/><col style={{ width: 100 }}/><col style={{ width: 115 }}/><col style={{ width: 175 }}/></colgroup><thead><tr><th>SELECT</th><th>COLLECTION</th><th>NEW PROMPTS</th><th>SUCCESSFUL</th><th>FAILED</th><th>PENDING</th><th>MISSING PROMPTS</th><th>BATCH JOBS</th></tr></thead><tbody>
-      {visible.map(({ collection, eligible, retryable, successful, failed, pendingCount, missingPrompts, incomplete, simulated, jobs: batchJobs }) => <tr key={collection.id}>
+      {pagedCollections.map(({ collection, eligible, retryable, successful, failed, pendingCount, missingPrompts, incomplete, simulated, jobs: batchJobs }) => <tr key={collection.id}>
         <td><input type="checkbox" aria-label={'Select ' + collection.name} disabled={!incomplete || working} checked={selected.includes(collection.id)} onChange={e => setSelected(old => e.target.checked ? [...old, collection.id] : old.filter(id => id !== collection.id))}/></td>
         <td style={{ overflowWrap: 'anywhere' }}><b>{collection.name}</b>{missingPrompts > 0 && <div><button type="button" className="outline-btn" disabled={working} onClick={() => onGeneratePrompts(collection.id)}>Generate {missingPrompts} missing prompts</button></div>}</td><td>{eligible.length}</td>
         <td>{simulated ? <><strong>TEST {simulated.successful}/{collection.characters.length}</strong><div className="sub">Real {successful}/{collection.characters.length}</div></> : <>{successful}/{collection.characters.length}</>}</td><td>{simulated ? <><strong>TEST {simulated.failed}</strong><div className="sub">Real {failed}</div></> : failed}{retryable.length ? <div className="sub">{retryable.length} retryable</div> : null}</td><td>{simulated ? <><strong>TEST {simulated.pending}</strong><div className="sub">Real {pendingCount}</div></> : pendingCount}</td><td>{missingPrompts}</td>
@@ -288,9 +323,11 @@ export default function MultiCollectionProduction({ onGeneratePrompts }: { onGen
       </tr>)}
     </tbody></table></div>
     {!visible.length && <p className="sub">No collections match your search.</p>}
+    <TablePagination total={visible.length} page={currentCollectionPage} pageSize={collectionPageSize} onPage={setCollectionPage} onPageSize={setCollectionPageSize} label="collections"/>
     <section className="production-activity-log" aria-label="Production activity log">
       <h3>Production Activity Log</h3>
-      <p className="sub">{environment === 'mock' ? 'TEST ONLY — simulated browser-local jobs; no production records or images.' : 'Latest 30 saved Batch jobs across collections. Refresh to retrieve updated OpenAI results. History survives closing the browser.'}</p>
+      <p className="sub">{environment === 'mock' ? 'TEST ONLY — simulated browser-local jobs; no production records or images.' : 'Saved Batch jobs across all collections. Refresh to retrieve updated OpenAI results. History survives closing the browser.'}</p>
+      {activityError && <p className="asset-error" role="alert">Could not load activity history: {activityError}</p>}
       {activity.length ? <div className="table-scroll"><table className="production-activity-table"><colgroup><col style={{ width: 170 }}/><col style={{ width: 330 }}/><col style={{ width: 195 }}/><col style={{ width: 170 }}/><col style={{ width: 145 }}/><col style={{ width: 115 }}/><col style={{ width: 115 }}/><col style={{ width: 310 }}/></colgroup><thead><tr><th>SUBMITTED</th><th>COLLECTION</th><th>MODEL</th><th>SCENARIO</th><th>STATUS</th><th>PROCESSED</th><th>IMPORTED</th><th>ERRORS</th></tr></thead><tbody>
         {activity.map(({ collection, job }) => <tr key={job.id}>
           <td>{new Date(job.createdAt).toLocaleString()}</td><td>{collection}</td><td>{job.model || 'Batch'}</td><td>{environment === 'mock' ? ((job as MockJob).scenario === 'quota_error' ? 'TEST: credits exhausted' : (job as MockJob).scenario === 'partial_failure' ? 'TEST: partial failure' : 'TEST: success') : 'Live batch'}</td>
@@ -299,6 +336,7 @@ export default function MultiCollectionProduction({ onGeneratePrompts }: { onGen
           <td>{job.warning || job.assets?.filter(item => item.status === 'error').slice(0, 2).map(item => item.error || 'Image failed').join('; ') || (job.failed ? job.failed + ' failed' : '—')}</td>
         </tr>)}
       </tbody></table></div> : <p className="sub">No Batch activity recorded yet.</p>}
+      <TablePagination total={activityTotal} page={currentActivityPage} pageSize={activityPageSize} onPage={setActivityPage} onPageSize={setActivityPageSize} label="jobs"/>
     </section>
   </div>;
 }
