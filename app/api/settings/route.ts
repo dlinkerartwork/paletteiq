@@ -2,8 +2,9 @@ import { eq } from 'drizzle-orm';
 import { getDb } from '@/db';
 import { studioSettings } from '@/db/schema';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
-import { encryptCredential, userCredential } from '@/lib/credentials';
+import { encryptCredential, decryptCredential, userCredential, userGeminiKeys } from '@/lib/credentials';
 import { env } from 'cloudflare:workers';
+import { parseGeminiKeyring, serializeGeminiKeyring } from '@/lib/gemini-keyring';
 
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 const seoPromptFields = ["general","title","description","tags","primaryKeyword","secondaryKeywords","longTailKeywords","categorySuggestion","attributes","materials","imageAltTexts","photoPlan","priceSuggestion","sku","digitalFiles","licenseNotes"] as const;
@@ -28,21 +29,26 @@ async function getSettings(req: Request) {
       .map(row => ({ id: row.id!, name: row.id!, batchSupported: ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'].includes(row.id!) })).sort((left, right) => left.id.localeCompare(right.id)) });
   }
     if (new URL(req.url).searchParams.get('models') === 'gemini') {
-    const key = await userCredential(user.userId, 'gemini');
-    if (!key) return bad('Save a Gemini API key first.', 400);
-    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000', {
-      headers: { 'x-goog-api-key': key }, signal: AbortSignal.timeout(15_000),
-    });
-    if (!response.ok) return bad(`Unable to list Gemini models (HTTP ${response.status}).`, 502);
+    const keys = await userGeminiKeys(user.userId);
+    if (!keys.length) return bad('Save a Gemini API key first.', 400);
+    let response: Response | undefined;
+    for (const key of keys) {
+      response = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000', {
+        headers: { 'x-goog-api-key': key }, signal: AbortSignal.timeout(15_000),
+      });
+      if (response.ok) break;
+      if (![401, 403, 429].includes(response.status)) break;
+    }
+    if (!response?.ok) return bad(`Unable to list Gemini models (HTTP ${response?.status ?? 'unknown'}).`, 502);
     const data = await response.json() as { models?: Array<{ name?: string; displayName?: string; supportedGenerationMethods?: string[] }> };
     const models = (data.models || []).filter(item => item.supportedGenerationMethods?.includes('generateContent'))
       .map(item => ({ id: (item.name || '').replace(/^models\//, ''), name: item.displayName || item.name || '' }))
       .filter(item => /^gemini-(?:(?:\d+(?:\.\d+)?)-)?(?:flash|pro)(?:-lite)?(?:-|$)/.test(item.id) && !/(?:image|imagen|banana|veo|video|tts|speech|audio|live|robot|argon|embedding|experimental|research|computer)/i.test(item.id + ' ' + item.name));
-    return Response.json({ models });
+    return Response.json({ models: models.filter(item => !/^gemini-(?:1\.|2\.0-|2\.5-pro(?:-|$))/.test(item.id)) });
   }
   const rows = await getDb().select().from(studioSettings).where(eq(studioSettings.owner, user.userId)).limit(1);
   const row = rows[0];
-  return Response.json({ preferences: { ...defaultPrefs, ...(row ? JSON.parse(row.preferences) : {}) }, credentials: { etsy: Boolean(row?.etsyCredential), openai: Boolean(row?.openaiCredential), gemini: Boolean(row?.geminiCredential) } });
+  return Response.json({ preferences: { ...defaultPrefs, ...(row ? JSON.parse(row.preferences) : {}) }, credentials: { etsy: Boolean(row?.etsyCredential), openai: Boolean(row?.openaiCredential), gemini: Boolean(row?.geminiCredential) }, geminiKeyCount: (await userGeminiKeys(user.userId)).length });
 }
 
 async function postSettings(req: Request) {
@@ -53,6 +59,22 @@ async function postSettings(req: Request) {
   const rows = await db.select().from(studioSettings).where(eq(studioSettings.owner, user.userId)).limit(1);
   const row = rows[0];
   const values = { owner: user.userId, preferences: row?.preferences || JSON.stringify(defaultPrefs), etsyCredential: row?.etsyCredential ?? null, openaiCredential: row?.openaiCredential ?? null, geminiCredential: row?.geminiCredential ?? null, updatedAt: Date.now() };
+  if (body.action === 'gemini-key-add' || body.action === 'gemini-key-remove') {
+    const previous = row?.geminiCredential ? parseGeminiKeyring(await decryptCredential(row.geminiCredential, user.userId)) : [];
+    let next = previous;
+    if (body.action === 'gemini-key-add') {
+      const value = typeof body.key === 'string' ? body.key.trim() : '';
+      if (value.length < 12 || value.length > 1000 || /\\s/.test(value)) return bad('Invalid Gemini API key');
+      if (previous.length >= 10 && !previous.includes(value)) return bad('Maximum 10 Gemini keys');
+      next = [...new Set([...previous, value])];
+    } else {
+      if (!Number.isInteger(body.index) || Number(body.index) < 0 || Number(body.index) >= previous.length) return bad('Invalid Gemini key index');
+      next = previous.filter((_, index) => index !== body.index);
+    }
+    values.geminiCredential = next.length ? await encryptCredential(serializeGeminiKeyring(next), user.userId) : null;
+    await db.insert(studioSettings).values(values).onConflictDoUpdate({ target: studioSettings.owner, set: { geminiCredential: values.geminiCredential, updatedAt: Date.now() } });
+    return Response.json({ ok: true, credentials: { etsy: Boolean(values.etsyCredential), openai: Boolean(values.openaiCredential), gemini: Boolean(values.geminiCredential) }, geminiKeyCount: next.length });
+  }
   if (body.action === 'preferences') {
     const raw = body.preferences as Record<string, unknown> | null;
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return bad('Invalid preferences');
@@ -73,7 +95,7 @@ async function postSettings(req: Request) {
     }
   } else return bad('Unknown action');
   await db.insert(studioSettings).values(values).onConflictDoUpdate({ target: studioSettings.owner, set: { preferences: values.preferences, etsyCredential: values.etsyCredential, openaiCredential: values.openaiCredential, geminiCredential: values.geminiCredential, updatedAt: Date.now() } });
-  return Response.json({ ok: true, credentials: { etsy: Boolean(values.etsyCredential), openai: Boolean(values.openaiCredential), gemini: Boolean(values.geminiCredential) } });
+  return Response.json({ ok: true, credentials: { etsy: Boolean(values.etsyCredential), openai: Boolean(values.openaiCredential), gemini: Boolean(values.geminiCredential) }, geminiKeyCount: parseGeminiKeyring(values.geminiCredential ? await decryptCredential(values.geminiCredential, user.userId) : null).length });
 }
 
 function settingsError(error: unknown): Response {
