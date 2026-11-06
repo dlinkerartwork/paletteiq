@@ -39,3 +39,17 @@ test('empty incremental recovery does not rewrite existing character records', (
   const items = [{ id: 'a', imageUrl: '/old', status: 'done' }];
   assert.equal(mergeNewBatchResults(characters, items, new Set())[0], characters[0]);
 });
+
+test('out-of-order Batch result never replaces an already saved newer asset', () => {
+  const current = [{ id: 'a', imageUrl: '/images/newer.png', status: 'done' }];
+  const stale = [{ id: 'a', imageUrl: '/images/older.png', status: 'done' }];
+  const result = mergeNewBatchResults(current, stale, new Set(['a']));
+  assert.equal(result[0], current[0]);
+});
+
+test('late Batch failure never changes a successfully regenerated image to error', () => {
+  const current = [{ id: 'a', imageUrl: '/images/newer.png', status: 'done' }];
+  const failed = [{ id: 'a', status: 'error', error: 'Old batch timed out' }];
+  const result = mergeNewBatchResults(current, failed, new Set(['a']));
+  assert.equal(result[0], current[0]);
+});
