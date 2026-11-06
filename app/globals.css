@@ -369,3 +369,9 @@ h1,h2,.stat strong,.step b,.source-card strong,.asset-meta b { color:#302721; }
 .collection-download-history .collection-redownload-hint{color:#b84e1b;font-weight:650}
 
 .collection-download-untracked{display:inline-flex;align-items:center;gap:5px;width:max-content;margin:6px 0;padding:4px 9px;border-radius:999px;background:#f6f0eb;border:1px solid #e9dcd1;color:#766354;font-size:11px;font-weight:600}
+
+.listing-workspace .listing-hero p{color:#62554e;opacity:1}
+.listing-model-panel .listing-provider-status{display:flex;align-items:center;gap:12px;margin-bottom:12px;color:#524238;font-size:12px}
+.listing-model-panel .listing-provider-status strong{font-size:10px;letter-spacing:.06em}
+.listing-model-panel .listing-provider-status span{display:inline-block;border:1px solid #f1c8ab;background:#fff1e7;color:#ae4c1f;padding:5px 10px;border-radius:999px;font-weight:700}
+.listing-model-panel .sub{color:#62554e;opacity:1}
