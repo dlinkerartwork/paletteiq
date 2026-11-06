@@ -18,6 +18,7 @@ win:
       arch:
         - x64
   executableName: PaletteIQ
+  icon: desktop/build-resources/icon.ico
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
