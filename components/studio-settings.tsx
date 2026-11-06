@@ -60,8 +60,8 @@ export default function StudioSettings({ preferences, onPreferences, projects, o
       setGeminiModelsLoaded(true);
     } catch (error) { setModelsError(error instanceof Error ? error.message : String(error)); }
   };
-  useEffect(() => { if (credentials.gemini) void loadGeminiModels(); }, [credentials.gemini]);
-  useEffect(() => { if (credentials.openai) void loadOpenaiModels(); }, [credentials.openai]);
+  useEffect(() => { if (credentials.gemini) queueMicrotask(() => void loadGeminiModels()); }, [credentials.gemini]);
+  useEffect(() => { if (credentials.openai) queueMicrotask(() => void loadOpenaiModels()); }, [credentials.openai]);
   const edit = (key: keyof StudioPreferences, value: string | number | boolean) => onPreferences({ ...preferences, [key]: value });
   const act = async (action: string, op: () => Promise<unknown>) => { setActive(action); setMessage(''); try { await op(); setMessage('Saved successfully.'); } catch (e) { setMessage(e instanceof Error ? e.message : String(e)); } finally { setActive(''); } };
   const saveKey = (provider: 'etsy' | 'openai' | 'gemini', remove = false) => act(provider, async () => {
