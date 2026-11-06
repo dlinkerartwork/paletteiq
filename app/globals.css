@@ -296,3 +296,63 @@ h1,h2,.stat strong,.step b,.source-card strong,.asset-meta b { color:#302721; }
 .production-activity-log{margin-top:24px;border-top:1px solid #e7ddd3;padding-top:20px}.production-activity-log h3{font-size:15px;font-weight:700;margin:0 0 7px}.production-activity-log .table-scroll{margin-top:12px;max-height:440px;overflow:auto}.production-activity-log td{max-width:290px;overflow-wrap:anywhere;font-size:12px}
 
 .mock-mode-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 14px;margin-bottom:12px;background:#f9f5ff;border:1px solid #cfb9ff;border-radius:12px}.mock-mode-toolbar strong{font-size:13px}.mock-mode-toolbar select{max-width:100%;min-height:36px;padding:6px;border-radius:8px;background:white;border:1px solid #cfb9ff}.mock-mode-disclaimer{padding:10px 12px;margin-bottom:16px;background:#fff0e5;color:#82420c;border-radius:8px;border:1px solid #efc2a0;font-size:12px;font-weight:600}
+
+/* Shared table safety: retain readable columns at smaller viewport widths. */
+.table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+.table-scroll > table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.table-scroll th,
+.table-scroll td {
+  box-sizing: border-box;
+  text-align: left;
+  vertical-align: top;
+  padding: 11px 12px;
+  overflow-wrap: anywhere;
+}
+.table-scroll th {
+  line-height: 1.35;
+  white-space: normal;
+}
+.table-scroll td {
+  line-height: 1.5;
+}
+.production-activity-log .table-scroll {
+  border: 1px solid #eadfd7;
+  border-radius: 10px;
+}
+.production-activity-log .production-activity-table {
+  table-layout: fixed;
+  min-width: 1550px;
+}
+.production-activity-table th {
+  padding: 12px 14px;
+  white-space: nowrap;
+  font-size: 11px;
+  letter-spacing: .02em;
+  background: #faf7f4;
+  border-bottom: 1px solid #eadfd7;
+}
+.production-activity-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid #eee8e3;
+  overflow-wrap: anywhere;
+}
+.production-activity-table td:first-child,
+.production-activity-table td:nth-child(5),
+.production-activity-table td:nth-child(6),
+.production-activity-table td:nth-child(7) {
+  white-space: nowrap;
+}
+.production-activity-table td:nth-child(8) {
+  white-space: normal;
+}
+.production-activity-table .status {
+  display: inline-flex;
+  white-space: nowrap;
+}
