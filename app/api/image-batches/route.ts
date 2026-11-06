@@ -110,6 +110,7 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
   const batch = await (await openai(key, `batches/${encodeURIComponent(job.openaiBatchId)}`)).json() as OpenAIBatch;
   const items = JSON.parse(job.items) as BatchItem[];
   const byId = new Map(items.map(i => [i.id, i]));
+  const changedIds = new Set<string>();
   const isTerminal = ['completed', 'expired', 'cancelled', 'failed'].includes(batch.status);
   const bucket = nativeAssetBucket() ?? env.BUCKET;
   if (isTerminal && bucket) {
@@ -130,12 +131,13 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
           item.status = 'done'; item.imageUrl = `/api/images/${record.custom_id}?format=${extension}&v=${Date.now()}`;
           item.similarityReview = await reviewImageSimilarity(key, b64, extension === 'jpg' ? 'image/jpeg' : 'image/png', references);
         } else { item.status = 'error'; item.error = String(record.error?.message || record.response?.body?.error?.message || 'Batch item failed').slice(0, 260); }
+        changedIds.add(item.id);
         handled++;
         if (handled >= 5) { interrupted = true; break; }
       }
       if (handled >= 5) break;
     }
-    if (!interrupted) for (const item of items) if (item.status === 'pending') { item.status = 'error'; item.error = 'No output returned by OpenAI for this item.'; }
+    if (!interrupted) for (const item of items) if (item.status === 'pending') { item.status = 'error'; item.error = 'No output returned by OpenAI for this item.'; changedIds.add(item.id); }
   }
   const newCompleted = items.filter(i => i.status === 'done').length;
   const newFailed = items.filter(i => i.status === 'error').length;
@@ -145,13 +147,13 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
   const requestFailed = batch.request_counts?.failed || 0;
   // Persist asset references in the collection BEFORE advancing job bookkeeping.
   // If this write fails, the job remains retriable rather than incorrectly marked complete.
-  if (newCompleted || newFailed) {
+  if (changedIds.size) {
     const saved = await db.select().from(projects).where(and(eq(projects.id, job.projectId), eq(projects.owner, owner))).limit(1);
     if (saved.length) {
       const project = JSON.parse(saved[0].data) as { characters?: Array<{ id: string; imageUrl?: string; status?: string; error?: string; similarityReview?: SimilarityReview }> };
-      project.characters = project.characters?.map(c => { const item = byId.get(c.id); return item?.status === 'done' ? { ...c, imageUrl: item.imageUrl, status: 'done', error: '', similarityReview: item.similarityReview } : item?.status === 'error' ? { ...c, status: 'error', error: item.error } : c; });
+      project.characters = project.characters?.map(c => { const item = changedIds.has(c.id) ? byId.get(c.id) : undefined; return item?.status === 'done' ? { ...c, imageUrl: item.imageUrl, status: 'done', error: '', similarityReview: item.similarityReview } : item?.status === 'error' ? { ...c, status: 'error', error: item.error } : c; });
       await db.update(projects).set({ data: JSON.stringify(project), updatedAt: Date.now() }).where(and(eq(projects.id, job.projectId), eq(projects.owner, owner)));
-    }
+    } else throw new Error('Batch import paused: original collection missing; job remains recoverable.');
   }
   await db.update(imageBatches).set({ status, completed: Math.max(requestCompleted, newCompleted), failed: Math.max(requestFailed, newFailed), items: JSON.stringify(items), outputFileId: batch.output_file_id ?? null, errorFileId: batch.error_file_id ?? null, updatedAt: Date.now() }).where(and(eq(imageBatches.id, job.id), eq(imageBatches.owner, owner)));
   return { ...job, status, completed: Math.max(requestCompleted, newCompleted), failed: Math.max(requestFailed, newFailed), items: JSON.stringify(items) };
