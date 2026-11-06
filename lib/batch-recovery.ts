@@ -26,12 +26,12 @@ export function mergeNewBatchResults<T extends RecoverableImage>(
       status: 'done',
       error: '',
       similarityReview: item.similarityReview,
-    };
+    } as T;
     if (item?.status === 'error') return {
       ...character,
       status: 'error',
       error: item.error,
-    };
+    } as T;
     return character;
   });
 }
