@@ -11,6 +11,7 @@ import { nativeAssetBucket } from '@/lib/native-bridge';
 import { acquireProductionLocks } from '@/lib/production-locks';
 import { mergeNewBatchResults } from '@/lib/batch-recovery';
 import { batchAssetKey, batchAssetUrl } from '@/lib/batch-assets';
+import { awaitBatchOutputFiles } from '@/lib/batch-status';
 
 const MODELS = ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
 const syncingJobIds = new Set<string>();
@@ -110,6 +111,7 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
   const reviewSources = savedProject.length ? JSON.parse(savedProject[0].data) as { selectedImageUrls?: string[]; images?: string[] } : {};
   const references = reviewSources.selectedImageUrls ?? reviewSources.images ?? [];
   const batch = await (await openai(key, `batches/${encodeURIComponent(job.openaiBatchId)}`)).json() as OpenAIBatch;
+  if (awaitBatchOutputFiles(batch)) throw new Error('Batch completed at OpenAI, but result files are not yet available. Recovery will retry automatically.');
   const items = JSON.parse(job.items) as BatchItem[];
   const byId = new Map(items.map(i => [i.id, i]));
   const changedIds = new Set<string>();
