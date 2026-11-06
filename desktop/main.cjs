@@ -160,8 +160,16 @@ function configureWorkspaceMenu(directory) {
   ] }]));
 }
 
+function isUnlicensedEdition() {
+  if (!app.isPackaged) return false;
+  // Only the installer edition metadata controls activation. Environment
+  // variables and user settings must never disable licensing.
+  const metadata = JSON.parse(readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf8'));
+  return metadata.paletteiqEdition === 'unlicensed';
+}
+
 async function requireActivation() {
-  if (!app.isPackaged) return; // Developer preview remains available for development.
+  if (!app.isPackaged || isUnlicensedEdition()) return; // Developer preview and explicit unlicensed edition.
   const publicKeyFile = path.join(ROOT, 'license-public.pem');
   if (!existsSync(publicKeyFile)) throw new Error('Desktop license verification key is missing from the installer.');
   const publicKey = readFileSync(publicKeyFile, 'utf8');
