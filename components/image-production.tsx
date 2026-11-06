@@ -11,7 +11,7 @@ import { isOpenAICreditError, primeProductionAudio, useProductionSounds } from '
 type Character = { id: string; name: string; prompt: string; status: string; imageUrl?: string; error?: string; similarityReview?: SimilarityReview };
 type Project = { id: string; name: string; characters: Character[]; listing?: { title?: string } };
 type Job = { id: string; status: string; model: string; total: number; completed: number; failed: number; imported: number; createdAt: number; characterIds: string[]; assets: Array<{ id: string; status: string; imageUrl?: string; error?: string }>; warning?: string };
-type Props = { project: Project; model: string; quality: string; onModel: (value: string) => void; onQuality: (value: string) => void; onDownloaded: (timestamp: number) => void; onAsset: (id: string, data: { imageUrl?: string; status: 'done' | 'error'; error?: string; similarityReview?: SimilarityReview }) => void };
+type Props = { project: Project; model: string; quality: string; onModel: (value: string) => void; onQuality: (value: string) => void; onDownloaded: (receipt: { lastDownloadedAt: number; downloadCount: number; lastDownloadImageCount: number; downloadedImageIds: string[] }) => void; onAsset: (id: string, data: { imageUrl?: string; status: 'done' | 'error'; error?: string; similarityReview?: SimilarityReview }) => void };
 
 async function request<T = unknown>(url: string, options?: RequestInit): Promise<T> {
   const r = await fetch(url, options);
@@ -155,7 +155,7 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
       if (!response.ok) { const error = await response.json() as { error?: string }; throw new Error(error.error || `Export failed (${response.status})`); }
       const blob = await response.blob(); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url;
       link.download = `${project.name.replace(/[^a-z0-9-]/gi, '_')}-${scope === 'package' ? 'etsy-package' : 'images'}.zip`; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 60000);
-      try { const receipt = await request<{ lastDownloadedAt: number }>('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'mark-download', projectId: project.id }) }); onDownloaded(receipt.lastDownloadedAt); } catch { setMessage('ZIP downloaded, but download history could not be saved.'); return; }
+      try { const receipt = await request<{ lastDownloadedAt: number; downloadCount: number; lastDownloadImageCount: number; downloadedImageIds: string[] }>('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'mark-download', projectId: project.id, scope, ids: selectedGenerated.map(c => c.id) }) }); onDownloaded(receipt); } catch { setMessage('ZIP downloaded, but download history could not be saved.'); return; }
       setMessage(`ZIP ready: ${scope === 'selected' ? selectedGenerated.length : generated.length} images.`);
     } catch (e) { setMessage(e instanceof Error ? e.message : String(e)); } finally { setDownloading(false); }
   };
