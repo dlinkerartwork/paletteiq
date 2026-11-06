@@ -45,7 +45,7 @@ export function playProductionSound(kind: ProductionSound): void {
         osc.type = kind === 'error' ? 'sawtooth' : kind === 'credits' ? 'triangle' : 'sine';
         osc.frequency.value = note.frequency;
         gain.gain.setValueAtTime(0.0001, at);
-        gain.gain.exponentialRampToValueAtTime(kind === 'error' ? 0.055 : 0.11, at + 0.015);
+        gain.gain.exponentialRampToValueAtTime(kind === 'error' ? 0.15 : 0.24, at + 0.015);
         gain.gain.exponentialRampToValueAtTime(0.0001, at + note.length);
         osc.connect(gain);
         gain.connect(context.destination);
