@@ -75,6 +75,7 @@ export default function Home() {
         if (!ids.length) return;
         const currentStates = new Map(observedBatchStates.current || []);
         let finished = false;
+        let hasBatchError = false;
         await Promise.all(ids.map(async id => {
           try {
             const response = await fetch(`/api/image-batches?projectId=${encodeURIComponent(id)}`);
@@ -82,7 +83,7 @@ export default function Home() {
             const data = await response.json() as { jobs?: Array<{ id: string; status: string; warning?: string }> };
             for (const job of data.jobs || []) {
               const previous = observedBatchStates.current?.get(job.id);
-              if (previous && !['completed', 'completed_with_errors', 'failed', 'cancelled', 'expired'].includes(previous) && ['completed', 'completed_with_errors', 'failed', 'cancelled', 'expired'].includes(job.status)) finished = true;
+              if (previous && !['completed', 'completed_with_errors', 'failed', 'cancelled', 'expired'].includes(previous) && ['completed', 'completed_with_errors', 'failed', 'cancelled', 'expired'].includes(job.status)) { finished = true; if (job.status !== 'completed') hasBatchError = true; }
               currentStates.set(job.id, job.status);
               if (job.warning && isOpenAICreditError(job.warning) && job.warning !== lastCreditNotice.current) {
                 lastCreditNotice.current = job.warning;
@@ -93,7 +94,7 @@ export default function Home() {
           } catch { /* Keep the next poll available after transient errors. */ }
         }));
         observedBatchStates.current = currentStates;
-        if (finished && productionSoundEnabled()) playProductionSound('completed');
+        if (finished && productionSoundEnabled()) playProductionSound(hasBatchError ? 'error' : 'completed');
         const recovered = await Promise.all(ids.map(async id => {
           const response = await fetch(`/api/studio?projectId=${encodeURIComponent(id)}`);
           return response.ok ? ((await response.json()) as Array<{ data: Project }>)[0]?.data : null;
