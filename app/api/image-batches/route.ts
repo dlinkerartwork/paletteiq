@@ -9,6 +9,7 @@ import { originalImagePrompt } from '@/lib/originality';
 import { reviewImageSimilarity, type SimilarityReview } from '@/lib/similarity-review';
 import { nativeAssetBucket } from '@/lib/native-bridge';
 import { acquireProductionLocks } from '@/lib/production-locks';
+import { mergeNewBatchResults } from '@/lib/batch-recovery';
 
 const MODELS = ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
 const syncingJobIds = new Set<string>();
@@ -151,7 +152,7 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
     const saved = await db.select().from(projects).where(and(eq(projects.id, job.projectId), eq(projects.owner, owner))).limit(1);
     if (saved.length) {
       const project = JSON.parse(saved[0].data) as { characters?: Array<{ id: string; imageUrl?: string; status?: string; error?: string; similarityReview?: SimilarityReview }> };
-      project.characters = project.characters?.map(c => { const item = changedIds.has(c.id) ? byId.get(c.id) : undefined; return item?.status === 'done' ? { ...c, imageUrl: item.imageUrl, status: 'done', error: '', similarityReview: item.similarityReview } : item?.status === 'error' ? { ...c, status: 'error', error: item.error } : c; });
+      project.characters = project.characters ? mergeNewBatchResults(project.characters, items, changedIds) : undefined;
       await db.update(projects).set({ data: JSON.stringify(project), updatedAt: Date.now() }).where(and(eq(projects.id, job.projectId), eq(projects.owner, owner)));
     } else throw new Error('Batch import paused: original collection missing; job remains recoverable.');
   }
