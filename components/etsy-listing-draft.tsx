@@ -8,7 +8,7 @@ import { auditSeo, type AiSeoReview } from '@/lib/seo-intelligence';
 
 export type SavedSeoReview = AiSeoReview & { sourceFingerprint: string; reviewedAt: number };
 type Project = { id: string; name: string; theme: string; characters: Array<{ status: string; imageUrl?: string }>; listing?: EtsyListingDraft; seoReview?: SavedSeoReview };
-type Props = { project: Project; onChange: (draft: EtsyListingDraft) => void; onSave: () => Promise<void>; onSeoReview: (review: SavedSeoReview) => Promise<void>; seoProvider: 'openai' | 'gemini'; seoGeminiModel: string; seoTitleMaxLength: number; seoAltTextCount: number };
+type Props = { project: Project; onChange: (draft: EtsyListingDraft) => void; onSave: () => Promise<void>; onSeoReview: (review: SavedSeoReview) => Promise<void>; onDownloaded: (receipt: { lastDownloadedAt: number; downloadCount: number; lastDownloadImageCount: number; downloadedImageIds: string[] }) => void; seoProvider: 'openai' | 'gemini'; seoGeminiModel: string; seoTitleMaxLength: number; seoAltTextCount: number };
 const download = (name: string, body: string, mime: string) => { const url = URL.createObjectURL(new Blob([body], { type: mime })); const a = document.createElement('a'); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url); };
 const slug = (s: string) => (s || 'paletteiq').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 60);
 
@@ -23,7 +23,7 @@ function notifySeoFinished(projectName: string, success: boolean) {
   }
 }
 
-export default function EtsyListingDraft({ project, onChange, onSave, onSeoReview, seoProvider, seoGeminiModel, seoTitleMaxLength, seoAltTextCount }: Props) {
+export default function EtsyListingDraft({ project, onChange, onSave, onSeoReview, onDownloaded, seoProvider, seoGeminiModel, seoTitleMaxLength, seoAltTextCount }: Props) {
   const [working, setWorking] = useState(() => activeSeoRuns.has(project.id));
   const [modelChoice, setModelChoice] = useState<{ defaultModel: string; selected: string } | null>(null);
   const selectedGeminiModel = modelChoice?.defaultModel === seoGeminiModel ? modelChoice.selected : seoGeminiModel;
@@ -130,7 +130,13 @@ export default function EtsyListingDraft({ project, onChange, onSave, onSeoRevie
       const response = await fetch('/api/exports', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId: project.id, scope: 'package' }) });
       if (!response.ok) throw new Error(((await response.json()) as { error?: string }).error || 'Export failed');
       const blob = await response.blob(); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `${slug(project.name)}-etsy-package.zip`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 60000);
-      setNotice('Collection images and listing draft ZIP downloaded.');
+      try {
+        const receiptResponse = await fetch('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'mark-download', projectId: project.id, scope: 'package' }) });
+        const receipt = await receiptResponse.json() as { lastDownloadedAt?: number; downloadCount?: number; lastDownloadImageCount?: number; downloadedImageIds?: string[]; error?: string };
+        if (!receiptResponse.ok || !receipt.lastDownloadedAt || typeof receipt.downloadCount !== 'number' || typeof receipt.lastDownloadImageCount !== 'number' || !Array.isArray(receipt.downloadedImageIds)) throw new Error(receipt.error || 'Download receipt was not saved');
+        onDownloaded({ lastDownloadedAt: receipt.lastDownloadedAt, downloadCount: receipt.downloadCount, lastDownloadImageCount: receipt.lastDownloadImageCount, downloadedImageIds: receipt.downloadedImageIds });
+        setNotice(`Collection ZIP downloaded: ${receipt.lastDownloadImageCount} images. Download history saved.`);
+      } catch (error) { setNotice(`ZIP downloaded, but history could not be saved: ${error instanceof Error ? error.message : String(error)}`); }
     } catch (e) { setNotice(e instanceof Error ? e.message : 'Export failed'); } finally { setExporting(false); }
   };
   const formatted = () => `TITLE\n${draft.title}\n\nDESCRIPTION\n${draft.description}\n\nTAGS\n${draft.tags.join(', ')}\n\nPRIMARY KEYWORD\n${draft.primaryKeyword}\n\nSECONDARY KEYWORDS\n${draft.secondaryKeywords.join(', ')}\n\nLONG-TAIL KEYWORDS\n${draft.longTailKeywords.join(', ')}\n\nCATEGORY SUGGESTION\n${draft.categorySuggestion}\n\nATTRIBUTES\n${JSON.stringify(draft.attributes, null, 2)}\n\nMATERIALS\n${draft.materials.join(', ')}\n\nIMAGE ALT TEXT\n${draft.imageAltTexts.join('\n')}\n\nPHOTO PLAN\n${draft.photoPlan.join('\n')}\n\nPRICE SUGGESTION\n${draft.priceSuggestion}\n\nSKU\n${draft.sku}\n\nDIGITAL FILES\n${draft.digitalFiles.join('\n')}\n\nLICENSE NOTES\n${draft.licenseNotes}`;
