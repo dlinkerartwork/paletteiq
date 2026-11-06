@@ -367,3 +367,5 @@ h1,h2,.stat strong,.step b,.source-card strong,.asset-meta b { color:#302721; }
 .collection-download-history{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:12px;padding:10px 0;border-top:1px solid #eee2d9;color:#62564d;font-size:11px;line-height:1.45}
 .collection-download-history span{display:inline-flex;align-items:center;gap:5px}
 .collection-download-history .collection-redownload-hint{color:#b84e1b;font-weight:650}
+
+.collection-download-untracked{display:inline-flex;align-items:center;gap:5px;width:max-content;margin:6px 0;padding:4px 9px;border-radius:999px;background:#f6f0eb;border:1px solid #e9dcd1;color:#766354;font-size:11px;font-weight:600}
