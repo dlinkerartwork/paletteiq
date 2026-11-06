@@ -159,7 +159,6 @@ export default function MultiCollectionProduction({ onGeneratePrompts }: { onGen
   const totalCollectionPages = Math.max(1, Math.ceil(visible.length / collectionPageSize));
   const currentCollectionPage = Math.min(collectionPage, totalCollectionPages);
   const pagedCollections = visible.slice((currentCollectionPage - 1) * collectionPageSize, currentCollectionPage * collectionPageSize);
-  useEffect(() => { setCollectionPage(1); }, [search, collectionPageSize]);
   const chosen = rows.filter(row => selected.includes(row.collection.id));
   const requestCount = chosen.reduce((sum, row) => sum + row.eligible.length, 0);
   const retryCount = chosen.reduce((sum, row) => sum + row.retryable.length, 0);
@@ -184,7 +183,6 @@ export default function MultiCollectionProduction({ onGeneratePrompts }: { onGen
     }).catch(error => { if (!cancelled) setActivityError(error instanceof Error ? error.message : String(error)); });
     return () => { cancelled = true; };
   }, [environment, activityPage, activityPageSize, activityRefresh]);
-  useEffect(() => { setActivityPage(1); }, [environment, activityPageSize]);
 
   const submit = async (kind: 'new' | 'retry' = 'new') => {
     if (working || !(kind === 'retry' ? retryCount : requestCount)) return;
@@ -281,7 +279,7 @@ export default function MultiCollectionProduction({ onGeneratePrompts }: { onGen
   return <div className="panel">
     {process.env.NODE_ENV !== 'production' && <div className="mock-mode-toolbar">
       <strong>Generation environment</strong>
-      <select aria-label="Generation environment" value={environment} disabled={working} onChange={e => { setEnvironment(e.target.value as 'mock' | 'live'); setSelected([]); setMessage(''); setCreditAlert(''); }}>
+      <select aria-label="Generation environment" value={environment} disabled={working} onChange={e => { setEnvironment(e.target.value as 'mock' | 'live'); setActivityPage(1); setSelected([]); setMessage(''); setCreditAlert(''); }}>
         <option value="mock">TEST / Mock — no OpenAI charges</option>
         <option value="live">LIVE — real OpenAI API requests</option>
       </select>
@@ -306,7 +304,7 @@ export default function MultiCollectionProduction({ onGeneratePrompts }: { onGen
       <button type="button" className="outline-btn" disabled={working || refreshing || !retryCount} onClick={() => void submit('retry')}>{environment === 'mock' ? 'Simulate Retry Failed' : 'Retry Failed'} {retryCount} images</button>
     </div>
     <div className="collections-toolbar">
-      <input aria-label="Search collections" placeholder="Search collections..." value={search} onChange={e => setSearch(e.target.value)}/>
+      <input aria-label="Search collections" placeholder="Search collections..." value={search} onChange={e => { setSearch(e.target.value); setCollectionPage(1); }}/>
       <button className="outline-btn" onClick={() => setSelected(visible.filter(row => row.incomplete).map(row => row.collection.id))}>Select incomplete</button>
       <button className="outline-btn" onClick={() => setSelected([])}>Clear selection</button>
     </div>
@@ -323,7 +321,7 @@ export default function MultiCollectionProduction({ onGeneratePrompts }: { onGen
       </tr>)}
     </tbody></table></div>
     {!visible.length && <p className="sub">No collections match your search.</p>}
-    <TablePagination total={visible.length} page={currentCollectionPage} pageSize={collectionPageSize} onPage={setCollectionPage} onPageSize={setCollectionPageSize} label="collections"/>
+    <TablePagination total={visible.length} page={currentCollectionPage} pageSize={collectionPageSize} onPage={setCollectionPage} onPageSize={size => { setCollectionPageSize(size); setCollectionPage(1); }} label="collections"/>
     <section className="production-activity-log" aria-label="Production activity log">
       <h3>Production Activity Log</h3>
       <p className="sub">{environment === 'mock' ? 'TEST ONLY — simulated browser-local jobs; no production records or images.' : 'Saved Batch jobs across all collections. Refresh to retrieve updated OpenAI results. History survives closing the browser.'}</p>
@@ -336,7 +334,7 @@ export default function MultiCollectionProduction({ onGeneratePrompts }: { onGen
           <td>{job.warning || job.assets?.filter(item => item.status === 'error').slice(0, 2).map(item => item.error || 'Image failed').join('; ') || (job.failed ? job.failed + ' failed' : '—')}</td>
         </tr>)}
       </tbody></table></div> : <p className="sub">No Batch activity recorded yet.</p>}
-      <TablePagination total={activityTotal} page={currentActivityPage} pageSize={activityPageSize} onPage={setActivityPage} onPageSize={setActivityPageSize} label="jobs"/>
+      <TablePagination total={activityTotal} page={currentActivityPage} pageSize={activityPageSize} onPage={setActivityPage} onPageSize={size => { setActivityPageSize(size); setActivityPage(1); }} label="jobs"/>
     </section>
   </div>;
 }
