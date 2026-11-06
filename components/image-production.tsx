@@ -88,7 +88,7 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
         const freshJobs = data.jobs || [];
         if (previousBatchStates.current) {
           const finished = freshJobs.some(job => isActiveBatchStatus(previousBatchStates.current?.get(job.id) || 'completed') && !isActiveBatchStatus(job.status));
-          if (finished) soundRef.current('completed');
+          if (finished) soundRef.current(freshJobs.some(job => isActiveBatchStatus(previousBatchStates.current?.get(job.id) || 'completed') && ['completed_with_errors', 'failed', 'cancelled', 'expired'].includes(job.status)) ? 'error' : 'completed');
         }
         previousBatchStates.current = new Map(freshJobs.map(job => [job.id, job.status]));
         const warning = freshJobs.find(job => isOpenAICreditError(job.warning))?.warning;
