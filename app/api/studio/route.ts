@@ -45,16 +45,26 @@ export async function POST(req: Request) {
   if (!user) return fail('Sign in required', 401);
   const body = await req.json() as StudioRequest;
   if (body.action === 'mark-download') {
-    if (typeof body.projectId !== 'string' || !/^[\w-]{8,80}$/.test(body.projectId)) return fail('Invalid collection');
+    if (typeof body.projectId !== 'string' || !/^[\\w-]{8,80}$/.test(body.projectId)) return fail('Invalid collection');
+    if (!['selected', 'all', 'package'].includes(String(body.scope))) return fail('Invalid download scope');
     const db = getDb();
     const rows = await db.select().from(projects).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId))).limit(1);
     if (!rows.length) return fail('Collection not found', 404);
-    const stored = JSON.parse(rows[0].data) as ProjectInput & { lastDownloadedAt?: number; downloadCount?: number };
+    const stored = JSON.parse(rows[0].data) as ProjectInput & {
+      lastDownloadedAt?: number; downloadCount?: number;
+      lastDownloadImageCount?: number; downloadedImageIds?: string[];
+    };
+    const selectedIds = new Set(Array.isArray(body.ids) ? body.ids.filter((id): id is string => typeof id === 'string') : []);
+    const exportedIds = stored.characters.filter(c => c.imageUrl && (body.scope !== 'selected' || selectedIds.has(c.id))).map(c => c.id);
+    if (!exportedIds.length) return fail('No generated images in this download');
+    const priorIds = Array.isArray(stored.downloadedImageIds) ? stored.downloadedImageIds.filter(id => typeof id === 'string') : [];
+    stored.downloadedImageIds = [...new Set([...priorIds, ...exportedIds])];
+    stored.lastDownloadImageCount = exportedIds.length;
     const now = Date.now();
     stored.lastDownloadedAt = now;
     stored.downloadCount = (Number.isSafeInteger(stored.downloadCount) && (stored.downloadCount ?? 0) >= 0 ? stored.downloadCount! : 0) + 1;
     await db.update(projects).set({ data: JSON.stringify(stored), updatedAt: now }).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId)));
-    return Response.json({ lastDownloadedAt: now, downloadCount: stored.downloadCount });
+    return Response.json({ lastDownloadedAt: now, downloadCount: stored.downloadCount, lastDownloadImageCount: stored.lastDownloadImageCount, downloadedImageIds: stored.downloadedImageIds });
   }
   if (body.action === 'save') {
     if (typeof body.id !== 'string' || !/^[\w-]{8,80}$/.test(body.id) || typeof body.name !== 'string' || !body.data) return fail('Invalid project');
@@ -65,9 +75,9 @@ export async function POST(req: Request) {
     if (current.length && current[0].owner !== user.userId) return fail('Forbidden', 403);
     if (current.length) {
       // An older browser snapshot must not erase assets already persisted by the image worker.
-      const old = JSON.parse(current[0].data) as { characters?: Array<{ id: string; imageUrl?: string; status?: string; similarityReview?: SimilarityReview }>; lastDownloadedAt?: number; downloadCount?: number };
+      const old = JSON.parse(current[0].data) as { characters?: Array<{ id: string; imageUrl?: string; status?: string; similarityReview?: SimilarityReview }>; lastDownloadedAt?: number; downloadCount?: number; lastDownloadImageCount?: number; downloadedImageIds?: string[] };
       // Download history belongs to the persisted collection, not a potentially stale browser snapshot.
-      if (old.lastDownloadedAt) { incoming.lastDownloadedAt = old.lastDownloadedAt; incoming.downloadCount = old.downloadCount ?? 1; }
+      if (old.lastDownloadedAt) { incoming.lastDownloadedAt = old.lastDownloadedAt; incoming.downloadCount = old.downloadCount ?? 1; incoming.lastDownloadImageCount = old.lastDownloadImageCount; incoming.downloadedImageIds = old.downloadedImageIds; }
       const storedImages = new Map((old.characters || []).filter(c => c.imageUrl).map(c => [c.id, c]));
       incoming.characters = incoming.characters.map((c: SubjectInput) => {
         const persisted = storedImages.get(c.id);
