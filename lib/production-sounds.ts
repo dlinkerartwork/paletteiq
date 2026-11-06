@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-export type ProductionSound = 'credits' | 'completed';
+export type ProductionSound = 'credits' | 'completed' | 'error';
 
 let audioContext: AudioContext | null = null;
 
@@ -35,15 +35,17 @@ export function playProductionSound(kind: ProductionSound): void {
       const start = context.currentTime + 0.02;
       const notes = kind === 'credits'
         ? [{ frequency: 740, at: 0, length: 0.19 }, { frequency: 470, at: 0.27, length: 0.25 }, { frequency: 370, at: 0.59, length: 0.34 }]
-        : [{ frequency: 523, at: 0, length: 0.13 }, { frequency: 659, at: 0.18, length: 0.13 }, { frequency: 784, at: 0.36, length: 0.24 }];
+        : kind === 'error'
+          ? [{ frequency: 220, at: 0, length: 0.3 }, { frequency: 233, at: 0.11, length: 0.33 }, { frequency: 155, at: 0.48, length: 0.48 }, { frequency: 110, at: 0.71, length: 0.47 }]
+          : [{ frequency: 523, at: 0, length: 0.12 }, { frequency: 659, at: 0.14, length: 0.12 }, { frequency: 784, at: 0.28, length: 0.12 }, { frequency: 1047, at: 0.44, length: 0.33 }];
       for (const note of notes) {
         const osc = context.createOscillator();
         const gain = context.createGain();
         const at = start + note.at;
-        osc.type = kind === 'credits' ? 'triangle' : 'sine';
+        osc.type = kind === 'error' ? 'sawtooth' : kind === 'credits' ? 'triangle' : 'sine';
         osc.frequency.value = note.frequency;
         gain.gain.setValueAtTime(0.0001, at);
-        gain.gain.exponentialRampToValueAtTime(0.11, at + 0.015);
+        gain.gain.exponentialRampToValueAtTime(kind === 'error' ? 0.055 : 0.11, at + 0.015);
         gain.gain.exponentialRampToValueAtTime(0.0001, at + note.length);
         osc.connect(gain);
         gain.connect(context.destination);
