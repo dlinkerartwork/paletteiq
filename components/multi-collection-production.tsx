@@ -75,7 +75,8 @@ export default function MultiCollectionProduction({ onGeneratePrompts }: { onGen
         const next = new Map(simulated.map(job => [job.id, job.status]));
         if (previousMockStates.current) {
           const changed = simulated.filter(job => isActiveBatchStatus(previousMockStates.current?.get(job.id) || 'completed') && !isActiveBatchStatus(job.status));
-          if (changed.some(job => job.status === 'completed' || job.status === 'completed_with_errors')) soundRef.current('completed');
+          if (changed.some(job => job.status === 'completed_with_errors' || job.status === 'failed')) soundRef.current('error');
+          else if (changed.some(job => job.status === 'completed')) soundRef.current('completed');
           if (changed.some(job => job.scenario === 'quota_error')) {
             setCreditAlert('TEST ONLY — simulated OpenAI insufficient_quota. No API call was made.');
             soundRef.current('credits');
@@ -101,7 +102,11 @@ export default function MultiCollectionProduction({ onGeneratePrompts }: { onGen
       const incomingJobs = Object.fromEntries(updated) as CollectionJobs;
       const nextStates = new Map<string, string>();
       for (const list of Object.values(incomingJobs)) for (const job of list) nextStates.set(job.id, job.status);
-      if (previousStates.current && [...nextStates].some(([id, status]) => isActiveBatchStatus(previousStates.current?.get(id) || 'completed') && !isActiveBatchStatus(status))) soundRef.current('completed');
+      if (previousStates.current) {
+        const finishedJobs = Object.values(incomingJobs).flat().filter(job => isActiveBatchStatus(previousStates.current?.get(job.id) || 'completed') && !isActiveBatchStatus(job.status));
+        if (finishedJobs.some(job => ['completed_with_errors', 'failed', 'cancelled', 'expired'].includes(job.status))) soundRef.current('error');
+        else if (finishedJobs.length) soundRef.current('completed');
+      }
       previousStates.current = nextStates;
       jobsRef.current = incomingJobs;
       setJobs(incomingJobs);
