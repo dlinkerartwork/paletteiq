@@ -2,15 +2,16 @@ import { env } from 'cloudflare:workers';
 import { and, eq } from 'drizzle-orm';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { getDb } from '@/db';
-import { projects } from '@/db/schema';
+import { projects, studioSettings } from '@/db/schema';
 import { zipStream, type ZipEntry } from '@/lib/zip-stream';
 import { normalizeListing } from '@/lib/etsy-listing';
 import { auditSeo } from '@/lib/seo-intelligence';
 import { nativeAssetBucket } from '@/lib/native-bridge';
+import { batchAssetKey } from '@/lib/batch-assets';
+import { createImageFileNamer, DEFAULT_IMAGE_NAMING } from '@/lib/image-file-naming';
 
 const enc = new TextEncoder();
 const slug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'collection';
-const fileTheme = (theme: string) => theme.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60) || 'clipart';
 const file = (content: string) => async () => new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(enc.encode(content)); controller.close(); } });
 export async function POST(request: Request) {
   const user = await getChatGPTUser();
@@ -27,15 +28,22 @@ export async function POST(request: Request) {
   const chosen = project.characters.filter(c => c.imageUrl && (body.scope !== 'selected' || selectedIds.has(c.id)));
   if (!chosen.length) return Response.json({ error: 'No generated images selected' }, { status: 400 });
   if (chosen.length > 1000) return Response.json({ error: 'Too many images in one ZIP' }, { status: 400 });
+  const settings = await getDb().select({ preferences: studioSettings.preferences }).from(studioSettings).where(eq(studioSettings.owner, user.userId)).limit(1);
+  let pattern = DEFAULT_IMAGE_NAMING;
+  try { if (settings[0]) pattern = (JSON.parse(settings[0].preferences) as { seoFileNaming?: string }).seoFileNaming || DEFAULT_IMAGE_NAMING; }
+  catch { /* Older settings fall back to the original naming convention. */ }
+  const imageFileName = createImageFileNamer(pattern, { theme: project.theme || project.name, collection: project.name });
   const entries: ZipEntry[] = [];
   for (const [index, character] of chosen.entries()) {
     const path = new URL(character.imageUrl!, 'https://app.local');
     const match = path.pathname.match(/^\/api\/images\/([0-9a-f-]{36})$/);
     if (!match) return Response.json({ error: 'Invalid stored image reference' }, { status: 400 });
     const extension = path.searchParams.get('format') === 'jpg' ? 'jpg' : 'png';
-    const key = `generated/${user.userId}/${match[1]}.${extension}`;
+    const batchId = path.searchParams.get('batch');
+    if (batchId && !/^[0-9a-f-]{36}$/.test(batchId)) return Response.json({ error: 'Invalid Batch image reference' }, { status: 400 });
+    const key = batchId ? batchAssetKey(user.userId, match[1], extension, batchId) : `generated/${user.userId}/${match[1]}.${extension}`;
     if (!await bucket.head(key)) return Response.json({ error: `Image file missing for ${character.name}` }, { status: 409 });
-    entries.push({ name: `images/${fileTheme(project.theme || project.name)}_${String(index + 1).padStart(3, '0')}.${extension}`, stream: async () => (await bucket.get(key))?.body || null });
+    entries.push({ name: `images/${imageFileName(character.name, index, extension)}`, stream: async () => (await bucket.get(key))?.body || null });
   }
   if (body.scope === 'package') {
     entries.push({ name: 'etsy-listing-draft.json', stream: file(JSON.stringify(project.listing || {}, null, 2)) });
