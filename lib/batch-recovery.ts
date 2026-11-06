@@ -20,6 +20,8 @@ export function mergeNewBatchResults<T extends RecoverableImage>(
   return characters.map(character => {
     if (!changedIds.has(character.id)) return character;
     const item = byId.get(character.id);
+    // Recovery must not roll back a newer result saved while a Batch was pending.
+    if (character.imageUrl && character.imageUrl !== item?.imageUrl) return character;
     if (item?.status === 'done') return {
       ...character,
       imageUrl: item.imageUrl,
