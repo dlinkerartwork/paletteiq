@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers';
-import { and, asc, desc, eq, notInArray } from 'drizzle-orm';
+import { and, asc, count, desc, eq, notInArray } from 'drizzle-orm';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { getDb } from '@/db';
 import { imageBatches, projects, studioSettings } from '@/db/schema';
@@ -183,6 +183,20 @@ export async function GET(req: Request) {
       catch (error) { warnings.push(error instanceof Error ? error.message : 'Batch recovery failed'); }
     }
     return Response.json({ updatedProjectIds: [...new Set(updatedProjectIds)], pendingJobs: active.length, warnings });
+  }
+  if (url.searchParams.get('activity') === '1') {
+    const pageSize = Number(url.searchParams.get('limit') || '25');
+    const offset = Number(url.searchParams.get('offset') || '0');
+    if (![10, 25, 50, 100].includes(pageSize) || !Number.isSafeInteger(offset) || offset < 0 || offset > 1_000_000) return fail('Invalid activity pagination');
+    const db = getDb();
+    const owner = eq(imageBatches.owner, user.userId);
+    const [totals, recent, ownedProjects] = await Promise.all([
+      db.select({ value: count() }).from(imageBatches).where(owner),
+      db.select().from(imageBatches).where(owner).orderBy(desc(imageBatches.createdAt), desc(imageBatches.id)).limit(pageSize).offset(offset),
+      db.select({ id: projects.id, name: projects.name }).from(projects).where(eq(projects.owner, user.userId)),
+    ]);
+    const labels = new Map(ownedProjects.map(project => [project.id, project.name]));
+    return Response.json({ total: totals[0]?.value ?? 0, activities: recent.map(job => ({ collection: labels.get(job.projectId) ?? 'Deleted collection', job: safeJob(job) })) });
   }
   const projectId = url.searchParams.get('projectId');
   if (!projectId) return fail('Missing project ID');
