@@ -45,7 +45,7 @@ export async function POST(req: Request) {
   if (!user) return fail('Sign in required', 401);
   const body = await req.json() as StudioRequest;
   if (body.action === 'mark-download') {
-    if (typeof body.projectId !== 'string' || !/^[\\w-]{8,80}$/.test(body.projectId)) return fail('Invalid collection');
+    if (typeof body.projectId !== 'string' || !/^[\w-]{8,80}$/.test(body.projectId)) return fail('Invalid collection');
     if (!['selected', 'all', 'package'].includes(String(body.scope))) return fail('Invalid download scope');
     const db = getDb();
     const rows = await db.select().from(projects).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId))).limit(1);
