@@ -1,0 +1,6 @@
+extends: ./electron-builder.yml
+# Same application identity and userData location as the licensed edition.
+# Installing either edition updates the same PaletteIQ installation.
+artifactName: PaletteIQ-NoLicense-Setup-${version}-${arch}.${ext}
+extraMetadata:
+  paletteiqEdition: unlicensed
