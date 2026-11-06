@@ -33,6 +33,7 @@ export default function StudioSettings({ preferences, onPreferences, projects, o
   const [active, setActive] = useState('');
   const [message, setMessage] = useState('');
   const [geminiModels, setGeminiModels] = useState<Array<{ id: string; name: string }>>([]);
+  const [geminiModelsLoaded, setGeminiModelsLoaded] = useState(false);
   const [openaiImageModels, setOpenaiImageModels] = useState<Array<{ id: string; name: string }>>([]);
   const [openaiModelsError, setOpenaiModelsError] = useState('');
   const [modelsError, setModelsError] = useState('');
@@ -49,11 +50,13 @@ export default function StudioSettings({ preferences, onPreferences, projects, o
   };
     const loadGeminiModels = async () => {
     setModelsError('');
+    setGeminiModelsLoaded(false);
     try {
       const response = await fetch('/api/settings?models=gemini');
       const data = await response.json() as { models?: Array<{ id: string; name: string }>; error?: string };
       if (!response.ok) throw new Error(data.error || 'Unable to fetch Gemini models');
       setGeminiModels(data.models || []);
+      setGeminiModelsLoaded(true);
     } catch (error) { setModelsError(error instanceof Error ? error.message : String(error)); }
   };
   useEffect(() => { if (credentials.gemini) void loadGeminiModels(); }, [credentials.gemini]);
@@ -105,7 +108,7 @@ export default function StudioSettings({ preferences, onPreferences, projects, o
     <section className="panel settings-panel settings-wide settings-seo"><div className="settings-header"><div className="heading-icon violet"><Settings2 size={21}/></div><div><h2>SEO generation settings & custom prompts</h2><p>Instructions below are included when generating the Etsy listing draft and running Advanced SEO Intelligence. Leave fields blank to use built-in guidance.</p></div></div>
       <div className="settings-fields seo-generation-options">
         <div><label className="input-label">SEO AI PROVIDER</label><select value={preferences.seoProvider ?? 'openai'} onChange={e => edit('seoProvider', e.target.value)}><option value="openai">OpenAI</option><option value="gemini">Google Gemini</option></select><p className="sub">Only SEO draft and AI SEO review use this provider; image generation is unchanged.</p></div>
-        <div><label className="input-label">GEMINI SEO MODEL</label><select value={preferences.seoGeminiModel ?? 'gemini-flash-latest'} onChange={e => edit('seoGeminiModel', e.target.value)} disabled={preferences.seoProvider !== 'gemini'}>{!geminiModels.some(m => m.id === (preferences.seoGeminiModel ?? 'gemini-flash-latest')) && <option value={preferences.seoGeminiModel ?? 'gemini-flash-latest'}>{preferences.seoGeminiModel ?? 'gemini-flash-latest'} (saved model)</option>}{geminiModels.map(m => <option key={m.id} value={m.id}>{m.name} ({m.id})</option>)}</select><button type="button" onClick={() => void loadGeminiModels()} disabled={preferences.seoProvider !== 'gemini'}>Refresh Gemini models</button><p className="sub">{modelsError || 'Model list is fetched from your Gemini API key. Model availability depends on the account.'}</p></div>
+        <div><label className="input-label">GEMINI SEO MODEL</label><select value={preferences.seoGeminiModel ?? 'gemini-flash-latest'} onChange={e => edit('seoGeminiModel', e.target.value)} disabled={preferences.seoProvider !== 'gemini'}>{!geminiModelsLoaded && <option value={preferences.seoGeminiModel ?? 'gemini-flash-latest'}>{preferences.seoGeminiModel ?? 'gemini-flash-latest'} (loading)</option>}{geminiModelsLoaded && !geminiModels.some(m => m.id === (preferences.seoGeminiModel ?? 'gemini-flash-latest')) && <option value={preferences.seoGeminiModel ?? 'gemini-flash-latest'} disabled>Select a supported Gemini model</option>}{geminiModels.map(m => <option key={m.id} value={m.id}>{m.name} ({m.id})</option>)}</select><button type="button" onClick={() => void loadGeminiModels()} disabled={preferences.seoProvider !== 'gemini'}>Refresh Gemini models</button><p className="sub">{modelsError || 'Model list is fetched from your Gemini API key. Model availability depends on the account.'}</p></div>
         <div><label className="input-label">TITLE MAX CHARACTERS (1–140)</label><input type="number" min={1} max={140} value={preferences.seoTitleMaxLength ?? 120} onChange={e => edit('seoTitleMaxLength', Number(e.target.value))}/><p className="sub">Default: 120 characters.</p></div>
         <div><label className="input-label">NUMBER OF IMAGE ALT TEXTS (1–20)</label><input type="number" min={1} max={20} value={preferences.seoAltTextCount ?? 10} onChange={e => edit('seoAltTextCount', Number(e.target.value))}/><p className="sub">Maximum 450 characters per alt text.</p></div>
         <div><label className="input-label">IMAGE FILE NAMING</label><input readOnly value="generaltheme_imagenumber" /><p className="sub">Example: flowers_blossoms_001.png. Applied to ZIP image exports.</p></div>
