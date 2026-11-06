@@ -12,7 +12,7 @@ export type StudioPreferences = {
 };
 export const defaultPrefs: StudioPreferences = { target: 120, model: 'gpt-image-1-mini', quality: 'low', analysisModel: 'gpt-4.1-mini', output: 'png', background: 'transparent', variations: 1, defaultStyle: 'Soft hand-painted watercolor illustration', autoSave: false, seoProvider: 'openai', seoGeminiModel: 'gemini-flash-latest', seoTitleMaxLength: 120, seoAltTextCount: 10, seoFileNaming: 'generaltheme_imagenumber', seoPrompts: { ...defaultSeoPrompts } };
 type Props = { preferences: StudioPreferences; onPreferences: (prefs: StudioPreferences) => void; projects: unknown[]; onImport: (data: { projects: unknown[]; preferences: StudioPreferences }) => Promise<void> };
-type SettingsResponse = { error?: string; credentials: { etsy: boolean; openai: boolean; gemini: boolean } };
+type SettingsResponse = { error?: string; credentials: { etsy: boolean; openai: boolean; gemini: boolean }; geminiKeyCount?: number };
 const readSettingsResponse = async (res: Response): Promise<SettingsResponse> => {
   const raw = await res.text();
   let data: Partial<SettingsResponse> | null = null;
@@ -28,6 +28,7 @@ const request = async (body: object): Promise<SettingsResponse> => {
 
 export default function StudioSettings({ preferences, onPreferences, projects, onImport }: Props) {
   const [credentials, setCredentials] = useState({ etsy: false, openai: false, gemini: false });
+  const [geminiKeyCount, setGeminiKeyCount] = useState(0);
   const [secrets, setSecrets] = useState({ etsy: '', openai: '', gemini: '' });
   const [visible, setVisible] = useState({ etsy: false, openai: false, gemini: false });
   const [active, setActive] = useState('');
@@ -38,7 +39,7 @@ export default function StudioSettings({ preferences, onPreferences, projects, o
   const [openaiModelsError, setOpenaiModelsError] = useState('');
   const [modelsError, setModelsError] = useState('');
   const picker = useRef<HTMLInputElement>(null);
-  useEffect(() => { fetch('/api/settings').then(readSettingsResponse).then(data => setCredentials(data.credentials)).catch(e => setMessage(e instanceof Error ? e.message : String(e))); }, []);
+  useEffect(() => { fetch('/api/settings').then(readSettingsResponse).then(data => { setCredentials(data.credentials); setGeminiKeyCount(data.geminiKeyCount ?? (data.credentials.gemini ? 1 : 0)); }).catch(e => setMessage(e instanceof Error ? e.message : String(e))); }, []);
   const loadOpenaiModels = async () => {
     setOpenaiModelsError('');
     try {
@@ -63,7 +64,19 @@ export default function StudioSettings({ preferences, onPreferences, projects, o
   useEffect(() => { if (credentials.openai) void loadOpenaiModels(); }, [credentials.openai]);
   const edit = (key: keyof StudioPreferences, value: string | number | boolean) => onPreferences({ ...preferences, [key]: value });
   const act = async (action: string, op: () => Promise<unknown>) => { setActive(action); setMessage(''); try { await op(); setMessage('Saved successfully.'); } catch (e) { setMessage(e instanceof Error ? e.message : String(e)); } finally { setActive(''); } };
-  const saveKey = (provider: 'etsy' | 'openai' | 'gemini', remove = false) => act(provider, async () => { const response = await request({ action: 'credential', provider, ...(remove ? { remove: true } : { key: secrets[provider] }) }); setCredentials(response.credentials); setSecrets(s => ({ ...s, [provider]: '' })); });
+  const saveKey = (provider: 'etsy' | 'openai' | 'gemini', remove = false) => act(provider, async () => {
+    const response = await request(provider === 'gemini' && !remove
+      ? { action: 'gemini-key-add', key: secrets.gemini }
+      : { action: 'credential', provider, ...(remove ? { remove: true } : { key: secrets[provider] }) });
+    setCredentials(response.credentials);
+    if (response.geminiKeyCount !== undefined) setGeminiKeyCount(response.geminiKeyCount);
+    setSecrets(s => ({ ...s, [provider]: '' }));
+  });
+  const removeGeminiKey = (index: number) => act('gemini-remove-' + index, async () => {
+    const response = await request({ action: 'gemini-key-remove', index });
+    setCredentials(response.credentials);
+    setGeminiKeyCount(response.geminiKeyCount ?? 0);
+  });
   const backup = () => { const payload = { format: 'paletteiq-backup', version: 1, exportedAt: new Date().toISOString(), preferences, projects }; const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }); const href = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = href; a.download = `paletteiq-backup-${new Date().toISOString().slice(0, 10)}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(href), 1000); setMessage('JSON backup downloaded. API keys are excluded.'); };
   const importBackup = async (file: File | undefined) => { if (!file) return; if (file.size > 10_000_000) { setMessage('Backup file exceeds 10 MB.'); return; } await act('import', async () => { const parsed = JSON.parse(await file.text()); if (parsed.format !== 'paletteiq-backup' || parsed.version !== 1 || !Array.isArray(parsed.projects) || typeof parsed.preferences !== 'object' || !parsed.preferences) throw new Error('Invalid paletteIQ backup format'); if (parsed.projects.length > 500) throw new Error('Backup has too many collections'); await onImport({ projects: parsed.projects, preferences: parsed.preferences }); }); if (picker.current) picker.current.value = ''; };
   const seoFields: Array<[SeoPromptKey, string, string]> = [
@@ -87,7 +100,7 @@ export default function StudioSettings({ preferences, onPreferences, projects, o
   return <div className="settings-layout">
     {message && <div className="notice"><ShieldCheck size={17}/>{message}</div>}
     <section className="panel settings-panel settings-wide settings-credentials"><div className="settings-header"><div className="heading-icon amber"><KeyRound size={21}/></div><div><h2>API credentials</h2><p>Keep your credentials private. Stored encrypted on the server and never included in JSON exports.</p></div></div>
-      {([{ id: 'openai', label: 'OpenAI API key', hint: 'Required for AI analysis, character expansion and image generation.', placeholder: 'sk-...' }, { id: 'gemini', label: 'Google Gemini API key', hint: 'Used only when Gemini is selected for SEO drafting/review.', placeholder: 'Gemini API key' }, { id: 'etsy', label: 'Etsy API credential', hint: 'Enter the Etsy keystring and shared secret separated by a colon.', placeholder: 'keystring:shared_secret' }] as const).map(c => <div className="secret-row" key={c.id}><div className="secret-heading"><div><b>{c.label}</b><p>{c.hint}</p></div><span className={`credential-status ${credentials[c.id] ? 'connected' : ''}`}>{credentials[c.id] ? <><CheckCircle2 size={13}/> Saved</> : 'Not configured'}</span></div><div className="secret-input"><input autoComplete="off" type={visible[c.id] ? 'text' : 'password'} value={secrets[c.id]} placeholder={credentials[c.id] ? '•••••••••••• (replace existing key)' : c.placeholder} onChange={e => setSecrets(s => ({ ...s, [c.id]: e.target.value }))}/><button aria-label={visible[c.id] ? 'Hide key' : 'Show key'} onClick={() => setVisible(v => ({ ...v, [c.id]: !v[c.id] }))}>{visible[c.id] ? <EyeOff size={17}/> : <Eye size={17}/>}</button><button className="primary-btn" disabled={!secrets[c.id] || Boolean(active)} onClick={() => saveKey(c.id)}><Save size={15}/> {active === c.id ? 'Saving…' : 'Save key'}</button>{credentials[c.id] && <button className="outline-btn danger-btn" disabled={Boolean(active)} onClick={() => saveKey(c.id, true)} title="Remove stored key"><Trash2 size={15}/></button>}</div></div>)}
+      {([{ id: 'openai', label: 'OpenAI API key', hint: 'Required for AI analysis, character expansion and image generation.', placeholder: 'sk-...' }, { id: 'gemini', label: 'Google Gemini API key', hint: 'Used only when Gemini is selected for SEO drafting/review.', placeholder: 'Gemini API key' }, { id: 'etsy', label: 'Etsy API credential', hint: 'Enter the Etsy keystring and shared secret separated by a colon.', placeholder: 'keystring:shared_secret' }] as const).map(c => <div className="secret-row" key={c.id}><div className="secret-heading"><div><b>{c.label}</b><p>{c.hint}</p></div><span className={`credential-status ${credentials[c.id] ? 'connected' : ''}`}>{credentials[c.id] ? <><CheckCircle2 size={13}/> Saved</> : 'Not configured'}</span></div><div className="secret-input"><input autoComplete="off" type={visible[c.id] ? 'text' : 'password'} value={secrets[c.id]} placeholder={c.id === 'gemini' ? 'Add another Gemini API key' : credentials[c.id] ? '•••••••••••• (replace existing key)' : c.placeholder} onChange={e => setSecrets(s => ({ ...s, [c.id]: e.target.value }))}/><button aria-label={visible[c.id] ? 'Hide key' : 'Show key'} onClick={() => setVisible(v => ({ ...v, [c.id]: !v[c.id] }))}>{visible[c.id] ? <EyeOff size={17}/> : <Eye size={17}/>}</button><button className="primary-btn" disabled={!secrets[c.id] || Boolean(active)} onClick={() => saveKey(c.id)}><Save size={15}/> {active === c.id ? 'Saving…' : c.id === 'gemini' ? 'Add key' : 'Save key'}</button>{credentials[c.id] && c.id !== 'gemini' && <button className="outline-btn danger-btn" disabled={Boolean(active)} onClick={() => saveKey(c.id, true)} title="Remove stored key"><Trash2 size={15}/></button>}</div>{c.id === 'gemini' && <div className="sub" style={{ marginTop: 8 }}><p>{geminiKeyCount} Gemini API key(s) configured. Rotation follows the order below on quota exhaustion.</p>{Array.from({ length: geminiKeyCount }, (_, index) => <div key={index} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}><span>Key {index + 1} · ••••••••</span><button type="button" className="outline-btn" disabled={Boolean(active)} onClick={() => removeGeminiKey(index)}><Trash2 size={14}/> Remove</button></div>)}</div>}</div>)}
       <div className="security-note"><LockKeyhole size={16}/><span>API keys are encrypted with a server-held encryption key. Stored keys are never sent back to the browser. Your backup intentionally excludes credentials.</span></div>
     </section>
 
