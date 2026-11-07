@@ -36,7 +36,7 @@ chrome.storage.local.get(['companionTask','companionStatus','companionTokenDraft
   api(currentTaskUrl(), { cache: 'no-store' }).then(response => response.json()).then(data => {
     if (data.status !== 'pending') throw new Error('Task is no longer pending');
     byId('task').textContent = 'Ready: ' + imageName + ' (' + new URL(base).host + ')';
-    for (const id of ['source','canva','place','upscale','result']) byId(id).disabled = false;
+    for (const id of ['source','canva','place','fit','upscale','result']) byId(id).disabled = false;
   }).catch(() => {
     byId('task').textContent = 'Saved pairing expired or unavailable. Load a new pairing code.';
     chrome.storage.local.remove('companionTask').catch(() => {});
@@ -257,6 +257,109 @@ byId('place').addEventListener('click', async () => {
     status(result?.result?.message || 'Canva did not confirm image placement.');
   } catch (error) { status('Place image unavailable: ' + String(error)); }
   finally { byId('place').disabled = false; }
+});
+
+// Fit the selected Canva image using the Position → Advanced numerical controls.
+// This targets one dimension with Canva's ratio lock enabled, preserving aspect
+// ratio. Canva's editor DOM is not an official API, so verify after each change.
+byId('fit').addEventListener('click', async () => {
+  byId('fit').disabled = true;
+  try {
+    const tabs = await chrome.tabs.query({});
+    const editors = tabs.filter(t => {
+      try {
+        const u = new URL(t.url || '');
+        return (u.hostname === 'canva.com' || u.hostname.endsWith('.canva.com')) && u.pathname.startsWith('/design/');
+      } catch { return false; }
+    });
+    const tab = editors.find(t => t.id === canvaTabId) || editors.find(t => t.active) || editors[0];
+    if (!tab) throw new Error('Open a Canva design with the image selected.');
+    canvaTabId = tab.id;
+    const [result] = await chrome.scripting.executeScript({
+      target: { tabId: canvaTabId },
+      func: async () => {
+        const visible = el => {
+          const r = el.getBoundingClientRect(), style = getComputedStyle(el);
+          return r.width > 0 && r.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+        };
+        const clickNamed = name => {
+          const buttons = [...document.querySelectorAll('button,[role="button"]')].filter(visible);
+          const button = buttons.find(b => [b.getAttribute('aria-label'), b.getAttribute('title'), b.textContent]
+            .some(s => String(s || '').trim() === name));
+          if (button && !button.disabled && button.getAttribute('aria-disabled') !== 'true') {
+            button.click();
+            return true;
+          }
+          return false;
+        };
+        const text = document.body.innerText;
+        const titleMatch = text.match(/(\d{2,5})\s*px\s*[×x]\s*(\d{2,5})\s*px/i);
+        if (!titleMatch) return { message:'Could not read Canva canvas dimensions. Open Position → Advanced and retry.' };
+        const cw = Number(titleMatch[1]), ch = Number(titleMatch[2]);
+        const findField = name => {
+          const labels = [...document.querySelectorAll('label,span,div,p')].filter(el =>
+            visible(el) && el.children.length < 2 && el.textContent.trim() === name &&
+            el.getBoundingClientRect().left < 650
+          );
+          const inputs = [...document.querySelectorAll('input')].filter(el => visible(el) &&
+            el.getBoundingClientRect().left < 650 && /[\d.]+/.test(el.value || '')
+          );
+          const options = [];
+          for (const label of labels) {
+            const r = label.getBoundingClientRect();
+            for (const input of inputs) {
+              const i = input.getBoundingClientRect();
+              const dx = Math.abs(i.left - r.left), dy = i.top - r.bottom;
+              if (dy >= -5 && dy < 72 && dx < 95)
+                options.push({ input, score: dy + dx / 8 });
+            }
+          }
+          options.sort((a,b) => a.score - b.score);
+          return options[0]?.input || null;
+        };
+        let width = findField('Width'), height = findField('Height');
+        if (!width || !height || width === height) {
+          const opened = clickNamed('Position');
+          return { message: opened
+            ? 'Position panel opened. Click Auto Fit again when Advanced Width/Height fields appear.'
+            : 'Cannot identify Width and Height safely. Open Position → Arrange → Advanced and retry.' };
+        }
+        const numeric = input => Number(String(input.value || '').replace(/[^0-9.]/g, ''));
+        const w = numeric(width), h = numeric(height);
+        if (!(w > 0 && h > 0 && cw > 0 && ch > 0))
+          return { message:'Invalid image/canvas dimensions; no resize performed.' };
+        const factor = Math.min(cw / w, ch / h);
+        const useWidth = cw / w <= ch / h;
+        const field = useWidth ? width : height;
+        const target = Math.round((useWidth ? w : h) * factor * 10) / 10;
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+        if (!setter) return { message:'Cannot update Canva numeric controls.' };
+        field.focus();
+        setter.call(field, String(target));
+        field.dispatchEvent(new Event('input', { bubbles:true }));
+        field.dispatchEvent(new Event('change', { bubbles:true }));
+        field.dispatchEvent(new KeyboardEvent('keydown', { key:'Enter', code:'Enter', bubbles:true }));
+        field.dispatchEvent(new KeyboardEvent('keyup', { key:'Enter', code:'Enter', bubbles:true }));
+        field.blur();
+        await new Promise(resolve => setTimeout(resolve, 350));
+        width = findField('Width'); height = findField('Height');
+        const newW = width ? numeric(width) : NaN, newH = height ? numeric(height) : NaN;
+        const expectedW = w * factor, expectedH = h * factor;
+        const valid = Number.isFinite(newW) && Number.isFinite(newH)
+          && Math.abs(newW - expectedW) < 2 && Math.abs(newH - expectedH) < 2;
+        if (!valid) return { message:
+          'Canva did not confirm proportional resize. Expected ' + expectedW.toFixed(1) + ' × ' +
+          expectedH.toFixed(1) + ', observed ' + newW + ' × ' + newH +
+          '. Check Ratio lock and adjust manually before Upscale.' };
+        clickNamed('Middle');
+        clickNamed('Center');
+        return { message:'Auto Fit applied: ' + newW + ' × ' + newH +
+          ' on ' + cw + ' × ' + ch + ' canvas. Middle/Center requested. Verify alignment before Upscale.' };
+      }
+    });
+    status(result?.result?.message || 'Auto Fit result unavailable.');
+  } catch (error) { status('Auto Fit unavailable: ' + String(error)); }
+  finally { byId('fit').disabled = false; }
 });
 
 // Upscale control varies across Canva releases. Only trigger a visible,
