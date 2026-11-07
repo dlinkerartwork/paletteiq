@@ -18,3 +18,13 @@ Chrome Manifest V3 extension for PaletteIQ Web (localhost:5173) or Desktop (127.
 - Direct upload caps image size at 12 MB; return accepts PNG/JPG up to 25 MB.
 - Pairing codes are random, one image per code, expire after 30 minutes and are stored in server memory. Restarting PaletteIQ loses pending tasks. Originals are preserved.
 - Canva credentials are never requested or handled by the extension.
+
+## v0.4.0 — persistent PaletteIQ floating sidebar
+- Open PaletteIQ Web or Desktop: the companion loads automatically as a right-side floating sidebar.
+- Use the narrow orange toggle halfway down the left edge of the sidebar to collapse or expand it. Its state persists across navigation and refresh.
+- Active pairing code, character name, endpoint, and status text are kept in extension-local storage so they survive PaletteIQ route/tab changes. On restoration, the extension revalidates the pairing against the server. Expired/completed tasks cannot be resumed.
+- Selected files from the browser's file picker **cannot** be preserved across page reloads; select the downloaded Canva result again when returning it.
+- The toolbar action popup is still supported, sharing the same pairing state with the embedded sidebar.
+- Chrome extension permissions now include storage plus a content script limited to PaletteIQ's local development and desktop URLs.
+- Update: pull the branch, reload the unpacked extension at chrome://extensions, then refresh PaletteIQ. No desktop installer rebuild is needed for local web development.
+- The embedded extension page requires Chrome to allow loading web-accessible extension resources; report a blank panel if browser policy blocks the frame.
