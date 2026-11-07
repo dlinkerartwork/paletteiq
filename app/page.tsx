@@ -15,7 +15,7 @@ import type { SimilarityReview } from '@/lib/similarity-review';
 
 type Character = { id: string; name: string; description: string; prompt: string; status: 'draft' | 'ready' | 'done' | 'error'; imageUrl?: string; error?: string; similarityReview?: SimilarityReview; origin: 'listing' | 'ai' | 'manual' };
 type Project = { id: string; name: string; url: string; theme: string; subtheme: string; style: string; palette: string; texture: string; keywords: string[]; characters: Character[]; title: string; images: string[]; selectedImageUrls?: string[]; notes: string; listing?: ListingData; seoReview?: SavedSeoReview; lastDownloadedAt?: number; downloadCount?: number; lastDownloadImageCount?: number; downloadedImageIds?: string[] };
-const etsyListingId = (value: string) => { try { const url = new URL(value.trim()); return ['etsy.com', 'www.etsy.com'].includes(url.hostname) ? url.pathname.match(/^\\/listing\\/(\\d+)/)?.[1] || null : null; } catch { return null; } };
+const etsyListingId = (value: string) => { try { const url = new URL(value.trim()); return ['etsy.com', 'www.etsy.com'].includes(url.hostname) ? url.pathname.match(/^\/listing\/(\d+)/)?.[1] || null : null; } catch { return null; } };
 const uid = () => crypto.randomUUID();
 const blank = (): Project => ({ id: uid(), name: 'Untitled collection', url: '', theme: '', subtheme: '', style: 'Soft hand-painted watercolor illustration', palette: 'Earthy muted colors', texture: 'Natural watercolor pigment granulation', keywords: [], characters: [], title: '', images: [], notes: '' });
 const makeChar = (name: string, origin: Character['origin'], description = ''): Character => ({ id: uid(), name, description, prompt: '', status: 'draft', origin });
