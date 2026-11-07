@@ -5,10 +5,10 @@ import { validImageNaming, createImageFileNamer, DEFAULT_IMAGE_NAMING } from '..
 
 const context = { theme: 'Flowers & Blossoms', collection: 'Spring Garden Set' };
 
-test('legacy default naming stays backward compatible', () => {
+test('new default uses character names plus numbered suffix', () => {
   const next = createImageFileNamer(DEFAULT_IMAGE_NAMING, context);
-  assert.equal(next('Rose', 0, 'png'), 'flowers_blossoms_001.png');
-  assert.equal(next('Rose', 1, 'jpg'), 'flowers_blossoms_002.jpg');
+  assert.equal(next('Rose', 0, 'png'), 'rose_001.png');
+  assert.equal(next('Rose', 1, 'jpg'), 'rose_002.jpg');
 });
 
 test('editable placeholders create meaningful sanitized filenames', () => {
@@ -61,4 +61,10 @@ test('microtheme falls back to collection name and duplicates remain unique', ()
 test('braced aliases and legacy tokens stay supported', () => {
   const next = createImageFileNamer('{generaltheme}_{charactername}_{imagenumber}', context);
   assert.equal(next('Tulip', 0, 'jpg'), 'flowers_blossoms_tulip_001.jpg');
+});
+
+
+test('previous generaltheme_imagenumber pattern remains available', () => {
+  const naming = createImageFileNamer('generaltheme_imagenumber', context);
+  assert.equal(naming('Rose', 0, 'png'), 'flowers_blossoms_001.png');
 });
