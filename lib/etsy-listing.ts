@@ -68,3 +68,21 @@ export function applySeoLimits(draft: EtsyListingDraft, maxTitleCharacters: numb
     : draft.title;
   return { ...draft, title, imageAltTexts: draft.imageAltTexts.slice(0, count).map(text => text.slice(0, 500).trim()) };
 }
+
+/** Prevent reference-listing URLs and quantities from leaking into our own Etsy draft. */
+export function adaptReferenceSeoToCollection(title: string, description: string, imageCount: number) {
+  const count = Math.max(0, Math.trunc(imageCount) || 0);
+  const stripLinks = (value: string) => value
+    .replace(/(?:https?:\/\/|www\.)[^\s<>()[\]{}]+/gi, '')
+    .replace(/\b(?:[\w-]+\.)+(?:com|net|org|io|co|shop|store|me|ly)\/[^\s<>()[\]{}]*/gi, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/ +([,.!?:;])/g, '$1')
+    .trim();
+  const updateQuantities = (value: string) => value
+    // Numeric quantity before the product unit: "50 PNG cliparts", "100+ images".
+    .replace(/\b\d{1,6}(?:\s*[-–]\s*\d{1,6})?\s*\+?\s*(?=(?:(?:high[ -]res|digital|watercolor|transparent|printable|individual|unique)\s+){0,3}(?:clip\s?arts?|images?|pngs?|illustrations?|graphics?|designs?|elements?|files?)\b)/gi, String(count) + ' ')
+    // Product unit before the quantity: "clipart bundle of 100", "images: 100".
+    .replace(/\b(clip\s?arts?|images?|pngs?|illustrations?|graphics?|designs?|elements?|files?)\s*(?:bundle|set|pack)?\s*(?:of|:|–|-)\s*\d{1,6}\+?/gi, (_match, unit: string) => `${unit}: ${count}`)
+    .replace(/\b(?:set|pack|bundle|collection)\s+of\s+\d{1,6}\+?\s+(?=clip\s?arts?|images?|pngs?|illustrations?|graphics?|designs?|elements?|files?)/gi, `set of ${count} `);
+  return { title: stripLinks(updateQuantities(title)), description: stripLinks(updateQuantities(description)) };
+}
