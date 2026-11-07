@@ -181,6 +181,10 @@ byId('canva').addEventListener('click', async () => {
     const filename = 'PaletteIQ-' + imageName.replace(/[^a-z0-9-]/gi, '_').slice(0,70) + (blob.type === 'image/jpeg' ? '.jpg' : '.png');
     const result = await injectIntoCanva(encoded, filename);
     status(result?.message || 'Canva did not confirm the upload. Use Download source as fallback.');
+    if (result?.ok) {
+      status('Image handed to Canva Uploads. Trying to place the matching upload on canvas in a moment…');
+      setTimeout(() => { if (!byId('place').disabled) byId('place').click(); }, 2500);
+    }
   } catch (error) {
     status('Automatic upload unavailable: ' + String(error) + '. You can still use Download source and upload manually.');
   } finally { byId('canva').disabled = false; }
