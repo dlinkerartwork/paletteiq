@@ -36,7 +36,7 @@ byId('load').addEventListener('click', async () => {
         base = endpoint;
         imageName = data.name || 'image';
         byId('task').textContent = 'Ready: ' + imageName + ' (' + new URL(base).host + ')';
-        for (const id of ['source','canva','result']) byId(id).disabled = false;
+        for (const id of ['source','canva','upscale','result']) byId(id).disabled = false;
         status('Connected. Click Send to Canva to try direct upload.');
         return;
       } catch (error) {
@@ -146,6 +146,54 @@ byId('canva').addEventListener('click', async () => {
   } catch (error) {
     status('Automatic upload unavailable: ' + String(error) + '. You can still use Download source and upload manually.');
   } finally { byId('canva').disabled = false; }
+});
+// Upscale control varies across Canva releases. Only trigger a visible,
+// explicitly labeled Upscale control in the selected Canva editor.
+byId('upscale').addEventListener('click', async () => {
+  byId('upscale').disabled = true;
+  try {
+    const allTabs = await chrome.tabs.query({});
+    const editors = allTabs.filter(t => {
+      try {
+        const url = new URL(t.url || '');
+        return (url.hostname === 'canva.com' || url.hostname.endsWith('.canva.com')) && url.pathname.startsWith('/design/');
+      } catch { return false; }
+    });
+    const tab = editors.find(t => t.id === canvaTabId) || editors.find(t => t.active) || editors[0];
+    if (!tab) throw new Error('Open a Canva design editor first.');
+    canvaTabId = tab.id;
+    const [outcome] = await chrome.scripting.executeScript({
+      target: { tabId: canvaTabId },
+      func: () => {
+        const visible = element => {
+          const rect = element.getBoundingClientRect();
+          const style = getComputedStyle(element);
+          return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+        };
+        const label = element => (
+          element.getAttribute('aria-label') ||
+          element.getAttribute('title') ||
+          element.textContent ||
+          ''
+        ).trim().replace(/\\s+/g, ' ');
+        const controls = [...document.querySelectorAll('button, [role="button"]')].filter(visible);
+        const match = exact => controls.find(el => exact.test(label(el)));
+        // Canva sometimes places the Upscale tool under the Edit image panel.
+        const edit = match(/^(Edit|Edit image)$/i);
+        let upscale = match(/^Upscale$/i);
+        if (!upscale && edit) {
+          edit.click();
+          return { action: 'opened-edit', message: 'Edit image opened. Wait for its tools to appear, then click Run Upscale again.' };
+        }
+        if (!upscale) return { action: 'not-found', message: 'Upscale control not found. Select the image, open Edit image, and try again.' };
+        upscale.click();
+        return { action: 'clicked', message: 'Clicked Canva Upscale. Watch the canvas and verify processing completes; this does not prove success yet.' };
+      }
+    });
+    status(outcome?.result?.message || 'Canva did not report an Upscale action.');
+  } catch (error) {
+    status('Upscale automation unavailable: ' + String(error));
+  } finally { byId('upscale').disabled = false; }
 });
 byId('result').addEventListener('change', () => { byId('submit').disabled = !byId('result').files?.length; });
 byId('submit').addEventListener('click', async () => {
