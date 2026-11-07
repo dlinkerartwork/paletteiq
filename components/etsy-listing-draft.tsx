@@ -120,7 +120,7 @@ export default function EtsyListingDraft({ project, onChange, onSave, onSeoRevie
     setReviewing(true); setNotice('');
     try {
       await onSave();
-      const response = await fetch('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'seo-review', projectId: project.id, draft, seoGeminiModel: seoProvider === 'gemini' ? selectedGeminiModel : undefined }) });
+      const response = await fetch('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'seo-review', projectId: project.id, draft, seoGeminiModel: seoProvider === 'gemini' ? selectedGeminiModel : undefined, seoOpenaiModel: seoProvider === 'openai' ? seoOpenaiModel : undefined }) });
       const data = await response.json() as { review?: AiSeoReview; error?: string };
       if (!response.ok || !data.review) throw new Error(data.error || 'AI SEO review failed');
       await onSeoReview({ ...data.review, sourceFingerprint: fingerprint, reviewedAt: Date.now() });
