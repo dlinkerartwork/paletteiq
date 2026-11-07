@@ -269,6 +269,7 @@ byId('place').addEventListener('click', async () => {
 // ratio. Canva's editor DOM is not an official API, so verify after each change.
 byId('fit').addEventListener('click', async () => {
   byId('fit').disabled = true;
+  let returnTabId = null;
   try {
     const tabs = await chrome.tabs.query({});
     const editors = tabs.filter(t => {
@@ -280,6 +281,12 @@ byId('fit').addEventListener('click', async () => {
     const tab = editors.find(t => t.id === canvaTabId) || editors.find(t => t.active) || editors[0];
     if (!tab) throw new Error('Open a Canva design with the image selected.');
     canvaTabId = tab.id;
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (activeTab && activeTab.id !== canvaTabId && activeTab.windowId === tab.windowId) {
+      returnTabId = activeTab.id;
+      await chrome.tabs.update(canvaTabId, { active: true });
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
     const [result] = await chrome.scripting.executeScript({
       target: { tabId: canvaTabId },
       world: 'MAIN',
@@ -393,7 +400,10 @@ byId('fit').addEventListener('click', async () => {
     });
     status(result?.result?.message || 'Auto Fit result unavailable.');
   } catch (error) { status('Auto Fit unavailable: ' + String(error)); }
-  finally { byId('fit').disabled = false; }
+  finally {
+    if (returnTabId != null) await chrome.tabs.update(returnTabId, { active: true }).catch(() => {});
+    byId('fit').disabled = false;
+  }
 });
 
 // Upscale control varies across Canva releases. Only trigger a visible,
