@@ -8,6 +8,7 @@ import { normalizeListing } from '@/lib/etsy-listing';
 import { normalizeAiSeoReview } from '@/lib/seo-intelligence';
 import { originalImagePrompt } from '@/lib/originality';
 import { generateSeoJson, seoPreferences } from '@/lib/seo-provider';
+import { hasTargetSeoAltLength, normalizeSeoAlt } from '@/lib/seo-alt-text';
 import { reviewImageSimilarity, type SimilarityReview } from '@/lib/similarity-review';
 import { nativeAssetBucket } from '@/lib/native-bridge';
 import { acquireProductionLocks } from '@/lib/production-locks';
@@ -174,13 +175,24 @@ export async function POST(req: Request) {
     if (!reference.title?.trim() || !reference.description?.trim() || !Array.isArray(reference.tags)) return fail('Reference listing is missing title, description or tags.', 422);
     const customSeo = await customSeoInstructions(user.userId);
     const warnings = Array.isArray(body.seoWarnings) ? body.seoWarnings.filter((value): value is string => typeof value === 'string').slice(0, 10).map(value => value.slice(0, 180)) : [];
-    const instruction = `Prepare a complete, original English-language Etsy CLIPART listing SEO package for this collection. Return a valid JSON object with these fields: title, description, tags, primaryKeyword, secondaryKeywords (array), longTailKeywords (array), categorySuggestion, attributes (occasion, recipient, primaryColor, secondaryColor, style), materials (array), imageAltTexts (array with EXACTLY ONE descriptive image alt text, max 500 characters), photoPlan (array), priceSuggestion, sku, digitalFiles (array), licenseNotes. Only ONE image alt text is required, describing the produced collection honestly without unsupported visual claims. Keep the primaryKeyword natural in your generated description. The reference title, description and tags are imported from Etsy API separately and will override the three Gemini fields; prioritize the remaining metadata and alt text. Never copy protected brand names or invent specifications. Collection: ${JSON.stringify(brief).slice(0, 14000)}. Existing audit warnings: ${JSON.stringify(warnings)}. ${customSeo}`;
+    const instruction = `Produce a complete Etsy digital clipart SEO draft. ALL human-readable fields, including every array item and image alt text, MUST be in fluent, natural ENGLISH. Return JSON with these keys: primaryKeyword, secondaryKeywords (array), longTailKeywords (array), categorySuggestion, attributes (occasion, recipient, primaryColor, secondaryColor, style), materials (array), imageAltTexts (array with EXACTLY ONE item), photoPlan (array), priceSuggestion, sku, digitalFiles (array), licenseNotes, referenceTitleEnglish, referenceDescriptionEnglish, referenceTagsEnglish (array). The imageAltTexts array must contain ONE detailed, accessible image ALT TEXT of 470–500 characters, ideally 485–495 characters; cover subject, materials, palette, composition and style ONLY if supported by collection evidence. Do not pad with vague repetitive text or invent visual details. Reference SEO fields MUST be faithful English renderings of the Etsy API source supplied below: if source wording is already English, retain it accurately; otherwise translate it to English without adding sales claims, rewriting or inventing facts. The source Title, Description and Tags are authoritative and MUST NOT be replaced by Gemini's invented SEO copy. Keep Etsy tags concise, up to 20 characters each. All other generated fields must be original and truthful. Collection: ${JSON.stringify(brief).slice(0, 14000)}. Reference SEO from Etsy API: ${JSON.stringify({ title: reference.title, description: reference.description, tags: reference.tags }).slice(0, 16000)}. Audit warnings: ${JSON.stringify(warnings)}. ${customSeo}`;
     try {
       const generated = await generateSeoJson(user.userId, instruction, 'gemini', seoConfig.seoGeminiModel);
       const candidate = normalizeListing(generated);
-      const alt = candidate.imageAltTexts[0]?.trim().slice(0, 500) || '';
-      if (!alt) return fail('Gemini did not provide an image alt text. Try again.', 502);
-      const draft = normalizeListing({ ...candidate, title: reference.title, description: reference.description, tags: reference.tags, imageAltTexts: [alt] });
+      const translated = generated && typeof generated === 'object' ? generated as { referenceTitleEnglish?: unknown; referenceDescriptionEnglish?: unknown; referenceTagsEnglish?: unknown } : {};
+      const englishTitle = typeof translated.referenceTitleEnglish === 'string' ? translated.referenceTitleEnglish.trim() : '';
+      const englishDescription = typeof translated.referenceDescriptionEnglish === 'string' ? translated.referenceDescriptionEnglish.trim() : '';
+      const englishTags = Array.isArray(translated.referenceTagsEnglish) ? translated.referenceTagsEnglish.filter((value): value is string => typeof value === 'string' && !!value.trim()) : [];
+      if (!englishTitle || !englishDescription || !englishTags.length) return fail('Gemini did not return English versions of the Etsy API SEO fields. Please retry.', 502);
+      let alt = normalizeSeoAlt(candidate.imageAltTexts[0]);
+      // A short first answer is retried without regenerating the other SEO fields.
+      for (let attempt = 0; attempt < 2 && !hasTargetSeoAltLength(alt); attempt++) {
+        const refine = `Respond in ENGLISH with JSON {"imageAltText":"..."} only. Rewrite this image alt text to 470–500 characters (aim 490), preserving only verified product attributes. No invented details, no keyword stuffing, no repetitive filler. Existing alt: ${JSON.stringify(alt)}. Collection facts: ${JSON.stringify(brief).slice(0, 9000)}.`;
+        const revised = await generateSeoJson(user.userId, refine, 'gemini', seoConfig.seoGeminiModel) as { imageAltText?: unknown };
+        alt = normalizeSeoAlt(revised?.imageAltText);
+      }
+      if (!hasTargetSeoAltLength(alt)) return fail('Gemini alt text is still shorter than 460 characters or exceeds 500 characters after retries. Please regenerate.', 502);
+      const draft = normalizeListing({ ...candidate, title: englishTitle, description: englishDescription, tags: englishTags, imageAltTexts: [alt] });
       // Save the completed draft to the originating collection, not whichever
       // collection the user happens to be viewing when the request finishes.
       const db = getDb();
