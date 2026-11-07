@@ -360,6 +360,7 @@ byId('fit').addEventListener('click', async () => {
           // Canva's controlled inputs may reject synthetic input/change events.
           // Ask Chromium to insert text into the focused editable control as a
           // fallback, then verify the actual Width/Height values again.
+          field = (useWidth ? findField('Width') : findField('Height')) || field;
           field.focus();
           field.select?.();
           const inserted = document.execCommand('insertText', false, String(target));
