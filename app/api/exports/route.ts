@@ -22,7 +22,7 @@ export async function POST(request: Request) {
   if (typeof body.projectId !== 'string' || !['selected','all','package'].includes(body.scope || '')) return Response.json({ error: 'Invalid export request' }, { status: 400 });
   const rows = await getDb().select().from(projects).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId))).limit(1);
   if (!rows.length) return Response.json({ error: 'Collection not found' }, { status: 404 });
-  const project = JSON.parse(rows[0].data) as { name: string; theme?: string; listing?: unknown; seoReview?: unknown; characters: Array<{ id: string; name: string; imageUrl?: string }> };
+  const project = JSON.parse(rows[0].data) as { name: string; theme?: string; subtheme?: string; microtheme?: string; listing?: unknown; seoReview?: unknown; characters: Array<{ id: string; name: string; imageUrl?: string }> };
   if (body.scope === 'package' && !(project.listing && typeof project.listing === 'object' && typeof (project.listing as { title?: string }).title === 'string' && (project.listing as { title: string }).title.trim())) return Response.json({ error: 'Create and save an Etsy listing draft before exporting the final package.' }, { status: 400 });
   const selectedIds = new Set(Array.isArray(body.ids) ? body.ids.filter(v => typeof v === 'string') : []);
   const chosen = project.characters.filter(c => c.imageUrl && (body.scope !== 'selected' || selectedIds.has(c.id)));
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
   let pattern = DEFAULT_IMAGE_NAMING;
   try { if (settings[0]) pattern = (JSON.parse(settings[0].preferences) as { seoFileNaming?: string }).seoFileNaming || DEFAULT_IMAGE_NAMING; }
   catch { /* Older settings fall back to the original naming convention. */ }
-  const imageFileName = createImageFileNamer(pattern, { theme: project.theme || project.name, collection: project.name });
+  const imageFileName = createImageFileNamer(pattern, { theme: project.theme || project.name, subtheme: project.subtheme, microtheme: project.microtheme, collection: project.name });
   const entries: ZipEntry[] = [];
   for (const [index, character] of chosen.entries()) {
     const path = new URL(character.imageUrl!, 'https://app.local');
