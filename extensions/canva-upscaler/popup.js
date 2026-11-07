@@ -1,6 +1,9 @@
 const base = 'http://127.0.0.1:18763/api/canva-companion';
 const byId = id => document.getElementById(id);
 const status = value => { byId('status').textContent = value; };
+const describeError = error => error instanceof TypeError && /fetch/i.test(error.message)
+  ? 'Cannot reach PaletteIQ Desktop at 127.0.0.1:18763. Start the desktop app, check its local port, then reload this extension at chrome://extensions. If the server works, update PaletteIQ to the latest version.'
+  : String(error);
 let token = '';
 let imageName = '';
 byId('load').addEventListener('click', async () => {
@@ -15,7 +18,7 @@ byId('load').addEventListener('click', async () => {
     byId('task').textContent = 'Ready: ' + imageName;
     for (const id of ['source','canva','result']) byId(id).disabled = false;
     status('Connected. Download the original image, then open Canva.');
-  } catch (error) { status(String(error)); }
+  } catch (error) { status(describeError(error)); }
 });
 byId('source').addEventListener('click', async () => {
   try {
@@ -25,7 +28,7 @@ byId('source').addEventListener('click', async () => {
     const blobUrl = URL.createObjectURL(blob);
     chrome.downloads.download({ url: blobUrl, filename: 'PaletteIQ-' + imageName.replace(/[^a-z0-9-]/gi, '_').slice(0,70) + (blob.type === 'image/jpeg' ? '.jpg' : '.png'), saveAs: true }, () => setTimeout(() => URL.revokeObjectURL(blobUrl), 60000));
     status('Source downloaded. Upload it to Canva.');
-  } catch (error) { status(String(error)); }
+  } catch (error) { status(describeError(error)); }
 });
 byId('canva').addEventListener('click', () => chrome.tabs.create({ url: 'https://www.canva.com/' }));
 byId('result').addEventListener('change', () => { byId('submit').disabled = !byId('result').files?.length; });
@@ -39,5 +42,5 @@ byId('submit').addEventListener('click', async () => {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Could not return image.');
     status('Saved to PaletteIQ! Return to the collection and refresh to view the upscaled version.');
-  } catch (error) { status(String(error)); byId('submit').disabled = false; }
+  } catch (error) { status(describeError(error)); byId('submit').disabled = false; }
 });
