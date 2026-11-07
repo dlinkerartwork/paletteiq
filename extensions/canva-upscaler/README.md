@@ -37,3 +37,10 @@ Chrome Manifest V3 extension for PaletteIQ Web (localhost:5173) or Desktop (127.
 5. If Canva supplies a blob URL, another host, an expired signed URL, or prevents redownload, Auto Return displays a failure and leaves the downloaded file intact. Use the existing **Return upscaled image** file picker instead.
 
 Limitations: export UI clicks are **not yet automated**; this is one-image and one-shot only. Do not download unrelated Canva images while capture is armed. The pairing is valid for 30 minutes, and capture is additionally limited to 15 minutes. No Canva login credentials are handled by the extension. Live behavior on Windows/Canva still needs testing.
+
+## v0.7 — guided one-click preparation (experimental)
+- **Guided Upscale** in the sidebar runs Send to Canva → Place matching upload → Auto Fit → Run Upscale, with step-by-step progress and stop-on-failure checks.
+- If Canva opens Edit image rather than showing its Upscale tool, the guided flow waits briefly and tries Upscale again.
+- The flow only confirms clicking the Upscale control, **not** completion of Canva's processing. Wait until Canva finishes, visually verify the result, then explicitly **Arm Auto Return** and export Download selection manually as transparent PNG with desired scale and quality.
+- Pairing must be loaded and a Canva design editor with Uploads available. If matching upload name is hidden, guided mode stops; select the correct thumbnail manually and resume with individual controls.
+- This is **not** unattended export or bulk upscale yet. Auto Return for downloaded output remains independently available.
