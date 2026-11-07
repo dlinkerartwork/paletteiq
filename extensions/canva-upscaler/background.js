@@ -32,9 +32,9 @@ async function importFromPaletteIQ(capture, bytes, mime) {
   if (!page) throw new Error('Open the paired PaletteIQ website in a Chrome tab and retry');
   // Chrome scripting arguments are JSON-serializable. Transfer as base64 in
   // bounded chunks; no download URLs or Canva credentials enter the page.
-  let encoded = '';
+  const encoded = [];
   for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-    encoded += btoa(String.fromCharCode(...bytes.subarray(offset, offset + 0x8000)));
+    encoded.push(btoa(String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))));
   }
   const response = await chrome.scripting.executeScript({
     target: { tabId: page.id },
@@ -55,7 +55,7 @@ async function importFromPaletteIQ(capture, bytes, mime) {
       let data = {};
       try { data = JSON.parse(raw); } catch { /* non-JSON server rejection */ }
       return { status: reply.status, ok: reply.ok && data.ok === true,
-        error: data.error || (reply.ok ? '' : raw.replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').slice(0, 180)) };
+        error: data.error || (reply.ok ? '' : raw.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').slice(0, 180)) };
     },
     args: [endpoint.pathname + '?token=' + encodeURIComponent(capture.token), encoded, mime]
   });
