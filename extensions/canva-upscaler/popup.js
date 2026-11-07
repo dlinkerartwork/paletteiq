@@ -38,7 +38,7 @@ chrome.storage.local.get(['companionTask','companionStatus','companionTokenDraft
   api(currentTaskUrl(), { cache: 'no-store' }).then(response => response.json()).then(data => {
     if (data.status !== 'pending') throw new Error('Task is no longer pending');
     byId('task').textContent = 'Ready: ' + imageName + ' (' + new URL(base).host + ')';
-    for (const id of ['source','canva','place','fit','upscale','arm','result','guided']) byId(id).disabled = false;
+    for (const id of ['source','canva','place','fit','upscale','arm','result','guided','audit']) byId(id).disabled = false;
   }).catch(() => {
     byId('task').textContent = 'Saved pairing expired or unavailable. Load a new pairing code.';
     chrome.storage.local.remove('companionTask').catch(() => {});
@@ -267,6 +267,51 @@ byId('place').addEventListener('click', async () => {
     stepComplete('place', result?.result?.ok === true, result?.result?.message);
   } catch (error) { stepComplete('place', false, String(error)); status('Place image unavailable: ' + String(error)); }
   finally { byId('place').disabled = false; }
+});
+
+// Read-only native-resolution audit. Never expose signed image URLs, cookies,
+// request bodies, or Canva account identifiers in the sidebar.
+byId('audit').addEventListener('click', async () => {
+  byId('audit').disabled = true;
+  try {
+    const tabs = await chrome.tabs.query({});
+    const editor = tabs.find(t => t.id === canvaTabId) || tabs.find(t => {
+      try { const u = new URL(t.url || ''); return u.hostname.endsWith('.canva.com') && u.pathname.startsWith('/design/'); }
+      catch { return false; }
+    });
+    if (!editor) throw new Error('Keep an open Canva design editor with the upscaled image visible.');
+    const [answer] = await chrome.scripting.executeScript({
+      target: { tabId: editor.id },
+      func: () => {
+        const visible = el => {
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0;
+        };
+        const images = [...document.images].filter(visible)
+          .map(el => ({ width: el.naturalWidth, height: el.naturalHeight }))
+          .filter(el => el.width >= 1024 || el.height >= 1024)
+          .sort((a,b) => (b.width * b.height) - (a.width * a.height)).slice(0,8);
+        const canvases = [...document.querySelectorAll('canvas')].filter(visible)
+          .map(el => ({ width: el.width, height: el.height }))
+          .filter(el => el.width >= 1024 || el.height >= 1024)
+          .sort((a,b) => (b.width * b.height) - (a.width * a.height)).slice(0,5);
+        // Resource metadata only: the hostname and file extension, without paths
+        // or query strings, which may contain temporary signed asset tokens.
+        const hosts = [...new Set(performance.getEntriesByType('resource').map(entry => {
+          try {
+            const u = new URL(entry.name);
+            return /\\.(png|jpe?g|webp|avif)$/i.test(u.pathname) ? u.hostname : null;
+          } catch { return null; }
+        }).filter(Boolean))].slice(0,10);
+        return { images, canvases, hosts };
+      }
+    });
+    const data = answer?.result;
+    if (!data) throw new Error('Canva did not expose diagnostic information.');
+    status('Native resolution audit (read-only): ' + JSON.stringify(data) +
+      '. These are rendered DOM dimensions, not proof of the final upscaled asset resolution.');
+  } catch (error) { status('Native resolution audit unavailable: ' + String(error)); }
+  finally { byId('audit').disabled = false; }
 });
 
 // Fit the selected Canva image using the Position → Advanced numerical controls.
