@@ -1,4 +1,4 @@
-export const DEFAULT_IMAGE_NAMING = 'generaltheme_imagenumber';
+export const DEFAULT_IMAGE_NAMING = 'charactername_imagenumber';
 
 // A filename template controls ZIP labels only; image objects keep their stable IDs.
 const allowed = new Set(['theme', 'collection', 'character', 'number', 'charactername', 'generaltheme', 'subtheme', 'microtheme', 'imagenumber']);
@@ -26,7 +26,7 @@ export function createImageFileNamer(pattern: string, context: { theme: string; 
     values.generaltheme = values.theme;
     values.charactername = values.character;
     values.imagenumber = values.number;
-    const raw = naming === DEFAULT_IMAGE_NAMING
+    const raw = naming === 'generaltheme_imagenumber'
       ? `${values.theme}_${values.number}`
       : naming
           .replace(/(^|[_. -])(charactername|generaltheme|subtheme|microtheme|imagenumber)(?=$|[_. -])/gi, (_, prefix: string, token: string) => prefix + values[token.toLowerCase()])
