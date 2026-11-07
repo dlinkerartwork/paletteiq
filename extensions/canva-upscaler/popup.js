@@ -300,7 +300,7 @@ byId('audit').addEventListener('click', async () => {
         const hosts = [...new Set(performance.getEntriesByType('resource').map(entry => {
           try {
             const u = new URL(entry.name);
-            return /\\.(png|jpe?g|webp|avif)$/i.test(u.pathname) ? u.hostname : null;
+            return /\.(png|jpe?g|webp|avif)$/i.test(u.pathname) ? u.hostname : null;
           } catch { return null; }
         }).filter(Boolean))].slice(0,10);
         return { images, canvases, hosts };
