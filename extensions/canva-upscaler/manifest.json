@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "PaletteIQ Canva Upscaler Companion",
-  "version": "0.2.0",
-  "description": "Send PaletteIQ images to Canva using a user-triggered upload attempt and return upscaled assets.",
+  "version": "0.3.0",
+  "description": "Experimental PaletteIQ Canva transfer and single-image Upscale action.",
   "permissions": [
     "downloads",
     "scripting",
