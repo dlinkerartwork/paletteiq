@@ -347,14 +347,36 @@ byId('fit').addEventListener('click', async () => {
         field.blur();
         await new Promise(resolve => setTimeout(resolve, 350));
         width = findField('Width'); height = findField('Height');
-        const newW = width ? numeric(width) : NaN, newH = height ? numeric(height) : NaN;
         const expectedW = w * factor, expectedH = h * factor;
-        const valid = Number.isFinite(newW) && Number.isFinite(newH)
-          && Math.abs(newW - expectedW) < 2 && Math.abs(newH - expectedH) < 2;
-        if (!valid) return { message:
-          'Canva did not confirm proportional resize. Expected ' + expectedW.toFixed(1) + ' × ' +
+        const measurements = () => {
+          width = findField('Width'); height = findField('Height');
+          return { nw: width ? numeric(width) : NaN, nh: height ? numeric(height) : NaN };
+        };
+        const matches = ({nw,nh}) => Number.isFinite(nw) && Number.isFinite(nh)
+          && Math.abs(nw - expectedW) < 2 && Math.abs(nh - expectedH) < 2;
+        let measured = measurements();
+        let inputMethod = 'native input events';
+        if (!matches(measured)) {
+          // Canva's controlled inputs may reject synthetic input/change events.
+          // Ask Chromium to insert text into the focused editable control as a
+          // fallback, then verify the actual Width/Height values again.
+          field.focus();
+          field.select?.();
+          const inserted = document.execCommand('insertText', false, String(target));
+          field.dispatchEvent(new Event('change', { bubbles: true }));
+          field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
+          field.blur();
+          await new Promise(resolve => setTimeout(resolve, 450));
+          measured = measurements();
+          inputMethod = inserted ? 'editable text insertion' : 'text insertion unsupported';
+        }
+        const {nw:newW, nh:newH} = measured;
+        if (!matches(measured)) return { message:
+          'Canva rejected both resize input methods. Expected ' + expectedW.toFixed(1) + ' × ' +
           expectedH.toFixed(1) + ', observed ' + newW + ' × ' + newH +
-          '. Check Ratio lock and adjust manually before Upscale.' };
+          ' (' + inputMethod + '). Input type: ' + field.type +
+          ', readOnly: ' + field.readOnly +
+          '. Resize manually for now; automation will not proceed to Upscale.' };
         clickNamed('Middle');
         clickNamed('Center');
         return { message:'Auto Fit applied: ' + newW + ' × ' + newH +
