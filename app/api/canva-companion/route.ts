@@ -45,7 +45,7 @@ export async function POST(req: Request) {
   return Response.json({ tasks: created, expiresInMinutes: 30 }, { headers: { 'Cache-Control': 'no-store' } });
 }
 
-export async function GET(req: Request) {
+async function getTaskResponse(req: Request) {
   const url = new URL(req.url);
   const task = getTask(url.searchParams.get('token') || '');
   if (!task) return bad('Pairing code missing or expired', 404);
@@ -57,7 +57,7 @@ export async function GET(req: Request) {
   return new Response(object.body, { headers: { 'Content-Type': source.format === 'jpg' ? 'image/jpeg' : 'image/png', 'Content-Disposition': `attachment; filename="paletteiq-source.${source.format}"`, 'Cache-Control': 'no-store' } });
 }
 
-export async function PUT(req: Request) {
+async function putTaskResponse(req: Request) {
   const token = new URL(req.url).searchParams.get('token') || '';
   const task = getTask(token);
   if (!task) return bad('Pairing code missing or expired', 404);
@@ -87,3 +87,22 @@ export async function PUT(req: Request) {
   task.status = 'completed';
   return Response.json({ ok: true, upscaledImageUrl: character.upscaledImageUrl, projectId: task.projectId, characterId: task.characterId });
 }
+
+// The Chrome extension has a chrome-extension:// origin. Explicitly support
+// preflight requests from that origin when the desktop server is on localhost.
+const companionCors = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, PUT, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Allow-Private-Network': 'true',
+  'Access-Control-Max-Age': '600',
+  'Vary': 'Access-Control-Request-Method, Access-Control-Request-Headers',
+};
+const withCors = (response: Response) => {
+  const headers = new Headers(response.headers);
+  for (const [key, value] of Object.entries(companionCors)) headers.set(key, value);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+};
+export async function OPTIONS() { return new Response(null, { status: 204, headers: companionCors }); }
+export async function GET(req: Request) { return withCors(await getTaskResponse(req)); }
+export async function PUT(req: Request) { return withCors(await putTaskResponse(req)); }
