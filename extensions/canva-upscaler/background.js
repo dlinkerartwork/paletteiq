@@ -39,7 +39,7 @@ chrome.downloads.onChanged.addListener(async delta => {
     const [candidate] = await chrome.downloads.search({ id: delta.id });
     if (!candidate || !isCanvaUrl(candidate.finalUrl || candidate.url) ||
         Date.parse(candidate.startTime || '') < capture.armedAt ||
-        !/\\.(png|jpe?g)$/i.test(candidate.filename || '')) return;
+        !/\.(png|jpe?g)$/i.test(candidate.filename || '')) return;
     if (candidate.referrer && capture.canvaDesignUrl &&
         new URL(candidate.referrer).pathname !== new URL(capture.canvaDesignUrl).pathname) return;
   }
