@@ -108,13 +108,24 @@ byId('canva').addEventListener('click', async () => {
     let tab;
     if (canvaTabId != null) tab = await chrome.tabs.get(canvaTabId).catch(() => null);
     if (!tab) {
-      tab = await chrome.tabs.create({ url: 'https://www.canva.com/' });
+      tab = await chrome.tabs.create({ url: 'https://www.canva.com/', active: false });
       canvaTabId = tab.id;
     }
-    if (!tab.url?.startsWith('https://www.canva.com/') || tab.status !== 'complete') {
-      status('Canva is opening. Wait for it to load, then click Send to Canva again.');
-      return;
+    if (tab.status !== 'complete') {
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => { chrome.tabs.onUpdated.removeListener(listener); reject(new Error('Canva tab timed out')); }, 25000);
+        const listener = (id, change) => {
+          if (id === canvaTabId && change.status === 'complete') {
+            clearTimeout(timeout);
+            chrome.tabs.onUpdated.removeListener(listener);
+            resolve();
+          }
+        };
+        chrome.tabs.onUpdated.addListener(listener);
+      });
     }
+    tab = await chrome.tabs.get(canvaTabId);
+    if (!tab.url?.startsWith('https://www.canva.com/')) throw new Error('Expected a Canva tab');
     const filename = 'PaletteIQ-' + imageName.replace(/[^a-z0-9-]/gi, '_').slice(0,70) + (blob.type === 'image/jpeg' ? '.jpg' : '.png');
     const result = await injectIntoCanva(encoded, filename);
     status(result?.message || 'Canva did not confirm the upload. Use Download source as fallback.');
