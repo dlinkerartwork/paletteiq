@@ -222,12 +222,29 @@ byId('place').addEventListener('click', async () => {
           const control = element.closest('button, [role="button"]') || element;
           cards.set(control, true);
         }
-        if (cards.size !== 1) return {
-          ok: false,
-          message: cards.size === 0
-            ? 'Could not identify the new upload by filename. In Canva Uploads, click the newly uploaded PaletteIQ image once, then use Run Canva Upscale.'
-            : 'More than one Canva control matches this image. Select the correct PaletteIQ upload manually to avoid editing the wrong image.'
-        };
+        if (cards.size !== 1) {
+          // Read-only diagnostics: names and element roles only, never image
+          // URLs or account information. Inspect thumbnails in left sidebar.
+          const previews = [...document.querySelectorAll('img')].filter(visible)
+            .filter(el => {
+              const rect = el.getBoundingClientRect();
+              return rect.left < Math.min(window.innerWidth * 0.38, 600) && rect.top > 190 && rect.width >= 40 && rect.height >= 40;
+            }).slice(0, 8).map(el => {
+              const parent = el.closest('button, [role="button"], [data-testid]') || el.parentElement;
+              return {
+                alt: (el.getAttribute('alt') || '').slice(0, 70),
+                title: (parent?.getAttribute('title') || '').slice(0, 70),
+                aria: (parent?.getAttribute('aria-label') || '').slice(0, 70),
+                role: parent?.getAttribute('role') || parent?.tagName?.toLowerCase() || 'unknown'
+              };
+            });
+          return {
+            ok: false,
+            message: cards.size === 0
+              ? 'Upload name not exposed by Canva. Visible sidebar thumbnails (read-only): ' + JSON.stringify(previews) + '. Send this text so we can build a reliable selector. You can click the correct upload manually meanwhile.'
+              : 'Multiple Canva controls match. Select the correct PaletteIQ upload manually to avoid editing the wrong image.'
+          };
+        }
         const [control] = cards.keys();
         control.click();
         return {
