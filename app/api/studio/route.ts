@@ -219,9 +219,17 @@ export async function POST(req: Request) {
     const seoConfig = await seoPreferences(user.userId);
     // Optional per-run selection from Etsy Listing Draft; all other SEO preferences
     // and custom instructions still come from the saved Settings record.
-    if (body.seoGeminiModel !== undefined && seoConfig.seoProvider === 'gemini') {
+    if (body.seoProvider !== undefined) {
+      if (!['gemini','openai'].includes(String(body.seoProvider))) return fail('Invalid SEO provider');
+      seoConfig.seoProvider = body.seoProvider as 'gemini' | 'openai';
+    }
+    if (body.seoGeminiModel !== undefined) {
       if (typeof body.seoGeminiModel !== 'string' || !/^gemini-[a-z0-9.-]{1,80}$/.test(body.seoGeminiModel)) return fail('Invalid Gemini SEO model');
       seoConfig.seoGeminiModel = body.seoGeminiModel;
+    }
+    if (body.seoOpenaiModel !== undefined) {
+      if (typeof body.seoOpenaiModel !== 'string' || !/^gpt-[a-z0-9.-]{1,80}$/.test(body.seoOpenaiModel)) return fail('Invalid OpenAI SEO model');
+      seoConfig.seoOpenaiModel = body.seoOpenaiModel;
     }
     if (!body.draft || typeof body.draft !== 'object' || typeof body.projectId !== 'string') return fail('Invalid SEO review request');
     const saved = await getDb().select().from(projects).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId))).limit(1);
