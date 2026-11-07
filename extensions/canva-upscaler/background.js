@@ -16,6 +16,54 @@ const stateMessage = async message => {
   await chrome.storage.local.set({ companionStatus: message }).catch(() => {});
 };
 
+// Import through a PaletteIQ page so the request has PaletteIQ's own origin.
+// Vinext/Cloudflare denies cross-site PUTs from chrome-extension:// origins.
+async function importFromPaletteIQ(capture, bytes, mime) {
+  const endpoint = new URL(capture.base);
+  if (endpoint.protocol !== 'http:' || !['localhost', '127.0.0.1'].includes(endpoint.hostname) ||
+      !['5173', '18763'].includes(endpoint.port) || endpoint.pathname !== '/api/canva-companion') {
+    throw new Error('Unsafe PaletteIQ endpoint in saved pairing');
+  }
+  const tabs = await chrome.tabs.query({});
+  const page = tabs.find(tab => {
+    try { return tab.id && new URL(tab.url).origin === endpoint.origin; }
+    catch { return false; }
+  });
+  if (!page) throw new Error('Open the paired PaletteIQ website in a Chrome tab and retry');
+  // Chrome scripting arguments are JSON-serializable. Transfer as base64 in
+  // bounded chunks; no download URLs or Canva credentials enter the page.
+  let encoded = '';
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    encoded += btoa(String.fromCharCode(...bytes.subarray(offset, offset + 0x8000)));
+  }
+  const response = await chrome.scripting.executeScript({
+    target: { tabId: page.id },
+    world: 'MAIN',
+    func: async (pathAndToken, encodedChunks, mimeType) => {
+      const binary = encodedChunks.map(chunk => atob(chunk));
+      const total = binary.reduce((sum, chunk) => sum + chunk.length, 0);
+      const body = new Uint8Array(total);
+      let offset = 0;
+      for (const chunk of binary) {
+        for (let index = 0; index < chunk.length; index++) body[offset++] = chunk.charCodeAt(index);
+      }
+      const reply = await fetch(pathAndToken, {
+        method: 'PUT', headers: { 'Content-Type': mimeType }, body,
+        credentials: 'same-origin'
+      });
+      const raw = await reply.text();
+      let data = {};
+      try { data = JSON.parse(raw); } catch { /* non-JSON server rejection */ }
+      return { status: reply.status, ok: reply.ok && data.ok === true,
+        error: data.error || (reply.ok ? '' : raw.replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').slice(0, 180)) };
+    },
+    args: [endpoint.pathname + '?token=' + encodeURIComponent(capture.token), encoded, mime]
+  });
+  const result = response?.[0]?.result;
+  if (!result?.ok) throw new Error('PaletteIQ import HTTP ' + (result?.status ?? 'unknown') +
+    (result?.error ? ': ' + result.error : ''));
+}
+
 chrome.downloads.onCreated.addListener(async item => {
   try {
     const { companionCapture: capture } = await chrome.storage.local.get('companionCapture');
@@ -59,24 +107,12 @@ chrome.downloads.onChanged.addListener(async delta => {
     if (!bytes.length || bytes.length > 25 * 1024 * 1024) throw new Error('Result must be under 25 MB');
     const mime = imageFormat(bytes);
     if (!mime) throw new Error('Downloaded data was not PNG/JPEG');
-    const put = await fetch(capture.base + '?token=' + encodeURIComponent(capture.token), {
-      method: 'PUT',
-      headers: { 'Content-Type': mime },
-      body: bytes
-    });
-    const replyText = await put.text();
-    let result = {};
-    try { result = JSON.parse(replyText); } catch { /* Middleware may return plain text or HTML. */ }
-    if (!put.ok || !result.ok) {
-      const hint = (result.error || (put.ok ? '' : replyText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').slice(0, 180))).trim();
-      throw new Error('PaletteIQ import HTTP ' + put.status + (hint ? ': ' + hint : '') +
-        ' (server: ' + new URL(capture.base).host + ')');
-    }
+    await importFromPaletteIQ(capture, bytes, mime);
     await chrome.storage.local.remove(['companionCapture','companionTask']);
     await stateMessage('Canva PNG/JPG automatically returned to PaletteIQ! Refresh the collection to see the upscale.');
   } catch (error) {
     await chrome.storage.local.remove('companionCapture');
-    await stateMessage('Auto Return could not read Canva download URL: ' + String(error) +
+    await stateMessage('Auto Return failed: ' + String(error) +
       '. The downloaded file is safe on your computer. Choose it in Return upscaled image instead.');
   }
 });
