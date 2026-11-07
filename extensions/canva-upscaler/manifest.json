@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PaletteIQ Canva Upscaler Companion",
-  "version": "0.5.5",
+  "version": "0.6.0",
   "description": "Experimental PaletteIQ Canva transfer and single-image Upscale action.",
   "permissions": [
     "downloads",
@@ -44,5 +44,11 @@
         "http://127.0.0.1:18763/*"
       ]
     }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "optional_host_permissions": [
+    "https://*.canva.com/*"
   ]
 }
