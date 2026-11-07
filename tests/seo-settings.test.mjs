@@ -44,10 +44,12 @@ test('ZIP export preserves legacy default naming and supports saved custom patte
 });
 
 
-test('Etsy source SEO is imported without Gemini rewriting source copy', () => {
+test('Etsy API SEO is faithfully translated to English and alt text is length-validated', () => {
   const route = readFileSync(new URL('../app/api/studio/route.ts', import.meta.url), 'utf8');
   assert.match(route, /reference\.title, description: reference\.description, tags: reference\.tags/);
+  assert.match(route, /title: englishTitle, description: englishDescription, tags: englishTags/);
   assert.match(route, /imageAltTexts: \[alt\]/);
-  assert.match(route, /candidate\.imageAltTexts\[0\]\?\.trim\(\)\.slice\(0, 500\)/);
+  assert.match(route, /hasTargetSeoAltLength\(alt\)/);
+  assert.match(route, /attempt < 2 && !hasTargetSeoAltLength\(alt\)/);
   assert.match(route, /primaryKeyword, secondaryKeywords/);
 });
