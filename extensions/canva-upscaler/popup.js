@@ -346,8 +346,11 @@ byId('fit').addEventListener('click', async () => {
         field.dispatchEvent(new Event('change', { bubbles:true }));
         field.dispatchEvent(new KeyboardEvent('keydown', { key:'Enter', code:'Enter', bubbles:true }));
         field.dispatchEvent(new KeyboardEvent('keyup', { key:'Enter', code:'Enter', bubbles:true }));
-        field.blur();
-        await new Promise(resolve => setTimeout(resolve, 350));
+        // Canva commits dimensions when focus moves to a different form field,
+        // which is not equivalent to simply calling field.blur().
+        const adjacent = useWidth ? height : width;
+        adjacent.focus();
+        await new Promise(resolve => setTimeout(resolve, 450));
         width = findField('Width'); height = findField('Height');
         const expectedW = w * factor, expectedH = h * factor;
         const measurements = () => {
@@ -367,9 +370,11 @@ byId('fit').addEventListener('click', async () => {
           field.select?.();
           const inserted = document.execCommand('insertText', false, String(target));
           field.dispatchEvent(new Event('change', { bubbles: true }));
-          field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
-          field.blur();
-          await new Promise(resolve => setTimeout(resolve, 450));
+          field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', bubbles: true }));
+          const nextField = (useWidth ? findField('Height') : findField('Width'));
+          if (nextField && nextField !== field) nextField.focus();
+          else field.blur();
+          await new Promise(resolve => setTimeout(resolve, 600));
           measured = measurements();
           inputMethod = inserted ? 'editable text insertion' : 'text insertion unsupported';
         }
