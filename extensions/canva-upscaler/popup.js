@@ -74,7 +74,7 @@ byId('load').addEventListener('click', async () => {
         imageName = data.name || 'image';
         rememberTask(data.expiresAt);
         byId('task').textContent = 'Ready: ' + imageName + ' (' + new URL(base).host + ')';
-        for (const id of ['source','canva','upscale','result']) byId(id).disabled = false;
+        for (const id of ['source','canva','place','fit','upscale','result']) byId(id).disabled = false;
         status('Connected. Click Send to Canva to try direct upload.');
         return;
       } catch (error) {
@@ -182,6 +182,7 @@ byId('canva').addEventListener('click', async () => {
     const result = await injectIntoCanva(encoded, filename);
     status(result?.message || 'Canva did not confirm the upload. Use Download source as fallback.');
     if (result?.ok) {
+      for (const id of ['place','fit','upscale','result']) byId(id).disabled = false;
       status('Image handed to Canva Uploads. Trying to place the matching upload on canvas in a moment…');
       setTimeout(() => { if (!byId('place').disabled) byId('place').click(); }, 2500);
     }
@@ -281,6 +282,7 @@ byId('fit').addEventListener('click', async () => {
     canvaTabId = tab.id;
     const [result] = await chrome.scripting.executeScript({
       target: { tabId: canvaTabId },
+      world: 'MAIN',
       func: async () => {
         const visible = el => {
           const r = el.getBoundingClientRect(), style = getComputedStyle(el);
