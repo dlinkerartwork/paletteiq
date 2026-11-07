@@ -15,7 +15,7 @@ export type SeoGenerationPreferences = {
 
 const defaults: SeoGenerationPreferences = {
   seoProvider: 'openai', seoGeminiModel: 'gemini-flash-latest', seoTitleMaxLength: 120,
-  seoAltTextCount: 10, seoFileNaming: 'generaltheme_imagenumber',
+  seoAltTextCount: 1, seoFileNaming: 'generaltheme_imagenumber',
 };
 const secret = (key: string) => (env as unknown as Record<string, string | undefined>)[key];
 
@@ -27,7 +27,7 @@ export async function seoPreferences(owner: string): Promise<SeoGenerationPrefer
     seoProvider: stored.seoProvider === 'gemini' ? 'gemini' : 'openai',
     seoGeminiModel: typeof stored.seoGeminiModel === 'string' && /^gemini-[a-z0-9.-]{1,80}$/.test(stored.seoGeminiModel) ? stored.seoGeminiModel : 'gemini-flash-latest',
     seoTitleMaxLength: typeof stored.seoTitleMaxLength === 'number' && Number.isInteger(stored.seoTitleMaxLength) && Number(stored.seoTitleMaxLength) >= 1 && Number(stored.seoTitleMaxLength) <= 140 ? Number(stored.seoTitleMaxLength) : defaults.seoTitleMaxLength,
-    seoAltTextCount: typeof stored.seoAltTextCount === 'number' && Number.isInteger(stored.seoAltTextCount) && Number(stored.seoAltTextCount) >= 1 && Number(stored.seoAltTextCount) <= 20 ? Number(stored.seoAltTextCount) : defaults.seoAltTextCount,
+    seoAltTextCount: 1,
     seoFileNaming: 'generaltheme_imagenumber',
   };
 }
