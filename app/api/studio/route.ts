@@ -4,7 +4,7 @@ import { getDb } from '@/db';
 import { imageBatches, projects, studioSettings } from '@/db/schema';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { userCredential } from '@/lib/credentials';
-import { ensurePrimaryKeywordOpening, normalizeListing, applySeoLimits } from '@/lib/etsy-listing';
+import { normalizeListing } from '@/lib/etsy-listing';
 import { normalizeAiSeoReview } from '@/lib/seo-intelligence';
 import { originalImagePrompt } from '@/lib/originality';
 import { generateSeoJson, seoPreferences } from '@/lib/seo-provider';
@@ -158,16 +158,13 @@ export async function POST(req: Request) {
     const subjects = project.characters.slice(0, 200).filter(c => c && typeof c.name === 'string').map(c => ({ name: String(c.name).slice(0, 100), produced: c.status === 'done' }));
     const produced = subjects.filter((c: { produced: boolean }) => c.produced).length;
     const brief = { name: String(project.name).slice(0, 150), theme: String(project.theme ?? '').slice(0, 150), subtheme: String(project.subtheme ?? '').slice(0, 150), style: String(project.style ?? '').slice(0, 200), palette: String(project.palette ?? '').slice(0, 200), texture: String(project.texture ?? '').slice(0, 200), keywords: Array.isArray(project.keywords) ? project.keywords.slice(0, 30) : [], subjects, produced, sourceReference: String(project.title ?? '').slice(0, 250) };
-    const customSeo = await customSeoInstructions(user.userId);
-    const seoWarnings = Array.isArray(body.seoWarnings) ? body.seoWarnings.filter((value): value is string => typeof value === 'string').slice(0, 10).map(value => value.slice(0, 180)) : [];
-    const auditGuidance = seoWarnings.length ? ' Address these existing SEO audit warnings naturally where factually possible: ' + JSON.stringify(seoWarnings) + '. Do not invent product attributes to make a warning disappear.' : '';
     // Etsy provides the source listing SEO fields. Gemini generates only one
     // image alt text; it never rewrites the reference title, description or tags.
     let referenceUrl: URL;
     try { referenceUrl = new URL(String(project.url || '')); }
     catch { return fail('Save a valid Etsy reference URL before generating SEO.'); }
     if (referenceUrl.protocol !== 'https:' || !['etsy.com', 'www.etsy.com'].includes(referenceUrl.hostname)) return fail('Use an Etsy reference listing URL.');
-    const listingId = referenceUrl.pathname.match(/^\\/listing\\/(\\d+)/)?.[1];
+    const listingId = referenceUrl.pathname.match(/^\/listing\/(\d+)/)?.[1];
     if (!listingId) return fail('Etsy reference listing ID is missing.');
     const etsyKey = await userCredential(user.userId, 'etsy') || secret('ETSY_API_KEY');
     if (!etsyKey) return fail('Configure your Etsy API key before importing listing SEO.', 503);
