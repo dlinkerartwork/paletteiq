@@ -1,14 +1,50 @@
+if (new URLSearchParams(location.search).has('sidebar')) document.documentElement.classList.add('in-sidebar');
 const endpoints = [
   'http://localhost:5173/api/canva-companion',
   'http://127.0.0.1:5173/api/canva-companion',
   'http://127.0.0.1:18763/api/canva-companion',
 ];
 const byId = id => document.getElementById(id);
-const status = value => { byId('status').textContent = value; };
+const status = value => {
+  byId('status').textContent = value;
+  chrome.storage.local.set({ companionStatus: value }).catch(() => {});
+};
 let base = '';
 let token = '';
 let imageName = '';
 let canvaTabId = null;
+
+const rememberTask = expiresAt => chrome.storage.local.set({
+  companionTask: { base, token, imageName, expiresAt },
+}).catch(() => {});
+
+// Popup and embedded sidebar use the same extension storage. A pending task
+// survives PaletteIQ client-side routing and full page reloads, but never
+// bypasses the server's pairing expiry.
+chrome.storage.local.get(['companionTask','companionStatus','companionTokenDraft']).then(saved => {
+  if (saved.companionTokenDraft) byId('token').value = saved.companionTokenDraft;
+  if (saved.companionStatus) byId('status').textContent = saved.companionStatus;
+  const task = saved.companionTask;
+  if (!task || !/^[a-f0-9]{64}$/.test(task.token || '')) return;
+  if (!Number.isFinite(task.expiresAt) || task.expiresAt <= Date.now()) {
+    chrome.storage.local.remove('companionTask').catch(() => {});
+    return;
+  }
+  base = task.base; token = task.token; imageName = task.imageName;
+  byId('token').value = token;
+  byId('task').textContent = 'Restoring: ' + imageName + ' (' + new URL(base).host + ')';
+  api(currentTaskUrl(), { cache: 'no-store' }).then(response => response.json()).then(data => {
+    if (data.status !== 'pending') throw new Error('Task is no longer pending');
+    byId('task').textContent = 'Ready: ' + imageName + ' (' + new URL(base).host + ')';
+    for (const id of ['source','canva','upscale','result']) byId(id).disabled = false;
+  }).catch(() => {
+    byId('task').textContent = 'Saved pairing expired or unavailable. Load a new pairing code.';
+    chrome.storage.local.remove('companionTask').catch(() => {});
+  });
+}).catch(() => {});
+byId('token').addEventListener('input', () => {
+  chrome.storage.local.set({ companionTokenDraft: byId('token').value }).catch(() => {});
+});
 
 const api = async (url, init) => {
   const response = await fetch(url, init);
@@ -35,6 +71,7 @@ byId('load').addEventListener('click', async () => {
         if (data.status !== 'pending') throw new Error('This task is already completed.');
         base = endpoint;
         imageName = data.name || 'image';
+        rememberTask(data.expiresAt);
         byId('task').textContent = 'Ready: ' + imageName + ' (' + new URL(base).host + ')';
         for (const id of ['source','canva','upscale','result']) byId(id).disabled = false;
         status('Connected. Click Send to Canva to try direct upload.');
@@ -204,6 +241,7 @@ byId('submit').addEventListener('click', async () => {
   try {
     const response = await api(currentTaskUrl(), { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
     const data = await response.json();
+    if (data.ok) chrome.storage.local.remove('companionTask').catch(() => {});
     status(data.ok ? 'Upscaled result saved to PaletteIQ. Refresh the collection.' : 'Unexpected response.');
   } catch (error) { status(String(error)); byId('submit').disabled = false; }
 });
