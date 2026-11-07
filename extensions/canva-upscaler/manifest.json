@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "PaletteIQ Canva Upscaler Companion",
+  "version": "0.1.0",
+  "description": "Transfer PaletteIQ images to Canva and return manually upscaled PNG/JPG assets.",
+  "permissions": ["downloads"],
+  "host_permissions": ["http://127.0.0.1:18763/*"],
+  "action": { "default_title": "PaletteIQ Canva Companion", "default_popup": "popup.html" }
+}
