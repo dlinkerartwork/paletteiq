@@ -45,6 +45,15 @@ export default defineConfig(async ({ command }) => {
 
   return {
     server: {
+      // Allow the locally installed Canva Companion to call the token-protected
+      // localhost API during development. Do not use cors: true: it also grants
+      // arbitrary websites access to Vite's source-code endpoints.
+      cors: {
+        origin: [
+          /^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/,
+          /^chrome-extension:\/\/[a-p]{32}$/,
+        ],
+      },
       ...(managedLinux
         ? { host: "0.0.0.0", allowedHosts: ["terminal.local"] }
         : {}),
