@@ -5,7 +5,8 @@
   "description": "Send PaletteIQ images to Canva using a user-triggered upload attempt and return upscaled assets.",
   "permissions": [
     "downloads",
-    "scripting"
+    "scripting",
+    "tabs"
   ],
   "host_permissions": [
     "http://localhost:5173/*",
