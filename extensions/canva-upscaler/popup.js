@@ -105,13 +105,25 @@ byId('canva').addEventListener('click', async () => {
     const blob = await sourceBlob();
     if (blob.size > 12 * 1024 * 1024) throw new Error('Automatic transfer is limited to 12 MB. Use Download source for larger images.');
     const encoded = await dataUrlOf(blob);
-    // Reuse an existing Canva design editor. A newly opened Canva home tab
-    // does not contain the Uploads input and must not be used as the target.
-    const openTabs = await chrome.tabs.query({ url: 'https://www.canva.com/*' });
-    const editors = openTabs.filter(t => /^https:\/\/www\.canva\.com\/design\/[^/]+\/edit(?:[/?#]|$)/.test(t.url || ''));
+    // Canva can use several editor URL forms. Inspect actual tab URLs instead
+    // of matching only /design/<id>/edit.
+    const allTabs = await chrome.tabs.query({});
+    const canvaTabs = allTabs.filter(t => {
+      try { return new URL(t.url || '').hostname.endsWith('.canva.com') || new URL(t.url || '').hostname === 'canva.com'; }
+      catch { return false; }
+    });
+    const editors = canvaTabs.filter(t => {
+      try { return new URL(t.url).pathname.startsWith('/design/'); }
+      catch { return false; }
+    });
     const current = canvaTabId == null ? null : editors.find(t => t.id === canvaTabId);
     let tab = current || editors.find(t => t.active) || editors[0];
-    if (!tab) throw new Error('Open a Canva design editor and its Uploads panel first, then retry. No editor tab was found.');
+    if (!tab) {
+      const observed = canvaTabs.map(t => {
+        try { return new URL(t.url).pathname.slice(0, 100); } catch { return '(unknown URL)'; }
+      }).slice(0, 5).join(', ');
+      throw new Error('No Canva design tab detected. Open a design (not Canva Home). Found ' + canvaTabs.length + ' Canva tabs' + (observed ? ': ' + observed : '') + '.');
+    }
     canvaTabId = tab.id;
     if (tab.status !== 'complete') {
       await new Promise((resolve, reject) => {
