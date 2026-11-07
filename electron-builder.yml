@@ -12,6 +12,8 @@ files:
 extraResources:
   - from: dist/desktop-runtime
     to: paletteiq-runtime
+  - from: extensions/canva-upscaler
+    to: canva-upscaler-companion
 win:
   target:
     - target: nsis
