@@ -44,3 +44,9 @@ Limitations: export UI clicks are **not yet automated**; this is one-image and o
 - The flow only confirms clicking the Upscale control, **not** completion of Canva's processing. Wait until Canva finishes, visually verify the result, then explicitly **Arm Auto Return** and export Download selection manually as transparent PNG with desired scale and quality.
 - Pairing must be loaded and a Canva design editor with Uploads available. If matching upload name is hidden, guided mode stops; select the correct thumbnail manually and resume with individual controls.
 - This is **not** unattended export or bulk upscale yet. Auto Return for downloaded output remains independently available.
+
+## v0.8 investigation — native resolution audit
+- Canva's documented Upscale tool can internally enlarge an image 4x or 16x, but the editor's Download selection scale is a separate export limit. Do not assume 3200×3200 is the original upscaled resolution.
+- Click **Inspect Native Resolution (read-only)** after upscale completes, while its editor is open. The sidebar reports dimensions of visible DOM images and canvas elements plus image-resource **hostnames only**. It never displays signed asset URLs, cookies or request data.
+- DOM dimensions are not conclusive evidence of an exported or native asset's pixel dimensions. This feature is exploratory and does **not** use undocumented Canva APIs, directly access the native asset or run a background upscale.
+- Preserve v0.7 as the verified fallback until an authorized, reliable direct retrieval path has been established and tested.
