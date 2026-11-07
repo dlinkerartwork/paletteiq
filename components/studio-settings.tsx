@@ -5,12 +5,15 @@ import { CheckCircle2, CloudDownload, CloudUpload, Eye, EyeOff, KeyRound, LockKe
 
 export type SeoPromptKey = 'general' | 'title' | 'description' | 'tags' | 'primaryKeyword' | 'secondaryKeywords' | 'longTailKeywords' | 'categorySuggestion' | 'attributes' | 'materials' | 'imageAltTexts' | 'photoPlan' | 'priceSuggestion' | 'sku' | 'digitalFiles' | 'licenseNotes';
 export type SeoPromptSettings = Record<SeoPromptKey, string>;
+export type SeoDraftField = Exclude<SeoPromptKey, 'general'>;
+export const seoDraftFieldOrder: SeoDraftField[] = ['title','description','tags','imageAltTexts','primaryKeyword','secondaryKeywords','longTailKeywords','categorySuggestion','attributes','materials','photoPlan','priceSuggestion','sku','digitalFiles','licenseNotes'];
+export const defaultSeoDraftFields: SeoDraftField[] = ['title','description','tags','imageAltTexts'];
 export const defaultSeoPrompts: SeoPromptSettings = { general: '', title: '', description: '', tags: '', primaryKeyword: '', secondaryKeywords: '', longTailKeywords: '', categorySuggestion: '', attributes: '', materials: '', imageAltTexts: '', photoPlan: '', priceSuggestion: '', sku: '', digitalFiles: '', licenseNotes: '' };
 
 export type StudioPreferences = {
-  target: number; model: string; quality: string; analysisModel: string; output: string; background: string; variations: number; defaultStyle: string; autoSave: boolean; seoProvider: 'openai' | 'gemini'; seoGeminiModel: string; seoTitleMaxLength: number; seoAltTextCount: number; seoFileNaming: string; seoPrompts: SeoPromptSettings;
+  target: number; model: string; quality: string; analysisModel: string; output: string; background: string; variations: number; defaultStyle: string; autoSave: boolean; seoProvider: 'openai' | 'gemini'; seoGeminiModel: string; seoOpenaiModel: string; seoDraftFields: SeoDraftField[]; seoTitleMaxLength: number; seoAltTextCount: number; seoFileNaming: string; seoPrompts: SeoPromptSettings;
 };
-export const defaultPrefs: StudioPreferences = { target: 120, model: 'gpt-image-1-mini', quality: 'low', analysisModel: 'gpt-4.1-mini', output: 'png', background: 'transparent', variations: 1, defaultStyle: 'Soft hand-painted watercolor illustration', autoSave: false, seoProvider: 'openai', seoGeminiModel: 'gemini-flash-latest', seoTitleMaxLength: 120, seoAltTextCount: 1, seoFileNaming: 'charactername_imagenumber', seoPrompts: { ...defaultSeoPrompts } };
+export const defaultPrefs: StudioPreferences = { target: 120, model: 'gpt-image-1-mini', quality: 'low', analysisModel: 'gpt-4.1-mini', output: 'png', background: 'transparent', variations: 1, defaultStyle: 'Soft hand-painted watercolor illustration', autoSave: false, seoProvider: 'openai', seoGeminiModel: 'gemini-flash-latest', seoOpenaiModel: 'gpt-4.1-mini', seoDraftFields: [...defaultSeoDraftFields], seoTitleMaxLength: 120, seoAltTextCount: 1, seoFileNaming: 'charactername_imagenumber', seoPrompts: { ...defaultSeoPrompts } };
 type Props = { preferences: StudioPreferences; onPreferences: (prefs: StudioPreferences) => void; projects: unknown[]; onImport: (data: { projects: unknown[]; preferences: StudioPreferences }) => Promise<void> };
 type SettingsResponse = { error?: string; credentials: { etsy: boolean; openai: boolean; gemini: boolean }; geminiKeyCount?: number };
 const readSettingsResponse = async (res: Response): Promise<SettingsResponse> => {
@@ -35,11 +38,21 @@ export default function StudioSettings({ preferences, onPreferences, projects, o
   const [message, setMessage] = useState('');
   const [geminiModels, setGeminiModels] = useState<Array<{ id: string; name: string }>>([]);
   const [geminiModelsLoaded, setGeminiModelsLoaded] = useState(false);
+  const [openaiSeoModels, setOpenaiSeoModels] = useState<Array<{ id: string; name: string }>>([]);
+  const [openaiSeoModelsError, setOpenaiSeoModelsError] = useState('');
   const [openaiImageModels, setOpenaiImageModels] = useState<Array<{ id: string; name: string }>>([]);
   const [openaiModelsError, setOpenaiModelsError] = useState('');
   const [modelsError, setModelsError] = useState('');
   const picker = useRef<HTMLInputElement>(null);
   useEffect(() => { fetch('/api/settings').then(readSettingsResponse).then(data => { setCredentials(data.credentials); setGeminiKeyCount(data.geminiKeyCount ?? (data.credentials.gemini ? 1 : 0)); }).catch(e => setMessage(e instanceof Error ? e.message : String(e))); }, []);
+  const loadOpenaiSeoModels = async () => {
+    try {
+      const response = await fetch('/api/settings?models=openai-seo');
+      const data = await response.json() as { models?: Array<{ id: string; name: string }>; error?: string };
+      if (!response.ok) throw new Error(data.error || 'Unable to fetch OpenAI SEO models');
+      setOpenaiSeoModels(data.models || []); setOpenaiSeoModelsError('');
+    } catch (error) { setOpenaiSeoModelsError(error instanceof Error ? error.message : String(error)); }
+  };
   const loadOpenaiModels = async () => {
     setOpenaiModelsError('');
     try {
@@ -61,7 +74,7 @@ export default function StudioSettings({ preferences, onPreferences, projects, o
     } catch (error) { setModelsError(error instanceof Error ? error.message : String(error)); }
   };
   useEffect(() => { if (credentials.gemini) queueMicrotask(() => void loadGeminiModels()); }, [credentials.gemini]);
-  useEffect(() => { if (credentials.openai) queueMicrotask(() => void loadOpenaiModels()); }, [credentials.openai]);
+  useEffect(() => { if (credentials.openai) queueMicrotask(() => { void loadOpenaiModels(); void loadOpenaiSeoModels(); }); }, [credentials.openai]);
   const edit = (key: keyof StudioPreferences, value: string | number | boolean) => onPreferences({ ...preferences, [key]: value });
   const act = async (action: string, op: () => Promise<unknown>) => { setActive(action); setMessage(''); try { await op(); setMessage('Saved successfully.'); } catch (e) { setMessage(e instanceof Error ? e.message : String(e)); } finally { setActive(''); } };
   const saveKey = (provider: 'etsy' | 'openai' | 'gemini', remove = false) => act(provider, async () => {
@@ -120,10 +133,12 @@ export default function StudioSettings({ preferences, onPreferences, projects, o
 
     <section className="panel settings-panel settings-wide settings-seo"><div className="settings-header"><div className="heading-icon violet"><Settings2 size={21}/></div><div><h2>SEO generation settings & custom prompts</h2><p>Instructions below are included when generating the Etsy listing draft and running Advanced SEO Intelligence. Leave fields blank to use built-in guidance.</p></div></div>
       <div className="settings-fields seo-generation-options">
-        <div><label className="input-label">SEO REVIEW AI PROVIDER</label><select value={preferences.seoProvider ?? 'openai'} onChange={e => edit('seoProvider', e.target.value)}><option value="openai">OpenAI</option><option value="gemini">Google Gemini</option></select><p className="sub">This selects the provider for Advanced SEO review. Reference title, description and tags are imported from Etsy; image alt text always uses Gemini.</p></div>
+        <div><label className="input-label">SEO AI PROVIDER</label><select value={preferences.seoProvider ?? 'openai'} onChange={e => edit('seoProvider', e.target.value)}><option value="openai">OpenAI</option><option value="gemini">Google Gemini</option></select><p className="sub">Selects the provider for SEO Draft generation, image alt text and Advanced SEO review. Etsy API remains the source for title, description and tags.</p></div>
+        <div><label className="input-label">OPENAI SEO MODEL</label><select value={preferences.seoOpenaiModel ?? 'gpt-4.1-mini'} onChange={e => edit('seoOpenaiModel', e.target.value)}>{!openaiSeoModels.some(m => m.id === (preferences.seoOpenaiModel ?? 'gpt-4.1-mini')) && <option value={preferences.seoOpenaiModel ?? 'gpt-4.1-mini'}>{preferences.seoOpenaiModel ?? 'gpt-4.1-mini'} (saved/default model)</option>}{openaiSeoModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select><button type="button" onClick={() => void loadOpenaiSeoModels()}>Refresh OpenAI SEO models</button><p className="sub">{openaiSeoModelsError || 'Used when OpenAI is the SEO AI provider.'}</p></div>
         <div><label className="input-label">GEMINI ALT TEXT MODEL</label><select value={preferences.seoGeminiModel ?? 'gemini-flash-latest'} onChange={e => edit('seoGeminiModel', e.target.value)}>{!geminiModelsLoaded && <option value={preferences.seoGeminiModel ?? 'gemini-flash-latest'}>{preferences.seoGeminiModel ?? 'gemini-flash-latest'} (loading)</option>}{geminiModelsLoaded && !geminiModels.some(m => m.id === (preferences.seoGeminiModel ?? 'gemini-flash-latest')) && <option value={preferences.seoGeminiModel ?? 'gemini-flash-latest'} disabled>Select a supported Gemini model</option>}{geminiModels.map(m => <option key={m.id} value={m.id}>{m.name} ({m.id})</option>)}</select><button type="button" onClick={() => void loadGeminiModels()}>Refresh Gemini models</button><p className="sub">{modelsError || 'Model list is fetched from your Gemini API key. Model availability depends on the account.'}</p></div>
+        <div className="full"><label className="input-label">FIELDS INCLUDED IN SEO DRAFT</label><p className="sub">Default order: Title, Description, Tags, Image ALT Text, followed by selected SEO Research & Listing Details. Unchecked fields are hidden from the draft and TXT output, but existing data is preserved.</p><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10, marginTop: 12 }}>{seoDraftFieldOrder.map(field => <label key={field} style={{ display: 'flex', gap: 8, alignItems: 'center' }}><input type="checkbox" checked={(preferences.seoDraftFields ?? defaultSeoDraftFields).includes(field)} onChange={e => onPreferences({ ...preferences, seoDraftFields: seoDraftFieldOrder.filter(key => key === field ? e.target.checked : (preferences.seoDraftFields ?? defaultSeoDraftFields).includes(key)) })}/>{field === 'imageAltTexts' ? 'Image ALT Text' : field.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase())}</label>)}</div></div>
         <div><label className="input-label">TITLE MAX CHARACTERS (1–140)</label><input type="number" min={1} max={140} value={preferences.seoTitleMaxLength ?? 120} onChange={e => edit('seoTitleMaxLength', Number(e.target.value))}/><p className="sub">Default: 120 characters.</p></div>
-        <div><label className="input-label">IMAGE ALT TEXT</label><input readOnly value="1 Gemini-generated alt text · max 500 characters" /><p className="sub">Title, description and tags are imported from the Etsy reference listing.</p></div>
+        <div><label className="input-label">IMAGE ALT TEXT</label><input readOnly value="1 AI-generated alt text · max 500 characters" /><p className="sub">Title, description and tags are imported from the Etsy reference listing.</p></div>
         <div><label className="input-label">IMAGE FILE NAMING</label><input maxLength={120} value={preferences.seoFileNaming ?? 'charactername_imagenumber'} onChange={e => edit('seoFileNaming', e.target.value)} placeholder="{theme}_{number}" /><p className="sub">ZIP filename pattern: type generaltheme, subtheme, microtheme, charactername, or imagenumber directly (e.g. generaltheme_charactername_imagenumber). Also supports {'{theme}'}, {'{collection}'}, {'{character}'} and {'{number}'}. Microtheme uses the collection name when no separate microtheme is saved. Duplicate filenames receive _2, _3, etc.</p></div>
       </div>
       <div className="settings-fields">{seoFields.map(([key, label, hint]) => <div className="seo-prompt-field" key={key}><label className="input-label">{label.toUpperCase()}</label><p className="sub">{hint}</p><textarea rows={3} maxLength={2000} placeholder={key === 'description' ? 'Example: Mention the primary keyword naturally in the opening paragraph.' : `Optional custom instructions for ${label.toLowerCase()}…`} value={preferences.seoPrompts?.[key] ?? ''} onChange={e => onPreferences({ ...preferences, seoPrompts: { ...defaultSeoPrompts, ...preferences.seoPrompts, [key]: e.target.value } })}/></div>)}</div>
