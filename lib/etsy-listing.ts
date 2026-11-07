@@ -66,5 +66,5 @@ export function applySeoLimits(draft: EtsyListingDraft, maxTitleCharacters: numb
   const title = draft.title.length > titleLimit
     ? draft.title.slice(0, titleLimit).replace(/\s+\S*$/, '').trim() || draft.title.slice(0, titleLimit)
     : draft.title;
-  return { ...draft, title, imageAltTexts: draft.imageAltTexts.slice(0, count).map(text => text.slice(0, 450).trim()) };
+  return { ...draft, title, imageAltTexts: draft.imageAltTexts.slice(0, count).map(text => text.slice(0, 500).trim()) };
 }
