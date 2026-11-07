@@ -43,3 +43,22 @@ test('ZIP export uses saved preference and resolves versioned Batch assets', () 
   assert.match(source, /batchAssetKey\(user\.userId/);
   assert.match(source, /imageFileName\(character\.name, index, extension\)/);
 });
+
+
+test('plain-text filename keywords resolve without braces', () => {
+  const next = createImageFileNamer('generaltheme_subtheme_microtheme_charactername_imagenumber', {
+    theme: 'Flowers & Blossoms', subtheme: 'Roses', microtheme: 'Wedding Bouquets', collection: 'Rose Collection',
+  });
+  assert.equal(next('Red Rose', 0, 'png'), 'flowers_blossoms_roses_wedding_bouquets_red_rose_001.png');
+});
+
+test('microtheme falls back to collection name and duplicates remain unique', () => {
+  const next = createImageFileNamer('microtheme_charactername', { theme: 'Flowers', subtheme: 'Roses', collection: 'Romantic Rose Set' });
+  assert.equal(next('Rose', 0, 'png'), 'romantic_rose_set_rose.png');
+  assert.equal(next('Rose', 1, 'png'), 'romantic_rose_set_rose_2.png');
+});
+
+test('braced aliases and legacy tokens stay supported', () => {
+  const next = createImageFileNamer('{generaltheme}_{charactername}_{imagenumber}', context);
+  assert.equal(next('Tulip', 0, 'jpg'), 'flowers_blossoms_tulip_001.jpg');
+});
