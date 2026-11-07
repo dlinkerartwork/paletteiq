@@ -15,7 +15,7 @@ export type SeoGenerationPreferences = {
 };
 
 const defaults: SeoGenerationPreferences = {
-  seoProvider: 'openai', seoGeminiModel: 'gemini-2.5-pro', seoOpenaiModel: 'gpt-4.1', seoTitleMaxLength: 120,
+  seoProvider: 'openai', seoGeminiModel: 'gemini-2.5-pro', seoOpenaiModel: 'gpt-6.1-terra', seoTitleMaxLength: 120,
   seoAltTextCount: 1, seoFileNaming: 'charactername_imagenumber',
 };
 const secret = (key: string) => (env as unknown as Record<string, string | undefined>)[key];
@@ -26,7 +26,7 @@ export async function seoPreferences(owner: string): Promise<SeoGenerationPrefer
   try { stored = rows[0]?.preferences ? JSON.parse(rows[0].preferences) : {}; } catch { /* Legacy defaults. */ }
   return {
     seoProvider: stored.seoProvider === 'gemini' ? 'gemini' : 'openai',
-    seoOpenaiModel: typeof stored.seoOpenaiModel === 'string' && /^gpt-[a-z0-9.-]{1,80}$/.test(stored.seoOpenaiModel) ? stored.seoOpenaiModel : 'gpt-4.1',
+    seoOpenaiModel: typeof stored.seoOpenaiModel === 'string' && /^gpt-[a-z0-9.-]{1,80}$/.test(stored.seoOpenaiModel) ? stored.seoOpenaiModel : 'gpt-6.1-terra',
     seoGeminiModel: typeof stored.seoGeminiModel === 'string' && /^gemini-[a-z0-9.-]{1,80}$/.test(stored.seoGeminiModel) ? stored.seoGeminiModel : 'gemini-2.5-pro',
     seoTitleMaxLength: typeof stored.seoTitleMaxLength === 'number' && Number.isInteger(stored.seoTitleMaxLength) && Number(stored.seoTitleMaxLength) >= 1 && Number(stored.seoTitleMaxLength) <= 140 ? Number(stored.seoTitleMaxLength) : defaults.seoTitleMaxLength,
     seoAltTextCount: 1,
