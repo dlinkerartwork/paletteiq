@@ -13,6 +13,8 @@ let base = '';
 let token = '';
 let imageName = '';
 let canvaTabId = null;
+let guidedRunning = false;
+const stepComplete = (name, ok, detail) => window.dispatchEvent(new CustomEvent('companion-step', { detail: { name, ok, detail } }));
 
 const rememberTask = expiresAt => chrome.storage.local.set({
   companionTask: { base, token, imageName, expiresAt },
@@ -36,7 +38,7 @@ chrome.storage.local.get(['companionTask','companionStatus','companionTokenDraft
   api(currentTaskUrl(), { cache: 'no-store' }).then(response => response.json()).then(data => {
     if (data.status !== 'pending') throw new Error('Task is no longer pending');
     byId('task').textContent = 'Ready: ' + imageName + ' (' + new URL(base).host + ')';
-    for (const id of ['source','canva','place','fit','upscale','arm','result']) byId(id).disabled = false;
+    for (const id of ['source','canva','place','fit','upscale','arm','result','guided']) byId(id).disabled = false;
   }).catch(() => {
     byId('task').textContent = 'Saved pairing expired or unavailable. Load a new pairing code.';
     chrome.storage.local.remove('companionTask').catch(() => {});
@@ -74,7 +76,7 @@ byId('load').addEventListener('click', async () => {
         imageName = data.name || 'image';
         rememberTask(data.expiresAt);
         byId('task').textContent = 'Ready: ' + imageName + ' (' + new URL(base).host + ')';
-        for (const id of ['source','canva','place','fit','upscale','result']) byId(id).disabled = false;
+        for (const id of ['source','canva','place','fit','upscale','arm','result','guided']) byId(id).disabled = false;
         status('Connected. Click Send to Canva to try direct upload.');
         return;
       } catch (error) {
@@ -184,9 +186,11 @@ byId('canva').addEventListener('click', async () => {
     if (result?.ok) {
       for (const id of ['place','fit','upscale','arm','result']) byId(id).disabled = false;
       status('Image handed to Canva Uploads. Trying to place the matching upload on canvas in a moment…');
-      setTimeout(() => { if (!byId('place').disabled) byId('place').click(); }, 2500);
-    }
+      if (!guidedRunning) setTimeout(() => { if (!byId('place').disabled) byId('place').click(); }, 2500);
+      stepComplete('canva', true);
+    } else stepComplete('canva', false, result?.message || 'Canva upload not confirmed');
   } catch (error) {
+    stepComplete('canva', false, String(error));
     status('Automatic upload unavailable: ' + String(error) + '. You can still use Download source and upload manually.');
   } finally { byId('canva').disabled = false; }
 });
@@ -260,7 +264,8 @@ byId('place').addEventListener('click', async () => {
       args: [uploadStem()]
     });
     status(result?.result?.message || 'Canva did not confirm image placement.');
-  } catch (error) { status('Place image unavailable: ' + String(error)); }
+    stepComplete('place', result?.result?.ok === true, result?.result?.message);
+  } catch (error) { stepComplete('place', false, String(error)); status('Place image unavailable: ' + String(error)); }
   finally { byId('place').disabled = false; }
 });
 
@@ -397,7 +402,8 @@ byId('fit').addEventListener('click', async () => {
       }
     });
     status(result?.result?.message || 'Auto Fit result unavailable.');
-  } catch (error) { status('Auto Fit unavailable: ' + String(error)); }
+    stepComplete('fit', Boolean(result?.result?.message?.startsWith('Auto Fit applied:')), result?.result?.message);
+  } catch (error) { stepComplete('fit', false, String(error)); status('Auto Fit unavailable: ' + String(error)); }
   finally {
     if (returnTabId != null) await chrome.tabs.update(returnTabId, { active: true }).catch(() => {});
     byId('fit').disabled = false;
@@ -448,10 +454,58 @@ byId('upscale').addEventListener('click', async () => {
       }
     });
     status(outcome?.result?.message || 'Canva did not report an Upscale action.');
+    stepComplete('upscale', outcome?.result?.action === 'clicked', outcome?.result?.action);
   } catch (error) {
+    stepComplete('upscale', false, String(error));
     status('Upscale automation unavailable: ' + String(error));
   } finally { byId('upscale').disabled = false; }
 });
+// Guided v0.7: chain only actions confirmed by Canva. Export remains manual.
+const guidedStep = (name, maxMs = 45000) => new Promise((resolve, reject) => {
+  const button = byId(name);
+  if (!button || button.disabled) return reject(new Error(name + ' is not ready'));
+  const timer = setTimeout(() => {
+    window.removeEventListener('companion-step', listener);
+    reject(new Error(name + ' timed out'));
+  }, maxMs);
+  function listener(event) {
+    if (event.detail.name !== name) return;
+    clearTimeout(timer);
+    window.removeEventListener('companion-step', listener);
+    if (event.detail.ok) resolve(event.detail);
+    else reject(new Error(event.detail.detail || name + ' failed'));
+  }
+  window.addEventListener('companion-step', listener);
+  button.click();
+});
+byId('guided').addEventListener('click', async () => {
+  if (guidedRunning) return;
+  guidedRunning = true;
+  byId('guided').disabled = true;
+  const progress = value => status('Guided Upscale: ' + value);
+  try {
+    progress('1/4 Uploading to Canva…');
+    await guidedStep('canva', 70000);
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    progress('2/4 Placing matching upload…');
+    await guidedStep('place');
+    progress('3/4 Fitting image to canvas…');
+    await guidedStep('fit');
+    progress('4/4 Opening Upscale…');
+    let result = await guidedStep('upscale');
+    if (result.detail === 'opened-edit') {
+      await new Promise(resolve => setTimeout(resolve, 700));
+      result = await guidedStep('upscale');
+    }
+    progress('Canva Upscale clicked. Wait for processing to finish; then Arm Auto Return and export PNG manually. Verify result before returning it.');
+  } catch (error) {
+    progress('Paused: ' + String(error) + '. Correct the step in Canva and use individual controls to resume.');
+  } finally {
+    guidedRunning = false;
+    byId('guided').disabled = !token;
+  }
+});
+
 // Arm a one-shot listener for the next Canva PNG/JPEG download created after
 // this action. The watcher imports only a Canva-hosted URL and a valid task.
 byId('arm').addEventListener('click', async () => {
