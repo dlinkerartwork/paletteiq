@@ -10,7 +10,7 @@ import { parseGeminiKeyring, serializeGeminiKeyring } from '@/lib/gemini-keyring
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 const seoPromptFields = ["general","title","description","tags","primaryKeyword","secondaryKeywords","longTailKeywords","categorySuggestion","attributes","materials","imageAltTexts","photoPlan","priceSuggestion","sku","digitalFiles","licenseNotes"] as const;
 const defaultSeoPrompts = Object.fromEntries(seoPromptFields.map(key => [key, '']));
-const defaultPrefs = { target: 120, model: 'gpt-image-1-mini', quality: 'low', analysisModel: 'gpt-4.1-mini', output: 'png', background: 'transparent', variations: 1, defaultStyle: 'Soft hand-painted watercolor illustration', autoSave: false, seoProvider: 'openai', seoGeminiModel: 'gemini-2.5-pro', seoOpenaiModel: 'gpt-4.1', seoDraftFields: ['title','description','tags','imageAltTexts'], seoTitleMaxLength: 120, seoAltTextCount: 1, seoFileNaming: 'charactername_imagenumber', seoPrompts: defaultSeoPrompts };
+const defaultPrefs = { target: 120, model: 'gpt-image-1-mini', quality: 'low', analysisModel: 'gpt-4.1-mini', output: 'png', background: 'transparent', variations: 1, defaultStyle: 'Soft hand-painted watercolor illustration', autoSave: false, seoProvider: 'openai', seoGeminiModel: 'gemini-2.5-pro', seoOpenaiModel: 'gpt-6.1-terra', seoDraftFields: ['title','description','tags','imageAltTexts'], seoTitleMaxLength: 120, seoAltTextCount: 1, seoFileNaming: 'charactername_imagenumber', seoPrompts: defaultSeoPrompts };
 const isImageModel = (value: unknown): value is string => typeof value === 'string' && /^gpt-image-[a-z0-9.-]{1,80}$/.test(value);
 
 async function getSettings(req: Request) {
@@ -25,7 +25,11 @@ async function getSettings(req: Request) {
     if (!response.ok) return bad(`Unable to list OpenAI models (HTTP ${response.status}).`, 502);
     const payload = await response.json() as { data?: Array<{ id?: string }> };
     if (new URL(req.url).searchParams.get('models') === 'openai-seo') {
-      return Response.json({ models: (payload.data || []).filter(row => typeof row.id === 'string' && /^gpt-[a-z0-9.-]{1,80}$/.test(row.id) && !/(image|audio|realtime|transcribe|tts|search|codex|mini|nano|micro|lite|preview|instruct)/i.test(row.id)).map(row => ({ id: row.id!, name: row.id! })).sort((a, b) => { const priority = (id: string) => ['gpt-5','gpt-5.1','gpt-5.2','gpt-4.1','gpt-4o'].indexOf(id); const ai = priority(a.id); const bi = priority(b.id); return (ai < 0 ? 100 : ai) - (bi < 0 ? 100 : bi) || a.id.localeCompare(b.id); }).slice(0, 6) });
+      const preferred = ['gpt-6.1-terra','gpt-6.1-sol','gpt-6-astra','gpt-6-luna','gpt-5.6','gpt-5.2','gpt-5','gpt-4.1'];
+      return Response.json({ models: (payload.data || [])
+        .filter(row => typeof row.id === 'string' && /^gpt-[a-z0-9.-]{1,80}$/.test(row.id) && !/(image|audio|realtime|transcribe|tts|search|codex|mini|nano|micro|lite|instruct)/i.test(row.id))
+        .map(row => ({ id: row.id!, name: row.id! }))
+        .sort((a, b) => { const ai = preferred.indexOf(a.id); const bi = preferred.indexOf(b.id); return (ai < 0 ? 100 : ai) - (bi < 0 ? 100 : bi) || b.id.localeCompare(a.id, undefined, { numeric: true }); }).slice(0, 6) });
     }
     // The models endpoint returns IDs, not transparency capability flags.
     // Limit options to the GPT Image family; the image API validates capabilities on use.
@@ -47,8 +51,13 @@ async function getSettings(req: Request) {
     const data = await response.json() as { models?: Array<{ name?: string; displayName?: string; supportedGenerationMethods?: string[] }> };
     const models = (data.models || []).filter(item => item.supportedGenerationMethods?.includes('generateContent'))
       .map(item => ({ id: (item.name || '').replace(/^models\//, ''), name: item.displayName || item.name || '' }))
-      .filter(item => /^gemini-(?:(?:\d+(?:\.\d+)?)-)?pro(?:-|$)/.test(item.id) && !/(?:image|imagen|banana|veo|video|tts|speech|audio|live|robot|argon|embedding|experimental|research|computer)/i.test(item.id + ' ' + item.name));
-    return Response.json({ models: models.sort((a,b) => a.id.localeCompare(b.id)).slice(0, 6) });
+      .filter(item => /^gemini-(?:(?:\d+(?:\.\d+)?)-)?(?:pro|flash)(?:-|$)/.test(item.id)
+        && !/(?:flash-lite|image|imagen|banana|veo|video|tts|speech|audio|live|robot|argon|embedding|experimental|research|computer)/i.test(item.id + ' ' + item.name));
+    // Newer Gemini families (3.5, 3.6, 3.7, …) take precedence over older versions.
+    const version = (id: string) => Number(id.match(/^gemini-(\d+(?:\.\d+)?)-/)?.[1] || 0);
+    return Response.json({ models: models.sort((a, b) => version(b.id) - version(a.id)
+      || Number(b.id.includes('-pro')) - Number(a.id.includes('-pro'))
+      || a.id.localeCompare(b.id)).slice(0, 6) });
   }
   const rows = await getDb().select().from(studioSettings).where(eq(studioSettings.owner, user.userId)).limit(1);
   const row = rows[0];
