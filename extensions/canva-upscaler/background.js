@@ -20,10 +20,12 @@ chrome.downloads.onCreated.addListener(async item => {
   try {
     const { companionCapture: capture } = await chrome.storage.local.get('companionCapture');
     if (!capture || capture.state !== 'armed' || Date.now() > capture.expiresAt) return;
-    if (!isCanvaUrl(item.finalUrl || item.url)) return;
-    if (item.referrer && capture.canvaDesignUrl && new URL(item.referrer).pathname !== new URL(capture.canvaDesignUrl).pathname) return;
+    if (!isCanvaUrl(item.finalUrl) && !isCanvaUrl(item.url)) return;
     if (Date.parse(item.startTime || '') < capture.armedAt) return;
-    if (!/\.(png|jpe?g)$/i.test(item.filename || '')) return;
+    if (!/\.(png|jpe?g)$/i.test(item.filename || '')) {
+      await stateMessage('Canva download found, but filename is not yet PNG/JPG. Checking when download completes…');
+      return;
+    }
     await chrome.storage.local.set({ companionCapture: { ...capture, state: 'downloading', downloadId: item.id } });
     await stateMessage('Canva export detected. Waiting for download to finish…');
   } catch (error) { await stateMessage('Download watch error: ' + String(error)); }
@@ -37,20 +39,17 @@ chrome.downloads.onChanged.addListener(async delta => {
   if (capture.state === 'armed') {
     // Some Chrome downloads don't have a filename until after creation.
     const [candidate] = await chrome.downloads.search({ id: delta.id });
-    if (!candidate || !isCanvaUrl(candidate.finalUrl || candidate.url) ||
+    if (!candidate || (!isCanvaUrl(candidate.finalUrl) && !isCanvaUrl(candidate.url)) ||
         Date.parse(candidate.startTime || '') < capture.armedAt ||
         !/\.(png|jpe?g)$/i.test(candidate.filename || '')) return;
-    if (candidate.referrer && capture.canvaDesignUrl &&
-        new URL(candidate.referrer).pathname !== new URL(capture.canvaDesignUrl).pathname) return;
   }
   // Set processing before awaiting network calls to avoid duplicate imports.
   await chrome.storage.local.set({ companionCapture: { ...capture, state: 'processing', downloadId: delta.id } });
   try {
     if (Date.now() > capture.expiresAt) throw new Error('Pairing/capture window expired');
     const [item] = await chrome.downloads.search({ id: delta.id });
-    if (!item || !isCanvaUrl(item.finalUrl || item.url)) throw new Error('Not a Canva download');
-    if (item.referrer && capture.canvaDesignUrl && new URL(item.referrer).pathname !== new URL(capture.canvaDesignUrl).pathname) throw new Error('Download referrer is a different Canva design');
-    const url = item.finalUrl || item.url;
+    if (!item || (!isCanvaUrl(item.finalUrl) && !isCanvaUrl(item.url))) throw new Error('Not a Canva download');
+    const url = isCanvaUrl(item.finalUrl) ? item.finalUrl : item.url;
     if (!/\.(png|jpe?g)$/i.test(item.filename || '')) throw new Error('Expected PNG or JPG filename');
     const response = await fetch(url, { cache: 'no-store', credentials: 'include', redirect: 'follow' });
     if (!response.ok) throw new Error('Canva download URL returned HTTP ' + response.status);
