@@ -10,7 +10,7 @@ import { parseGeminiKeyring, serializeGeminiKeyring } from '@/lib/gemini-keyring
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 const seoPromptFields = ["general","title","description","tags","primaryKeyword","secondaryKeywords","longTailKeywords","categorySuggestion","attributes","materials","imageAltTexts","photoPlan","priceSuggestion","sku","digitalFiles","licenseNotes"] as const;
 const defaultSeoPrompts = Object.fromEntries(seoPromptFields.map(key => [key, '']));
-const defaultPrefs = { target: 120, model: 'gpt-image-1-mini', quality: 'low', analysisModel: 'gpt-4.1-mini', output: 'png', background: 'transparent', variations: 1, defaultStyle: 'Soft hand-painted watercolor illustration', autoSave: false, seoProvider: 'openai', seoGeminiModel: 'gemini-flash-latest', seoTitleMaxLength: 120, seoAltTextCount: 10, seoFileNaming: 'generaltheme_imagenumber', seoPrompts: defaultSeoPrompts };
+const defaultPrefs = { target: 120, model: 'gpt-image-1-mini', quality: 'low', analysisModel: 'gpt-4.1-mini', output: 'png', background: 'transparent', variations: 1, defaultStyle: 'Soft hand-painted watercolor illustration', autoSave: false, seoProvider: 'openai', seoGeminiModel: 'gemini-flash-latest', seoTitleMaxLength: 120, seoAltTextCount: 1, seoFileNaming: 'generaltheme_imagenumber', seoPrompts: defaultSeoPrompts };
 const isImageModel = (value: unknown): value is string => typeof value === 'string' && /^gpt-image-[a-z0-9.-]{1,80}$/.test(value);
 
 async function getSettings(req: Request) {
