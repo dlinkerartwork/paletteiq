@@ -175,7 +175,7 @@ byId('upscale').addEventListener('click', async () => {
           element.getAttribute('title') ||
           element.textContent ||
           ''
-        ).trim().replace(/\\s+/g, ' ');
+        ).trim().replace(/\s+/g, ' ');
         const controls = [...document.querySelectorAll('button, [role="button"]')].filter(visible);
         const match = exact => controls.find(el => exact.test(label(el)));
         // Canva sometimes places the Upscale tool under the Edit image panel.
