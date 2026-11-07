@@ -28,3 +28,12 @@ Chrome Manifest V3 extension for PaletteIQ Web (localhost:5173) or Desktop (127.
 - Chrome extension permissions now include storage plus a content script limited to PaletteIQ's local development and desktop URLs.
 - Update: pull the branch, reload the unpacked extension at chrome://extensions, then refresh PaletteIQ. No desktop installer rebuild is needed for local web development.
 - The embedded extension page requires Chrome to allow loading web-accessible extension resources; report a blank panel if browser policy blocks the frame.
+
+## v0.6.0 — one-shot Auto Return experiment
+1. Send one image to Canva, place/fit/upscale it, and wait until the edit completes.
+2. Click **Arm Auto Return for next Canva download** in the PaletteIQ floating sidebar. Chrome may request optional permission for Canva subdomains; grant it if you want automatic URL retrieval.
+3. In Canva manually open **Download selection**, choose PNG with transparent background and desired export scale, and click Download.
+4. The extension monitors the *next* Canva PNG/JPG download created after arming. If its Canva-hosted download URL can be fetched again, it validates PNG/JPEG signature and size (25 MB max), then uploads to the paired PaletteIQ character. The original remains unchanged.
+5. If Canva supplies a blob URL, another host, an expired signed URL, or prevents redownload, Auto Return displays a failure and leaves the downloaded file intact. Use the existing **Return upscaled image** file picker instead.
+
+Limitations: export UI clicks are **not yet automated**; this is one-image and one-shot only. Do not download unrelated Canva images while capture is armed. The pairing is valid for 30 minutes, and capture is additionally limited to 15 minutes. No Canva login credentials are handled by the extension. Live behavior on Windows/Canva still needs testing.
