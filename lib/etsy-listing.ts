@@ -86,3 +86,31 @@ export function adaptReferenceSeoToCollection(title: string, description: string
     .replace(/\b(?:set|pack|bundle|collection)\s+of\s+\d{1,6}\+?\s+(?=clip\s?arts?|images?|pngs?|illustrations?|graphics?|designs?|elements?|files?)/gi, `set of ${count} `);
   return { title: stripLinks(updateQuantities(title)), description: stripLinks(updateQuantities(description)) };
 }
+
+/** Saved fields control exports only. The editor always retains every SEO field. */
+export const SEO_EXPORT_FIELD_ORDER = ['title','description','tags','imageAltTexts','primaryKeyword','secondaryKeywords','longTailKeywords','categorySuggestion','attributes','materials','photoPlan','priceSuggestion','sku','digitalFiles','licenseNotes'] as const;
+export type SeoExportField = typeof SEO_EXPORT_FIELD_ORDER[number];
+export const DEFAULT_SEO_EXPORT_FIELDS: SeoExportField[] = ['title','description','tags','imageAltTexts'];
+const SEO_EXPORT_LABELS: Record<SeoExportField, string> = {
+  title: 'TITLE', description: 'DESCRIPTION', tags: 'TAGS', imageAltTexts: 'IMAGE ALT TEXT',
+  primaryKeyword: 'PRIMARY KEYWORD', secondaryKeywords: 'SECONDARY KEYWORDS',
+  longTailKeywords: 'LONG-TAIL KEYWORDS', categorySuggestion: 'CATEGORY SUGGESTION',
+  attributes: 'ATTRIBUTES', materials: 'MATERIALS', photoPlan: 'PHOTO PLAN',
+  priceSuggestion: 'PRICE SUGGESTION', sku: 'SKU', digitalFiles: 'DIGITAL FILES',
+  licenseNotes: 'LICENSE NOTES',
+};
+export function selectedSeoExportFields(value: unknown): SeoExportField[] {
+  if (!Array.isArray(value)) return [...DEFAULT_SEO_EXPORT_FIELDS];
+  const chosen = new Set(value.filter((field): field is SeoExportField => typeof field === 'string' && (SEO_EXPORT_FIELD_ORDER as readonly string[]).includes(field)));
+  return SEO_EXPORT_FIELD_ORDER.filter(field => chosen.has(field));
+}
+export function selectSeoExportDraft(draft: EtsyListingDraft, fields: unknown): Partial<EtsyListingDraft> {
+  return Object.fromEntries(selectedSeoExportFields(fields).map(field => [field, draft[field]])) as Partial<EtsyListingDraft>;
+}
+export function formatSeoExportText(draft: EtsyListingDraft, fields: unknown): string {
+  return selectedSeoExportFields(fields).map(field => {
+    const value = draft[field];
+    const printed = field === 'attributes' ? JSON.stringify(value, null, 2) : Array.isArray(value) ? value.join(field === 'tags' ? ', ' : '\\n') : value;
+    return `${SEO_EXPORT_LABELS[field]}\\n${printed}`;
+  }).join('\\n\\n');
+}
