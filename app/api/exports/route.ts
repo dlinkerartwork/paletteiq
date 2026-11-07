@@ -4,8 +4,7 @@ import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { getDb } from '@/db';
 import { projects, studioSettings } from '@/db/schema';
 import { zipStream, type ZipEntry } from '@/lib/zip-stream';
-import { normalizeListing } from '@/lib/etsy-listing';
-import { auditSeo } from '@/lib/seo-intelligence';
+import { normalizeListing, selectSeoExportDraft, formatSeoExportText } from '@/lib/etsy-listing';
 import { nativeAssetBucket } from '@/lib/native-bridge';
 import { batchAssetKey } from '@/lib/batch-assets';
 import { createImageFileNamer, DEFAULT_IMAGE_NAMING } from '@/lib/image-file-naming';
@@ -30,7 +29,8 @@ export async function POST(request: Request) {
   if (chosen.length > 1000) return Response.json({ error: 'Too many images in one ZIP' }, { status: 400 });
   const settings = await getDb().select({ preferences: studioSettings.preferences }).from(studioSettings).where(eq(studioSettings.owner, user.userId)).limit(1);
   let pattern = DEFAULT_IMAGE_NAMING;
-  try { if (settings[0]) pattern = (JSON.parse(settings[0].preferences) as { seoFileNaming?: string }).seoFileNaming || DEFAULT_IMAGE_NAMING; }
+  let seoDraftFields: unknown = undefined;
+  try { if (settings[0]) { const prefs = JSON.parse(settings[0].preferences) as { seoFileNaming?: string; seoDraftFields?: unknown }; pattern = prefs.seoFileNaming || DEFAULT_IMAGE_NAMING; seoDraftFields = prefs.seoDraftFields; } }
   catch { /* Older settings fall back to the original naming convention. */ }
   const imageFileName = createImageFileNamer(pattern, { theme: project.theme || project.name, subtheme: project.subtheme, microtheme: project.microtheme, collection: project.name });
   const entries: ZipEntry[] = [];
@@ -46,10 +46,9 @@ export async function POST(request: Request) {
     entries.push({ name: `images/${imageFileName(character.name, index, extension)}`, stream: async () => (await bucket.get(key))?.body || null });
   }
   if (body.scope === 'package') {
-    entries.push({ name: 'etsy-listing-draft.json', stream: file(JSON.stringify(project.listing || {}, null, 2)) });
-    entries.push({ name: 'seo-readiness-report.json', stream: file(JSON.stringify({ editorialAudit: auditSeo(normalizeListing(project.listing)), aiReview: project.seoReview || null, note: 'Editorial completeness only; not an Etsy search ranking, traffic, or sales prediction.' }, null, 2)) });
-    const listing = (project.listing || {}) as { title?: string; description?: string; tags?: string[]; primaryKeyword?: string };
-    entries.push({ name: 'etsy-listing-draft.txt', stream: file(`TITLE\n${listing.title || ''}\n\nDESCRIPTION\n${listing.description || ''}\n\nTAGS\n${(listing.tags || []).join(', ')}\n\nPRIMARY KEYWORD\n${listing.primaryKeyword || ''}\n`) });
+    const listing = normalizeListing(project.listing);
+    entries.push({ name: 'etsy-listing-draft.json', stream: file(JSON.stringify(selectSeoExportDraft(listing, seoDraftFields), null, 2)) });
+    entries.push({ name: 'etsy-listing-draft.txt', stream: file(formatSeoExportText(listing, seoDraftFields)) });
     entries.push({ name: 'collection-manifest.json', stream: file(JSON.stringify({ collection: project.name, images: chosen.map(c => ({ id: c.id, name: c.name, imageUrl: c.imageUrl })) }, null, 2)) });
   }
   const name = `${slug(project.name)}-${body.scope === 'package' ? 'etsy-package' : 'images'}.zip`;
