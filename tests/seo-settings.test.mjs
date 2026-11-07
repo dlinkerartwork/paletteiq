@@ -48,5 +48,6 @@ test('Etsy source SEO is imported without Gemini rewriting source copy', () => {
   const route = readFileSync(new URL('../app/api/studio/route.ts', import.meta.url), 'utf8');
   assert.match(route, /reference\.title, description: reference\.description, tags: reference\.tags/);
   assert.match(route, /imageAltTexts: \[alt\]/);
-  assert.match(route, /generated\.imageAltText\.trim\(\)\.slice\(0, 500\)/);
+  assert.match(route, /candidate\.imageAltTexts\[0\]\?\.trim\(\)\.slice\(0, 500\)/);
+  assert.match(route, /primaryKeyword, secondaryKeywords/);
 });
