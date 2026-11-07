@@ -12,7 +12,7 @@ type Project = { id: string; name: string; theme: string; characters: Array<{ st
 type Props = { project: Project; onChange: (draft: EtsyListingDraft) => void; onSave: () => Promise<void>; onSeoReview: (review: SavedSeoReview) => Promise<void>; onDownloaded: (receipt: { lastDownloadedAt: number; downloadCount: number; lastDownloadImageCount: number; downloadedImageIds: string[] }) => void; seoProvider: 'openai' | 'gemini'; seoGeminiModel: string; seoOpenaiModel: string; seoDraftFields: SeoDraftField[]; seoTitleMaxLength: number; seoAltTextCount: number };
 const download = (name: string, body: string, mime: string) => { const url = URL.createObjectURL(new Blob([body], { type: mime })); const a = document.createElement('a'); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url); };
 const slug = (s: string) => (s || 'paletteiq').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 60);
-const safeListingFilename = (title: string, fallback: string) => { const name = (title.trim() || fallback.trim() || 'etsy-listing').replace(/[<>:"/\\|?*\x00-\x1f]/g, ' ').replace(/\s+/g, ' ').replace(/[. ]+$/g, '').slice(0, 120).trim(); return /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name) ? `listing-${name}` : name || 'etsy-listing'; };
+const safeListingFilename = (title: string, fallback: string) => { const name = (title.trim() || fallback.trim() || 'etsy-listing').replace(/[<>:"\/\\|?*\x00-\x1f]/g, ' ').replace(/\s+/g, ' ').replace(/[. ]+$/g, '').slice(0, 120).trim(); return /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name) ? `listing-${name}` : name || 'etsy-listing'; };
 
 type SeoDone = { projectId: string; draft?: EtsyListingDraft; error?: string };
 const activeSeoRuns = new Map<string, Promise<EtsyListingDraft>>();
