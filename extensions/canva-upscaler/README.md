@@ -5,7 +5,7 @@ This Chrome Manifest V3 extension connects **locally** to PaletteIQ Desktop on `
 ## Install
 1. Launch PaletteIQ Desktop.
 2. In Chrome open `chrome://extensions` and enable **Developer mode**.
-3. Select **Load unpacked**, and choose the `extensions/canva-upscaler` directory.
+3. Select **Load unpacked**, and choose the `extensions/canva-upscaler` directory from the source checkout, or `resources/canva-upscaler-companion` inside the installed PaletteIQ application directory.
 4. In PaletteIQ → Image production, tick one or more generated image cards and select **Send to Canva**.
 5. Copy the pairing code for the first image. The extension supports one image per pairing code; repeat for other images.
 6. Paste the code into the extension popup and select **Load selected image**.
