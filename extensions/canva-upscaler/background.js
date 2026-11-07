@@ -64,8 +64,14 @@ chrome.downloads.onChanged.addListener(async delta => {
       headers: { 'Content-Type': mime },
       body: bytes
     });
-    const result = await put.json().catch(() => ({}));
-    if (!put.ok || !result.ok) throw new Error(result.error || 'PaletteIQ import HTTP ' + put.status);
+    const replyText = await put.text();
+    let result = {};
+    try { result = JSON.parse(replyText); } catch { /* Middleware may return plain text or HTML. */ }
+    if (!put.ok || !result.ok) {
+      const hint = (result.error || (put.ok ? '' : replyText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').slice(0, 180))).trim();
+      throw new Error('PaletteIQ import HTTP ' + put.status + (hint ? ': ' + hint : '') +
+        ' (server: ' + new URL(capture.base).host + ')');
+    }
     await chrome.storage.local.remove(['companionCapture','companionTask']);
     await stateMessage('Canva PNG/JPG automatically returned to PaletteIQ! Refresh the collection to see the upscale.');
   } catch (error) {
