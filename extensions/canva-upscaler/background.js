@@ -21,6 +21,7 @@ chrome.downloads.onCreated.addListener(async item => {
     const { companionCapture: capture } = await chrome.storage.local.get('companionCapture');
     if (!capture || capture.state !== 'armed' || Date.now() > capture.expiresAt) return;
     if (!isCanvaUrl(item.finalUrl || item.url)) return;
+    if (capture.canvaTabId != null && item.tabId !== capture.canvaTabId) return;
     if (Date.parse(item.startTime || '') < capture.armedAt) return;
     if (!/\.(png|jpe?g)$/i.test(item.filename || '')) return;
     await chrome.storage.local.set({ companionCapture: { ...capture, state: 'downloading', downloadId: item.id } });
@@ -38,6 +39,7 @@ chrome.downloads.onChanged.addListener(async delta => {
     if (Date.now() > capture.expiresAt) throw new Error('Pairing/capture window expired');
     const [item] = await chrome.downloads.search({ id: delta.id });
     if (!item || !isCanvaUrl(item.finalUrl || item.url)) throw new Error('Not a Canva download');
+    if (capture.canvaTabId != null && item.tabId !== capture.canvaTabId) throw new Error('Download came from a different tab');
     const url = item.finalUrl || item.url;
     if (!/\.(png|jpe?g)$/i.test(item.filename || '')) throw new Error('Expected PNG or JPG filename');
     const response = await fetch(url, { cache: 'no-store', credentials: 'include', redirect: 'follow' });
