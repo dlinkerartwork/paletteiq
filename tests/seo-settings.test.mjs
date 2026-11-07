@@ -14,20 +14,20 @@ test('SEO title limit defaults can be applied to 120 characters', () => {
   const limited = applySeoLimits(draft(), 120, 10);
   assert.ok(limited.title.length <= 120);
   assert.equal(limited.imageAltTexts.length, 10);
-  assert.ok(limited.imageAltTexts.every(text => text.length <= 450));
+  assert.ok(limited.imageAltTexts.every(text => text.length <= 500));
 });
 
 test('custom smaller title and alt count are respected', () => {
   const limited = applySeoLimits(draft(), 60, 3);
   assert.ok(limited.title.length <= 60);
   assert.equal(limited.imageAltTexts.length, 3);
-  assert.ok(limited.imageAltTexts.every(text => text.length <= 450));
+  assert.ok(limited.imageAltTexts.every(text => text.length <= 500));
 });
 
 test('server routes honor configured provider and generation limits', () => {
   const route = readFileSync(new URL('../app/api/studio/route.ts', import.meta.url), 'utf8');
   const provider = readFileSync(new URL('../lib/seo-provider.ts', import.meta.url), 'utf8');
-  assert.match(route, /generateSeoJson\(user\.userId, instruction, seoConfig\.seoProvider, seoConfig\.seoGeminiModel\)/);
+  assert.match(route, /generateSeoJson\(user\.userId, instruction, 'gemini', seoConfig\.seoGeminiModel\)/);
   assert.match(route, /generateSeoJson\(user\.userId, prompt, seoConfig\.seoProvider, seoConfig\.seoGeminiModel\)/);
   assert.match(provider, /models\/\$\{model\}:generateContent/);
   assert.match(provider, /thinkingBudget: 0/);
@@ -41,4 +41,12 @@ test('ZIP export preserves legacy default naming and supports saved custom patte
   assert.equal(defaultName('Lily', 1, 'png'), 'flowers_blossoms_002.png');
   assert.match(route, /createImageFileNamer\(pattern/);
   assert.match(route, /imageFileName\(character\.name, index, extension\)/);
+});
+
+
+test('Etsy source SEO is imported without Gemini rewriting source copy', () => {
+  const route = readFileSync(new URL('../app/api/studio/route.ts', import.meta.url), 'utf8');
+  assert.match(route, /reference\.title, description: reference\.description, tags: reference\.tags/);
+  assert.match(route, /imageAltTexts: \[alt\]/);
+  assert.match(route, /generated\.imageAltText\.trim\(\)\.slice\(0, 500\)/);
 });
