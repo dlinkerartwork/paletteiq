@@ -110,7 +110,7 @@ export function selectSeoExportDraft(draft: EtsyListingDraft, fields: unknown): 
 export function formatSeoExportText(draft: EtsyListingDraft, fields: unknown): string {
   return selectedSeoExportFields(fields).map(field => {
     const value = draft[field];
-    const printed = field === 'attributes' ? JSON.stringify(value, null, 2) : Array.isArray(value) ? value.join(field === 'tags' ? ', ' : '\\n') : value;
-    return `${SEO_EXPORT_LABELS[field]}\\n${printed}`;
-  }).join('\\n\\n');
+    const printed = field === 'attributes' ? JSON.stringify(value, null, 2) : Array.isArray(value) ? value.join(field === 'tags' ? ', ' : '\n') : value;
+    return `${SEO_EXPORT_LABELS[field]}\n${printed}`;
+  }).join('\n\n');
 }
