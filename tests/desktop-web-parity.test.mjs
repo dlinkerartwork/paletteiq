@@ -13,10 +13,10 @@ test('desktop packaging rebuilds and copies the same web client and server bundl
   assert.match(main, /config\.main = path\.join\(ROOT, 'dist', 'server', 'index\.js'\)/);
 });
 
-test('SEO provider and Gemini model visibility are controlled by Settings, not desktop mode', () => {
+test('Gemini alt model is visible on desktop and SEO review provider remains configurable', () => {
   const listing = readFileSync('components/etsy-listing-draft.tsx', 'utf8');
   assert.match(listing, /listing-provider-status/);
-  assert.match(listing, /GEMINI SEO MODEL/);
+  assert.match(listing, /GEMINI MODEL/);
   assert.match(listing, /seoProvider === 'gemini'/);
-  assert.doesNotMatch(listing, /isDesktop.*GEMINI SEO MODEL/);
+  assert.doesNotMatch(listing, /isDesktop.*GEMINI MODEL/);
 });
