@@ -105,12 +105,14 @@ byId('canva').addEventListener('click', async () => {
     const blob = await sourceBlob();
     if (blob.size > 12 * 1024 * 1024) throw new Error('Automatic transfer is limited to 12 MB. Use Download source for larger images.');
     const encoded = await dataUrlOf(blob);
-    let tab;
-    if (canvaTabId != null) tab = await chrome.tabs.get(canvaTabId).catch(() => null);
-    if (!tab) {
-      tab = await chrome.tabs.create({ url: 'https://www.canva.com/', active: false });
-      canvaTabId = tab.id;
-    }
+    // Reuse an existing Canva design editor. A newly opened Canva home tab
+    // does not contain the Uploads input and must not be used as the target.
+    const openTabs = await chrome.tabs.query({ url: 'https://www.canva.com/*' });
+    const editors = openTabs.filter(t => /^https:\/\/www\.canva\.com\/design\/[^/]+\/edit(?:[/?#]|$)/.test(t.url || ''));
+    const current = canvaTabId == null ? null : editors.find(t => t.id === canvaTabId);
+    let tab = current || editors.find(t => t.active) || editors[0];
+    if (!tab) throw new Error('Open a Canva design editor and its Uploads panel first, then retry. No editor tab was found.');
+    canvaTabId = tab.id;
     if (tab.status !== 'complete') {
       await new Promise((resolve, reject) => {
         const timeout = setTimeout(() => { chrome.tabs.onUpdated.removeListener(listener); reject(new Error('Canva tab timed out')); }, 25000);
