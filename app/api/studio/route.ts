@@ -165,8 +165,8 @@ export async function POST(req: Request) {
     const subjects = project.characters.slice(0, 200).filter(c => c && typeof c.name === 'string').map(c => ({ name: String(c.name).slice(0, 100), produced: c.status === 'done' }));
     const produced = project.characters.filter(c => typeof c.imageUrl === 'string' && !!c.imageUrl.trim()).length;
     const brief = { name: String(project.name).slice(0, 150), theme: String(project.theme ?? '').slice(0, 150), subtheme: String(project.subtheme ?? '').slice(0, 150), style: String(project.style ?? '').slice(0, 200), palette: String(project.palette ?? '').slice(0, 200), texture: String(project.texture ?? '').slice(0, 200), keywords: Array.isArray(project.keywords) ? project.keywords.slice(0, 30) : [], subjects, produced, sourceReference: String(project.title ?? '').slice(0, 250) };
-    // Etsy provides the source listing SEO fields. Gemini generates only one
-    // image alt text; it never rewrites the reference title, description or tags.
+    // Etsy API supplies the reference SEO signals; the chosen provider adapts
+    // title, description and tags to the original collection and its actual assets.
     let referenceUrl: URL;
     try { referenceUrl = new URL(String(project.url || '')); }
     catch { return fail('Save a valid Etsy reference URL before generating SEO.'); }
@@ -181,15 +181,11 @@ export async function POST(req: Request) {
     if (!reference.title?.trim() || !reference.description?.trim() || !Array.isArray(reference.tags)) return fail('Reference listing is missing title, description or tags.', 422);
     const customSeo = await customSeoInstructions(user.userId);
     const warnings = Array.isArray(body.seoWarnings) ? body.seoWarnings.filter((value): value is string => typeof value === 'string').slice(0, 10).map(value => value.slice(0, 180)) : [];
-    const instruction = `Produce a complete Etsy digital clipart SEO draft. ALL human-readable fields, including every array item and image alt text, MUST be in fluent, natural ENGLISH. Return JSON with these keys: primaryKeyword, secondaryKeywords (array), longTailKeywords (array), categorySuggestion, attributes (occasion, recipient, primaryColor, secondaryColor, style), materials (array), imageAltTexts (array with EXACTLY ONE item), photoPlan (array), priceSuggestion, sku, digitalFiles (array), licenseNotes, referenceTitleEnglish, referenceDescriptionEnglish, referenceTagsEnglish (array). The imageAltTexts array must contain ONE detailed, accessible image ALT TEXT of 470–500 characters, ideally 485–495 characters; cover subject, materials, palette, composition and style ONLY if supported by collection evidence. Do not pad with vague repetitive text or invent visual details. Reference SEO fields MUST be faithful English renderings of the Etsy API source supplied below: if source wording is already English, retain it accurately; otherwise translate it to English without adding sales claims, rewriting or inventing facts. The source Title, Description and Tags are authoritative, but all quantity claims in Title and Description MUST reflect exactly ${produced} actual generated images in THIS collection, NOT the reference listing quantity. Remove ALL URLs, websites, email links and store links from Title and Description. Never copy reference quantities. Do not invent image quantities or change tags. Keep Etsy tags concise, up to 20 characters each. All other generated fields must be original and truthful. Collection: ${JSON.stringify(brief).slice(0, 14000)}. Reference SEO from Etsy API: ${JSON.stringify({ title: reference.title, description: reference.description, tags: reference.tags }).slice(0, 16000)}. Audit warnings: ${JSON.stringify(warnings)}. ${customSeo}`;
+    const instruction = `Create an ORIGINAL, buyer-friendly Etsy clipart SEO draft in fluent, natural ENGLISH using the Etsy API listing TITLE, DESCRIPTION and TAGS only as keyword/market-language reference, never as final text to copy. The selected SEO model MUST improve the Title, Description and Tags for THIS collection while preserving relevant keyword intent and removing irrelevant claims. Return JSON with keys: title (string, max ${seoConfig.seoTitleMaxLength} characters), description (string), tags (up to 13 relevant distinct English phrases, max 20 characters each), primaryKeyword, secondaryKeywords (array), longTailKeywords (array), categorySuggestion, attributes (occasion, recipient, primaryColor, secondaryColor, style), materials (array), imageAltTexts (array with EXACTLY ONE item), photoPlan (array), priceSuggestion, sku, digitalFiles (array), licenseNotes. Do NOT return referenceTitleEnglish, referenceDescriptionEnglish or referenceTagsEnglish. Place the primary keyword naturally near the start of the title; do not keyword-stuff, copy the source seller's branding or claims, or invent product facts. Both Title and Description MUST contain no URL, website address, domain, shop link, email link or social handle. This collection contains exactly ${produced} GENERATED IMAGES, independently of the Etsy reference count. If mentioning any item/image/clipart quantity, it MUST equal ${produced}, in both Title and Description; never use the source listing's quantity. If ${produced} is zero, do not advertise generated files. Reference sizes, materials, licenses and formats must never be copied as facts unless confirmed by the collection. The imageAltTexts array must contain ONE descriptive accessible English text of 470–500 characters (target 490) supported by the artwork. No made-up details or repetitive padding. Keep all remaining fields truthful and consistent with the produced assets. Collection: ${JSON.stringify(brief).slice(0, 14000)}. Etsy API SEO reference (keywords and buyer vocabulary only): ${JSON.stringify({ title: reference.title, description: reference.description, tags: reference.tags }).slice(0, 16000)}. Audit warnings: ${JSON.stringify(warnings)}. ${customSeo}`;
     try {
       const generated = await generateSeoJson(user.userId, instruction, seoConfig.seoProvider, seoConfig.seoProvider === 'gemini' ? seoConfig.seoGeminiModel : seoConfig.seoOpenaiModel);
       const candidate = normalizeListing(generated);
-      const translated = generated && typeof generated === 'object' ? generated as { referenceTitleEnglish?: unknown; referenceDescriptionEnglish?: unknown; referenceTagsEnglish?: unknown } : {};
-      const englishTitle = typeof translated.referenceTitleEnglish === 'string' ? translated.referenceTitleEnglish.trim() : '';
-      const englishDescription = typeof translated.referenceDescriptionEnglish === 'string' ? translated.referenceDescriptionEnglish.trim() : '';
-      const englishTags = Array.isArray(translated.referenceTagsEnglish) ? translated.referenceTagsEnglish.filter((value): value is string => typeof value === 'string' && !!value.trim()) : [];
-      if (!englishTitle || !englishDescription || !englishTags.length) return fail('The SEO provider did not return English versions of the Etsy API SEO fields. Please retry.', 502);
+      if (!candidate.title || !candidate.description || !candidate.tags.length) return fail('The selected SEO model did not return title, description and tags. Please retry.', 502);
       let alt = normalizeSeoAlt(candidate.imageAltTexts[0]);
       // A short first answer is retried without regenerating the other SEO fields.
       for (let attempt = 0; attempt < 2 && !hasTargetSeoAltLength(alt); attempt++) {
@@ -198,7 +194,7 @@ export async function POST(req: Request) {
         alt = normalizeSeoAlt(revised?.imageAltText);
       }
       if (!hasTargetSeoAltLength(alt)) return fail('SEO alt text is still shorter than 460 characters or exceeds 500 characters after retries. Please regenerate.', 502);
-      const draft = normalizeListing({ ...candidate, title: englishTitle, description: englishDescription, tags: englishTags, imageAltTexts: [alt] });
+      const draft = normalizeListing({ ...candidate, imageAltTexts: [alt] });
       // Save the completed draft to the originating collection, not whichever
       // collection the user happens to be viewing when the request finishes.
       const db = getDb();
@@ -207,7 +203,7 @@ export async function POST(req: Request) {
       const saved = JSON.parse(rows[0].data) as ProjectInput;
       const actualImages = Array.isArray(saved.characters) ? saved.characters.filter(c => typeof c.imageUrl === 'string' && !!c.imageUrl.trim()).length : produced;
       const adjusted = adaptReferenceSeoToCollection(draft.title, draft.description, actualImages);
-      draft.title = adjusted.title.slice(0, 140);
+      draft.title = adjusted.title.slice(0, seoConfig.seoTitleMaxLength);
       draft.description = adjusted.description.slice(0, 12000);
       saved.listing = draft;
       await db.update(projects).set({ data: JSON.stringify(saved), updatedAt: Date.now() })
