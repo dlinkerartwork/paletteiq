@@ -36,7 +36,7 @@ chrome.storage.local.get(['companionTask','companionStatus','companionTokenDraft
   api(currentTaskUrl(), { cache: 'no-store' }).then(response => response.json()).then(data => {
     if (data.status !== 'pending') throw new Error('Task is no longer pending');
     byId('task').textContent = 'Ready: ' + imageName + ' (' + new URL(base).host + ')';
-    for (const id of ['source','canva','place','fit','upscale','result']) byId(id).disabled = false;
+    for (const id of ['source','canva','place','fit','upscale','arm','result']) byId(id).disabled = false;
   }).catch(() => {
     byId('task').textContent = 'Saved pairing expired or unavailable. Load a new pairing code.';
     chrome.storage.local.remove('companionTask').catch(() => {});
@@ -182,7 +182,7 @@ byId('canva').addEventListener('click', async () => {
     const result = await injectIntoCanva(encoded, filename);
     status(result?.message || 'Canva did not confirm the upload. Use Download source as fallback.');
     if (result?.ok) {
-      for (const id of ['place','fit','upscale','result']) byId(id).disabled = false;
+      for (const id of ['place','fit','upscale','arm','result']) byId(id).disabled = false;
       status('Image handed to Canva Uploads. Trying to place the matching upload on canvas in a moment…');
       setTimeout(() => { if (!byId('place').disabled) byId('place').click(); }, 2500);
     }
@@ -454,6 +454,38 @@ byId('upscale').addEventListener('click', async () => {
     status('Upscale automation unavailable: ' + String(error));
   } finally { byId('upscale').disabled = false; }
 });
+// Arm a one-shot listener for the next Canva PNG/JPEG download created after
+// this action. The watcher imports only a Canva-hosted URL and a valid task.
+byId('arm').addEventListener('click', async () => {
+  byId('arm').disabled = true;
+  try {
+    const response = await api(currentTaskUrl(), { cache:'no-store' });
+    const data = await response.json();
+    if (data.status !== 'pending' || data.expiresAt <= Date.now()) throw new Error('Pairing is no longer pending. Generate a new code.');
+    const allowed = await chrome.permissions.request({ origins: ['https://*.canva.com/*'] });
+    if (!allowed) throw new Error('Canva download host permission was not granted. Use manual Return upscaled image.');
+    const tabs = await chrome.tabs.query({});
+    const editor = tabs.find(t => t.id === canvaTabId) || tabs.find(t => {
+      try { const u = new URL(t.url || ''); return u.hostname.endsWith('.canva.com') && u.pathname.startsWith('/design/'); }
+      catch { return false; }
+    });
+    if (!editor) throw new Error('Keep the Canva design editor open before arming Auto Return.');
+    await chrome.storage.local.set({ companionCapture: {
+      state: 'armed', base, token, name: imageName, canvaDesignUrl: editor.url, armedAt: Date.now(),
+      expiresAt: Math.min(data.expiresAt, Date.now() + 15 * 60 * 1000)
+    }});
+    status('Auto Return armed for this image. In Canva, export Download selection as PNG/JPG now. The companion will try to import the completed Canva download.');
+  } catch (error) { status('Auto Return not armed: ' + String(error)); }
+  finally { byId('arm').disabled = false; }
+});
+
+// Background service worker reports download/import progress through storage.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.companionStatus?.newValue) {
+    byId('status').textContent = changes.companionStatus.newValue;
+  }
+});
+
 byId('result').addEventListener('change', () => { byId('submit').disabled = !byId('result').files?.length; });
 byId('submit').addEventListener('click', async () => {
   const file = byId('result').files?.[0];
@@ -463,7 +495,7 @@ byId('submit').addEventListener('click', async () => {
   try {
     const response = await api(currentTaskUrl(), { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
     const data = await response.json();
-    if (data.ok) chrome.storage.local.remove('companionTask').catch(() => {});
+    if (data.ok) chrome.storage.local.remove(['companionTask','companionCapture']).catch(() => {});
     status(data.ok ? 'Upscaled result saved to PaletteIQ. Refresh the collection.' : 'Unexpected response.');
   } catch (error) { status(String(error)); byId('submit').disabled = false; }
 });
