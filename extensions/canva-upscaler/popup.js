@@ -454,7 +454,7 @@ byId('upscale').addEventListener('click', async () => {
       }
     });
     status(outcome?.result?.message || 'Canva did not report an Upscale action.');
-    stepComplete('upscale', outcome?.result?.action === 'clicked', outcome?.result?.action);
+    stepComplete('upscale', ['clicked', 'opened-edit'].includes(outcome?.result?.action), outcome?.result?.action);
   } catch (error) {
     stepComplete('upscale', false, String(error));
     status('Upscale automation unavailable: ' + String(error));
