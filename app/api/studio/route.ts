@@ -149,7 +149,7 @@ export async function POST(req: Request) {
     const seoConfig = await seoPreferences(user.userId);
     // Optional per-run selection from Etsy Listing Draft; all other SEO preferences
     // and custom instructions still come from the saved Settings record.
-    if (body.seoGeminiModel !== undefined && seoConfig.seoProvider === 'gemini') {
+    if (body.seoGeminiModel !== undefined) {
       if (typeof body.seoGeminiModel !== 'string' || !/^gemini-[a-z0-9.-]{1,80}$/.test(body.seoGeminiModel)) return fail('Invalid Gemini SEO model');
       seoConfig.seoGeminiModel = body.seoGeminiModel;
     }
@@ -161,11 +161,27 @@ export async function POST(req: Request) {
     const customSeo = await customSeoInstructions(user.userId);
     const seoWarnings = Array.isArray(body.seoWarnings) ? body.seoWarnings.filter((value): value is string => typeof value === 'string').slice(0, 10).map(value => value.slice(0, 180)) : [];
     const auditGuidance = seoWarnings.length ? ' Address these existing SEO audit warnings naturally where factually possible: ' + JSON.stringify(seoWarnings) + '. Do not invent product attributes to make a warning disappear.' : '';
-    const instruction = `You are preparing an original, accurate, English-language Etsy DIGITAL CLIPART listing draft. Return a single valid JSON object with precisely these keys: title (natural, clear, <=${seoConfig.seoTitleMaxLength} characters, ideally under 15 words), description (scannable, buyer-friendly opening, what's included, potential uses, download and licensing caveats), tags (13 distinct relevant phrases, each <=20 characters), primaryKeyword, secondaryKeywords (array), longTailKeywords (array), categorySuggestion (suggestion only, not taxonomy ID), attributes (object: occasion, recipient, primaryColor, secondaryColor, style), materials (array), imageAltTexts (EXACTLY ${seoConfig.seoAltTextCount} distinct entries, each no more than 450 characters; describe actual or planned images truthfully), photoPlan (array), priceSuggestion (estimated range with currency and clearly marked estimate, not a market fact), sku, digitalFiles (array of proposed package contents; image filenames are determined by the user's editable ZIP image naming preference and collisions are resolved automatically on export; do not assert a fixed filename convention), licenseNotes. Select one precise primaryKeyword that describes the actual product; put that exact phrase naturally within the first 250 characters of the description, ideally in the first sentence, and introduce the product clearly. Do not stuff or repeat the phrase unnaturally. Never copy the source listing's wording, SEO tags, or branding; create distinct original copy. Never invent concrete specs such as exact files, DPI, sizes, transparent backgrounds, licenses, or quantities as facts if unknown. Mark such details TO CONFIRM. Do not claim ${subjects.length} images are delivered when only ${produced} are produced. Etsy allows 13 tags of up to 20 characters. No unsupported demand, ranking, sales or ownership claims. Seller will verify before publishing. Collection brief: ${JSON.stringify(brief).slice(0, 21000)}${customSeo}${auditGuidance}`;
+    // Etsy provides the source listing SEO fields. Gemini generates only one
+    // image alt text; it never rewrites the reference title, description or tags.
+    let referenceUrl: URL;
+    try { referenceUrl = new URL(String(project.url || '')); }
+    catch { return fail('Save a valid Etsy reference URL before generating SEO.'); }
+    if (referenceUrl.protocol !== 'https:' || !['etsy.com', 'www.etsy.com'].includes(referenceUrl.hostname)) return fail('Use an Etsy reference listing URL.');
+    const listingId = referenceUrl.pathname.match(/^\\/listing\\/(\\d+)/)?.[1];
+    if (!listingId) return fail('Etsy reference listing ID is missing.');
+    const etsyKey = await userCredential(user.userId, 'etsy') || secret('ETSY_API_KEY');
+    if (!etsyKey) return fail('Configure your Etsy API key before importing listing SEO.', 503);
+    const referenceResponse = await fetch(`https://api.etsy.com/v3/application/listings/${listingId}`, { headers: { 'x-api-key': etsyKey } });
+    if (!referenceResponse.ok) return fail(`Could not retrieve reference Etsy SEO (${referenceResponse.status}).`, 502);
+    const reference = await referenceResponse.json() as { title?: string; description?: string; tags?: string[] };
+    if (!reference.title?.trim() || !reference.description?.trim() || !Array.isArray(reference.tags)) return fail('Reference listing is missing title, description or tags.', 422);
+    const instruction = `Write ONE accessible image ALT TEXT for a clipart bundle, up to 500 characters. Base the description on the collection subject information supplied; do not invent visual details that have not been verified. Return JSON with exactly one key: {"imageAltText":"..."}. Do not generate or rewrite title, description, or tags. Collection: ${JSON.stringify(brief).slice(0, 12000)}. Etsy reference subject: ${String(reference.title).slice(0, 350)}.`;
     try {
-      const raw = await generateSeoJson(user.userId, instruction, seoConfig.seoProvider, seoConfig.seoGeminiModel);
-      const draft = applySeoLimits(ensurePrimaryKeywordOpening(normalizeListing(raw)), seoConfig.seoTitleMaxLength, seoConfig.seoAltTextCount);
-      if (draft.imageAltTexts.length !== seoConfig.seoAltTextCount) return fail(`SEO model returned ${draft.imageAltTexts.length} alt texts; requested ${seoConfig.seoAltTextCount}. Please regenerate or adjust the count.`, 502);
+      const generated = await generateSeoJson(user.userId, instruction, 'gemini', seoConfig.seoGeminiModel) as { imageAltText?: unknown };
+      const alt = typeof generated?.imageAltText === 'string' ? generated.imageAltText.trim().slice(0, 500) : '';
+      if (!alt) return fail('Gemini did not provide an image alt text. Try again.', 502);
+      const previous = normalizeListing(project.listing);
+      const draft = normalizeListing({ ...previous, title: reference.title, description: reference.description, tags: reference.tags, imageAltTexts: [alt], primaryKeyword: previous.primaryKeyword || reference.tags[0] || '' });
       // Save the completed draft to the originating collection, not whichever
       // collection the user happens to be viewing when the request finishes.
       const db = getDb();
