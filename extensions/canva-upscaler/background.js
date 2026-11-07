@@ -32,9 +32,19 @@ chrome.downloads.onCreated.addListener(async item => {
 chrome.downloads.onChanged.addListener(async delta => {
   if (delta.state?.current !== 'complete') return;
   const { companionCapture: capture } = await chrome.storage.local.get('companionCapture');
-  if (!capture || capture.state !== 'downloading' || capture.downloadId !== delta.id) return;
+  if (!capture || !['armed', 'downloading'].includes(capture.state)) return;
+  if (capture.state === 'downloading' && capture.downloadId !== delta.id) return;
+  if (capture.state === 'armed') {
+    // Some Chrome downloads don't have a filename until after creation.
+    const [candidate] = await chrome.downloads.search({ id: delta.id });
+    if (!candidate || !isCanvaUrl(candidate.finalUrl || candidate.url) ||
+        Date.parse(candidate.startTime || '') < capture.armedAt ||
+        !/\\.(png|jpe?g)$/i.test(candidate.filename || '')) return;
+    if (candidate.referrer && capture.canvaDesignUrl &&
+        new URL(candidate.referrer).pathname !== new URL(capture.canvaDesignUrl).pathname) return;
+  }
   // Set processing before awaiting network calls to avoid duplicate imports.
-  await chrome.storage.local.set({ companionCapture: { ...capture, state: 'processing' } });
+  await chrome.storage.local.set({ companionCapture: { ...capture, state: 'processing', downloadId: delta.id } });
   try {
     if (Date.now() > capture.expiresAt) throw new Error('Pairing/capture window expired');
     const [item] = await chrome.downloads.search({ id: delta.id });
