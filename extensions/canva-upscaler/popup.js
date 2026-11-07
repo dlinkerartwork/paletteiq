@@ -334,7 +334,7 @@ byId('fit').addEventListener('click', async () => {
           return { message:'Invalid image/canvas dimensions; no resize performed.' };
         const factor = Math.min(cw / w, ch / h);
         const useWidth = cw / w <= ch / h;
-        const field = useWidth ? width : height;
+        let field = useWidth ? width : height;
         const target = Math.round((useWidth ? w : h) * factor * 10) / 10;
         const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
         if (!setter) return { message:'Cannot update Canva numeric controls.' };
