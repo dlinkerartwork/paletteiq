@@ -1,46 +1,136 @@
-const base = 'http://127.0.0.1:18763/api/canva-companion';
+const endpoints = [
+  'http://localhost:5173/api/canva-companion',
+  'http://127.0.0.1:5173/api/canva-companion',
+  'http://127.0.0.1:18763/api/canva-companion',
+];
 const byId = id => document.getElementById(id);
 const status = value => { byId('status').textContent = value; };
-const describeError = error => error instanceof TypeError && /fetch/i.test(error.message)
-  ? 'Cannot reach PaletteIQ Desktop at 127.0.0.1:18763. Start the desktop app, check its local port, then reload this extension at chrome://extensions. If the server works, update PaletteIQ to the latest version.'
-  : String(error);
+let base = '';
 let token = '';
 let imageName = '';
+let canvaTabId = null;
+
+const api = async (url, init) => {
+  const response = await fetch(url, init);
+  const contentType = response.headers.get('content-type') || '';
+  if (!response.ok) {
+    const error = contentType.includes('json') ? await response.json().catch(() => ({})) : {};
+    throw new Error(error.error || 'PaletteIQ returned HTTP ' + response.status);
+  }
+  return response;
+};
+const currentTaskUrl = query => base + '?token=' + encodeURIComponent(token) + (query || '');
+const sourceBlob = async () => (await api(currentTaskUrl('&file=1'))).blob();
+
 byId('load').addEventListener('click', async () => {
   token = byId('token').value.trim().toLowerCase();
   if (!/^[a-f0-9]{64}$/.test(token)) return status('Paste a valid pairing code from PaletteIQ.');
+  byId('load').disabled = true;
+  const failures = [];
   try {
-    const response = await fetch(base + '?token=' + token, { cache: 'no-store' });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Cannot connect. Check that PaletteIQ is open.');
-    if (data.status !== 'pending') throw new Error('This task has already been completed.');
-    imageName = data.name || 'image';
-    byId('task').textContent = 'Ready: ' + imageName;
-    for (const id of ['source','canva','result']) byId(id).disabled = false;
-    status('Connected. Download the original image, then open Canva.');
-  } catch (error) { status(describeError(error)); }
+    for (const endpoint of endpoints) {
+      try {
+        const response = await api(endpoint + '?token=' + token, { cache: 'no-store' });
+        const data = await response.json();
+        if (data.status !== 'pending') throw new Error('This task is already completed.');
+        base = endpoint;
+        imageName = data.name || 'image';
+        byId('task').textContent = 'Ready: ' + imageName + ' (' + new URL(base).host + ')';
+        for (const id of ['source','canva','result']) byId(id).disabled = false;
+        status('Connected. Click Send to Canva to try direct upload.');
+        return;
+      } catch (error) {
+        failures.push(new URL(endpoint).host + ': ' + String(error));
+      }
+    }
+    throw new Error('No matching PaletteIQ server/task found. Check that PaletteIQ Web is running on port 5173 or Desktop on 18763. ' + failures.join(' | '));
+  } catch (error) { status(String(error)); }
+  finally { byId('load').disabled = false; }
 });
+
 byId('source').addEventListener('click', async () => {
   try {
-    const response = await fetch(base + '?file=1&token=' + token);
-    if (!response.ok) throw new Error('Could not retrieve source image.');
-    const blob = await response.blob();
-    const blobUrl = URL.createObjectURL(blob);
-    chrome.downloads.download({ url: blobUrl, filename: 'PaletteIQ-' + imageName.replace(/[^a-z0-9-]/gi, '_').slice(0,70) + (blob.type === 'image/jpeg' ? '.jpg' : '.png'), saveAs: true }, () => setTimeout(() => URL.revokeObjectURL(blobUrl), 60000));
-    status('Source downloaded. Upload it to Canva.');
-  } catch (error) { status(describeError(error)); }
+    const blob = await sourceBlob();
+    const url = URL.createObjectURL(blob);
+    chrome.downloads.download({
+      url, filename: 'PaletteIQ-' + imageName.replace(/[^a-z0-9-]/gi, '_').slice(0,70) + (blob.type === 'image/jpeg' ? '.jpg' : '.png'), saveAs: true
+    }, () => {
+      if (chrome.runtime.lastError) status(chrome.runtime.lastError.message);
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    });
+    status('Source download started.');
+  } catch (error) { status(String(error)); }
 });
-byId('canva').addEventListener('click', () => chrome.tabs.create({ url: 'https://www.canva.com/' }));
+
+const dataUrlOf = blob => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(reader.result);
+  reader.onerror = () => reject(reader.error || new Error('Could not read source image'));
+  reader.readAsDataURL(blob);
+});
+
+async function injectIntoCanva(encoded, filename) {
+  const [result] = await chrome.scripting.executeScript({
+    target: { tabId: canvaTabId },
+    func: (dataUrl, name) => {
+      const binary = atob(dataUrl.split(',')[1]);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const type = dataUrl.slice(5, dataUrl.indexOf(';'));
+      const file = new File([bytes], name, { type });
+      const visibleInputs = [...document.querySelectorAll('input[type="file"]')].filter(input => {
+        const accept = (input.accept || '').toLowerCase();
+        return !accept || accept.includes('image') || accept.includes('.png') || accept.includes('.jpg') || accept.includes('.jpeg') || accept.includes('*');
+      });
+      const input = visibleInputs[0];
+      if (!input) return { ok: false, message: 'Canva upload input was not found. Open Uploads → Upload files in Canva, then try Send to Canva again.' };
+      try {
+        const transfer = new DataTransfer();
+        transfer.items.add(file);
+        input.files = transfer.files;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        return { ok: true, message: 'Image handed to Canva upload input. Verify that it appears in Canva Uploads.' };
+      } catch (error) { return { ok: false, message: 'Canva rejected the simulated file selection: ' + String(error) }; }
+    },
+    args: [encoded, filename]
+  });
+  return result?.result;
+}
+
+byId('canva').addEventListener('click', async () => {
+  byId('canva').disabled = true;
+  try {
+    status('Preparing source image and Canva tab…');
+    const blob = await sourceBlob();
+    if (blob.size > 12 * 1024 * 1024) throw new Error('Automatic transfer is limited to 12 MB. Use Download source for larger images.');
+    const encoded = await dataUrlOf(blob);
+    let tab;
+    if (canvaTabId != null) tab = await chrome.tabs.get(canvaTabId).catch(() => null);
+    if (!tab) {
+      tab = await chrome.tabs.create({ url: 'https://www.canva.com/' });
+      canvaTabId = tab.id;
+    }
+    if (!tab.url?.startsWith('https://www.canva.com/') || tab.status !== 'complete') {
+      status('Canva is opening. Wait for it to load, then click Send to Canva again.');
+      return;
+    }
+    const filename = 'PaletteIQ-' + imageName.replace(/[^a-z0-9-]/gi, '_').slice(0,70) + (blob.type === 'image/jpeg' ? '.jpg' : '.png');
+    const result = await injectIntoCanva(encoded, filename);
+    status(result?.message || 'Canva did not confirm the upload. Use Download source as fallback.');
+  } catch (error) {
+    status('Automatic upload unavailable: ' + String(error) + '. You can still use Download source and upload manually.');
+  } finally { byId('canva').disabled = false; }
+});
 byId('result').addEventListener('change', () => { byId('submit').disabled = !byId('result').files?.length; });
 byId('submit').addEventListener('click', async () => {
   const file = byId('result').files?.[0];
-  if (!file) return status('Select your upscaled image first.');
-  if (!['image/png','image/jpeg'].includes(file.type) || file.size > 25*1024*1024) return status('Use PNG or JPG, max 25 MB.');
+  if (!file) return status('Select the upscaled Canva image first.');
+  if (!['image/png','image/jpeg'].includes(file.type) || file.size > 25 * 1024 * 1024) return status('Use PNG/JPG up to 25 MB.');
   byId('submit').disabled = true;
   try {
-    const response = await fetch(base + '?token=' + token, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
+    const response = await api(currentTaskUrl(), { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Could not return image.');
-    status('Saved to PaletteIQ! Return to the collection and refresh to view the upscaled version.');
-  } catch (error) { status(describeError(error)); byId('submit').disabled = false; }
+    status(data.ok ? 'Upscaled result saved to PaletteIQ. Refresh the collection.' : 'Unexpected response.');
+  } catch (error) { status(String(error)); byId('submit').disabled = false; }
 });
