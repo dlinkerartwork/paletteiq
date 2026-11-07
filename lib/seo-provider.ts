@@ -34,7 +34,7 @@ export async function seoPreferences(owner: string): Promise<SeoGenerationPrefer
   };
 }
 
-export async function generateSeoJson(owner: string, instruction: string, provider: 'openai' | 'gemini', modelChoice = 'gemini-flash-latest'): Promise<unknown> {
+export async function generateSeoJson(owner: string, instruction: string, provider: 'openai' | 'gemini', modelChoice = 'gemini-2.5-pro'): Promise<unknown> {
   if (provider === 'openai') {
     const key = await userCredential(owner, 'openai') || secret('OPENAI_API_KEY');
     if (!key) throw new Error('Configure your OpenAI API key in Settings before generating SEO.');
@@ -51,7 +51,7 @@ export async function generateSeoJson(owner: string, instruction: string, provid
   const keys = await userGeminiKeys(owner);
   if (!keys.length && secret('GEMINI_API_KEY')) keys.push(secret('GEMINI_API_KEY')!);
   if (!keys.length) throw new Error('Configure a Gemini API key in Settings before generating SEO.');
-  const model = /^gemini-[a-z0-9.-]{1,80}$/.test(modelChoice) ? modelChoice : 'gemini-flash-latest';
+  const model = /^gemini-[a-z0-9.-]{1,80}$/.test(modelChoice) ? modelChoice : 'gemini-2.5-pro';
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
   const payload = JSON.stringify({ contents: [{ role: 'user', parts: [{ text: instruction }] }], generationConfig: { responseMimeType: 'application/json', ...(model.startsWith('gemini-2.5-') ? { thinkingConfig: { thinkingBudget: 0 } } : {}) } });
   let exhausted = 0;
