@@ -332,66 +332,64 @@ byId('fit').addEventListener('click', async () => {
         };
         let width = findField('Width'), height = findField('Height');
         if (!width || !height || width === height) {
-          const opened = clickNamed('Position');
-          return { message: opened
-            ? 'Position panel opened. Click Auto Fit again when Advanced Width/Height fields appear.'
-            : 'Cannot identify Width and Height safely. Open Position → Arrange → Advanced and retry.' };
+          if (!clickNamed('Position')) return { message:
+            'Cannot open Position. Select the image, then retry Auto Fit.' };
+          // Opening the Position panel is asynchronous in Canva.
+          for (let attempt = 0; attempt < 12; attempt++) {
+            await new Promise(resolve => setTimeout(resolve, 150));
+            width = findField('Width'); height = findField('Height');
+            if (width && height && width !== height) break;
+          }
         }
+        if (!width || !height || width === height) return { message:
+          'Position opened, but Advanced Width/Height were not found. Select the image and retry.' };
         const numeric = input => Number(String(input.value || '').replace(/[^0-9.]/g, ''));
         const w = numeric(width), h = numeric(height);
         if (!(w > 0 && h > 0 && cw > 0 && ch > 0))
           return { message:'Invalid image/canvas dimensions; no resize performed.' };
         const factor = Math.min(cw / w, ch / h);
-        const useWidth = cw / w <= ch / h;
-        let field = useWidth ? width : height;
-        const target = Math.round((useWidth ? w : h) * factor * 10) / 10;
-        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-        if (!setter) return { message:'Cannot update Canva numeric controls.' };
-        field.focus();
-        setter.call(field, String(target));
-        field.dispatchEvent(new Event('input', { bubbles:true }));
-        field.dispatchEvent(new Event('change', { bubbles:true }));
-        field.dispatchEvent(new KeyboardEvent('keydown', { key:'Enter', code:'Enter', bubbles:true }));
-        field.dispatchEvent(new KeyboardEvent('keyup', { key:'Enter', code:'Enter', bubbles:true }));
-        // Canva commits dimensions when focus moves to a different form field,
-        // which is not equivalent to simply calling field.blur().
-        const adjacent = useWidth ? height : width;
-        adjacent.focus();
-        await new Promise(resolve => setTimeout(resolve, 450));
-        width = findField('Width'); height = findField('Height');
-        const expectedW = w * factor, expectedH = h * factor;
+        const expectedW = Math.round(w * factor * 10) / 10;
+        const expectedH = Math.round(h * factor * 10) / 10;
         const measurements = () => {
-          width = findField('Width'); height = findField('Height');
-          return { nw: width ? numeric(width) : NaN, nh: height ? numeric(height) : NaN };
+          const wi = findField('Width'), hi = findField('Height');
+          return { nw: wi ? numeric(wi) : NaN, nh: hi ? numeric(hi) : NaN };
         };
         const matches = ({nw,nh}) => Number.isFinite(nw) && Number.isFinite(nh)
           && Math.abs(nw - expectedW) < 2 && Math.abs(nh - expectedH) < 2;
-        let measured = measurements();
-        let inputMethod = 'native input events';
-        if (!matches(measured)) {
-          // Canva's controlled inputs may reject synthetic input/change events.
-          // Ask Chromium to insert text into the focused editable control as a
-          // fallback, then verify the actual Width/Height values again.
-          field = (useWidth ? findField('Width') : findField('Height')) || field;
+        // Apply BOTH dimensions. Canva sometimes leaves Ratio unlocked, so
+        // changing only Width is insufficient and can distort the artwork.
+        // Focus must move to a different input for Canva to commit its value.
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+        const setField = async (name, desired, otherName) => {
+          const field = findField(name), next = findField(otherName);
+          if (!field || !next || field === next) return false;
+          if (Math.abs(numeric(field) - desired) < 1) return true;
           field.focus();
           field.select?.();
-          const inserted = document.execCommand('insertText', false, String(target));
-          field.dispatchEvent(new Event('change', { bubbles: true }));
-          field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', bubbles: true }));
-          const nextField = (useWidth ? findField('Height') : findField('Width'));
-          if (nextField && nextField !== field) nextField.focus();
-          else field.blur();
-          await new Promise(resolve => setTimeout(resolve, 600));
+          const inserted = document.execCommand('insertText', false, String(desired));
+          if (!inserted && setter) {
+            setter.call(field, String(desired));
+            field.dispatchEvent(new Event('input', { bubbles:true }));
+          }
+          field.dispatchEvent(new Event('change', { bubbles:true }));
+          field.dispatchEvent(new KeyboardEvent('keydown', { key:'Enter', code:'Enter', bubbles:true }));
+          field.dispatchEvent(new KeyboardEvent('keyup', { key:'Enter', code:'Enter', bubbles:true }));
+          next.focus();
+          await new Promise(resolve => setTimeout(resolve, 400));
+          return true;
+        };
+        let measured = measurements();
+        for (let attempt = 0; attempt < 3 && !matches(measured); attempt++) {
+          await setField('Width', expectedW, 'Height');
+          await setField('Height', expectedH, 'Width');
+          await new Promise(resolve => setTimeout(resolve, 350));
           measured = measurements();
-          inputMethod = inserted ? 'editable text insertion' : 'text insertion unsupported';
         }
         const {nw:newW, nh:newH} = measured;
         if (!matches(measured)) return { message:
-          'Canva rejected both resize input methods. Expected ' + expectedW.toFixed(1) + ' × ' +
-          expectedH.toFixed(1) + ', observed ' + newW + ' × ' + newH +
-          ' (' + inputMethod + '). Input type: ' + field.type +
-          ', readOnly: ' + field.readOnly +
-          '. Resize manually for now; automation will not proceed to Upscale.' };
+          'Auto Fit not confirmed after 3 attempts. Expected ' + expectedW + ' × ' +
+          expectedH + ', observed ' + newW + ' × ' + newH +
+          '. Check Canva Ratio lock and adjust manually before Upscale.' };
         clickNamed('Middle');
         clickNamed('Center');
         return { message:'Auto Fit applied: ' + newW + ' × ' + newH +
