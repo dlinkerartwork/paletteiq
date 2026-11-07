@@ -23,7 +23,7 @@ function notifySeoFinished(projectName: string, success: boolean) {
   }
 }
 
-export default function EtsyListingDraft({ project, onChange, onSave, onSeoReview, onDownloaded, seoProvider, seoGeminiModel, seoTitleMaxLength, seoAltTextCount }: Props) {
+export default function EtsyListingDraft({ project, onChange, onSave, onSeoReview, onDownloaded, seoProvider, seoGeminiModel }: Props) {
   const [working, setWorking] = useState(() => activeSeoRuns.has(project.id));
   const [modelChoice, setModelChoice] = useState<{ defaultModel: string; selected: string } | null>(null);
   const selectedGeminiModel = modelChoice?.defaultModel === seoGeminiModel ? modelChoice.selected : seoGeminiModel;
@@ -73,7 +73,7 @@ export default function EtsyListingDraft({ project, onChange, onSave, onSeoRevie
   const review = project.seoReview;
   const staleReview = !!review && review.sourceFingerprint !== fingerprint;
   const edit = (fields: Partial<EtsyListingDraft>) => onChange({ ...draft, ...fields });
-  const listEdit = (key: 'secondaryKeywords' | 'longTailKeywords' | 'materials' | 'imageAltTexts' | 'photoPlan' | 'digitalFiles', value: string) => edit({ [key]: value.split('\n').map(x => (key === 'imageAltTexts' ? x.slice(0, 450) : x).trim()).filter(Boolean).slice(0, key === 'imageAltTexts' ? seoAltTextCount : 30) });
+  const listEdit = (key: 'secondaryKeywords' | 'longTailKeywords' | 'materials' | 'photoPlan' | 'digitalFiles', value: string) => edit({ [key]: value.split('\n').map(x => x.trim()).filter(Boolean).slice(0, 30) });
   const produced = project.characters.filter(c => c.status === 'done').length;
   const warnings = listingWarnings(draft, produced);
   const generate = async () => {
