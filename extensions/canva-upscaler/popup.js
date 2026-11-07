@@ -36,7 +36,7 @@ chrome.storage.local.get(['companionTask','companionStatus','companionTokenDraft
   api(currentTaskUrl(), { cache: 'no-store' }).then(response => response.json()).then(data => {
     if (data.status !== 'pending') throw new Error('Task is no longer pending');
     byId('task').textContent = 'Ready: ' + imageName + ' (' + new URL(base).host + ')';
-    for (const id of ['source','canva','upscale','result']) byId(id).disabled = false;
+    for (const id of ['source','canva','place','upscale','result']) byId(id).disabled = false;
   }).catch(() => {
     byId('task').textContent = 'Saved pairing expired or unavailable. Load a new pairing code.';
     chrome.storage.local.remove('companionTask').catch(() => {});
@@ -57,6 +57,7 @@ const api = async (url, init) => {
 };
 const currentTaskUrl = query => base + '?token=' + encodeURIComponent(token) + (query || '');
 const sourceBlob = async () => (await api(currentTaskUrl('&file=1'))).blob();
+const uploadStem = () => 'PaletteIQ-' + imageName.replace(/[^a-z0-9-]/gi, '_').slice(0,70);
 
 byId('load').addEventListener('click', async () => {
   token = byId('token').value.trim().toLowerCase();
@@ -184,6 +185,63 @@ byId('canva').addEventListener('click', async () => {
     status('Automatic upload unavailable: ' + String(error) + '. You can still use Download source and upload manually.');
   } finally { byId('canva').disabled = false; }
 });
+// Place only the upload that can be identified by this task's filename.
+// Never select the first thumbnail blindly: the Canva Uploads list can contain
+// unrelated artwork from other collections.
+byId('place').addEventListener('click', async () => {
+  byId('place').disabled = true;
+  try {
+    const allTabs = await chrome.tabs.query({});
+    const editors = allTabs.filter(t => {
+      try {
+        const u = new URL(t.url || '');
+        return (u.hostname === 'canva.com' || u.hostname.endsWith('.canva.com')) && u.pathname.startsWith('/design/');
+      } catch { return false; }
+    });
+    const tab = editors.find(t => t.id === canvaTabId) || editors.find(t => t.active) || editors[0];
+    if (!tab) throw new Error('Open your Canva design editor first.');
+    canvaTabId = tab.id;
+    const [result] = await chrome.scripting.executeScript({
+      target: { tabId: canvaTabId },
+      func: expected => {
+        const normalize = s => String(s || '').toLowerCase().replace(/\.[a-z0-9]{2,5}$/, '').trim();
+        const visible = el => {
+          const r = el.getBoundingClientRect();
+          const style = getComputedStyle(el);
+          return r.width > 0 && r.height > 0 && style.visibility !== 'hidden';
+        };
+        const target = normalize(expected);
+        const candidates = [...document.querySelectorAll('img[alt], [title], [aria-label]')]
+          .filter(visible)
+          .filter(el => {
+            const names = [el.getAttribute('alt'), el.getAttribute('title'), el.getAttribute('aria-label')];
+            return names.some(v => normalize(v) === target);
+          });
+        const cards = new Map();
+        for (const element of candidates) {
+          const control = element.closest('button, [role="button"]') || element;
+          cards.set(control, true);
+        }
+        if (cards.size !== 1) return {
+          ok: false,
+          message: cards.size === 0
+            ? 'Could not identify the new upload by filename. In Canva Uploads, click the newly uploaded PaletteIQ image once, then use Run Canva Upscale.'
+            : 'More than one Canva control matches this image. Select the correct PaletteIQ upload manually to avoid editing the wrong image.'
+        };
+        const [control] = cards.keys();
+        control.click();
+        return {
+          ok: true,
+          message: 'Clicked the matching uploaded image. Verify it appears and is selected on the canvas, then run Canva Upscale.'
+        };
+      },
+      args: [uploadStem()]
+    });
+    status(result?.result?.message || 'Canva did not confirm image placement.');
+  } catch (error) { status('Place image unavailable: ' + String(error)); }
+  finally { byId('place').disabled = false; }
+});
+
 // Upscale control varies across Canva releases. Only trigger a visible,
 // explicitly labeled Upscale control in the selected Canva editor.
 byId('upscale').addEventListener('click', async () => {
