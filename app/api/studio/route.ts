@@ -172,13 +172,15 @@ export async function POST(req: Request) {
     if (!referenceResponse.ok) return fail(`Could not retrieve reference Etsy SEO (${referenceResponse.status}).`, 502);
     const reference = await referenceResponse.json() as { title?: string; description?: string; tags?: string[] };
     if (!reference.title?.trim() || !reference.description?.trim() || !Array.isArray(reference.tags)) return fail('Reference listing is missing title, description or tags.', 422);
-    const instruction = `Write ONE accessible image ALT TEXT for a clipart bundle, up to 500 characters. Base the description on the collection subject information supplied; do not invent visual details that have not been verified. Return JSON with exactly one key: {"imageAltText":"..."}. Do not generate or rewrite title, description, or tags. Collection: ${JSON.stringify(brief).slice(0, 12000)}. Etsy reference subject: ${String(reference.title).slice(0, 350)}.`;
+    const customSeo = await customSeoInstructions(user.userId);
+    const warnings = Array.isArray(body.seoWarnings) ? body.seoWarnings.filter((value): value is string => typeof value === 'string').slice(0, 10).map(value => value.slice(0, 180)) : [];
+    const instruction = `Prepare a complete, original English-language Etsy CLIPART listing SEO package for this collection. Return a valid JSON object with these fields: title, description, tags, primaryKeyword, secondaryKeywords (array), longTailKeywords (array), categorySuggestion, attributes (occasion, recipient, primaryColor, secondaryColor, style), materials (array), imageAltTexts (array with EXACTLY ONE descriptive image alt text, max 500 characters), photoPlan (array), priceSuggestion, sku, digitalFiles (array), licenseNotes. Only ONE image alt text is required, describing the produced collection honestly without unsupported visual claims. Keep the primaryKeyword natural in your generated description. The reference title, description and tags are imported from Etsy API separately and will override the three Gemini fields; prioritize the remaining metadata and alt text. Never copy protected brand names or invent specifications. Collection: ${JSON.stringify(brief).slice(0, 14000)}. Existing audit warnings: ${JSON.stringify(warnings)}. ${customSeo}`;
     try {
-      const generated = await generateSeoJson(user.userId, instruction, 'gemini', seoConfig.seoGeminiModel) as { imageAltText?: unknown };
-      const alt = typeof generated?.imageAltText === 'string' ? generated.imageAltText.trim().slice(0, 500) : '';
+      const generated = await generateSeoJson(user.userId, instruction, 'gemini', seoConfig.seoGeminiModel);
+      const candidate = normalizeListing(generated);
+      const alt = candidate.imageAltTexts[0]?.trim().slice(0, 500) || '';
       if (!alt) return fail('Gemini did not provide an image alt text. Try again.', 502);
-      const previous = normalizeListing(project.listing);
-      const draft = normalizeListing({ ...previous, title: reference.title, description: reference.description, tags: reference.tags, imageAltTexts: [alt], primaryKeyword: previous.primaryKeyword || reference.tags[0] || '' });
+      const draft = normalizeListing({ ...candidate, title: reference.title, description: reference.description, tags: reference.tags, imageAltTexts: [alt] });
       // Save the completed draft to the originating collection, not whichever
       // collection the user happens to be viewing when the request finishes.
       const db = getDb();
