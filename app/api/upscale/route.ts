@@ -31,7 +31,8 @@ async function remoteConfig(owner: string) {
   if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== '/' && parsed.pathname !== '') throw Error('Invalid Remote Upscale server URL');
   const local = /^(?:127\.0\.0\.1|localhost|10\.(?:\d{1,3}\.){2}\d{1,3}|192\.168\.(?:\d{1,3}\.)\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.(?:\d{1,3}\.)\d{1,3}|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.(?:\d{1,3}\.)\d{1,3})$/.test(parsed.hostname);
   const desktop = variables().PALETTEIQ_DESKTOP === '1';
-  if (parsed.protocol !== 'https:' && !(desktop && parsed.protocol === 'http:' && local)) throw Error('Remote Upscale requires HTTPS for web; private HTTP is allowed only in desktop mode.');
+  const allowPrivateHttp = desktop || variables().PALETTEIQ_ALLOW_PRIVATE_HTTP_UPSCALE === '1';
+  if (parsed.protocol !== 'https:' && !(allowPrivateHttp && parsed.protocol === 'http:' && local)) throw Error('Remote Upscale requires HTTPS unless private HTTP is explicitly enabled on the backend for a LAN address.');
   const accessId = variables().PALETTEIQ_GPU_ACCESS_CLIENT_ID?.trim();
   const accessSecret = variables().PALETTEIQ_GPU_ACCESS_CLIENT_SECRET?.trim();
   if (Boolean(accessId) !== Boolean(accessSecret)) throw Error('Both GPU tunnel Access credentials must be configured together.');
