@@ -15,7 +15,7 @@ export type StudioPreferences = {
 };
 export const defaultPrefs: StudioPreferences = { target: 120, model: 'gpt-image-1-mini', quality: 'low', analysisModel: 'gpt-4.1-mini', output: 'png', background: 'transparent', variations: 1, defaultStyle: 'Soft hand-painted watercolor illustration', autoSave: false, seoProvider: 'openai', seoGeminiModel: 'gemini-2.5-pro', seoOpenaiModel: 'gpt-6.1-terra', seoDraftFields: [...defaultSeoDraftFields], seoTitleMaxLength: 120, seoAltTextCount: 1, seoFileNaming: 'charactername_imagenumber', seoPrompts: { ...defaultSeoPrompts }, upscaleProvider: 'remote', upscaleFactor: 4, upscaleRequireTransparency: true, upscaleQc: true, upscaleModel: 'realesrgan-x4plus', upscaleCleanup: false, upscaleCleanupStrength: 'low' };
 type Props = { preferences: StudioPreferences; onPreferences: (prefs: StudioPreferences) => void; projects: unknown[]; onImport: (data: { projects: unknown[]; preferences: StudioPreferences }) => Promise<void> };
-type SettingsResponse = { error?: string; credentials: { etsy: boolean; openai: boolean; gemini: boolean }; geminiKeyCount?: number };
+type SettingsResponse = { error?: string; credentials: { etsy: boolean; openai: boolean; gemini: boolean; upscale: boolean }; geminiKeyCount?: number };
 const readSettingsResponse = async (res: Response): Promise<SettingsResponse> => {
   const raw = await res.text();
   let data: Partial<SettingsResponse> | null = null;
@@ -30,9 +30,11 @@ const request = async (body: object): Promise<SettingsResponse> => {
 };
 
 export default function StudioSettings({ preferences, onPreferences, projects, onImport }: Props) {
-  const [credentials, setCredentials] = useState({ etsy: false, openai: false, gemini: false });
+  const [credentials, setCredentials] = useState({ etsy: false, openai: false, gemini: false, upscale: false });
   const [geminiKeyCount, setGeminiKeyCount] = useState(0);
   const [secrets, setSecrets] = useState({ etsy: '', openai: '', gemini: '' });
+  const [upscaleSecret, setUpscaleSecret] = useState('');
+  const [showUpscaleSecret, setShowUpscaleSecret] = useState(false);
   const [visible, setVisible] = useState({ etsy: false, openai: false, gemini: false });
   const [active, setActive] = useState('');
   const [message, setMessage] = useState('');
@@ -90,6 +92,11 @@ export default function StudioSettings({ preferences, onPreferences, projects, o
     setCredentials(response.credentials);
     setGeminiKeyCount(response.geminiKeyCount ?? 0);
   });
+  const saveUpscaleKey = (remove = false) => act('upscale-key', async () => {
+    const response = await request({ action: 'upscale-credential', ...(remove ? { remove: true } : { key: upscaleSecret }) });
+    setCredentials(response.credentials);
+    setUpscaleSecret('');
+  });
   const backup = () => { const payload = { format: 'paletteiq-backup', version: 1, exportedAt: new Date().toISOString(), preferences, projects }; const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }); const href = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = href; a.download = `paletteiq-backup-${new Date().toISOString().slice(0, 10)}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(href), 1000); setMessage('JSON backup downloaded. API keys are excluded.'); };
   const importBackup = async (file: File | undefined) => { if (!file) return; if (file.size > 10_000_000) { setMessage('Backup file exceeds 10 MB.'); return; } await act('import', async () => { const parsed = JSON.parse(await file.text()); if (parsed.format !== 'paletteiq-backup' || parsed.version !== 1 || !Array.isArray(parsed.projects) || typeof parsed.preferences !== 'object' || !parsed.preferences) throw new Error('Invalid paletteIQ backup format'); if (parsed.projects.length > 500) throw new Error('Backup has too many collections'); await onImport({ projects: parsed.projects, preferences: parsed.preferences }); }); if (picker.current) picker.current.value = ''; };
   const seoFields: Array<[SeoPromptKey, string, string]> = [
@@ -112,7 +119,7 @@ export default function StudioSettings({ preferences, onPreferences, projects, o
   ];
   return <div className="settings-layout">
     {message && <div className="notice"><ShieldCheck size={17}/>{message}</div>}
-    <section className="panel settings-panel settings-wide settings-credentials"><div className="settings-header"><div className="heading-icon amber"><KeyRound size={21}/></div><div><h2>API credentials</h2><p>Keep your credentials private. Stored encrypted on the server and never included in JSON exports.</p></div></div>
+    <section className="panel settings-panel settings-credentials"><div className="settings-header"><div className="heading-icon amber"><KeyRound size={21}/></div><div><h2>API credentials</h2><p>Keep your credentials private. Stored encrypted on the server and never included in JSON exports.</p></div></div>
       {([{ id: 'openai', label: 'OpenAI API key', hint: 'Required for AI analysis, character expansion and image generation.', placeholder: 'sk-...' }, { id: 'gemini', label: 'Google Gemini API key', hint: 'Used only when Gemini is selected for SEO drafting/review.', placeholder: 'Gemini API key' }, { id: 'etsy', label: 'Etsy API credential', hint: 'Enter the Etsy keystring and shared secret separated by a colon.', placeholder: 'keystring:shared_secret' }] as const).map(c => <div className="secret-row" key={c.id}><div className="secret-heading"><div><b>{c.label}</b><p>{c.hint}</p></div><span className={`credential-status ${credentials[c.id] ? 'connected' : ''}`}>{credentials[c.id] ? <><CheckCircle2 size={13}/> Saved</> : 'Not configured'}</span></div><div className="secret-input"><input autoComplete="off" type={visible[c.id] ? 'text' : 'password'} value={secrets[c.id]} placeholder={c.id === 'gemini' ? 'Add another Gemini API key' : credentials[c.id] ? '•••••••••••• (replace existing key)' : c.placeholder} onChange={e => setSecrets(s => ({ ...s, [c.id]: e.target.value }))}/><button aria-label={visible[c.id] ? 'Hide key' : 'Show key'} onClick={() => setVisible(v => ({ ...v, [c.id]: !v[c.id] }))}>{visible[c.id] ? <EyeOff size={17}/> : <Eye size={17}/>}</button><button className="primary-btn" disabled={!secrets[c.id] || Boolean(active)} onClick={() => saveKey(c.id)}><Save size={15}/> {active === c.id ? 'Saving…' : c.id === 'gemini' ? 'Add key' : 'Save key'}</button>{credentials[c.id] && c.id !== 'gemini' && <button className="outline-btn danger-btn" disabled={Boolean(active)} onClick={() => saveKey(c.id, true)} title="Remove stored key"><Trash2 size={15}/></button>}</div>{c.id === 'gemini' && <div className="sub" style={{ marginTop: 8 }}><p>{geminiKeyCount} Gemini API key(s) configured. Rotation follows the order below on quota exhaustion.</p>{Array.from({ length: geminiKeyCount }, (_, index) => <div key={index} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}><span>Key {index + 1} · ••••••••</span><button type="button" className="outline-btn" disabled={Boolean(active)} onClick={() => removeGeminiKey(index)}><Trash2 size={14}/> Remove</button></div>)}</div>}</div>)}
       <div className="security-note"><LockKeyhole size={16}/><span>API keys are encrypted with a server-held encryption key. Stored keys are never sent back to the browser. Your backup intentionally excludes credentials.</span></div>
     </section>
@@ -129,8 +136,12 @@ export default function StudioSettings({ preferences, onPreferences, projects, o
       <div className="full"><label className="input-label">DEFAULT VISUAL STYLE</label><textarea rows={3} value={preferences.defaultStyle} onChange={e => edit('defaultStyle', e.target.value)} /></div>
     </div><div className="settings-actions"><button className="primary-btn" disabled={Boolean(active)} onClick={() => act('preferences', async () => { if (preferences.output === 'jpg' && preferences.background === 'transparent') throw new Error('JPG requires an opaque background. Choose PNG for transparency.'); await request({ action: 'preferences', preferences }); })}><Save size={16}/> {active === 'preferences' ? 'Saving…' : 'Save preferences'}</button></div></section>
 
-    <section className="panel settings-panel settings-wide">
-      <div className="settings-header"><div className="heading-icon violet"><Settings2 size={21}/></div><div><h2>Remote GPU Upscale</h2><p>Upscaling runs on your PaletteIQ GPU Server. URL and API key are configured securely on the backend, never in the browser.</p></div></div>
+    <section className="panel settings-panel">
+      <div className="settings-header"><div className="heading-icon violet"><Settings2 size={21}/></div><div><h2>Remote GPU Upscale</h2><p>Upscaling runs on your PaletteIQ GPU Server. Connection URL stays on the backend; your API key is stored encrypted.</p></div></div>
+      <div className="secret-row"><div className="secret-heading"><div><b>GPU Server API key</b><p>Enter the same key configured as PALETTEIQ_API_KEY on your GPU server.</p></div><span className={`credential-status ${credentials.upscale ? 'connected' : ''}`}>{credentials.upscale ? <><CheckCircle2 size={13}/> Saved</> : 'Using backend default / not saved'}</span></div>
+        <div className="secret-input"><input aria-label="GPU Server API key" autoComplete="off" type={showUpscaleSecret ? 'text' : 'password'} value={upscaleSecret} placeholder={credentials.upscale ? '•••••••••••• (replace saved key)' : 'Paste GPU server API key (min. 32 characters)'} onChange={e => setUpscaleSecret(e.target.value)}/><button type="button" aria-label={showUpscaleSecret ? 'Hide GPU key' : 'Show GPU key'} onClick={() => setShowUpscaleSecret(v => !v)}>{showUpscaleSecret ? <EyeOff size={17}/> : <Eye size={17}/>}</button><button className="primary-btn" disabled={upscaleSecret.trim().length < 32 || Boolean(active)} onClick={() => void saveUpscaleKey()}><Save size={15}/> {active === 'upscale-key' ? 'Saving…' : 'Save key'}</button>{credentials.upscale && <button className="outline-btn danger-btn" disabled={Boolean(active)} title="Remove saved GPU key and use backend default" onClick={() => void saveUpscaleKey(true)}><Trash2 size={15}/></button>}</div>
+        <p className="sub">Saved key is never returned by Settings or included in backups. Removing it falls back to the backend environment key, if configured.</p>
+      </div>
       <div className="settings-fields">
         <div><label className="input-label">UPSCALE PROVIDER</label><select value="remote" disabled><option value="remote">PaletteIQ Remote GPU Server</option></select></div>
         <div><label className="input-label">UPSCALE MODEL</label><select value={preferences.upscaleModel ?? 'realesrgan-x4plus'} onChange={e => edit('upscaleModel', e.target.value)}><option value="realesrgan-x4plus">Real-ESRGAN General (Watercolor)</option><option value="realesrgan-x4plus-anime">Real-ESRGAN Anime (Illustration)</option><option value="realesrnet-x4plus">Real-ESRNet</option></select></div>
@@ -139,7 +150,7 @@ export default function StudioSettings({ preferences, onPreferences, projects, o
         <label className="full"><input type="checkbox" checked={preferences.upscaleQc ?? true} onChange={e => edit('upscaleQc', e.target.checked)}/> Run automatic quality control after upscale</label>
         <label className="full"><input type="checkbox" checked={preferences.upscaleCleanup ?? false} onChange={e => edit('upscaleCleanup', e.target.checked)}/> Enable transparency edge cleanup (opt-in)</label>
         <div><label className="input-label">EDGE CLEANUP STRENGTH</label><select value={preferences.upscaleCleanupStrength ?? 'low'} disabled={!preferences.upscaleCleanup} onChange={e => edit('upscaleCleanupStrength', e.target.value)}><option value="low">Low — recommended</option><option value="medium">Medium</option><option value="high">High — review carefully</option></select></div>
-        <p className="sub full">Connection settings: PALETTEIQ_UPSCALE_SERVER_URL and PALETTEIQ_UPSCALE_SERVER_KEY on the backend. Web deployments require an authenticated HTTPS endpoint. The original image remains intact.</p>
+        <p className="sub full">Server URL: PALETTEIQ_UPSCALE_SERVER_URL on the backend. A saved API key above overrides PALETTEIQ_UPSCALE_SERVER_KEY. Web deployments require authenticated HTTPS. The original image remains intact.</p>
       </div>
       <div className="settings-actions"><button className="outline-btn" disabled={Boolean(active)} onClick={() => act('upscale-test', async () => { const response = await fetch('/api/upscale?check=1'); const data = await response.json() as { connected?: boolean; error?: string }; if (!response.ok || !data.connected) throw new Error(data.error || 'GPU server unavailable'); })}>Test Connection</button><button className="primary-btn" disabled={Boolean(active)} onClick={() => act('upscale-preferences', async () => { await request({ action: 'preferences', preferences: { ...preferences, upscaleProvider: 'remote' } }); })}><Save size={16}/> Save upscale settings</button></div>
     </section>
