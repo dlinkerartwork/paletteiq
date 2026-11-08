@@ -81,7 +81,8 @@ export async function POST(req: Request) {
     const prefs = saved[0] ? JSON.parse(saved[0].preferences) as Record<string, unknown> : {};
     const factor: 2 | 4 = prefs.upscaleFactor === 2 ? 2 : 4;
     const model = typeof prefs.upscaleModel === 'string' ? prefs.upscaleModel : 'realesrgan-x4plus';
-    if (!['realesrgan-x4plus','realesrgan-x4plus-anime','realesrnet-x4plus'].includes(model)) return bad('Invalid remote model');
+    if (!['realesrgan-x4plus','realesrgan-x4plus-anime','realesrnet-x4plus','realesr-animevideov3','real-hat-gan-sharper-x4'].includes(model)) return bad('Invalid remote model');
+    if (model === 'real-hat-gan-sharper-x4' && factor !== 4) return bad('Real-HAT Sharper supports only 4×', 422);
     const strength = typeof prefs.upscaleCleanupStrength === 'string' ? prefs.upscaleCleanupStrength : 'low';
     if (!['low','medium','high'].includes(strength)) return bad('Invalid cleanup strength');
     const obj = await storage()?.get(sourceKey(user.userId, character.imageUrl));
