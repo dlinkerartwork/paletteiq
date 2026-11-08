@@ -8,7 +8,7 @@ import { eligibleForBulk, isActiveBatchStatus, wasPreviouslyGenerated } from '@/
 import type { SimilarityReview } from '@/lib/similarity-review';
 import { isOpenAICreditError, primeProductionAudio, useProductionSounds } from '@/lib/production-sounds';
 
-type Character = { id: string; name: string; prompt: string; status: string; imageUrl?: string; upscaledImageUrl?: string; upscaleJob?: { id: string; submittedAt?: number }; error?: string; similarityReview?: SimilarityReview };
+type Character = { id: string; name: string; prompt: string; status: string; imageUrl?: string; upscaledImageUrl?: string; upscaleJob?: { id: string }; error?: string; similarityReview?: SimilarityReview };
 type Project = { id: string; name: string; characters: Character[]; listing?: { title?: string } };
 type Job = { id: string; status: string; model: string; total: number; completed: number; failed: number; imported: number; createdAt: number; characterIds: string[]; assets: Array<{ id: string; status: string; imageUrl?: string; error?: string }>; warning?: string };
 type Props = { project: Project; model: string; quality: string; onModel: (value: string) => void; onQuality: (value: string) => void; onDownloaded: (receipt: { lastDownloadedAt: number; downloadCount: number; lastDownloadImageCount: number; downloadedImageIds: string[] }) => void; onAsset: (id: string, data: { imageUrl?: string; status: 'done' | 'error'; error?: string; similarityReview?: SimilarityReview }) => void };
@@ -48,13 +48,7 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
   const [upscaleProvider, setUpscaleProvider] = useState<'remote'>('remote');
   const [upscaleFactor, setUpscaleFactor] = useState(4);
   const [upscaling, setUpscaling] = useState(false);
-  const [submission, setSubmission] = useState({ done: 0, total: 0 });
-  const [clockNow, setClockNow] = useState(() => Date.now());
-  useEffect(() => { const timer = setInterval(() => setClockNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
-  const queuedUpscales = project.characters.filter(c => c.upscaleJob);
-  const earliestUpscale = Math.min(...queuedUpscales.map(c => c.upscaleJob?.submittedAt || clockNow));
-  const elapsedSeconds = Math.max(0, Math.floor((clockNow - earliestUpscale) / 1000));
-  const elapsedLabel = [Math.floor(elapsedSeconds / 3600), Math.floor(elapsedSeconds % 3600 / 60), elapsedSeconds % 60].map(n => String(n).padStart(2, '0')).join(':');
+  const [remoteProgress, setRemoteProgress] = useState<Record<string, { status: string; elapsed: number }>>({});
   useEffect(() => {
     let live = true;
     void fetch('/api/settings').then(r => r.json()).then((data: { preferences?: { upscaleFactor?: number } }) => {
@@ -69,29 +63,27 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
     if (!pendingIds.length) return;
     let stopped = false;
     let running = false;
-    let cursor = 0;
     const poll = async () => {
       if (running || stopped) return;
       running = true;
       try {
-        // Cap polling per cycle so large collections do not flood the desktop backend.
-        const sample = Array.from({ length: Math.min(10, pendingIds.length) }, (_, i) => pendingIds[(cursor + i) % pendingIds.length]);
-        cursor = (cursor + sample.length) % pendingIds.length;
-        for (const characterId of sample) {
+        for (const characterId of pendingIds) {
           const response = await fetch(`/api/upscale?projectId=${encodeURIComponent(project.id)}&characterId=${encodeURIComponent(characterId)}`);
           if (!response.ok) continue;
-          const result = await response.json() as { status: string; error?: string };
+          const result = await response.json() as { status: string; error?: string; elapsedSeconds?: number };
           if (stopped) return;
           if (result.status === 'succeeded') { window.location.reload(); return; }
+          if (result.status === 'cancelled') { window.location.reload(); return; }
+          setRemoteProgress(old => ({ ...old, [characterId]: { status: result.status, elapsed: result.elapsedSeconds || 0 } }));
           if (result.status === 'failed') setMessage(`Remote upscale failed: ${result.error || 'Unknown error'}`);
-          else setMessage(`Remote GPU upscale: ${result.status}. This job continues on the GPU server.`);
+          else setMessage(`Remote GPU upscale: ${result.status} · ${Math.floor((result.elapsedSeconds || 0) / 60)}m ${Math.floor((result.elapsedSeconds || 0) % 60)}s. This job continues on the GPU server.`);
         }
       } finally { running = false; }
     };
     void poll();
     const interval = setInterval(() => void poll(), 5000);
     return () => { stopped = true; clearInterval(interval); };
-  }, [project.id, project.characters]);
+  }, [project.id]);
   const [creditAlert, setCreditAlert] = useState('');
   const { enabled: soundEnabled, toggle: toggleSound, play: playSound } = useProductionSounds();
   const soundRef = useRef(playSound);
@@ -202,26 +194,41 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
   };
 
   const runCloudUpscale = async () => {
-    if (!selectedGenerated.length || upscaling) return;
-    const targets = selectedGenerated.filter(c => !c.upscaleJob && !c.upscaledImageUrl);
-    if (!targets.length) { setMessage('Selected images are already queued or upscaled.'); return; }
+    if (!selectedGenerated.length) return;
+    if (upscaleProvider !== 'remote') { setMessage('Remote GPU Server is not selected.'); return; }
     setUpscaling(true);
-    setSubmission({ done: 0, total: targets.length });
-    let accepted = 0;
-    const failures: string[] = [];
+    let completed = 0;
     try {
-      // Upload first, poll later. Keep sequential writes to the same collection safe.
-      for (const c of targets) {
-        setMessage(`Submitting ${accepted + failures.length + 1}/${targets.length}: ${c.name}. Keep this client powered on until all uploads finish.`);
-        try {
-          await request('/api/upscale', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId: project.id, characterId: c.id }) });
-          accepted++;
-        } catch (e) { failures.push(`${c.name}: ${e instanceof Error ? e.message : String(e)}`); }
-        setSubmission({ done: accepted + failures.length, total: targets.length });
+      for (const c of selectedGenerated) {
+        setMessage(`Upscaling ${completed + 1}/${selectedGenerated.length}: ${c.name}…`);
+        await request<{ id: string }>('/api/upscale', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId: project.id, characterId: c.id }) });
+        let finished = false;
+        for (let attempt = 0; attempt < 180; attempt++) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          const progress = await request<{ status: string; url?: string; width?: number; height?: number; error?: string; elapsedSeconds?: number }>(`/api/upscale?projectId=${encodeURIComponent(project.id)}&characterId=${encodeURIComponent(c.id)}`);
+          if (progress.status === 'failed') throw new Error(progress.error || `Remote upscale failed for ${c.name}`);
+          if (progress.status === 'cancelled') throw new Error(`Remote upscale cancelled for ${c.name}`);
+          setRemoteProgress(old => ({ ...old, [c.id]: { status: progress.status, elapsed: progress.elapsedSeconds || 0 } }));
+          if (progress.status === 'succeeded') {
+            completed++;
+            setMessage(`Upscaled ${completed}/${selectedGenerated.length}: ${c.name} (${progress.width}×${progress.height}).`);
+            finished = true;
+            break;
+          }
+        }
+        if (!finished) throw new Error(`Still processing ${c.name}. Job is saved; reopen Image Production to resume.`);
       }
-      setMessage(`GPU server accepted ${accepted}/${targets.length} jobs. ${failures.length ? `${failures.length} uploads failed. Review and retry failed images.` : 'Safe to turn off the client PC; the GPU server continues processing independently.'} Reopen PaletteIQ to import results.`);
-      if (accepted) window.location.reload();
-    } finally { setUpscaling(false); }
+      setMessage(`Remote GPU upscale complete: ${completed} image(s). Refreshing collection…`);
+      window.location.reload();
+    } catch (e) { setMessage(`Completed ${completed} image(s). ${e instanceof Error ? e.message : String(e)}`); }
+    finally { setUpscaling(false); }
+  };
+  const cancelRemoteUpscale = async (character: Character) => {
+    if (!character.upscaleJob || !window.confirm(`Cancel remote upscale for ${character.name}?`)) return;
+    try {
+      const result = await request<{ status: string }>('/api/upscale', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'cancel', projectId: project.id, characterId: character.id }) });
+      setMessage(`Cancellation requested for ${character.name}: ${result.status}.`);
+    } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
   };
   const downloadZip = async (scope: 'selected' | 'all' | 'package') => {
     setDownloading(true); setMessage('Preparing ZIP download from saved collection images…');
@@ -248,14 +255,13 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
       </div>
       {mode === 'batch' && <div className="batch-selector"><div className="batch-selector-head"><div><b>New prompt submission</b><small>{eligible.length} never-generated prompts available. Selected cards limit submission to eligible prompts; otherwise all eligible prompts are submitted (automatically split into groups of 50).</small></div><button onClick={() => setSelectedIds([])}>Clear selection</button></div><p className="batch-hint"><Clock3 size={15}/> Previously generated items are never included in bulk submission. Use per-card Regenerate for an explicit rerun. Batch jobs continue after closing the browser.</p></div>}
       {message && <div className="notice production-notice"><CircleAlert size={16}/>{message}</div>}
-       {(upscaling || queuedUpscales.length > 0) && <div className="notice production-notice" role="status"><Clock3 size={16}/>{upscaling ? `Submitting to server: ${submission.done}/${submission.total} · Keep client on` : `${queuedUpscales.length} remote jobs pending · Elapsed ${elapsedLabel} · Processing continues on the GPU server even if client is off`}</div>}
       <div className="production-progress"><div><span>Collection images produced</span><b>{completedTotal} / {project.characters.length}</b></div><div className="progress"><i style={{ width: `${project.characters.length ? completedTotal / project.characters.length * 100 : 0}%` }}/></div></div>
       {mode === 'single' && working && <div className="single-loading"><LoaderCircle className="spin" size={16}/> Single image in progress · {singleProgress.done}/{singleProgress.total} completed</div>}
     </section>
     {!jobsLoaded && <section className="panel batch-jobs" role="status"><LoaderCircle size={16} className="spin"/> Loading saved Batch progress…</section>}
     {jobs.length > 0 && <section className="panel batch-jobs"><div className="table-toolbar"><div><h2>OpenAI Batch jobs</h2><p>Jobs update automatically every 15 seconds when this page is open.</p></div><button type="button" className="outline-btn" disabled={refreshing} onClick={() => void refreshNow.current()}>{refreshing ? <LoaderCircle className="spin" size={17}/> : <RefreshCw size={17}/>} Refresh</button></div>{jobs.map(job => <div key={job.id} className="batch-job"><div className="batch-job-top"><div><b>{job.model}</b><small>{new Date(job.createdAt).toLocaleString()} · {job.total} requests</small></div><span className={`status ${job.status === 'completed' ? 'done' : job.status.includes('failed') ? 'error' : 'ready'}`}>{job.status.replaceAll('_',' ')}</span></div><div className="batch-job-counts"><span><CheckCircle2 size={14}/> {job.completed} processed by OpenAI</span><span><CircleAlert size={14}/> {job.failed} failed</span><span><ImageIcon size={14}/> {job.imported} imported</span></div><div className="progress"><i style={{ width: `${job.total ? Math.round((job.completed + job.failed) / job.total * 100) : 0}%` }}/></div>{job.warning && <p className="asset-error">{job.warning}</p>}</div>)}</section>}
-    <section className="panel image-download-toolbar"><div><h2>Collection images</h2><p className="sub">{selectedIds.length} cards selected · {generated.length} images available · {eligible.length} prompts not yet generated</p></div><div className="image-download-actions"><button className="outline-btn" onClick={() => setSelectedIds(project.characters.map(c => c.id))}>Select all</button><button className="outline-btn" onClick={() => setSelectedIds([])}>Clear</button><button className="outline-btn" disabled={upscaling || !selectedGenerated.length} onClick={() => void runCloudUpscale()}>{upscaling ? <LoaderCircle size={15} className="spin"/> : <ImageIcon size={15}/>} Queue remote upscale {upscaleFactor}× ({selectedGenerated.length})</button><button className="outline-btn" disabled={downloading || !selectedGenerated.length} onClick={() => void downloadZip('selected')}><Download size={15}/> Download selected ZIP</button><button className="outline-btn" disabled={downloading || !generated.length} onClick={() => void downloadZip('all')}><Download size={15}/> Download all ZIP</button><button className="primary-btn" title={!project.listing?.title ? 'Create and save an Etsy listing draft first.' : ''} disabled={downloading || !generated.length || !project.listing?.title} onClick={() => void downloadZip('package')}><Download size={15}/> Images + listing draft ZIP</button></div></section>
-    <div className="assets-grid">{project.characters.map(c => <div className={`asset-card image-select-card ${selectedIds.includes(c.id) ? 'selected' : ''}`} key={c.id}><label className="asset-select"><input type="checkbox" aria-label={`Select ${c.name}`} checked={selectedIds.includes(c.id)} onChange={e => setSelectedIds(ids => e.target.checked ? [...ids, c.id] : ids.filter(id => id !== c.id))}/><span>Select</span></label><div className="asset-image">{c.imageUrl ? <Image unoptimized width={1024} height={1024} src={c.imageUrl} alt={c.name}/> : <ImageIcon size={36}/>}</div><div className="asset-meta"><b>{c.name}</b><span className={`status ${c.status}`}>{c.status}</span></div>{pending.has(c.id) && <p className="asset-pending">Batch pending</p>}{c.upscaledImageUrl && <div className="asset-upscaled"><a className="outline-btn" href={c.upscaledImageUrl} target="_blank" rel="noreferrer">View upscale</a><a className="outline-btn" href={c.upscaledImageUrl + '&download=1'} download>Download upscale</a></div>}{c.imageUrl && <div className={`similarity-note similarity-${c.similarityReview?.status || 'unverified'}`} title={c.similarityReview?.reason || 'Not checked yet'}>{c.similarityReview?.status === 'needs_review' ? `⚠ Similar to reference (${c.similarityReview.score}%) — review / regenerate` : c.similarityReview?.status === 'clear' ? `✓ AI visual review: low similarity (${c.similarityReview.score}%)` : 'Similarity not verified'}{c.similarityReview?.reason && <small>{c.similarityReview.reason}</small>}</div>}{c.error && <p className="asset-error">{c.error}</p>}<div className="asset-card-actions"><button className="outline-btn" disabled={working || pending.has(c.id) || !c.prompt} onClick={() => mode === 'single' ? void generateSingle(c) : void submitBatch([c.id], everGenerated(c))}>{working ? <LoaderCircle size={14} className="spin"/> : <Sparkles size={14}/>} {everGenerated(c) ? 'Regenerate' : 'Generate'} {mode === 'batch' ? '(Batch)' : '(Single)'}</button>{c.imageUrl && <a className="outline-btn" href={`${c.imageUrl}&download=1`} download><Download size={14}/> Download</a>}</div></div>)}</div>
+    <section className="panel image-download-toolbar"><div><h2>Collection images</h2><p className="sub">{selectedIds.length} cards selected · {generated.length} images available · {eligible.length} prompts not yet generated</p></div><div className="image-download-actions"><button className="outline-btn" onClick={() => setSelectedIds(project.characters.map(c => c.id))}>Select all</button><button className="outline-btn" onClick={() => setSelectedIds([])}>Clear</button><button className="outline-btn" disabled={upscaling || !selectedGenerated.length || selectedGenerated.length > 20} onClick={() => void runCloudUpscale()}>{upscaling ? <LoaderCircle size={15} className="spin"/> : <ImageIcon size={15}/>} Remote GPU upscale {upscaleFactor}× ({selectedGenerated.length})</button><button className="outline-btn" disabled={downloading || !selectedGenerated.length} onClick={() => void downloadZip('selected')}><Download size={15}/> Download selected ZIP</button><button className="outline-btn" disabled={downloading || !generated.length} onClick={() => void downloadZip('all')}><Download size={15}/> Download all ZIP</button><button className="primary-btn" title={!project.listing?.title ? 'Create and save an Etsy listing draft first.' : ''} disabled={downloading || !generated.length || !project.listing?.title} onClick={() => void downloadZip('package')}><Download size={15}/> Images + listing draft ZIP</button></div></section>
+    <div className="assets-grid">{project.characters.map(c => <div className={`asset-card image-select-card ${selectedIds.includes(c.id) ? 'selected' : ''}`} key={c.id}><label className="asset-select"><input type="checkbox" aria-label={`Select ${c.name}`} checked={selectedIds.includes(c.id)} onChange={e => setSelectedIds(ids => e.target.checked ? [...ids, c.id] : ids.filter(id => id !== c.id))}/><span>Select</span></label><div className="asset-image">{c.imageUrl ? <Image unoptimized width={1024} height={1024} src={c.imageUrl} alt={c.name}/> : <ImageIcon size={36}/>}</div><div className="asset-meta"><b>{c.name}</b><span className={`status ${c.status}`}>{c.status}</span></div>{pending.has(c.id) && <p className="asset-pending">Batch pending</p>}{c.upscaleJob && <div className="asset-upscaled"><span>Remote GPU: {remoteProgress[c.id]?.status || 'queued'} · {Math.floor((remoteProgress[c.id]?.elapsed || 0) / 60)}m {Math.floor((remoteProgress[c.id]?.elapsed || 0) % 60)}s</span><button className="outline-btn" type="button" onClick={() => void cancelRemoteUpscale(c)}>Cancel upscale</button></div>}{c.upscaledImageUrl && <div className="asset-upscaled"><a className="outline-btn" href={c.upscaledImageUrl} target="_blank" rel="noreferrer">View upscale</a><a className="outline-btn" href={c.upscaledImageUrl + '&download=1'} download>Download upscale</a></div>}{c.imageUrl && <div className={`similarity-note similarity-${c.similarityReview?.status || 'unverified'}`} title={c.similarityReview?.reason || 'Not checked yet'}>{c.similarityReview?.status === 'needs_review' ? `⚠ Similar to reference (${c.similarityReview.score}%) — review / regenerate` : c.similarityReview?.status === 'clear' ? `✓ AI visual review: low similarity (${c.similarityReview.score}%)` : 'Similarity not verified'}{c.similarityReview?.reason && <small>{c.similarityReview.reason}</small>}</div>}{c.error && <p className="asset-error">{c.error}</p>}<div className="asset-card-actions"><button className="outline-btn" disabled={working || pending.has(c.id) || !c.prompt} onClick={() => mode === 'single' ? void generateSingle(c) : void submitBatch([c.id], everGenerated(c))}>{working ? <LoaderCircle size={14} className="spin"/> : <Sparkles size={14}/>} {everGenerated(c) ? 'Regenerate' : 'Generate'} {mode === 'batch' ? '(Batch)' : '(Single)'}</button>{c.imageUrl && <a className="outline-btn" href={`${c.imageUrl}&download=1`} download><Download size={14}/> Download</a>}</div></div>)}</div>
     {!project.characters.length && <div className="panel empty-state"><ImageIcon size={32}/><strong>No image subjects yet</strong><p>Create characters and prompts first.</p></div>}
   </>;
 }
