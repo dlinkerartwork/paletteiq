@@ -5,6 +5,7 @@ import { getDb } from '@/db';
 import { projects, studioSettings } from '@/db/schema';
 import { nativeAssetBucket } from '@/lib/native-bridge';
 import { batchAssetKey } from '@/lib/batch-assets';
+import { decryptCredential } from '@/lib/credentials';
 
 type RemoteJob = { id: string; sourceUrl: string; factor: 2 | 4; requireTransparency: boolean; qc: boolean; submittedAt: number };
 type Character = { id: string; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: RemoteJob };
@@ -21,9 +22,10 @@ const dimension = (bytes: Uint8Array) => {
   return { width: view.getUint32(16), height: view.getUint32(20), alpha: bytes[25] === 4 || bytes[25] === 6 };
 };
 
-function remoteConfig() {
+async function remoteConfig(owner: string) {
   const url = variables().PALETTEIQ_UPSCALE_SERVER_URL?.trim();
-  const key = variables().PALETTEIQ_UPSCALE_SERVER_KEY?.trim();
+  const rows = await getDb().select({ upscaleCredential: studioSettings.upscaleCredential }).from(studioSettings).where(eq(studioSettings.owner, owner)).limit(1);
+  const key = rows[0]?.upscaleCredential ? await decryptCredential(rows[0].upscaleCredential, owner) : variables().PALETTEIQ_UPSCALE_SERVER_KEY?.trim();
   if (!url || !key || key.length < 32) throw Error('Remote Upscale is not configured on the PaletteIQ backend.');
   const parsed = new URL(url);
   if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== '/' && parsed.pathname !== '') throw Error('Invalid Remote Upscale server URL');
@@ -36,8 +38,8 @@ function remoteConfig() {
   return { base: parsed.origin, key, accessId, accessSecret };
 }
 
-async function remote(path: string, init: RequestInit = {}) {
-  const { base, key, accessId, accessSecret } = remoteConfig();
+async function remote(owner: string, path: string, init: RequestInit = {}) {
+  const { base, key, accessId, accessSecret } = await remoteConfig(owner);
   const result = await fetch(base + path, { ...init, headers: { 'X-API-Key': key, ...(accessId && accessSecret ? { 'CF-Access-Client-Id': accessId, 'CF-Access-Client-Secret': accessSecret } : {}), ...(init.headers || {}) }, cache: 'no-store', signal: AbortSignal.timeout(120_000) });
   if (!result.ok) throw Error(`Remote Upscale HTTP ${result.status}: ${(await result.text()).slice(0, 160)}`);
   return result;
@@ -69,7 +71,7 @@ export async function POST(req: Request) {
     if (!character?.imageUrl) return bad('Generated image not found', 404);
     if (character.upscaleJob) {
       if (character.upscaleJob.sourceUrl !== character.imageUrl) return bad('Original image changed; previous job requires review', 409);
-      const previous = await (await remote(`/v1/jobs/${character.upscaleJob.id}`)).json() as RemoteStatus;
+      const previous = await (await remote(user.userId, `/v1/jobs/${character.upscaleJob.id}`)).json() as RemoteStatus;
       if (previous.status !== 'failed') return Response.json({ id: character.upscaleJob.id, status: previous.status });
     }
     const saved = await getDb().select().from(studioSettings).where(eq(studioSettings.owner, user.userId)).limit(1);
@@ -90,7 +92,7 @@ export async function POST(req: Request) {
     form.set('scale', String(factor));
     form.set('edge_cleanup', String(prefs.upscaleCleanup === true));
     form.set('cleanup_strength', strength);
-    const submitted = await (await remote('/v1/jobs', { method: 'POST', body: form })).json() as { id?: string };
+    const submitted = await (await remote(user.userId, '/v1/jobs', { method: 'POST', body: form })).json() as { id?: string };
     if (!submitted.id || !/^[0-9a-f]{32}$/.test(submitted.id)) return bad('Remote server returned an invalid job ID', 502);
     // Re-read latest collection to avoid overwriting unrelated edits made while uploading.
     const latest = await ownedProject(user.userId, body.projectId);
@@ -108,7 +110,7 @@ export async function GET(req: Request) {
     if (!user) return bad('Sign in required', 401);
     const url = new URL(req.url);
     if (url.searchParams.get('check') === '1') {
-      const health = await (await remote('/v1/health')).json() as { status: string; queue_depth?: number; engine_ready?: boolean };
+      const health = await (await remote(user.userId, '/v1/health')).json() as { status: string; queue_depth?: number; engine_ready?: boolean };
       return Response.json({ connected: health.status === 'ok', queueDepth: health.queue_depth, engineReady: health.engine_ready });
     }
     const projectId = url.searchParams.get('projectId') || '';
@@ -120,10 +122,10 @@ export async function GET(req: Request) {
     const task = character.upscaleJob;
     if (!task) return Response.json({ status: character.upscaledImageUrl ? 'succeeded' : 'idle', url: character.upscaledImageUrl });
     if (character.imageUrl !== task.sourceUrl) return bad('Original image changed during upscale; previous job was not applied', 409);
-    const result = await (await remote(`/v1/jobs/${task.id}`)).json() as RemoteStatus;
+    const result = await (await remote(user.userId, `/v1/jobs/${task.id}`)).json() as RemoteStatus;
     if (result.status === 'failed') return Response.json({ status: 'failed', error: result.error || 'Remote upscale failed', id: task.id });
     if (result.status !== 'completed') return Response.json({ status: result.status, id: task.id });
-    const response = await remote(`/v1/jobs/${task.id}/result`);
+    const response = await remote(user.userId, `/v1/jobs/${task.id}/result`);
     const length = Number(response.headers.get('content-length') || 0);
     if (length > 100 * 1024 * 1024) return bad('Upscale result exceeds 100 MB', 413);
     const bytes = new Uint8Array(await response.arrayBuffer());
