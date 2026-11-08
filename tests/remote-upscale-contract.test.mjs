@@ -21,6 +21,8 @@ test('GPU key only travels through backend route', () => {
   assert.match(route, /'X-API-Key': key/);
   assert.match(route, /parsed\.protocol !== 'https:'/);
   assert.match(route, /PALETTEIQ_DESKTOP === '1'/);
+  assert.match(route, /PALETTEIQ_ALLOW_PRIVATE_HTTP_UPSCALE === '1'/);
+  assert.match(route, /allowPrivateHttp && parsed\.protocol === 'http:' && local/);
   assert.match(route, /upscaleJob =/);
   assert.doesNotMatch(read('components/image-production.tsx'), /PALETTEIQ_UPSCALE_SERVER_KEY|NEXT_PUBLIC_UPSCALE/);
 });
