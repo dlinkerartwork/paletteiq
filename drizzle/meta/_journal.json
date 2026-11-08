@@ -2,33 +2,10 @@
   "version": "7",
   "dialect": "sqlite",
   "entries": [
-    {
-      "idx": 0,
-      "version": "6",
-      "when": 1793702864114,
-      "tag": "0000_slippery_pyro",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1793706075374,
-      "tag": "0001_big_bedlam",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1793710069232,
-      "tag": "0002_fine_red_hulk",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1793850000000,
-      "tag": "0003_gemini_seo",
-      "breakpoints": true
-    }
+    { "idx": 0, "version": "6", "when": 1793702864114, "tag": "0000_slippery_pyro", "breakpoints": true },
+    { "idx": 1, "version": "6", "when": 1793706075374, "tag": "0001_big_bedlam", "breakpoints": true },
+    { "idx": 2, "version": "6", "when": 1793710069232, "tag": "0002_fine_red_hulk", "breakpoints": true },
+    { "idx": 3, "version": "6", "when": 1793850000000, "tag": "0003_gemini_seo", "breakpoints": true },
+    { "idx": 4, "version": "6", "when": 1794119000000, "tag": "0004_upscale_credential", "breakpoints": true }
   ]
 }
