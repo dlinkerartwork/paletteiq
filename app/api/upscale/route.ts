@@ -31,7 +31,9 @@ async function remoteConfig(owner: string) {
   if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== '/' && parsed.pathname !== '') throw Error('Invalid Remote Upscale server URL');
   const local = /^(?:127\.0\.0\.1|localhost|10\.(?:\d{1,3}\.){2}\d{1,3}|192\.168\.(?:\d{1,3}\.)\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.(?:\d{1,3}\.)\d{1,3}|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.(?:\d{1,3}\.)\d{1,3})$/.test(parsed.hostname);
   const desktop = variables().PALETTEIQ_DESKTOP === '1';
-  const allowPrivateHttp = desktop || variables().PALETTEIQ_ALLOW_PRIVATE_HTTP_UPSCALE === '1';
+  // setup-local.ps1 marks intentionally local, login-free development with
+  // PALETTEIQ_LOCAL_NO_AUTH=1. Keep the allowance limited to private targets.
+  const allowPrivateHttp = desktop || variables().PALETTEIQ_ALLOW_PRIVATE_HTTP_UPSCALE === '1' || variables().PALETTEIQ_LOCAL_NO_AUTH === '1';
   if (parsed.protocol !== 'https:' && !(allowPrivateHttp && parsed.protocol === 'http:' && local)) throw Error('Remote Upscale requires HTTPS unless private HTTP is explicitly enabled on the backend for a LAN address.');
   const accessId = variables().PALETTEIQ_GPU_ACCESS_CLIENT_ID?.trim();
   const accessSecret = variables().PALETTEIQ_GPU_ACCESS_CLIENT_SECRET?.trim();
