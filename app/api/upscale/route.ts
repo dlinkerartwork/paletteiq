@@ -10,7 +10,7 @@ import { decryptCredential } from '@/lib/credentials';
 type RemoteJob = { id: string; sourceUrl: string; factor: 2 | 4; requireTransparency: boolean; qc: boolean; submittedAt: number };
 type Character = { id: string; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: RemoteJob };
 type ProjectData = { characters: Character[] };
-type RemoteStatus = { status: 'queued' | 'processing' | 'completed' | 'failed'; error?: string | null; qc?: unknown };
+type RemoteStatus = { status: 'queued' | 'processing' | 'cancelling' | 'cancelled' | 'completed' | 'failed'; error?: string | null; qc?: unknown; elapsed_seconds?: number; started_at?: number | null };
 
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 const variables = () => env as unknown as Record<string, string | undefined>;
@@ -67,15 +67,20 @@ export async function POST(req: Request) {
   try {
     const user = await getChatGPTUser();
     if (!user) return bad('Sign in required', 401);
-    const body = await req.json() as { projectId?: string; characterId?: string };
+    const body = await req.json() as { projectId?: string; characterId?: string; action?: 'cancel' };
     if (!body.projectId || !body.characterId) return bad('Select a generated image');
     const { row, data } = await ownedProject(user.userId, body.projectId);
     const character = data.characters.find(c => c.id === body.characterId);
     if (!character?.imageUrl) return bad('Generated image not found', 404);
+    if (body.action === 'cancel') {
+      if (!character.upscaleJob) return bad('No pending upscale job', 409);
+      const cancelled = await (await remote(user.userId, `/v1/jobs/${character.upscaleJob.id}/cancel`, { method: 'POST' })).json() as RemoteStatus;
+      return Response.json({ id: character.upscaleJob.id, status: cancelled.status });
+    }
     if (character.upscaleJob) {
       if (character.upscaleJob.sourceUrl !== character.imageUrl) return bad('Original image changed; previous job requires review', 409);
       const previous = await (await remote(user.userId, `/v1/jobs/${character.upscaleJob.id}`)).json() as RemoteStatus;
-      if (previous.status !== 'failed') return Response.json({ id: character.upscaleJob.id, status: previous.status });
+      if (!['failed', 'cancelled'].includes(previous.status)) return Response.json({ id: character.upscaleJob.id, status: previous.status });
     }
     const saved = await getDb().select().from(studioSettings).where(eq(studioSettings.owner, user.userId)).limit(1);
     const prefs = saved[0] ? JSON.parse(saved[0].preferences) as Record<string, unknown> : {};
@@ -128,7 +133,16 @@ export async function GET(req: Request) {
     if (character.imageUrl !== task.sourceUrl) return bad('Original image changed during upscale; previous job was not applied', 409);
     const result = await (await remote(user.userId, `/v1/jobs/${task.id}`)).json() as RemoteStatus;
     if (result.status === 'failed') return Response.json({ status: 'failed', error: result.error || 'Remote upscale failed', id: task.id });
-    if (result.status !== 'completed') return Response.json({ status: result.status, id: task.id });
+    if (result.status === 'cancelled') {
+      const latest = await ownedProject(user.userId, projectId);
+      const target = latest.data.characters.find(c => c.id === characterId);
+      if (target?.upscaleJob?.id === task.id) {
+        delete target.upscaleJob;
+        await getDb().update(projects).set({ data: JSON.stringify(latest.data), updatedAt: Date.now() }).where(and(eq(projects.id, latest.row.id), eq(projects.owner, user.userId)));
+      }
+      return Response.json({ status: 'cancelled', id: task.id, elapsedSeconds: result.elapsed_seconds });
+    }
+    if (result.status !== 'completed') return Response.json({ status: result.status, id: task.id, elapsedSeconds: result.elapsed_seconds, startedAt: result.started_at });
     const response = await remote(user.userId, `/v1/jobs/${task.id}/result`);
     const length = Number(response.headers.get('content-length') || 0);
     if (length > 100 * 1024 * 1024) return bad('Upscale result exceeds 100 MB', 413);
