@@ -15,7 +15,7 @@ import { acquireProductionLocks } from '@/lib/production-locks';
 
 const fail = (error: string, status = 400) => Response.json({ error }, { status });
 const secret = (key: string) => (env as unknown as Record<string, string | undefined>)[key];
-type SubjectInput = { id: string; name: string; description?: string; prompt?: string; status?: string; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; error?: string; similarityReview?: SimilarityReview };
+type SubjectInput = { id: string; name: string; description?: string; prompt?: string; status?: string; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: { id: string }; error?: string; similarityReview?: SimilarityReview };
 type ProjectInput = { id: string; name: string; characters: SubjectInput[]; [key: string]: unknown };
 type StudioRequest = { action: string; id: string; name: string; data: ProjectInput; url: string; project: ProjectInput; draft?: unknown; projectId: string; characterId: string; model: string; quality: string; selectedImages?: unknown[]; characters?: SubjectInput[]; [key: string]: unknown };
 type AiTextResult = { output?: Array<{ content?: Array<{ text?: string }> }> };
@@ -76,13 +76,13 @@ export async function POST(req: Request) {
     if (current.length && current[0].owner !== user.userId) return fail('Forbidden', 403);
     if (current.length) {
       // An older browser snapshot must not erase assets already persisted by the image worker.
-      const old = JSON.parse(current[0].data) as { characters?: Array<{ id: string; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; status?: string; similarityReview?: SimilarityReview }>; lastDownloadedAt?: number; downloadCount?: number; lastDownloadImageCount?: number; downloadedImageIds?: string[] };
+      const old = JSON.parse(current[0].data) as { characters?: Array<{ id: string; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: { id: string }; status?: string; similarityReview?: SimilarityReview }>; lastDownloadedAt?: number; downloadCount?: number; lastDownloadImageCount?: number; downloadedImageIds?: string[] };
       // Download history belongs to the persisted collection, not a potentially stale browser snapshot.
       if (old.lastDownloadedAt) { incoming.lastDownloadedAt = old.lastDownloadedAt; incoming.downloadCount = old.downloadCount ?? 1; incoming.lastDownloadImageCount = old.lastDownloadImageCount; incoming.downloadedImageIds = old.downloadedImageIds; }
       const storedImages = new Map((old.characters || []).filter(c => c.imageUrl).map(c => [c.id, c]));
       incoming.characters = incoming.characters.map((c: SubjectInput) => {
         const persisted = storedImages.get(c.id);
-        return persisted?.imageUrl ? { ...c, imageUrl: persisted.imageUrl, status: 'done', error: '', similarityReview: persisted.similarityReview, upscaledImageUrl: persisted.upscaledImageUrl, upscaledAt: persisted.upscaledAt } : c;
+        return persisted?.imageUrl ? { ...c, imageUrl: persisted.imageUrl, status: 'done', error: '', similarityReview: persisted.similarityReview, upscaledImageUrl: persisted.upscaledImageUrl, upscaledAt: persisted.upscaledAt, upscaleJob: persisted.upscaleJob } : c;
       });
     }
     const data = JSON.stringify(incoming);
@@ -303,3 +303,4 @@ export async function POST(req: Request) {
   }
   return fail('Unknown action');
 }
+

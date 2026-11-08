@@ -47,7 +47,10 @@ function runtimeConfig(directory, secret, nativeBridge) {
   config.vars = { ...(config.vars || {}), PALETTEIQ_DESKTOP: '1', PALETTEIQ_LOCAL_NO_AUTH: '1', PALETTEIQ_NATIVE_BRIDGE_URL: `http://127.0.0.1:${nativeBridge.port}` };
   const configPath = path.join(directory, 'wrangler.json');
   writeFileSync(configPath, JSON.stringify(config, null, 2));
-  writeFileSync(path.join(directory, '.dev.vars'), `STUDIO_CREDENTIAL_ENCRYPTION_KEY=${secret}\nPALETTEIQ_NATIVE_BRIDGE_TOKEN=${nativeBridge.token}\n`, { mode: 0o600 });
+  const remoteUrl = process.env.PALETTEIQ_UPSCALE_SERVER_URL || '';
+  const remoteKey = process.env.PALETTEIQ_UPSCALE_SERVER_KEY || '';
+  if (/[\r\n]/.test(remoteUrl + remoteKey)) throw new Error('Invalid Remote GPU configuration');
+  writeFileSync(path.join(directory, '.dev.vars'), `STUDIO_CREDENTIAL_ENCRYPTION_KEY=${secret}\nPALETTEIQ_NATIVE_BRIDGE_TOKEN=${nativeBridge.token}\nPALETTEIQ_UPSCALE_SERVER_URL=${remoteUrl}\nPALETTEIQ_UPSCALE_SERVER_KEY=${remoteKey}\n`, { mode: 0o600 });
   return configPath;
 }
 
@@ -230,3 +233,4 @@ app.on('before-quit', () => {
     try { unlinkSync(path.join(activeDirectory, '.dev.vars')); } catch (error) { if (error.code !== 'ENOENT') console.error('Could not remove temporary credential environment', error); }
   }
 });
+
