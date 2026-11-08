@@ -39,3 +39,13 @@ test('ZIP export prioritizes unmodified remote upscale PNGs', () => {
   assert.match(image, /new Response\(obj\.body,/);
   assert.match(zip, /u16\(lv, 8, 0\)/); // ZIP store method: no transcoding.
 });
+
+test('Remote upscale exposes cancellation and elapsed-time updates without leaking GPU keys', () => {
+  const api = read('app/api/upscale/route.ts');
+  const ui = read('components/image-production.tsx');
+  assert.match(api, /\/cancel\`, \{ method: 'POST' \}/);
+  assert.match(api, /elapsedSeconds: result\.elapsed_seconds/);
+  assert.match(ui, /Cancel upscale/);
+  assert.match(ui, /remoteProgress/);
+  assert.doesNotMatch(ui, /PALETTEIQ_UPSCALE_SERVER_KEY/);
+});
