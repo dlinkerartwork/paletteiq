@@ -30,12 +30,15 @@ function remoteConfig() {
   const local = /^(?:127\.0\.0\.1|localhost|10\.(?:\d{1,3}\.){2}\d{1,3}|192\.168\.(?:\d{1,3}\.)\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.(?:\d{1,3}\.)\d{1,3}|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.(?:\d{1,3}\.)\d{1,3})$/.test(parsed.hostname);
   const desktop = variables().PALETTEIQ_DESKTOP === '1';
   if (parsed.protocol !== 'https:' && !(desktop && parsed.protocol === 'http:' && local)) throw Error('Remote Upscale requires HTTPS for web; private HTTP is allowed only in desktop mode.');
-  return { base: parsed.origin, key };
+  const accessId = variables().PALETTEIQ_GPU_ACCESS_CLIENT_ID?.trim();
+  const accessSecret = variables().PALETTEIQ_GPU_ACCESS_CLIENT_SECRET?.trim();
+  if (Boolean(accessId) !== Boolean(accessSecret)) throw Error('Both GPU tunnel Access credentials must be configured together.');
+  return { base: parsed.origin, key, accessId, accessSecret };
 }
 
 async function remote(path: string, init: RequestInit = {}) {
-  const { base, key } = remoteConfig();
-  const result = await fetch(base + path, { ...init, headers: { 'X-API-Key': key, ...(init.headers || {}) }, cache: 'no-store', signal: AbortSignal.timeout(120_000) });
+  const { base, key, accessId, accessSecret } = remoteConfig();
+  const result = await fetch(base + path, { ...init, headers: { 'X-API-Key': key, ...(accessId && accessSecret ? { 'CF-Access-Client-Id': accessId, 'CF-Access-Client-Secret': accessSecret } : {}), ...(init.headers || {}) }, cache: 'no-store', signal: AbortSignal.timeout(120_000) });
   if (!result.ok) throw Error(`Remote Upscale HTTP ${result.status}: ${(await result.text()).slice(0, 160)}`);
   return result;
 }
