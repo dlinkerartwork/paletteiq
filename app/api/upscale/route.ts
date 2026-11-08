@@ -15,7 +15,7 @@ const isPng = (bytes: Uint8Array) => bytes.length > 33 && [137,80,78,71,13,10,26
 const dimension = (bytes: Uint8Array) => {
   if (!isPng(bytes)) throw Error('Only PNG sources and PNG output supported in the initial Replicate integration.');
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  return { width: view.getUint32(16), height: view.getUint32(20), alpha: bytes[25] === 4 || bytes[25] === 6 || bytes.includes(116) && false };
+  return { width: view.getUint32(16), height: view.getUint32(20), alpha: bytes[25] === 4 || bytes[25] === 6 };
 };
 const sourceKey = (owner: string, reference: string) => {
   const url = new URL(reference, 'https://app.local');
