@@ -21,10 +21,10 @@ export async function POST(request: Request) {
   if (typeof body.projectId !== 'string' || !['selected','all','package'].includes(body.scope || '')) return Response.json({ error: 'Invalid export request' }, { status: 400 });
   const rows = await getDb().select().from(projects).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId))).limit(1);
   if (!rows.length) return Response.json({ error: 'Collection not found' }, { status: 404 });
-  const project = JSON.parse(rows[0].data) as { name: string; theme?: string; subtheme?: string; microtheme?: string; listing?: unknown; seoReview?: unknown; characters: Array<{ id: string; name: string; imageUrl?: string }> };
+  const project = JSON.parse(rows[0].data) as { name: string; theme?: string; subtheme?: string; microtheme?: string; listing?: unknown; seoReview?: unknown; characters: Array<{ id: string; name: string; imageUrl?: string; upscaledImageUrl?: string }> };
   if (body.scope === 'package' && !(project.listing && typeof project.listing === 'object' && typeof (project.listing as { title?: string }).title === 'string' && (project.listing as { title: string }).title.trim())) return Response.json({ error: 'Create and save an Etsy listing draft before exporting the final package.' }, { status: 400 });
   const selectedIds = new Set(Array.isArray(body.ids) ? body.ids.filter(v => typeof v === 'string') : []);
-  const chosen = project.characters.filter(c => c.imageUrl && (body.scope !== 'selected' || selectedIds.has(c.id)));
+  const chosen = project.characters.filter(c => (c.upscaledImageUrl || c.imageUrl) && (body.scope !== 'selected' || selectedIds.has(c.id)));
   if (!chosen.length) return Response.json({ error: 'No generated images selected' }, { status: 400 });
   if (chosen.length > 1000) return Response.json({ error: 'Too many images in one ZIP' }, { status: 400 });
   const settings = await getDb().select({ preferences: studioSettings.preferences }).from(studioSettings).where(eq(studioSettings.owner, user.userId)).limit(1);
@@ -35,7 +35,9 @@ export async function POST(request: Request) {
   const imageFileName = createImageFileNamer(pattern, { theme: project.theme || project.name, subtheme: project.subtheme, microtheme: project.microtheme, collection: project.name });
   const entries: ZipEntry[] = [];
   for (const [index, character] of chosen.entries()) {
-    const path = new URL(character.imageUrl!, 'https://app.local');
+    // Preserve the original PNG bytes from storage (including pHYs/300 DPI).
+    // Prefer the remotely upscaled asset when the collection has one.
+    const path = new URL(character.upscaledImageUrl || character.imageUrl!, 'https://app.local');
     const match = path.pathname.match(/^\/api\/images\/([0-9a-f-]{36})$/);
     if (!match) return Response.json({ error: 'Invalid stored image reference' }, { status: 400 });
     const extension = path.searchParams.get('format') === 'jpg' ? 'jpg' : 'png';
@@ -49,7 +51,7 @@ export async function POST(request: Request) {
     const listing = normalizeListing(project.listing);
     entries.push({ name: 'etsy-listing-draft.json', stream: file(JSON.stringify(selectSeoExportDraft(listing, seoDraftFields), null, 2)) });
     entries.push({ name: 'etsy-listing-draft.txt', stream: file(formatSeoExportText(listing, seoDraftFields)) });
-    entries.push({ name: 'collection-manifest.json', stream: file(JSON.stringify({ collection: project.name, images: chosen.map(c => ({ id: c.id, name: c.name, imageUrl: c.imageUrl })) }, null, 2)) });
+    entries.push({ name: 'collection-manifest.json', stream: file(JSON.stringify({ collection: project.name, images: chosen.map(c => ({ id: c.id, name: c.name, imageUrl: c.upscaledImageUrl || c.imageUrl })) }, null, 2)) });
   }
   const name = `${slug(project.name)}-${body.scope === 'package' ? 'etsy-package' : 'images'}.zip`;
   return new Response(zipStream(entries), { headers: { 'Content-Type': 'application/zip', 'Content-Disposition': `attachment; filename="${name}"`, 'Cache-Control': 'private, no-store' } });
