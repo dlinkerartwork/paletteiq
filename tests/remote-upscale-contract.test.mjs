@@ -27,3 +27,15 @@ test('GPU key only travels through backend route', () => {
   assert.match(route, /upscaleJob =/);
   assert.doesNotMatch(read('components/image-production.tsx'), /PALETTEIQ_UPSCALE_SERVER_KEY|NEXT_PUBLIC_UPSCALE/);
 });
+
+test('ZIP export prioritizes unmodified remote upscale PNGs', () => {
+  const route = read('app/api/exports/route.ts');
+  const image = read('app/api/images/[id]/route.ts');
+  const upscale = read('app/api/upscale/route.ts');
+  const zip = read('lib/zip-stream.ts');
+  assert.match(upscale, /await bucket\.put\(`generated\/\$\{user\.userId\}\/\$\{assetId\}\.png`, bytes\)/);
+  assert.match(route, /character\.upscaledImageUrl \|\| character\.imageUrl/);
+  assert.match(route, /stream: async \(\) => \(await bucket\.get\(key\)\)\?\.body \|\| null/);
+  assert.match(image, /new Response\(obj\.body,/);
+  assert.match(zip, /u16\(lv, 8, 0\)/); // ZIP store method: no transcoding.
+});
