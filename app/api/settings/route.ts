@@ -61,7 +61,7 @@ async function getSettings(req: Request) {
   }
   const rows = await getDb().select().from(studioSettings).where(eq(studioSettings.owner, user.userId)).limit(1);
   const row = rows[0];
-  return Response.json({ preferences: { ...defaultPrefs, ...(row ? JSON.parse(row.preferences) : {}), upscaleProvider: 'remote' }, credentials: { etsy: Boolean(row?.etsyCredential), openai: Boolean(row?.openaiCredential), gemini: Boolean(row?.geminiCredential) }, geminiKeyCount: (await userGeminiKeys(user.userId)).length });
+  return Response.json({ preferences: { ...defaultPrefs, ...(row ? JSON.parse(row.preferences) : {}), upscaleProvider: 'remote' }, credentials: { etsy: Boolean(row?.etsyCredential), openai: Boolean(row?.openaiCredential), gemini: Boolean(row?.geminiCredential), upscale: Boolean(row?.upscaleCredential) }, geminiKeyCount: (await userGeminiKeys(user.userId)).length });
 }
 
 async function postSettings(req: Request) {
@@ -71,7 +71,7 @@ async function postSettings(req: Request) {
   const db = getDb();
   const rows = await db.select().from(studioSettings).where(eq(studioSettings.owner, user.userId)).limit(1);
   const row = rows[0];
-  const values = { owner: user.userId, preferences: row?.preferences || JSON.stringify(defaultPrefs), etsyCredential: row?.etsyCredential ?? null, openaiCredential: row?.openaiCredential ?? null, geminiCredential: row?.geminiCredential ?? null, updatedAt: Date.now() };
+  const values = { owner: user.userId, preferences: row?.preferences || JSON.stringify(defaultPrefs), etsyCredential: row?.etsyCredential ?? null, openaiCredential: row?.openaiCredential ?? null, geminiCredential: row?.geminiCredential ?? null, upscaleCredential: row?.upscaleCredential ?? null, updatedAt: Date.now() };
   if (body.action === 'gemini-key-add' || body.action === 'gemini-key-remove') {
     const previous = row?.geminiCredential ? parseGeminiKeyring(await decryptCredential(row.geminiCredential, user.userId)) : [];
     let next = previous;
@@ -86,7 +86,7 @@ async function postSettings(req: Request) {
     }
     values.geminiCredential = next.length ? await encryptCredential(serializeGeminiKeyring(next), user.userId) : null;
     await db.insert(studioSettings).values(values).onConflictDoUpdate({ target: studioSettings.owner, set: { geminiCredential: values.geminiCredential, updatedAt: Date.now() } });
-    return Response.json({ ok: true, credentials: { etsy: Boolean(values.etsyCredential), openai: Boolean(values.openaiCredential), gemini: Boolean(values.geminiCredential) }, geminiKeyCount: next.length });
+    return Response.json({ ok: true, credentials: { etsy: Boolean(values.etsyCredential), openai: Boolean(values.openaiCredential), gemini: Boolean(values.geminiCredential), upscale: Boolean(values.upscaleCredential) }, geminiKeyCount: next.length });
   }
   if (body.action === 'preferences') {
     const raw = body.preferences as Record<string, unknown> | null;
@@ -96,6 +96,13 @@ async function postSettings(req: Request) {
     if (!Array.isArray(prefs.seoDraftFields) || prefs.seoDraftFields.some((field: unknown) => !['title','description','tags','imageAltTexts','primaryKeyword','secondaryKeywords','longTailKeywords','categorySuggestion','attributes','materials','photoPlan','priceSuggestion','sku','digitalFiles','licenseNotes'].includes(String(field))) || new Set(prefs.seoDraftFields).size !== prefs.seoDraftFields.length) return bad('Invalid SEO draft field selection');
     if (!prefs.seoPrompts || typeof prefs.seoPrompts !== 'object' || Array.isArray(prefs.seoPrompts) || Object.keys(prefs.seoPrompts).some(key => !seoPromptFields.includes(key as typeof seoPromptFields[number])) || seoPromptFields.some(key => typeof prefs.seoPrompts[key] !== 'string' || prefs.seoPrompts[key].length > 2000)) return bad('Invalid custom SEO prompts');
     values.preferences = JSON.stringify(prefs);
+  } else if (body.action === 'upscale-credential') {
+    if (body.remove === true) values.upscaleCredential = null;
+    else {
+      const value = typeof body.key === 'string' ? body.key.trim() : '';
+      if (value.length < 32 || value.length > 1000 || /\s/.test(value)) return bad('GPU Server API key must be 32–1000 characters with no spaces');
+      values.upscaleCredential = await encryptCredential(value, user.userId);
+    }
   } else if (body.action === 'credential') {
     if (!['etsy','openai','gemini'].includes(String(body.provider))) return bad('Invalid provider');
     const provider = body.provider as 'etsy' | 'openai' | 'gemini';
@@ -108,8 +115,8 @@ async function postSettings(req: Request) {
       if (provider === 'etsy') values.etsyCredential = encrypted; else if (provider === 'gemini') values.geminiCredential = encrypted; else values.openaiCredential = encrypted;
     }
   } else return bad('Unknown action');
-  await db.insert(studioSettings).values(values).onConflictDoUpdate({ target: studioSettings.owner, set: { preferences: values.preferences, etsyCredential: values.etsyCredential, openaiCredential: values.openaiCredential, geminiCredential: values.geminiCredential, updatedAt: Date.now() } });
-  return Response.json({ ok: true, credentials: { etsy: Boolean(values.etsyCredential), openai: Boolean(values.openaiCredential), gemini: Boolean(values.geminiCredential) }, geminiKeyCount: parseGeminiKeyring(values.geminiCredential ? await decryptCredential(values.geminiCredential, user.userId) : null).length });
+  await db.insert(studioSettings).values(values).onConflictDoUpdate({ target: studioSettings.owner, set: { preferences: values.preferences, etsyCredential: values.etsyCredential, openaiCredential: values.openaiCredential, geminiCredential: values.geminiCredential, upscaleCredential: values.upscaleCredential, updatedAt: Date.now() } });
+  return Response.json({ ok: true, credentials: { etsy: Boolean(values.etsyCredential), openai: Boolean(values.openaiCredential), gemini: Boolean(values.geminiCredential), upscale: Boolean(values.upscaleCredential) }, geminiKeyCount: parseGeminiKeyring(values.geminiCredential ? await decryptCredential(values.geminiCredential, user.userId) : null).length });
 }
 
 function settingsError(error: unknown): Response {
