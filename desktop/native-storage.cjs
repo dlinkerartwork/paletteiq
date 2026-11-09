@@ -16,7 +16,7 @@ function openNativeDb(directory, migrationsDir) {
   try {
     database.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;');
     database.exec('CREATE TABLE IF NOT EXISTS __paletteiq_migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)');
-    const migrations = ['0000_slippery_pyro.sql', '0001_big_bedlam.sql', '0002_fine_red_hulk.sql', '0003_gemini_seo.sql'];
+    const migrations = ['0000_slippery_pyro.sql', '0001_big_bedlam.sql', '0002_fine_red_hulk.sql', '0003_gemini_seo.sql', '0004_upscale_credential.sql'];
     const pending = migrations.filter(file => !database.prepare('SELECT 1 FROM __paletteiq_migrations WHERE name=?').get(file));
     if (existingDatabase && pending.length) {
       // VACUUM INTO makes a consistent SQLite snapshot even when WAL is active.
@@ -31,9 +31,11 @@ function openNativeDb(directory, migrationsDir) {
       try {
         // A previous version may have added this column before the migration
         // ledger was introduced. Reconcile the ledger without altering data.
-        const alreadyHasGemini = file === '0003_gemini_seo.sql'
-          && database.prepare('PRAGMA table_info(studio_settings)').all().some(column => column.name === 'gemini_credential');
-        if (!alreadyHasGemini) database.exec(readFileSync(path.join(migrationsDir, file), 'utf8'));
+        const additiveColumn = file === '0003_gemini_seo.sql' ? 'gemini_credential'
+          : file === '0004_upscale_credential.sql' ? 'upscale_credential' : null;
+        const alreadyHasColumn = additiveColumn && database.prepare('PRAGMA table_info(studio_settings)').all()
+          .some(column => column.name === additiveColumn);
+        if (!alreadyHasColumn) database.exec(readFileSync(path.join(migrationsDir, file), 'utf8'));
         database.prepare('INSERT INTO __paletteiq_migrations (name, applied_at) VALUES (?, ?)').run(file, Date.now());
         database.exec('COMMIT');
       } catch (error) {
