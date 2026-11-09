@@ -111,10 +111,11 @@ export async function POST(req: Request) {
     if (!selectedImages.length) return fail('Select at least one image from this Etsy listing before AI analysis.');
     const provider = body.analysisProvider ?? 'openai';
     const model = body.analysisModel ?? 'gpt-4.1-mini';
-    const openaiModels = ['gpt-4.1-mini', 'gpt-4.1', 'gpt-4o'];
-    const geminiModels = ['gemini-2.5-flash', 'gemini-2.5-pro'];
+    // Match the dynamic model list exposed by SEO Settings. Availability and
+    // image-input capability are ultimately checked by the provider API.
+    const validModel = provider === 'openai' ? /^gpt-[a-z0-9.-]{1,80}$/ : /^gemini-[a-z0-9.-]{1,80}$/;
     if (provider !== 'openai' && provider !== 'gemini') return fail('Invalid visual analysis provider');
-    if (!(provider === 'openai' ? openaiModels : geminiModels).includes(String(model))) return fail('Unsupported visual analysis model');
+    if (typeof model !== 'string' || !validModel.test(model)) return fail('Unsupported visual analysis model');
     const aiKey = provider === 'openai' ? await userCredential(user.userId, 'openai') || secret('OPENAI_API_KEY') : null;
     const geminiKeys = provider === 'gemini' ? await userGeminiKeys(user.userId) : [];
     if (provider === 'openai' && !aiKey) return fail('OpenAI API not connected. Configure it in Settings to analyze images.', 503);
@@ -176,22 +177,21 @@ export async function POST(req: Request) {
     try { const result = JSON.parse(extractText(await ai.json())) as { characters?: Array<{ name: string; description?: string }> }; const characters = Array.isArray(result.characters) ? result.characters.filter(c => c && typeof c.name === 'string' && c.name.trim()).slice(0, count).map(c => ({ name: c.name.trim().slice(0,160), description: String(c.description || '').slice(0,500) })) : []; return Response.json({ characters }); } catch { return fail('Invalid AI response', 502); }
   }
   if (body.action === 'generate-prompts') {
-    const aiKey = await userCredential(user.userId, 'openai') || secret('OPENAI_API_KEY');
-    if (!aiKey) return fail('Configure an OpenAI API key in Settings to generate prompts.', 503);
+    const provider = body.promptProvider ?? 'openai';
+    const model = body.promptModel ?? 'gpt-4.1-mini';
+    if (!['openai', 'gemini'].includes(String(provider)) || typeof model !== 'string' || !(provider === 'gemini' ? /^gemini-[a-z0-9.-]{1,80}$/ : /^gpt-[a-z0-9.-]{1,80}$/).test(model)) return fail('Invalid prompt AI provider or model');
     const incoming: SubjectInput[] = Array.isArray(body.characters) ? body.characters : [];
     if (!incoming.length || incoming.length > 10 || incoming.some(c => typeof c.id !== 'string' || typeof c.name !== 'string' || !c.name.trim())) return fail('Select 1–10 valid characters per AI request.');
     const context = { theme: String(body.theme ?? '').slice(0, 200), subtheme: String(body.subtheme ?? '').slice(0, 200), style: String(body.style ?? '').slice(0, 500), palette: String(body.palette ?? '').slice(0, 300), texture: String(body.texture ?? '').slice(0, 300) };
     const characters = incoming.map(c => ({ id: String(c.id).slice(0, 80), name: String(c.name).slice(0, 200), description: String(c.description ?? '').slice(0, 500), previousPrompt: String(c.prompt ?? '').slice(0, 1200) }));
     const requestText = `Write ONE original, detailed, production-ready English image-generation prompt per character. Return JSON {"prompts":[{"id":"exact given id","prompt":"..."}]}. Preserve each id exactly. The source Etsy images establish the broad subject and art medium ONLY; NEVER reproduce their distinctive design. For EVERY subject deliberately invent a NEW pose, silhouette, arrangement, proportions, focal details and creative accessories. If character descriptions contain visible reference specifics, transform them into distinct, original alternatives. Make each prompt self-contained with concrete differences instead of vague words like 'unique'. Each prompt must be visually distinctive in pose/composition/character details while following the same art direction. Include hand-painted texture, palette, lighting, expressive details, isolated full subject centered on transparent background; no text, logo, watermark, sticker cutline, white border, exterior shadows, unrelated elements. The image must be a single clipart element ready for a coordinated bundle. Avoid copying any existing shop's character or proprietary artwork. If previousPrompt exists, regenerate with fresh unique subject-specific details. Never add unsupported trademarked characters. Style guide: ${JSON.stringify(context)}. Subjects: ${JSON.stringify(characters)}`;
-    const ai = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'gpt-4.1-mini', input: requestText, text: { format: { type: 'json_object' } } }) });
-    if (!ai.ok) return fail(`OpenAI prompt generation failed (${ai.status}): ${(await ai.text()).slice(0, 200)}`, 502);
     try {
-      const result = JSON.parse(extractText(await ai.json())) as { prompts?: Array<{ id: string; prompt: string }> };
+      const result = await generateSeoJson(user.userId, requestText, provider as 'openai' | 'gemini', model) as { prompts?: Array<{ id: string; prompt: string }> };
       const allowed = new Set(characters.map((c: { id: string }) => c.id));
       const prompts = Array.isArray(result.prompts) ? result.prompts.filter(p => allowed.has(p.id) && typeof p.prompt === 'string' && p.prompt.trim().length > 60).map(p => ({ id: p.id, prompt: p.prompt.trim().slice(0, 8000) })) : [];
       if (new Set(prompts.map((p: { id: string }) => p.id)).size !== characters.length || prompts.length !== characters.length) return fail('AI returned incomplete prompts. Please retry this group.', 502);
       return Response.json({ prompts });
-    } catch (error) { return fail(error instanceof Error && error.message.startsWith('AI returned') ? error.message : 'Invalid OpenAI prompt response', 502); }
+    } catch (error) { return fail(error instanceof Error ? error.message.slice(0, 260) : 'Invalid AI prompt response', 502); }
   }
   if (body.action === 'listing-draft') {
     const seoConfig = await seoPreferences(user.userId);
