@@ -272,7 +272,10 @@ export async function POST(req: Request) {
     // A deterministic per-character object key allows recovery if DB persistence fails.
     await bucket.put(`generated/${user.userId}/${character.id}.${extension}`, Uint8Array.from(atob(b64), c => c.charCodeAt(0)), { httpMetadata: { contentType: format === 'jpeg' ? 'image/jpeg' : 'image/png' } });
     character.imageUrl = imageUrl; character.status = 'done'; character.error = '';
-    character.similarityReview = await reviewImageSimilarity(aiKey, b64, format === 'jpeg' ? 'image/jpeg' : 'image/png', project.selectedImageUrls ?? project.images ?? []);
+    // Image persistence must not depend on optional similarity review availability.
+    try {
+      character.similarityReview = await reviewImageSimilarity(aiKey, b64, format === 'jpeg' ? 'image/jpeg' : 'image/png', project.selectedImageUrls ?? project.images ?? []);
+    } catch { character.similarityReview = undefined; }
     try {
       await db.update(projects).set({ data: JSON.stringify(project), updatedAt: Date.now() }).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId)));
     } catch {
