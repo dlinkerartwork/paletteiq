@@ -3,7 +3,7 @@
 import Image from 'next/image';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, BarChart3, BookOpenText, Check, CircleHelp, Download, ExternalLink, FileSearch, Image as ImageIcon, Layers3, LoaderCircle, Plus, Search, Settings2, Sparkles, Trash2, WandSparkles, X } from 'lucide-react';
+import { ArrowRight, BarChart3, BookOpenText, Check, CircleHelp, Download, ExternalLink, FileSearch, Image as ImageIcon, Layers3, LoaderCircle, Plus, Search, Settings2, Sparkles, Trash2, WandSparkles, X, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import StudioSettings, { defaultPrefs, defaultSeoPrompts, defaultSeoDraftFields, type StudioPreferences } from '@/components/studio-settings';
 import ImageProduction from '@/components/image-production';
 import { isOpenAICreditError, playProductionSound, productionSoundEnabled } from '@/lib/production-sounds';
@@ -29,6 +29,7 @@ export default function Home() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [project, setProject] = useState<Project>(blank);
   const [tab, setTab] = useState('overview');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [query, setQuery] = useState('');
   const [libraryPage, setLibraryPage] = useState(1);
   const [libraryPageSize, setLibraryPageSize] = useState(25);
@@ -49,6 +50,13 @@ export default function Home() {
   const [duplicateListing, setDuplicateListing] = useState<{ url: string; collections: string[] } | null>(null);
   const [preferences, setPreferences] = useState<StudioPreferences>(defaultPrefs);
 
+  useEffect(() => {
+    try { setSidebarCollapsed(localStorage.getItem('paletteiq-sidebar-collapsed') === '1'); } catch { /* Optional preference. */ }
+  }, []);
+  const toggleSidebar = () => setSidebarCollapsed(value => {
+    try { localStorage.setItem('paletteiq-sidebar-collapsed', value ? '0' : '1'); } catch { /* Optional preference. */ }
+    return !value;
+  });
   useEffect(() => { fetch('/api/studio').then(r => r.ok ? r.json() : [] as { data: Project }[]).then((rows) => {
     const list = (rows as { data: Project }[]).map(r => r.data); setProjects(list);
     let restored: { id?: string; tab?: string } = {};
@@ -264,8 +272,8 @@ export default function Home() {
   const stepIndex = steps.findIndex(s => s.id === tab);
   const title = nav.find(n => n.id === tab)?.label || steps.find(s => s.id === tab)?.label || tab;
 
-  return <div className="studio-shell">
-    <aside className="sidebar"><div className="brand"><div className="brand-icon" style={{ background: "transparent", boxShadow: "none" }}><Image src="/paletteiq-icon.svg" width={39} height={39} alt="PaletteIQ icon" unoptimized/></div><div><strong>palette<span>IQ</span></strong><small>CLIPART INTELLIGENCE</small></div></div><div className="side-caption">WORKSPACE</div><nav>{nav.map(n => <button key={n.id} className={tab === n.id ? 'active' : ''} onClick={() => setTab(n.id)}><n.icon size={18}/>{n.label}{tab === n.id && <span className="nav-active-dot"/>}</button>)}</nav><div className="side-foot"><div className="account-avatar">D</div><div><b>My creative workspace</b><small>Private studio</small></div><Settings2 size={16}/></div></aside>
+  return <div className={`studio-shell ${sidebarCollapsed ? "sidebar-is-collapsed" : ""}`}>
+    <aside className="sidebar"><button type="button" className="sidebar-toggle" onClick={toggleSidebar} aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}>{sidebarCollapsed ? <PanelLeftOpen size={18}/> : <PanelLeftClose size={18}/>}</button><div className="brand"><div className="brand-icon" style={{ background: "transparent", boxShadow: "none" }}><Image src="/paletteiq-icon.svg" width={39} height={39} alt="PaletteIQ icon" unoptimized/></div><div><strong>palette<span>IQ</span></strong><small>CLIPART INTELLIGENCE</small></div></div><div className="side-caption">WORKSPACE</div><nav>{nav.map(n => <button key={n.id} className={tab === n.id ? 'active' : ''} onClick={() => setTab(n.id)}><n.icon size={18}/><span className="sidebar-nav-label">{n.label}</span>{tab === n.id && <span className="nav-active-dot"/>}</button>)}</nav><div className="side-foot"><div className="account-avatar">D</div><div><b>My creative workspace</b><small>Private studio</small></div><Settings2 size={16}/></div></aside>
     <main className="main"><header className="topbar"><div className="crumb"><button className="breadcrumb-button" onClick={() => setTab('collections')}>Collections</button> <span>/</span> <b>{stepIndex >= 0 ? `${project.name} / ${title}` : title}</b></div><div className="top-actions"><span className="online"><span/> Personal workspace</span>{stepIndex >= 0 && <button className="save-btn" onClick={() => save()} disabled={!!busy}><Check size={16}/> {busy === 'save' ? 'Saving...' : 'Save collection'}</button>}</div></header>
       <div className="content"><div className="page-head"><div><div className="eyebrow"><Sparkles size={13}/> AI-POWERED CREATIVE PRODUCTION {stepIndex >= 0 && <span> / {title}</span>}</div><h1>{stepIndex >= 0 ? project.name : tab === 'overview' ? 'Your creative command center' : title}</h1><p>{tab === 'overview' ? 'From market insight to an original, production-ready clipart collection.' : tab === 'collections' ? 'Find a saved collection and resume its production pipeline.' : tab === 'analysis' ? 'Turn an Etsy listing into structured, actionable creative intelligence.' : tab === 'characters' ? 'Build, refine and organize 120+ subjects.' : tab === 'prompts' ? 'Generate unique prompts with OpenAI for each character.' : 'Continue preparing your clipart product.'}</p></div>{stepIndex >= 0 && <div className="head-buttons"><button className="outline-btn" onClick={() => { const blob = new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${project.name.replace(/[^\w-]/g,'_')}.json`; a.click(); URL.revokeObjectURL(a.href); }}><Download size={16}/> Export JSON</button></div>}</div>
       {duplicateListing && <div role="alertdialog" aria-label="Previously used Etsy reference" style={{ position: 'fixed', right: 24, top: 88, zIndex: 1000, width: 'min(420px, calc(100vw - 48px))', padding: 18, borderRadius: 14, border: '1px solid #ffc69e', background: '#fff9f3', color: '#53260e', boxShadow: '0 12px 40px #0002' }}><strong>Reference Etsy ini sudah pernah digunakan</strong><p style={{ marginTop: 8, marginBottom: 8 }}>Digunakan dalam collection: {duplicateListing.collections.join(', ')}. Anda tetap bisa memakai URL yang sama untuk collection baru.</p><div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}><button type="button" className="outline-btn" onClick={() => setDuplicateListing(null)}>Batal</button><button type="button" className="primary-btn" onClick={() => { setSourceUrl(duplicateListing.url); void loadListingImages(true); }}>Tetap gunakan</button></div></div>}
