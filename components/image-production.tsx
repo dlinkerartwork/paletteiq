@@ -74,7 +74,11 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
         cursor = (cursor + sample.length) % pendingIds.length;
         for (const characterId of sample) {
           const response = await fetch(`/api/upscale?projectId=${encodeURIComponent(project.id)}&characterId=${encodeURIComponent(characterId)}`);
-          if (!response.ok) continue;
+          if (!response.ok) {
+            const detail = await response.json().catch(() => ({})) as { error?: string };
+            if (!stopped) setMessage(`Upscale result sync failed for ${project.characters.find(c => c.id === characterId)?.name || characterId}: HTTP ${response.status} — ${detail.error || 'Unknown error'}. The GPU job remains on the server; do not submit it again.`);
+            continue;
+          }
           const result = await response.json() as { status: string; error?: string; elapsedSeconds?: number };
           if (stopped) return;
           if (result.status === 'succeeded') { window.location.reload(); return; }
@@ -83,6 +87,8 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
           if (result.status === 'failed') setMessage(`Remote upscale failed: ${result.error || 'Unknown error'}`);
           else setMessage(`Remote GPU upscale: ${result.status} · ${Math.floor((result.elapsedSeconds || 0) / 60)}m ${Math.floor((result.elapsedSeconds || 0) % 60)}s. This job continues on the GPU server.`);
         }
+      } catch (error) {
+        if (!stopped) setMessage(`Upscale status check failed: ${error instanceof Error ? error.message : String(error)}. The GPU job remains on the server; do not resubmit it.`);
       } finally { running = false; }
     };
     void poll();
