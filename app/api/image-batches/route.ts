@@ -27,7 +27,7 @@ const safeJob = (job: typeof imageBatches.$inferSelect) => ({
   id: job.id, status: job.status, model: job.model, createdAt: job.createdAt,
   characterIds: (JSON.parse(job.items) as BatchItem[]).map(i => i.id),
   total: job.total, completed: job.completed, failed: job.failed,
-  imported: (JSON.parse(job.items) as BatchItem[]).filter(i => i.status !== 'pending').length,
+  imported: (JSON.parse(job.items) as BatchItem[]).filter(i => i.status === 'done').length,
   assets: (JSON.parse(job.items) as BatchItem[]).filter(i => i.status !== 'pending'),
 });
 
@@ -51,6 +51,8 @@ export async function POST(req: Request) {
   const previous = await db.select().from(imageBatches).where(and(eq(imageBatches.owner, user.userId), eq(imageBatches.projectId, data.projectId)));
   const activeIds = new Set(previous.filter(b => isActiveBatchStatus(b.status)).flatMap(b => (JSON.parse(b.items) as BatchItem[]).filter(i => i.status === 'pending').map(i => i.id)));
   if (data.characterIds.some(id => activeIds.has(id))) return fail('Some characters already have a pending Batch job.');
+  // Validate output storage before creating a chargeable OpenAI Batch.
+  if (!(nativeAssetBucket() ?? env.BUCKET)) return fail('Image storage is unavailable. Batch was not submitted to OpenAI.', 503);
   const secret = (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
   const key = await userCredential(user.userId, 'openai') || secret;
   if (!key) return fail('Configure an OpenAI API key in Settings first.', 503);
@@ -136,7 +138,10 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
           const extension = job.format === 'jpeg' ? 'jpg' : 'png';
           await bucket.put(batchAssetKey(owner, record.custom_id!, extension, job.id), Uint8Array.from(atob(b64), c => c.charCodeAt(0)), { httpMetadata: { contentType: extension === 'jpg' ? 'image/jpeg' : 'image/png' } });
           item.status = 'done'; item.imageUrl = batchAssetUrl(record.custom_id!, extension, job.id);
-          item.similarityReview = await reviewImageSimilarity(key, b64, extension === 'jpg' ? 'image/jpeg' : 'image/png', references);
+          // Similarity QC is advisory. A review outage must never block paid image recovery.
+          try {
+            item.similarityReview = await reviewImageSimilarity(key, b64, extension === 'jpg' ? 'image/jpeg' : 'image/png', references);
+          } catch { item.similarityReview = undefined; }
         } else { item.status = 'error'; item.error = String(record.error?.message || record.response?.body?.error?.message || 'Batch item failed').slice(0, 260); }
         changedIds.add(item.id);
         handled++;
