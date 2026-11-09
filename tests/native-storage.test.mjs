@@ -75,6 +75,8 @@ test('upgrading an existing desktop database adds Gemini column without losing s
     assert.equal(storage.database.prepare('SELECT name FROM projects WHERE id=?').get('old').name, 'Saved collection');
     assert.equal(storage.database.prepare('SELECT preferences FROM studio_settings WHERE owner=?').get('owner').preferences, '{"target":120}');
     assert.ok(storage.database.prepare("PRAGMA table_info(studio_settings)").all().some(column => column.name === 'gemini_credential'));
+    assert.ok(storage.database.prepare("PRAGMA table_info(studio_settings)").all().some(column => column.name === 'upscale_credential'));
+    assert.equal(storage.database.prepare("SELECT COUNT(*) AS total FROM __paletteiq_migrations WHERE name = '0004_upscale_credential.sql'").get().total, 1);
     assert.equal(storage.database.prepare("SELECT COUNT(*) AS total FROM __paletteiq_migrations WHERE name = '0003_gemini_seo.sql'").get().total, 1);
     storage.server.close(); storage.database.close(); storage = null;
     storage = await startNativeStorage({ directory: temp, migrationsDir: path.resolve('drizzle'), token: 'upgrade-secret' });
