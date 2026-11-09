@@ -231,7 +231,7 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
           errors.push(`${c.name}: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
-      const notice = `GPU server accepted ${accepted}/${targets.length} upscale jobs. ${errors.length ? `${errors.length} failed to submit; retry those images later.` : 'You may turn off the client PC now; processing continues on the GPU server.'} Reopen PaletteIQ to import results.`;
+      const notice = `GPU server accepted ${accepted}/${targets.length} upscale jobs. ${errors.length ? `${errors.length} failed to submit:\n${errors.slice(0, 5).join('\n')}${errors.length > 5 ? `\n…and ${errors.length - 5} more failures.` : ''} Retry only failed images after fixing the errors.` : 'You may turn off the client PC now; processing continues on the GPU server.'} ${accepted ? 'Reopen PaletteIQ to import results.' : ''}`;
       setMessage(notice);
       // Rehydrate persisted references and start normal background polling.
       if (accepted) {
