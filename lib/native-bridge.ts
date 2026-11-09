@@ -39,7 +39,7 @@ export function nativeAssetBucket(): R2Bucket | null {
   const config = bridgeConfig();
   if (!config) return null;
   const endpoint = (key: string) => {
-    if (!/^generated\/[\w-]{1,120}\/[0-9a-f-]{36}\.(?:jpg|png)$/.test(key)) throw new Error('Invalid image key');
+    if (!/^generated\/[\w-]{1,120}\/(?:batches\/[0-9a-f-]{36}\/)?[0-9a-f-]{36}\.(?:jpg|png)$/.test(key)) throw new Error('Invalid image key');
     return `/assets/${key}`;
   };
   return {
