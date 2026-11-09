@@ -122,7 +122,10 @@ async function postSettings(req: Request) {
 function settingsError(error: unknown): Response {
   console.error('Settings request failed:', error);
   const detail = error instanceof Error ? error.message : String(error);
-  if (/gemini_credential|no such column/i.test(detail)) {
+  if (/no such column:\s*(?:studio_settings\.)?upscale_credential|has no column named upscale_credential/i.test(detail)) {
+    return bad('Database migration is required: apply drizzle/0004_upscale_credential.sql to the active database, then retry.', 503);
+  }
+  if (/no such column:\s*(?:studio_settings\.)?gemini_credential|has no column named gemini_credential/i.test(detail)) {
     return bad('Database migration is required: apply drizzle/0003_gemini_seo.sql to the active database, then retry.', 503);
   }
   return bad('Settings could not be saved. Check the server logs for details.', 500);
