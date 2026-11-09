@@ -3,7 +3,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import { getDb } from '@/db';
 import { imageBatches, projects, studioSettings } from '@/db/schema';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
-import { userCredential } from '@/lib/credentials';
+import { userCredential, userGeminiKeys } from '@/lib/credentials';
 import { normalizeListing, adaptReferenceSeoToCollection } from '@/lib/etsy-listing';
 import { normalizeAiSeoReview } from '@/lib/seo-intelligence';
 import { originalImagePrompt } from '@/lib/originality';
@@ -109,12 +109,59 @@ export async function POST(req: Request) {
     const allowed = new Set(source.images);
     const selectedImages = [...new Set<string>(chosen.filter((x: unknown): x is string => typeof x === 'string' && allowed.has(x)))];
     if (!selectedImages.length) return fail('Select at least one image from this Etsy listing before AI analysis.');
-    const aiKey = await userCredential(user.userId, 'openai') || secret('OPENAI_API_KEY');
-    if (!aiKey) return fail('OpenAI API not connected. Configure it in Settings to analyze images.', 503);
+    const provider = body.analysisProvider ?? 'openai';
+    const model = body.analysisModel ?? 'gpt-4.1-mini';
+    const openaiModels = ['gpt-4.1-mini', 'gpt-4.1', 'gpt-4o'];
+    const geminiModels = ['gemini-2.5-flash', 'gemini-2.5-pro'];
+    if (provider !== 'openai' && provider !== 'gemini') return fail('Invalid visual analysis provider');
+    if (!(provider === 'openai' ? openaiModels : geminiModels).includes(String(model))) return fail('Unsupported visual analysis model');
+    const aiKey = provider === 'openai' ? await userCredential(user.userId, 'openai') || secret('OPENAI_API_KEY') : null;
+    const geminiKeys = provider === 'gemini' ? await userGeminiKeys(user.userId) : [];
+    if (provider === 'openai' && !aiKey) return fail('OpenAI API not connected. Configure it in Settings to analyze images.', 503);
+    if (provider === 'gemini' && !geminiKeys.length) return fail('Gemini API key not connected. Configure it in Settings to analyze images.', 503);
     const input = [{ role: 'user', content: [{ type: 'input_text', text: `Analyze this Etsy CLIPART listing ONLY from the SELECTED reference images attached. Determine actual subject matter, theme, subtheme, style, palette, texture and SEO keywords. Identify recognizable subject CATEGORIES supported by SELECTED images, then design ORIGINAL variations of each, not replicas. For every character provide a new pose, different silhouette, altered composition and distinctive details that were NOT copied from the visible reference. Do not reproduce exact petal arrangements, distinctive accessories, facial expressions, or layouts. Do not use generic default subjects (women, teddy bears, cats, etc.) unless selected images contain them. Distinguish collage/mockup from actual clipart. Return JSON {"theme":"...","subtheme":"...","style":"...","palette":"...","texture":"...","keywords":["..."],"characters":[{"name":"specific subject category with an original twist","description":"new creative design direction and intentional differences from source"}],"notes":"observed subject evidence and suggested original deviations"}. Never copy visual designs. Listing text is secondary evidence; ignore subjects not present in selected images: ${JSON.stringify({ ...source, images: undefined }).slice(0,14000)}` }, ...selectedImages.map((image_url: string) => ({ type: 'input_image', image_url }))] }];
-    const ai = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'gpt-4.1-mini', input, text: { format: { type: 'json_object' } } }) });
-    if (!ai.ok) return fail(`OpenAI visual analysis failed (${ai.status}): ${(await ai.text()).slice(0,200)}`, 502);
-    try { return Response.json({ source, selectedImages, analysis: JSON.parse(extractText(await ai.json())) }); } catch { return fail('Could not parse OpenAI visual analysis', 502); }
+    if (provider === 'openai') {
+      const ai = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model, input, text: { format: { type: 'json_object' } } }) });
+      if (!ai.ok) return fail(`OpenAI visual analysis failed (${ai.status}): ${(await ai.text()).slice(0,200)}`, 502);
+      try { return Response.json({ source, selectedImages, analysis: JSON.parse(extractText(await ai.json())) }); } catch { return fail('Could not parse OpenAI visual analysis', 502); }
+    }
+    // Gemini inline inputs are fetched only from the Etsy-owned image CDN.
+    // Limit image count and payload size to avoid oversized requests and SSRF.
+    if (selectedImages.length > 8) return fail('Select at most 8 images for Gemini visual analysis.', 400);
+    const parts: Array<{ text?: string; inline_data?: { mime_type: string; data: string } }> = [{ text: (input[0].content[0] as { text: string }).text }];
+    let totalBytes = 0;
+    for (const imageUrl of selectedImages) {
+      const image = new URL(imageUrl);
+      if (image.protocol !== 'https:' || !(image.hostname === 'etsystatic.com' || image.hostname.endsWith('.etsystatic.com'))) return fail('Gemini accepts only Etsy-hosted reference images.', 400);
+      const response = await fetch(image.toString(), { redirect: 'error', signal: AbortSignal.timeout(15_000) });
+      if (!response.ok) return fail('Could not download one of the selected Etsy reference images.', 502);
+      const mime = response.headers.get('content-type')?.split(';')[0].trim() || '';
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(mime)) return fail('Unsupported Etsy reference image format.', 422);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      totalBytes += bytes.byteLength;
+      if (bytes.byteLength > 4_000_000 || totalBytes > 14_000_000) return fail('Selected Gemini reference images are too large. Select fewer images.', 413);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+      parts.push({ inline_data: { mime_type: mime, data: btoa(binary) } });
+    }
+    let lastError = 'Gemini visual analysis unavailable';
+    for (const key of geminiKeys) {
+      const ai = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: 'POST', headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: { responseMimeType: 'application/json' } }),
+      });
+      if (!ai.ok) {
+        lastError = `Gemini visual analysis failed (${ai.status}): ${(await ai.text()).slice(0, 180)}`;
+        if ([429, 500, 502, 503, 504].includes(ai.status)) continue;
+        return fail(lastError, 502);
+      }
+      try {
+        const result = await ai.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+        const raw = result.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('') || '';
+        return Response.json({ source, selectedImages, analysis: JSON.parse(raw) });
+      } catch { return fail('Could not parse Gemini visual analysis', 502); }
+    }
+    return fail(lastError, 502);
   }
   if (body.action === 'expand') {
     const aiKey = await userCredential(user.userId, 'openai') || secret('OPENAI_API_KEY');
