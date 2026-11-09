@@ -375,3 +375,43 @@ h1,h2,.stat strong,.step b,.source-card strong,.asset-meta b { color:#302721; }
 .listing-model-panel .listing-provider-status strong{font-size:10px;letter-spacing:.06em}
 .listing-model-panel .listing-provider-status span{display:inline-block;border:1px solid #f1c8ab;background:#fff1e7;color:#ae4c1f;padding:5px 10px;border-radius:999px;font-weight:700}
 .listing-model-panel .sub{color:#62554e;opacity:1}
+
+/* Image production: activity queue alongside generation controls. */
+.production-dashboard{display:grid;grid-template-columns:minmax(0,1fr) minmax(310px,360px);gap:20px;align-items:start;margin-bottom:20px}
+.production-dashboard-main{min-width:0}
+.production-dashboard-main .production-setup{margin-bottom:0}
+.production-activity{min-width:0;position:sticky;top:16px;padding:0;overflow:hidden;display:flex;flex-direction:column;max-height:calc(100vh - 32px)}
+.production-activity-head{padding:18px;border-bottom:1px solid #eee6df}
+.production-activity-head h2{font-size:16px;margin:0 0 4px}
+.production-activity-scroll{overflow-y:auto;min-height:0;overscroll-behavior:contain}
+.production-activity-section{padding:16px;border-bottom:1px solid #eee6df}
+.production-activity-section h3{font-size:13px;margin:0 0 14px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.production-activity-section h3 span{font-size:11px;color:#8c7368;font-weight:600}
+.production-activity-section .batch-job{padding:12px 0;border-top:1px solid #f0e9e4}
+.production-activity-section .batch-job-top{gap:8px;align-items:flex-start}
+.production-activity-section .batch-job-top b{display:block;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.production-activity-section .batch-job-top small{display:block;margin-top:4px}
+.production-activity-section .batch-job-counts{display:flex;flex-wrap:wrap;gap:7px}
+.production-activity-section .batch-job-counts span{white-space:normal}
+.production-activity-summary{font-size:11px;color:#67584e;background:#fff6f0;padding:10px;border-radius:8px;margin-bottom:8px}
+.production-activity-summary b{color:#bd541f}
+.remote-activity-track{height:7px;border-radius:999px;background:#f0e7df;overflow:hidden;position:relative;margin-top:11px}
+.remote-activity-track i{display:block;width:15%;height:100%;border-radius:999px;background:#c76a33}
+.remote-activity-track.is-processing i{width:35%;animation:remote-upscale-indeterminate 1.8s ease-in-out infinite}
+@keyframes remote-upscale-indeterminate{0%{transform:translateX(-120%)}100%{transform:translateX(360%)}}
+.remote-job-cancel{font-size:10px;padding:6px 10px;margin-top:9px}
+.sidebar{position:sticky}
+.sidebar-toggle{align-self:flex-end;background:transparent;border:1px solid #eaded5;border-radius:8px;color:#9b5940;display:flex;align-items:center;justify-content:center;width:32px;height:32px;margin:-10px 0 8px;cursor:pointer}
+.sidebar-is-collapsed .sidebar{width:72px;min-width:72px;padding-left:10px;padding-right:10px}
+.sidebar-is-collapsed .sidebar .brand{justify-content:center}
+.sidebar-is-collapsed .sidebar .brand>div:last-child,
+.sidebar-is-collapsed .sidebar .side-caption,
+.sidebar-is-collapsed .sidebar .side-foot,
+.sidebar-is-collapsed .sidebar-nav-label,
+.sidebar-is-collapsed .sidebar .nav-active-dot{display:none}
+.sidebar-is-collapsed .sidebar nav button{justify-content:center;padding:13px 8px}
+.sidebar-is-collapsed .sidebar nav button svg{flex-shrink:0}
+@media(max-width:1200px){.production-dashboard{grid-template-columns:minmax(0,1fr) 300px}}
+@media(max-width:980px){.production-dashboard{grid-template-columns:minmax(0,1fr)}.production-activity{position:static;max-height:480px}}
+@media(max-width:760px){.sidebar-toggle{display:none}.sidebar-is-collapsed .sidebar{width:100%;min-width:0;padding:15px}.sidebar-is-collapsed .sidebar .brand>div:last-child,.sidebar-is-collapsed .sidebar-nav-label{display:inline}.sidebar-is-collapsed .sidebar nav button{padding:10px}.production-activity{max-height:420px}}
+@media(prefers-reduced-motion:reduce){.remote-activity-track.is-processing i{animation:none;width:100%}}
