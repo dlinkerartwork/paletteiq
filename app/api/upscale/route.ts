@@ -74,8 +74,28 @@ export async function POST(req: Request) {
     if (!character?.imageUrl) return bad('Generated image not found', 404);
     if (body.action === 'cancel') {
       if (!character.upscaleJob) return bad('No pending upscale job', 409);
-      const cancelled = await (await remote(user.userId, `/v1/jobs/${character.upscaleJob.id}/cancel`, { method: 'POST' })).json() as RemoteStatus;
-      return Response.json({ id: character.upscaleJob.id, status: cancelled.status });
+      const staleId = character.upscaleJob.id;
+      let status: string;
+      let missing = false;
+      try {
+        const cancelled = await (await remote(user.userId, `/v1/jobs/${staleId}/cancel`, { method: 'POST' })).json() as RemoteStatus;
+        status = cancelled.status;
+      } catch (error) {
+        const description = error instanceof Error ? error.message : String(error);
+        // Clean up only a confirmed missing job, not an offline server, auth
+        // failure, timeout, or unsupported cancel endpoint.
+        if (!/Remote Upscale HTTP 404:.*(?:job.*not found|job.*does not exist|unknown job)/i.test(description)) throw error;
+        missing = true;
+        status = 'orphaned';
+      }
+      if (missing || status === 'cancelled') {
+        const latest = await ownedProject(user.userId, body.projectId);
+        const target = latest.data.characters.find(c => c.id === body.characterId);
+        if (!target || target.upscaleJob?.id !== staleId) return bad('Job changed while cancelling; please refresh', 409);
+        delete target.upscaleJob;
+        await getDb().update(projects).set({ data: JSON.stringify(latest.data), updatedAt: Date.now() }).where(and(eq(projects.id, latest.row.id), eq(projects.owner, user.userId)));
+      }
+      return Response.json({ id: staleId, status, cleared: missing || status === 'cancelled' });
     }
     if (character.upscaleJob) {
       if (character.upscaleJob.sourceUrl !== character.imageUrl) return bad('Original image changed; previous job requires review', 409);
