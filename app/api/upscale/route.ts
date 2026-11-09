@@ -6,6 +6,7 @@ import { projects, studioSettings } from '@/db/schema';
 import { nativeAssetBucket } from '@/lib/native-bridge';
 import { batchAssetKey } from '@/lib/batch-assets';
 import { decryptCredential } from '@/lib/credentials';
+import { normalizeUpscaleServerUrl } from '@/lib/upscale-server-url';
 
 type RemoteJob = { id: string; sourceUrl: string; factor: 2 | 4; requireTransparency: boolean; qc: boolean; submittedAt: number };
 type Character = { id: string; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: RemoteJob };
@@ -23,8 +24,11 @@ const dimension = (bytes: Uint8Array) => {
 };
 
 async function remoteConfig(owner: string) {
-  const url = variables().PALETTEIQ_UPSCALE_SERVER_URL?.trim();
-  const rows = await getDb().select({ upscaleCredential: studioSettings.upscaleCredential }).from(studioSettings).where(eq(studioSettings.owner, owner)).limit(1);
+  const rows = await getDb().select({ upscaleCredential: studioSettings.upscaleCredential, preferences: studioSettings.preferences }).from(studioSettings).where(eq(studioSettings.owner, owner)).limit(1);
+  const preferences = rows[0]?.preferences ? JSON.parse(rows[0].preferences) as { upscaleServerUrl?: string } : {};
+  const customUrl = preferences.upscaleServerUrl || '';
+  const url = customUrl || variables().PALETTEIQ_UPSCALE_SERVER_URL?.trim();
+  if (customUrl && !normalizeUpscaleServerUrl(customUrl)) throw Error('Invalid saved GPU Server URL. Update it in Settings.');
   const key = rows[0]?.upscaleCredential ? await decryptCredential(rows[0].upscaleCredential, owner) : variables().PALETTEIQ_UPSCALE_SERVER_KEY?.trim();
   if (!url || !key || key.length < 32) throw Error('Remote Upscale is not configured on the PaletteIQ backend.');
   const parsed = new URL(url);
