@@ -238,7 +238,8 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
     if (!character.upscaleJob || !window.confirm(`Cancel remote upscale for ${character.name}?`)) return;
     try {
       const result = await request<{ status: string }>('/api/upscale', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'cancel', projectId: project.id, characterId: character.id }) });
-      setMessage(`Cancellation requested for ${character.name}: ${result.status}.`);
+      setMessage(`Remote upscale for ${character.name}: ${result.status}.`);
+      if (result.status === 'cancelled' || result.status === 'orphaned') window.location.reload();
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
   };
   const downloadZip = async (scope: 'selected' | 'all' | 'package') => {
