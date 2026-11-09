@@ -5,7 +5,7 @@ const { randomUUID } = require('node:crypto');
 const path = require('node:path');
 
 const TABLES = ['projects', 'studio_settings', 'image_batches'];
-const assetKey = /^generated\/([\w-]{1,120})\/([0-9a-f-]{36})\.(png|jpg)$/;
+const assetKey = /^generated\/([\w-]{1,120})\/(?:batches\/([0-9a-f-]{36})\/)?([0-9a-f-]{36})\.(png|jpg)$/;
 
 function openNativeDb(directory, migrationsDir) {
   const dbDir = path.join(directory, 'database');
@@ -103,8 +103,8 @@ function startNativeStorage({ directory, migrationsDir, token }) {
       }
       const match = /^\/assets\/(.*)$/.exec(req.url || '');
       if (match && assetKey.test(match[1])) {
-        const [, owner, id, extension] = match[1].match(assetKey);
-        const folder = path.join(imagesRoot, owner);
+        const [, owner, batchId, id, extension] = match[1].match(assetKey);
+        const folder = batchId ? path.join(imagesRoot, owner, 'batches', batchId) : path.join(imagesRoot, owner);
         const filename = path.join(folder, `${id}.${extension}`);
         if (req.method === 'PUT') {
           mkdirSync(folder, { recursive: true });
