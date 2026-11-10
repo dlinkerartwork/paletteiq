@@ -23,6 +23,89 @@ async function request<T = unknown>(url: string, options?: RequestInit): Promise
 // Keep the last known job progress visible immediately when switching tabs.
 const batchJobSnapshot = new Map<string, Job[]>();
 
+type UpscaleCompareProps = { name: string; originalUrl: string; upscaledUrl: string; onClose: () => void };
+
+function UpscaleCompare({ name, originalUrl, upscaledUrl, onClose }: UpscaleCompareProps) {
+  const [split, setSplit] = useState(50);
+  const [zoom, setZoom] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const gesture = useRef<{ kind: 'split' | 'pan'; pointerId: number; startX: number; startY: number; split: number; offset: { x: number; y: number } } | null>(null);
+
+  const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+  const setMagnification = (next: number) => {
+    const bounded = clamp(next, 1, 8);
+    setZoom(bounded);
+    if (bounded === 1) setOffset({ x: 0, y: 0 });
+  };
+  useEffect(() => {
+    const dismiss = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', dismiss);
+    return () => window.removeEventListener('keydown', dismiss);
+  }, [onClose]);
+  const pointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 && event.button !== 1) return;
+    const bounds = canvasRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    const dividerX = bounds.left + bounds.width * split / 100;
+    const kind = event.button === 0 && Math.abs(event.clientX - dividerX) <= 24 ? 'split' : 'pan';
+    gesture.current = { kind, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, split, offset };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  };
+  const pointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const current = gesture.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    const bounds = canvasRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    if (current.kind === 'split') {
+      setSplit(clamp(current.split + (event.clientX - current.startX) / bounds.width * 100, 0, 100));
+    } else if (zoom > 1) {
+      setOffset({ x: current.offset.x + event.clientX - current.startX, y: current.offset.y + event.clientY - current.startY });
+    }
+  };
+  const endGesture = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (gesture.current?.pointerId === event.pointerId) gesture.current = null;
+  };
+  const imageStyle: React.CSSProperties = {
+    position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain',
+    transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`,
+    transformOrigin: 'center center', pointerEvents: 'none', userSelect: 'none'
+  };
+  return <div role="presentation" onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 1100, background: 'rgba(15, 23, 42, 0.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+    <div role="dialog" aria-modal="true" aria-label={`Compare original and upscaled: ${name}`} onClick={event => event.stopPropagation()} style={{ background: '#fff', borderRadius: 14, width: 'min(96vw, 1200px)', maxHeight: '96vh', padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <strong>{name} · Original / Upscaled comparison</strong>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button className="outline-btn" type="button" onClick={() => setMagnification(zoom / 1.25)} aria-label="Zoom out">−</button>
+          <span style={{ minWidth: 48, textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
+          <button className="outline-btn" type="button" onClick={() => setMagnification(zoom * 1.25)} aria-label="Zoom in">+</button>
+          <button className="outline-btn" type="button" onClick={() => { setMagnification(1); setOffset({ x: 0, y: 0 }); setSplit(50); }}>Reset</button>
+          <button className="outline-btn" type="button" onClick={onClose}>Close</button>
+        </div>
+      </div>
+      <div ref={canvasRef} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={endGesture} onPointerCancel={endGesture}
+        onWheel={event => { if (event.deltaY !== 0) setMagnification(zoom * (event.deltaY < 0 ? 1.15 : 1 / 1.15)); }}
+        style={{ position: 'relative', height: 'min(75vh, 780px)', minHeight: 240, overflow: 'hidden', borderRadius: 8, backgroundColor: '#eee', backgroundImage: 'linear-gradient(45deg, #ddd 25%, transparent 25%), linear-gradient(-45deg, #ddd 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #ddd 75%), linear-gradient(-45deg, transparent 75%, #ddd 75%)', backgroundSize: '24px 24px', backgroundPosition: '0 0, 0 12px, 12px -12px, -12px 0', touchAction: 'none', cursor: zoom > 1 ? 'grab' : 'col-resize' }}>
+        <Image unoptimized src={originalUrl} alt={`Original ${name}`} width={4096} height={4096} draggable={false} style={imageStyle}/>
+        <div style={{ position: 'absolute', inset: 0, clipPath: `inset(0 0 0 ${split}%)`, pointerEvents: 'none' }}>
+          <Image unoptimized src={upscaledUrl} alt={`Upscaled ${name}`} width={4096} height={4096} draggable={false} style={imageStyle}/>
+        </div>
+        <div style={{ position: 'absolute', left: `${split}%`, top: 0, bottom: 0, width: 2, background: '#fff', boxShadow: '0 0 0 1px #444, 0 0 8px #222', pointerEvents: 'none' }}>
+          <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', width: 36, height: 36, display: 'grid', placeItems: 'center', borderRadius: '50%', border: '2px solid #fff', background: '#242424', color: '#fff', fontSize: 17 }}>↔</div>
+        </div>
+        <span style={{ position: 'absolute', top: 10, left: 10, padding: '4px 8px', borderRadius: 5, background: 'rgba(0,0,0,.7)', color: '#fff', pointerEvents: 'none' }}>Original</span>
+        <span style={{ position: 'absolute', top: 10, right: 10, padding: '4px 8px', borderRadius: 5, background: 'rgba(0,0,0,.7)', color: '#fff', pointerEvents: 'none' }}>Upscaled 4×</span>
+      </div>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <label htmlFor="upscale-compare-divider" style={{ whiteSpace: 'nowrap' }}>Compare</label>
+        <input id="upscale-compare-divider" type="range" min="0" max="100" value={split} onChange={event => setSplit(Number(event.target.value))} aria-label="Comparison divider position" style={{ flex: 1 }}/>
+      </div>
+      <small style={{ color: '#64748b' }}>Drag the center line to compare · Zoom with buttons or mouse wheel · Drag the image to pan when zoomed · Esc to close</small>
+    </div>
+  </div>;
+}
+
 export default function ImageProduction({ project, model, quality, onModel, onQuality, onDownloaded, onAsset }: Props) {
   const [mode, setMode] = useState<'single' | 'batch'>('batch');
   const [batchModel, setBatchModel] = useState('gpt-image-2.5-flare');
@@ -48,7 +131,7 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
   const [upscaleProvider, setUpscaleProvider] = useState<'remote'>('remote');
   const [upscaleFactor, setUpscaleFactor] = useState(4);
   const [upscaling, setUpscaling] = useState(false);
-  const [upscalePreview, setUpscalePreview] = useState<{ name: string; url: string } | null>(null);
+  const [upscalePreview, setUpscalePreview] = useState<{ name: string; originalUrl: string; upscaledUrl: string } | null>(null);
   const [remoteProgress, setRemoteProgress] = useState<Record<string, { status: string; elapsed: number }>>({});
   useEffect(() => {
     let live = true;
@@ -324,15 +407,8 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
     </aside>
     </div>
     <section className="panel image-download-toolbar"><div><h2>Collection images</h2><p className="sub">{selectedIds.length} cards selected · {generated.length} images available · {eligible.length} prompts not yet generated</p></div><div className="image-download-actions"><button className="outline-btn" onClick={() => setSelectedIds(project.characters.map(c => c.id))}>Select all</button><button className="outline-btn" onClick={() => setSelectedIds([])}>Clear</button><button className="outline-btn" disabled={upscaling || !selectedGenerated.length} onClick={() => void runCloudUpscale()}>{upscaling ? <LoaderCircle size={15} className="spin"/> : <ImageIcon size={15}/>} Remote GPU upscale {upscaleFactor}× ({selectedGenerated.length})</button><button className="outline-btn" disabled={downloading || !selectedGenerated.length} onClick={() => void downloadZip('selected')}><Download size={15}/> Download selected ZIP</button><button className="outline-btn" disabled={downloading || !generated.length} onClick={() => void downloadZip('all')}><Download size={15}/> Download all ZIP</button><button className="primary-btn" title={!project.listing?.title ? 'Create and save an Etsy listing draft first.' : ''} disabled={downloading || !generated.length || !project.listing?.title} onClick={() => void downloadZip('package')}><Download size={15}/> Images + listing draft ZIP</button></div></section>
-    <div className="assets-grid">{project.characters.map(c => <div className={`asset-card image-select-card ${selectedIds.includes(c.id) ? 'selected' : ''}`} key={c.id}><label className="asset-select"><input type="checkbox" aria-label={`Select ${c.name}`} checked={selectedIds.includes(c.id)} onChange={e => setSelectedIds(ids => e.target.checked ? [...ids, c.id] : ids.filter(id => id !== c.id))}/><span>Select</span></label><div className="asset-image">{c.imageUrl ? <Image unoptimized width={1024} height={1024} src={c.imageUrl} alt={c.name}/> : <ImageIcon size={36}/>}</div><div className="asset-meta"><b>{c.name}</b><span className={`status ${c.status}`}>{c.status}</span></div>{pending.has(c.id) && <p className="asset-pending">Batch pending</p>}{c.upscaleJob && <div className="asset-upscaled"><span>Remote GPU: {remoteProgress[c.id]?.status === 'sync_error' ? 'Import failed' : remoteProgress[c.id]?.status || 'queued'} · {Math.floor((remoteProgress[c.id]?.elapsed || 0) / 60)}m {Math.floor((remoteProgress[c.id]?.elapsed || 0) % 60)}s</span><button className="outline-btn" type="button" onClick={() => void cancelRemoteUpscale(c)}>Cancel upscale</button></div>}{c.upscaledImageUrl && <div className="asset-upscaled"><button type="button" className="outline-btn" onClick={() => setUpscalePreview({ name: c.name, url: c.upscaledImageUrl! })}>View upscale</button><a className="outline-btn" href={c.upscaledImageUrl + '&download=1'} download>Download upscale</a></div>}{c.imageUrl && <div className={`similarity-note similarity-${c.similarityReview?.status || 'unverified'}`} title={c.similarityReview?.reason || 'Not checked yet'}>{c.similarityReview?.status === 'needs_review' ? `⚠ Similar to reference (${c.similarityReview.score}%) — review / regenerate` : c.similarityReview?.status === 'clear' ? `✓ AI visual review: low similarity (${c.similarityReview.score}%)` : 'Similarity not verified'}{c.similarityReview?.reason && <small>{c.similarityReview.reason}</small>}</div>}{c.error && <p className="asset-error">{c.error}</p>}<div className="asset-card-actions"><button className="outline-btn" disabled={working || pending.has(c.id) || !c.prompt} onClick={() => mode === 'single' ? void generateSingle(c) : void submitBatch([c.id], everGenerated(c))}>{working ? <LoaderCircle size={14} className="spin"/> : <Sparkles size={14}/>} {everGenerated(c) ? 'Regenerate' : 'Generate'} {mode === 'batch' ? '(Batch)' : '(Single)'}</button>{c.imageUrl && <a className="outline-btn" href={`${c.imageUrl}&download=1`} download><Download size={14}/> Download</a>}</div></div>)}</div>
-    {upscalePreview && <div role="presentation" onClick={() => setUpscalePreview(null)} style={{ position: 'fixed', inset: 0, zIndex: 1100, background: 'rgba(15, 23, 42, 0.88)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-      <div role="dialog" aria-modal="true" aria-label={`Upscaled image: ${upscalePreview.name}`} onClick={event => event.stopPropagation()} style={{ background: '#fff', borderRadius: 14, width: 'min(95vw, 1100px)', maxHeight: '95vh', padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}><strong>{upscalePreview.name} · Upscaled</strong><button type="button" className="outline-btn" onClick={() => setUpscalePreview(null)}>Close</button></div>
-        <div style={{ minHeight: 0, overflow: 'auto', display: 'flex', justifyContent: 'center', background: '#f5f5f5', borderRadius: 8 }}>
-          <Image unoptimized src={upscalePreview.url} alt={`Upscaled ${upscalePreview.name}`} width={4096} height={4096} style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: 'calc(95vh - 125px)', objectFit: 'contain' }}/>
-        </div>
-      </div>
-    </div>}
+    <div className="assets-grid">{project.characters.map(c => <div className={`asset-card image-select-card ${selectedIds.includes(c.id) ? 'selected' : ''}`} key={c.id}><label className="asset-select"><input type="checkbox" aria-label={`Select ${c.name}`} checked={selectedIds.includes(c.id)} onChange={e => setSelectedIds(ids => e.target.checked ? [...ids, c.id] : ids.filter(id => id !== c.id))}/><span>Select</span></label><div className="asset-image">{c.imageUrl ? <Image unoptimized width={1024} height={1024} src={c.imageUrl} alt={c.name}/> : <ImageIcon size={36}/>}</div><div className="asset-meta"><b>{c.name}</b><span className={`status ${c.status}`}>{c.status}</span></div>{pending.has(c.id) && <p className="asset-pending">Batch pending</p>}{c.upscaleJob && <div className="asset-upscaled"><span>Remote GPU: {remoteProgress[c.id]?.status === 'sync_error' ? 'Import failed' : remoteProgress[c.id]?.status || 'queued'} · {Math.floor((remoteProgress[c.id]?.elapsed || 0) / 60)}m {Math.floor((remoteProgress[c.id]?.elapsed || 0) % 60)}s</span><button className="outline-btn" type="button" onClick={() => void cancelRemoteUpscale(c)}>Cancel upscale</button></div>}{c.upscaledImageUrl && <div className="asset-upscaled"><button type="button" className="outline-btn" onClick={() => c.imageUrl && setUpscalePreview({ name: c.name, originalUrl: c.imageUrl, upscaledUrl: c.upscaledImageUrl! })}>View upscale</button><a className="outline-btn" href={c.upscaledImageUrl + '&download=1'} download>Download upscale</a></div>}{c.imageUrl && <div className={`similarity-note similarity-${c.similarityReview?.status || 'unverified'}`} title={c.similarityReview?.reason || 'Not checked yet'}>{c.similarityReview?.status === 'needs_review' ? `⚠ Similar to reference (${c.similarityReview.score}%) — review / regenerate` : c.similarityReview?.status === 'clear' ? `✓ AI visual review: low similarity (${c.similarityReview.score}%)` : 'Similarity not verified'}{c.similarityReview?.reason && <small>{c.similarityReview.reason}</small>}</div>}{c.error && <p className="asset-error">{c.error}</p>}<div className="asset-card-actions"><button className="outline-btn" disabled={working || pending.has(c.id) || !c.prompt} onClick={() => mode === 'single' ? void generateSingle(c) : void submitBatch([c.id], everGenerated(c))}>{working ? <LoaderCircle size={14} className="spin"/> : <Sparkles size={14}/>} {everGenerated(c) ? 'Regenerate' : 'Generate'} {mode === 'batch' ? '(Batch)' : '(Single)'}</button>{c.imageUrl && <a className="outline-btn" href={`${c.imageUrl}&download=1`} download><Download size={14}/> Download</a>}</div></div>)}</div>
+    {upscalePreview && <UpscaleCompare name={upscalePreview.name} originalUrl={upscalePreview.originalUrl} upscaledUrl={upscalePreview.upscaledUrl} onClose={() => setUpscalePreview(null)}/>}
     {!project.characters.length && <div className="panel empty-state"><ImageIcon size={32}/><strong>No image subjects yet</strong><p>Create characters and prompts first.</p></div>}
   </>;
 }
