@@ -68,9 +68,15 @@ function insertLegacyRows(database, table, rows) {
 
 function readPayload(req, limit = 12 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
-    const buffers = []; let length = 0;
-    req.on('data', chunk => { length += chunk.length; if (length > limit) { reject(new Error('Request too large')); req.destroy(); } else buffers.push(chunk); });
-    req.on('end', () => resolve(Buffer.concat(buffers)));
+    const buffers = []; let length = 0; let tooLarge = false;
+    req.on('data', chunk => {
+      length += chunk.length;
+      if (length > limit) { tooLarge = true; buffers.length = 0; }
+      else if (!tooLarge) buffers.push(chunk);
+    });
+    req.on('end', () => tooLarge
+      ? reject(Object.assign(new Error(`Request exceeds ${Math.round(limit / 1024 / 1024)} MB limit`), { statusCode: 413 }))
+      : resolve(Buffer.concat(buffers)));
     req.on('error', reject);
   });
 }
@@ -110,7 +116,7 @@ function startNativeStorage({ directory, migrationsDir, token }) {
         const filename = path.join(folder, `${id}.${extension}`);
         if (req.method === 'PUT') {
           mkdirSync(folder, { recursive: true });
-          const content = await readPayload(req);
+          const content = await readPayload(req, 100 * 1024 * 1024);
           // Never truncate the visible image in place. A crash during writing
           // must leave the previously saved image intact.
           const temporary = path.join(folder, `.${id}.${randomUUID()}.tmp`);
@@ -133,7 +139,7 @@ function startNativeStorage({ directory, migrationsDir, token }) {
         if (req.method === 'GET') { res.writeHead(200, { 'Content-Type': extension === 'jpg' ? 'image/jpeg' : 'image/png' }); return createReadStream(filename).pipe(res); }
       }
       return finish(404, { error: 'Not found' });
-    } catch (error) { return finish(500, { error: String(error instanceof Error ? error.message : error) }); }
+    } catch (error) { return finish(error?.statusCode === 413 ? 413 : 500, { error: String(error instanceof Error ? error.message : error) }); }
   });
   return new Promise((resolve, reject) => {
     server.once('error', reject);
