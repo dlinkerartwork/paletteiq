@@ -138,6 +138,7 @@ export async function POST(req: Request) {
 }
 
 export async function GET(req: Request) {
+  let syncStage = 'read request';
   try {
     const user = await getChatGPTUser();
     if (!user) return bad('Sign in required', 401);
@@ -155,6 +156,7 @@ export async function GET(req: Request) {
     const task = character.upscaleJob;
     if (!task) return Response.json({ status: character.upscaledImageUrl ? 'succeeded' : 'idle', url: character.upscaledImageUrl });
     if (character.imageUrl !== task.sourceUrl) return bad('Original image changed during upscale; previous job was not applied', 409);
+    syncStage = 'read remote job status';
     const result = await (await remote(user.userId, `/v1/jobs/${task.id}`)).json() as RemoteStatus;
     if (result.status === 'failed') return Response.json({ status: 'failed', error: result.error || 'Remote upscale failed', id: task.id });
     if (result.status === 'cancelled') {
@@ -167,28 +169,34 @@ export async function GET(req: Request) {
       return Response.json({ status: 'cancelled', id: task.id, elapsedSeconds: result.elapsed_seconds });
     }
     if (result.status !== 'completed') return Response.json({ status: result.status, id: task.id, elapsedSeconds: result.elapsed_seconds, startedAt: result.started_at });
+    syncStage = 'download completed upscale PNG';
     const response = await remote(user.userId, `/v1/jobs/${task.id}/result`);
     const length = Number(response.headers.get('content-length') || 0);
     if (length > 100 * 1024 * 1024) return bad('Upscale result exceeds 100 MB', 413);
     const bytes = new Uint8Array(await response.arrayBuffer());
+    syncStage = 'validate output PNG';
     if (bytes.length > 100 * 1024 * 1024) return bad('Upscale result exceeds 100 MB', 413);
     const output = dimension(bytes);
+    syncStage = 'read source PNG for QC';
     const sourceObject = await storage()?.get(sourceKey(user.userId, task.sourceUrl));
     if (!sourceObject) return bad('Source image unavailable for QC', 404);
     const source = dimension(new Uint8Array(await sourceObject.arrayBuffer()));
     if (task.qc && (output.width !== source.width * task.factor || output.height !== source.height * task.factor)) return bad('QC rejected incorrect output dimensions', 422);
     if (task.requireTransparency && source.alpha && !output.alpha) return bad('QC rejected missing PNG alpha channel', 422);
+    syncStage = 'read latest collection state';
     const latest = await ownedProject(user.userId, projectId);
     const target = latest.data.characters.find(c => c.id === characterId);
     if (!target || target.imageUrl !== task.sourceUrl || target.upscaleJob?.id !== task.id) return bad('Collection changed before upscale completed', 409);
     const assetId = crypto.randomUUID();
     const bucket = storage();
     if (!bucket) return bad('Storage unavailable', 503);
+    syncStage = 'save upscale PNG in desktop storage';
     await bucket.put(`generated/${user.userId}/${assetId}.png`, bytes);
     target.upscaledImageUrl = `/api/images/${assetId}?format=png`;
     target.upscaledAt = Date.now();
     delete target.upscaleJob;
+    syncStage = 'save imported result in collection database';
     await getDb().update(projects).set({ data: JSON.stringify(latest.data), updatedAt: Date.now() }).where(and(eq(projects.id, latest.row.id), eq(projects.owner, user.userId)));
     return Response.json({ status: 'succeeded', url: target.upscaledImageUrl, width: output.width, height: output.height, qc: result.qc });
-  } catch (e) { return bad(e instanceof Error ? e.message : String(e), 502); }
+  } catch (e) { const detail = e instanceof Error ? e.message : String(e); console.error(`[upscale-sync] stage=${syncStage}: ${detail}`); return bad(`Upscale import failed at ${syncStage}: ${detail}`, 502); }
 }
