@@ -9,7 +9,7 @@ export type ThumbnailElement = {
   fontSize?: number; curve?: number; fontFamily?: string; color?: string; fontWeight?: string; opacity?: number; locked?: boolean;
 };
 export type ThumbnailDesign = {
-  id: string; name: string; width: number; height: number; background: string; backgroundImageUrl?: string; aiImageUrl?: string; aiImagePrompt?: string; elements: ThumbnailElement[];
+  id: string; name: string; width: number; height: number; background: string; backgroundImageUrl?: string; aiImageUrl?: string; aiImagePrompt?: string; renderedImageUrl?: string; elements: ThumbnailElement[];
   referenceUrl?: string; updatedAt: number;
 };
 type Character = { id: string; name: string; imageUrl?: string; upscaledImageUrl?: string };
@@ -93,6 +93,7 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
   const [backgroundUploading, setBackgroundUploading] = useState(false);
   const [history, setHistory] = useState<ThumbnailDesign[]>([]);
   const [future, setFuture] = useState<ThumbnailDesign[]>([]);
+  const saveRendersRef = useRef<(snapshot: ThumbnailDesign[]) => Promise<void>>(onSave);
   const latestSaveRef = useRef(onSave);
   latestSaveRef.current = onSave;
   const lastScheduledDesignsRef = useRef(JSON.stringify(designs));
@@ -101,7 +102,7 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
     if (serialized === lastScheduledDesignsRef.current) return;
     lastScheduledDesignsRef.current = serialized;
     const timeout = window.setTimeout(() => {
-      void latestSaveRef.current(designs).catch(error => {
+      void saveRendersRef.current(designs).catch(error => {
         setMessage('Automatic thumbnail save failed: ' + (error instanceof Error ? error.message : String(error)));
       });
     }, 1300);
@@ -308,22 +309,19 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
       link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
   };
-  const exportPng = async (format: 'png' | 'jpeg') => {
-    if (!design) return;
-    setBusy(true); setMessage('');
-    try {
-      const canvas = document.createElement('canvas'); canvas.width = design.width; canvas.height = design.height;
+  const renderDesignBlob = async (target: ThumbnailDesign, format: 'png' | 'jpeg' = 'png'): Promise<Blob> => {
+      const canvas = document.createElement('canvas'); canvas.width = target.width; canvas.height = target.height;
       const ctx = canvas.getContext('2d'); if (!ctx) throw new Error('Canvas unavailable');
-      ctx.fillStyle = design.background; ctx.fillRect(0, 0, canvas.width, canvas.height);
-      if (design.aiImageUrl || design.backgroundImageUrl) {
-        const background = await loadForExport(design.aiImageUrl || design.backgroundImageUrl!);
-        const scale = Math.max(design.width / background.naturalWidth, design.height / background.naturalHeight);
+      ctx.fillStyle = target.background; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      if (target.aiImageUrl || target.backgroundImageUrl) {
+        const background = await loadForExport(target.aiImageUrl || target.backgroundImageUrl!);
+        const scale = Math.max(target.width / background.naturalWidth, target.height / background.naturalHeight);
         const w = background.naturalWidth * scale, h = background.naturalHeight * scale;
-        ctx.drawImage(background, (design.width - w) / 2, (design.height - h) / 2, w, h);
+        ctx.drawImage(background, (target.width - w) / 2, (target.height - h) / 2, w, h);
       }
-      for (const element of design.elements) {
-        const x = element.x / 100 * design.width, y = element.y / 100 * design.height;
-        const w = element.width / 100 * design.width, h = element.height / 100 * design.height;
+      for (const element of target.elements) {
+        const x = element.x / 100 * target.width, y = element.y / 100 * target.height;
+        const w = element.width / 100 * target.width, h = element.height / 100 * target.height;
         ctx.save(); ctx.globalAlpha = element.opacity ?? 1;
         ctx.translate(x + w/2, y + h/2); ctx.rotate(element.rotation * Math.PI/180);
         if (element.type === 'image') {
@@ -335,10 +333,10 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
         } else {
           ctx.fillStyle = element.color || '#333333';
           await document.fonts.load(`${element.fontWeight || 'bold'} ${(element.fontSize || 80)}px ${element.fontFamily || 'Arial'}`).catch(() => []);
-          ctx.font = `${element.fontWeight || 'bold'} ${Math.round((element.fontSize || 80) * design.width / 2000)}px ${element.fontFamily || 'Arial'}`;
+          ctx.font = `${element.fontWeight || 'bold'} ${Math.round((element.fontSize || 80) * target.width / 2000)}px ${element.fontFamily || 'Arial'}`;
           ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
           const raw = (element.text || '').split('\n');
-          const lineHeight = (element.fontSize || 80) * design.width / 2000 * 1.2;
+          const lineHeight = (element.fontSize || 80) * target.width / 2000 * 1.2;
           raw.forEach((line,i) => {
             const available = Math.max(1, w - 8);
             const actual = ctx.measureText(line).width;
@@ -369,6 +367,46 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
       }
       const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, format === 'png' ? 'image/png' : 'image/jpeg', .95));
       if (!blob) throw new Error('Could not encode thumbnail');
+      return blob;
+  };
+  const renderCacheRef = useRef(new Map<string, { signature: string; url: string }>());
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const saveVersionRef = useRef(0);
+  const saveAllWithImages = async (snapshot: ThumbnailDesign[]) => {
+    const serial = ++saveVersionRef.current;
+    const operation = saveQueueRef.current.catch(() => {}).then(async () => {
+      const prepared: ThumbnailDesign[] = [];
+      for (const item of snapshot) {
+        if (item.aiImageUrl) { prepared.push(item); continue; }
+        // Cached PNG is reusable until the editable content changes.
+        const signature = JSON.stringify({ width: item.width, height: item.height, background: item.background, backgroundImageUrl: item.backgroundImageUrl, elements: item.elements });
+        const cached = renderCacheRef.current.get(item.id);
+        if (cached?.signature === signature) {
+          prepared.push({ ...item, renderedImageUrl: cached.url });
+          continue;
+        }
+        const blob = await renderDesignBlob(item);
+        const form = new FormData();
+        form.set('projectId', projectId);
+        form.set('file', new File([blob], 'thumbnail.png', { type: 'image/png' }));
+        const response = await fetch('/api/thumbnail-background', { method: 'POST', body: form });
+        const result = await response.json() as { url?: string; error?: string };
+        if (!response.ok || !result.url) throw new Error('Could not store thumbnail ' + item.name + ': ' + (result.error || response.status));
+        renderCacheRef.current.set(item.id, { signature, url: result.url });
+        prepared.push({ ...item, renderedImageUrl: result.url });
+      }
+      if (serial !== saveVersionRef.current) return;
+      await latestSaveRef.current(prepared);
+      if (JSON.stringify(prepared) !== JSON.stringify(snapshot)) onChange(prepared);
+    });
+    saveQueueRef.current = operation;
+    return operation;
+  };
+  const exportPng = async (format: 'png' | 'jpeg') => {
+    if (!design) return;
+    setBusy(true); setMessage('');
+    try {
+      const blob = await renderDesignBlob(design, format);
       const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url;
       link.download = (design.name.replace(/[^a-z0-9_-]/gi, '_') || 'thumbnail') + '.' + (format === 'png' ? 'png' : 'jpg');
       link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 5000);
@@ -376,7 +414,8 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
     } catch (error) { setMessage('Export failed: ' + (error instanceof Error ? error.message : String(error))); }
     finally { setBusy(false); }
   };
-  const save = async () => { setBusy(true); try { await onSave(designs); setMessage('Thumbnail designs saved.'); } catch (error) { setMessage('Save failed: ' + String(error)); } finally { setBusy(false); } };
+  const save = async () => { setBusy(true); try { await saveAllWithImages(designs); setMessage('Thumbnail designs and PNG previews saved.'); } catch (error) { setMessage('Save failed: ' + String(error)); } finally { setBusy(false); } };
+  saveRendersRef.current = saveAllWithImages;
   const control = { width: '100%', minWidth: 0 } as const;
   return <div className="thumbnail-studio">
     <div className="panel" style={{ padding: 16, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
