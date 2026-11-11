@@ -9,7 +9,7 @@ export type ThumbnailElement = {
   fontSize?: number; curve?: number; fontFamily?: string; color?: string; fontWeight?: string; opacity?: number; locked?: boolean;
 };
 export type ThumbnailDesign = {
-  id: string; name: string; width: number; height: number; background: string; backgroundImageUrl?: string; aiImageUrl?: string; aiImagePrompt?: string; renderedImageUrl?: string; upscaledImageUrl?: string; upscaleJob?: { id: string; sourceUrl: string; factor: 2 | 4; submittedAt: number }; elements: ThumbnailElement[];
+  id: string; name: string; width: number; height: number; background: string; backgroundImageUrl?: string; aiImageUrl?: string; aiImagePrompt?: string; renderedImageUrl?: string; upscaledImageUrl?: string; upscaleJob?: { id: string; sourceUrl: string; factor: 2 | 4 | 6 | 8; submittedAt: number }; elements: ThumbnailElement[];
   referenceUrl?: string; updatedAt: number;
 };
 type Character = { id: string; name: string; imageUrl?: string; upscaledImageUrl?: string };
@@ -53,6 +53,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const [aiBusy, setAiBusy] = useState(false);
   const [imageBusy, setImageBusy] = useState(false);
   const [upscaleBusy, setUpscaleBusy] = useState(false);
+  const [upscaleFactor, setUpscaleFactor] = useState<2 | 4 | 6 | 8>(4);
   const [selectedThumbnailIds, setSelectedThumbnailIds] = useState<Set<string>>(() => new Set());
   const [upscaleSubmitting, setUpscaleSubmitting] = useState({ done: 0, total: 0 });
   const [upscaleStatus, setUpscaleStatus] = useState('');
@@ -425,8 +426,8 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   };
   const upscaleSelectedThumbnails = async () => {
     if (upscaleBusy) return;
-    const targets = latestDesignsRef.current.filter(item => selectedThumbnailIds.has(item.id) && !item.upscaleJob && !item.upscaledImageUrl);
-    if (!targets.length) { setMessage('Select at least one thumbnail that is not queued or already upscaled.'); return; }
+    const targets = latestDesignsRef.current.filter(item => selectedThumbnailIds.has(item.id) && !item.upscaleJob);
+    if (!targets.length) { setMessage('Select at least one thumbnail that is not queued.'); return; }
     if (!window.confirm('Submit ' + targets.length + ' selected thumbnails to Remote GPU? You can close PaletteIQ after all jobs are accepted.')) return;
     setUpscaleBusy(true); setUpscaleSubmitting({ done: 0, total: targets.length }); setMessage('');
     const errors: string[] = [];
@@ -435,7 +436,8 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
       for (const item of targets) {
         setMessage('Uploading thumbnail ' + (accepted + errors.length + 1) + '/' + targets.length + ': ' + item.name);
         try {
-          const source = item.aiImageUrl ? await loadForExport(item.aiImageUrl) : null;
+          const sourceUrlToRender = item.upscaledImageUrl || item.aiImageUrl;
+          const source = sourceUrlToRender ? await loadForExport(sourceUrlToRender) : null;
           const png = source ? await (async () => {
             const canvas = document.createElement('canvas');
             canvas.width = source.naturalWidth; canvas.height = source.naturalHeight;
@@ -445,10 +447,10 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
           })() : await renderDesignBlob(item, 'png');
           if (!png) throw new Error('Could not prepare GPU input PNG');
           const sourceUrl = await uploadRenderedThumbnail(png, 'image/png');
-          const response = await fetch('/api/thumbnail-upscale', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, thumbnailId: item.id, sourceUrl }) });
+          const response = await fetch('/api/thumbnail-upscale', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, thumbnailId: item.id, sourceUrl, factor: upscaleFactor, previousUpscaledUrl: item.upscaledImageUrl ?? null }) });
           const result = await response.json() as { id?: string; error?: string };
           if (!response.ok || !result.id) throw new Error(result.error || 'GPU did not accept the thumbnail');
-          const next = latestDesignsRef.current.map(d => d.id === item.id ? { ...d, upscaleJob: { id: result.id!, sourceUrl, factor: 4 as const, submittedAt: Date.now() } } : d);
+          const next = latestDesignsRef.current.map(d => d.id === item.id ? { ...d, upscaleJob: { id: result.id!, sourceUrl, factor: upscaleFactor, submittedAt: Date.now() } } : d);
           latestDesignsRef.current = next;
           onChange(next);
           // A remote job survives app exit only if its ID survives in the collection.
@@ -606,7 +608,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         <div style={{ maxHeight: 400, overflowY: 'auto', display: 'grid', gap: 8 }}>
           {characters.filter(c => c.imageUrl).map(c => <button type="button" key={c.id} onClick={() => add(newImage(c, design.elements.filter(e => e.type === 'image').length))} style={{ textAlign: 'left', display: 'flex', gap: 8, alignItems: 'center', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: 6 }}>
             <img src={c.upscaledImageUrl || c.imageUrl} alt="" style={{ width: 45, height: 45, objectFit: 'contain' }}/>
-            <span style={{ fontSize: 12 }}>{c.name}{c.upscaledImageUrl ? ' · 4× ready' : ''}</span>
+            <span style={{ fontSize: 12 }}>{c.name}{c.upscaledImageUrl ? ' · Upscaled' : ''}</span>
           </button>)}
           {!characters.some(c => c.imageUrl) && <p className="sub">Generate character images first.</p>}
         </div>
@@ -685,7 +687,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
             <label className="input-label">TEXT COLOR</label><div style={{ display: 'flex', gap: 8 }}><input aria-label="Choose text color" type="color" value={selection.color || '#333333'} onChange={e => updateElement({ color: e.target.value })}/><input aria-label="Text color hex" value={selection.color || '#333333'} onChange={e => { if (/^#[0-9a-f]{6}$/i.test(e.target.value)) updateElement({ color: e.target.value }); }}/></div>
             <label className="input-label">WEIGHT</label><select value={selection.fontWeight || 'bold'} onChange={e => updateElement({ fontWeight: e.target.value })}><option value="normal">Normal</option><option value="bold">Bold</option></select>
           </> : <>
-            <label className="input-label">ASSET SOURCE</label><select value={selection.source || 'original'} onChange={e => updateElement({ source: e.target.value as 'original' | 'upscaled' })}><option value="original">Original</option><option value="upscaled" disabled={!assetMap.get(selection.characterId || '')?.upscaledImageUrl}>Upscaled 4×</option></select>
+            <label className="input-label">ASSET SOURCE</label><select value={selection.source || 'original'} onChange={e => updateElement({ source: e.target.value as 'original' | 'upscaled' })}><option value="original">Original</option><option value="upscaled" disabled={!assetMap.get(selection.characterId || '')?.upscaledImageUrl}>Upscaled</option></select>
           </>}
           {(['x','y','width','height','rotation','opacity'] as const).map(key => <label key={key} style={{ display: 'grid', gap: 4 }}><span className="input-label">{key.toUpperCase()}{key === 'opacity' ? ' (0–1)' : key === 'rotation' ? ' (DEG)' : ' (%)'}</span><input type="number" step={key === 'opacity' ? .1 : 1} value={selection[key] ?? (key === 'opacity' ? 1 : 0)} onChange={e => updateElement({ [key]: Number(e.target.value) })}/></label>)}
           <label><input type="checkbox" checked={Boolean(selection.locked)} onChange={e => updateElement({ locked: e.target.checked })}/> Lock element</label>
@@ -706,8 +708,9 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
         <button type="button" className="outline-btn" disabled={upscaleBusy} onClick={() => setSelectedThumbnailIds(new Set(designs.filter(item => !item.upscaledImageUrl && !item.upscaleJob).map(item => item.id)))}>Select pending</button>
         <button type="button" className="outline-btn" disabled={upscaleBusy} onClick={() => setSelectedThumbnailIds(new Set())}>Clear selection</button>
-        <button type="button" className="primary-btn" disabled={upscaleBusy || ![...selectedThumbnailIds].some(id => designs.some(item => item.id === id && !item.upscaleJob && !item.upscaledImageUrl))} onClick={() => void upscaleSelectedThumbnails()}>
-          {upscaleBusy ? 'Submitting ' + upscaleSubmitting.done + '/' + upscaleSubmitting.total : 'Remote GPU Upscale selected (' + [...selectedThumbnailIds].filter(id => designs.some(d => d.id === id && !d.upscaleJob && !d.upscaledImageUrl)).length + ')'}
+        <select style={{ width: 88, flex: '0 0 88px' }} aria-label="Thumbnail upscale factor" value={upscaleFactor} disabled={upscaleBusy} onChange={event => setUpscaleFactor(Number(event.target.value) as 2 | 4 | 6 | 8)}>{[2,4,6,8].map(factor => <option key={factor} value={factor}>{factor}×</option>)}</select>
+        <button type="button" className="primary-btn" disabled={upscaleBusy || ![...selectedThumbnailIds].some(id => designs.some(item => item.id === id && !item.upscaleJob))} onClick={() => void upscaleSelectedThumbnails()}>
+          {upscaleBusy ? 'Submitting ' + upscaleSubmitting.done + '/' + upscaleSubmitting.total : 'Remote GPU Upscale selected (' + [...selectedThumbnailIds].filter(id => designs.some(d => d.id === id && !d.upscaleJob)).length + ')'}
         </button>
         {upscaleStatus && <small>{upscaleStatus}</small>}
       </div>
@@ -717,7 +720,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         {designs.map(item => (
           <div key={item.id} style={{ background: item.id === design?.id ? '#fff3e9' : '#fff', border: item.id === design?.id ? '2px solid #f1641e' : '1px solid #ddd', borderRadius: 10, padding: 8, textAlign: 'left', flex: '0 0 170px', scrollSnapAlign: 'start' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, marginBottom: 6 }}>
-              <input type="checkbox" checked={selectedThumbnailIds.has(item.id)} disabled={upscaleBusy || Boolean(item.upscaledImageUrl) || Boolean(item.upscaleJob)} onChange={event => setSelectedThumbnailIds(old => { const next = new Set(old); if (event.target.checked) next.add(item.id); else next.delete(item.id); return next; })}/>
+              <input type="checkbox" checked={selectedThumbnailIds.has(item.id)} disabled={upscaleBusy || Boolean(item.upscaleJob)} onChange={event => setSelectedThumbnailIds(old => { const next = new Set(old); if (event.target.checked) next.add(item.id); else next.delete(item.id); return next; })}/>
               Select for upscale
             </label>
             <button type="button" onClick={() => { setActiveId(item.id); setSelectedId(''); }} style={{ border: 0, background: 'transparent', textAlign: 'left', padding: 0, width: '100%', cursor: 'pointer' }}>
@@ -727,7 +730,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
             <strong style={{ display: 'block', marginTop: 7, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</strong>
             <small>{item.aiImageUrl ? 'AI image' : 'Editable design'} · {item.width}×{item.height}</small>
             </button>
-            <small style={{ display: 'block', marginTop: 5 }}>{item.upscaledImageUrl ? '✓ Upscale completed' : item.upscaleJob ? 'GPU queued / processing' : 'Not upscaled'}</small>
+            <small style={{ display: 'block', marginTop: 5 }}>{item.upscaleJob ? 'GPU queued / processing' : item.upscaledImageUrl ? '✓ Upscale completed' : 'Not upscaled'}</small>
             {item.upscaledImageUrl && <a href={item.upscaledImageUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>View upscale</a>}
             {item.aiImageUrl && <a href={item.aiImageUrl} download style={{ display: 'block', fontSize: 12 }}>View AI image</a>}
           </div>

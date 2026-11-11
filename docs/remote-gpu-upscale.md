@@ -22,7 +22,7 @@ The GPU API key can also be added or replaced in **Settings → Remote GPU Upsca
 
 ## Usage
 
-1. In Settings → Remote GPU Upscale, choose model, 2×/4×, transparency policy and optional Edge Cleanup strength. Save and click **Test Connection**.
+1. In Settings → Remote GPU Upscale, choose model, 2×/4×/6×/8×, transparency policy and optional Edge Cleanup strength. Save and click **Test Connection**.
 2. In Image Generation, select generated PNGs, then **Remote GPU upscale**.
 3. Each accepted server job ID is written to the relevant character in the stored collection. Reopening Image Generation resumes status polling.
 4. On completion the backend downloads and checks PNG output dimensions/alpha, saves a separate image in the asset bucket, and links it as `upscaledImageUrl`.
@@ -36,3 +36,27 @@ The GPU API key can also be added or replaced in **Settings → Remote GPU Upsca
 - GPU jobs are durable on the remote server. PaletteIQ persists their IDs in collection JSON; simultaneous edits to the same collection from multiple devices still need concurrency controls in a later release.
 - The proxy returns errors when the GPU server or tunnel is unavailable; existing originals are retained.
 - Do not delete legacy Canva extension installations on user devices automatically; they are no longer used by this branch.
+
+## Scale selection, repeated upscale and thumbnail JPEGs
+
+Image Production and the thumbnail gallery have a scale selector next to the
+Remote GPU button. Each submission sends its selected 2×, 4×, 6× or 8× factor;
+Settings supplies the default for API clients that omit it. Completed images
+can be selected again. Image Production reads `upscaledImageUrl` before
+`imageUrl`; thumbnails rasterize the latest upscaled image at its natural pixel
+dimensions. For example, 1024 → 4× → 4096 → 2× → 8192 pixels.
+
+Update **paletteiq-server together with this change**, before using the new UI.
+The server runs the native 4× neural model and uses Lanczos to match the selected
+output dimensions (including 6×/8×); those sizes do not imply additional learned
+detail. HAT uses the same final sizing policy. Existing upload, pixel and output
+file limits still apply, especially when repeatedly enlarging large images.
+
+Clipart results remain PNG to preserve transparency. Thumbnail imports request
+`GET /v1/jobs/{id}/result?format=jpg`, validate JPEG dimensions, and store the
+returned bytes as `.jpg` with `image/jpeg` metadata. Transparent thumbnail
+backgrounds are flattened onto white by the server at JPEG quality 95 and 300
+DPI. The server retains its original PNG result for QC/older clients; PaletteIQ
+stores the thumbnail result as JPG. An old server returning PNG is rejected with
+an update message rather than saving PNG bytes under a JPG extension. Older
+stored PNG thumbnails remain readable and will produce JPG on their next upscale.
