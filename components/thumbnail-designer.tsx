@@ -57,6 +57,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const [selectedThumbnailIds, setSelectedThumbnailIds] = useState<Set<string>>(() => new Set());
   const [upscaleSubmitting, setUpscaleSubmitting] = useState({ done: 0, total: 0 });
   const [upscaleStatus, setUpscaleStatus] = useState('');
+  const [upscaleJobs, setUpscaleJobs] = useState<Record<string, { status: string; elapsed?: number; remaining?: number | null; error?: string }>>({});
   const [upscaleRemaining, setUpscaleRemaining] = useState<Record<string, number | null>>({});
   const [imageProvider, setImageProvider] = useState<'openai' | 'gemini'>('openai');
   const [imageModel, setImageModel] = useState('gpt-image-1-mini');
@@ -471,29 +472,37 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     if (!activeThumbnailJobs) return;
     let stopped = false, running = false;
     const poll = async () => {
-      if (running) return;
+      if (running || stopped) return;
       running = true;
       try {
-        for (const item of designs.filter(d => d.upscaleJob)) {
-          const response = await fetch('/api/thumbnail-upscale?projectId=' + encodeURIComponent(projectId) + '&thumbnailId=' + encodeURIComponent(item.id));
-          const result = await response.json() as { status?: string; url?: string; error?: string; estimatedRemainingSeconds?: number | null };
-          setUpscaleRemaining(old => ({ ...old, [item.id]: result.estimatedRemainingSeconds ?? null }));
-          if (!response.ok) throw new Error(result.error || 'GPU status unavailable');
-          if (stopped) return;
-          if (result.status === 'succeeded' && result.url) {
-            onChange(latestDesignsRef.current.map(d => d.id === item.id ? { ...d, upscaledImageUrl: result.url, upscaleJob: undefined } : d));
-            setUpscaleStatus('Thumbnail GPU upscale completed');
-          } else if (result.status === 'failed') {
-            setUpscaleStatus('GPU upscale failed: ' + (result.error || 'Unknown error'));
-          } else setUpscaleStatus('Remote GPU: ' + result.status);
+        for (const item of latestDesignsRef.current.filter(d => d.upscaleJob)) {
+          if (stopped) break;
+          const jobId = item.upscaleJob!.id;
+          try {
+            const response = await fetch('/api/thumbnail-upscale?projectId=' + encodeURIComponent(projectId) + '&thumbnailId=' + encodeURIComponent(item.id));
+            const result = await response.json() as { status?: string; url?: string; error?: string; elapsedSeconds?: number; estimatedRemainingSeconds?: number | null };
+            if (!response.ok) throw new Error(result.error || 'GPU status unavailable');
+            if (stopped) break;
+            setUpscaleRemaining(old => ({ ...old, [item.id]: result.estimatedRemainingSeconds ?? null }));
+            setUpscaleJobs(old => ({ ...old, [jobId]: { status: result.status || 'unknown', elapsed: result.elapsedSeconds, remaining: result.estimatedRemainingSeconds, error: result.error } }));
+            if (result.status === 'succeeded' && result.url) {
+              const next = latestDesignsRef.current.map(d => d.id === item.id && d.upscaleJob?.id === jobId ? { ...d, upscaledImageUrl: result.url, upscaleJob: undefined } : d);
+              latestDesignsRef.current = next;
+              onChange(next);
+              setUpscaleStatus('Thumbnail GPU upscale completed');
+            }
+          } catch (error) {
+            if (!stopped) setUpscaleJobs(old => ({ ...old, [jobId]: { ...old[jobId], status: 'sync_error', error: error instanceof Error ? error.message : String(error) } }));
+          }
         }
-      } catch (error) { if (!stopped) setUpscaleStatus('GPU polling: ' + (error instanceof Error ? error.message : String(error))); }
-      finally { running = false; }
+      } finally { running = false; }
     };
     void poll();
     const timer = window.setInterval(() => void poll(), 5000);
     return () => { stopped = true; window.clearInterval(timer); };
   }, [projectId, activeThumbnailJobs]);
+  const queueItems = designs.filter(item => item.upscaleJob || item.upscaledImageUrl);
+  const queueDuration = (seconds?: number | null) => seconds == null ? '—' : Math.floor(seconds / 60) + 'm ' + Math.floor(seconds % 60) + 's';
   const renderCacheRef = useRef(new Map<string, { signature: string; url: string }>());
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const saveVersionRef = useRef(0);
@@ -707,6 +716,26 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
       </div>
       </div>
     </div>}
+    <section className="panel" aria-label="Thumbnail upscale job queue" style={{ marginTop: 14, padding: 16 }}>
+      <h3 style={{ marginTop: 0 }}>Upscale job queue</h3>
+      <p className="sub">Jobs for this collection · Updates every 5 seconds. GPU processing continues when PaletteIQ is closed.</p>
+      {upscaleBusy && <p role="status">Submitting {upscaleSubmitting.done} / {upscaleSubmitting.total} thumbnails…</p>}
+      {!queueItems.length ? <p>No thumbnail upscale jobs yet.</p> : <div style={{ overflowX: 'auto' }}><table style={{ width: '100%' }}>
+        <thead><tr><th>Thumbnail</th><th>Job ID</th><th>Scale</th><th>Status</th><th>Elapsed</th><th>Est. remaining</th><th>Result / details</th></tr></thead>
+        <tbody>{queueItems.map(item => {
+          const job = item.upscaleJob;
+          const progress = job ? upscaleJobs[job.id] : undefined;
+          const status = job ? progress?.status || 'checking' : 'succeeded';
+          const label = ({ checking: 'Checking…', queued: 'Queued', processing: 'Processing', succeeded: 'Completed', failed: 'Failed', cancelled: 'Cancelled', cancelling: 'Cancelling', sync_error: 'Status unavailable' } as Record<string, string>)[status] || status;
+          return <tr key={item.id}>
+            <td>{item.name}</td><td title={job?.id}>{job ? job.id.slice(0, 12) : '—'}</td><td>{job ? job.factor + '×' : '—'}</td>
+            <td>{label}</td><td>{queueDuration(progress?.elapsed)}</td>
+            <td>{status === 'processing' ? progress?.remaining != null ? '≈ ' + queueDuration(progress.remaining) : 'Estimating…' : status === 'queued' ? 'Waiting for GPU' : '—'}</td>
+            <td>{progress?.error || (job ? 'Submitted ' + new Date(job.submittedAt).toLocaleString() : item.upscaledImageUrl ? <a href={item.upscaledImageUrl} target="_blank" rel="noreferrer">View JPG</a> : '—')}</td>
+          </tr>;
+        })}</tbody>
+      </table></div>}
+    </section>
     <div className="panel" style={{ marginTop: 14, padding: 16, width: '100%' }}>
       <h3 style={{ marginTop: 0 }}>All collection thumbnails ({designs.length})</h3>
       <p className="sub">Click a thumbnail to show it on the canvas. Check thumbnails for GPU upscale; completed submissions continue on the remote server even if PaletteIQ closes.</p>
