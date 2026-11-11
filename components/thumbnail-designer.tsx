@@ -13,7 +13,8 @@ export type ThumbnailDesign = {
   referenceUrl?: string; updatedAt: number;
 };
 type Character = { id: string; name: string; imageUrl?: string; upscaledImageUrl?: string };
-type Props = { title: string; aiDefaults: { provider: 'openai' | 'gemini'; openaiModel: string; geminiModel: string }; projectId: string; characters: Character[]; references: string[]; designs: ThumbnailDesign[]; onChange: (designs: ThumbnailDesign[]) => void; onSave: (designs: ThumbnailDesign[]) => Promise<void> };
+export type ThumbnailSaveControls = { save: () => Promise<void>; hasUnsaved: () => boolean };
+type Props = { registerSaveControls?: (controls: ThumbnailSaveControls | null) => void; title: string; aiDefaults: { provider: 'openai' | 'gemini'; openaiModel: string; geminiModel: string }; projectId: string; characters: Character[]; references: string[]; designs: ThumbnailDesign[]; onChange: (designs: ThumbnailDesign[]) => void; onSave: (designs: ThumbnailDesign[]) => Promise<void> };
 const id = () => crypto.randomUUID();
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 const newDesign = (index: number): ThumbnailDesign => ({ id: id(), name: 'Thumbnail ' + index, width: 2000, height: 2000, background: '#f7f1e9', elements: [], updatedAt: Date.now() });
@@ -43,7 +44,7 @@ async function loadForExport(url: string): Promise<HTMLImageElement> {
   await image.decode();
   return image;
 }
-export default function ThumbnailDesigner({ title, aiDefaults, projectId, characters, references, designs, onChange, onSave }: Props) {
+export default function ThumbnailDesigner({ registerSaveControls, title, aiDefaults, projectId, characters, references, designs, onChange, onSave }: Props) {
   const [activeId, setActiveId] = useState(designs[0]?.id || '');
   const [selectedId, setSelectedId] = useState('');
   const [previewZoom, setPreviewZoom] = useState(1);
@@ -96,6 +97,19 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
   const saveRendersRef = useRef<(snapshot: ThumbnailDesign[]) => Promise<void>>(onSave);
   const latestSaveRef = useRef(onSave);
   latestSaveRef.current = onSave;
+  const lastSavedDesignsRef = useRef(JSON.stringify(designs));
+  const latestDesignsRef = useRef(designs);
+  latestDesignsRef.current = designs;
+  const registeredControlsRef = useRef<ThumbnailSaveControls>({
+    save: async () => {},
+    hasUnsaved: () => false
+  });
+  const registrationRef = useRef(registerSaveControls);
+  registrationRef.current = registerSaveControls;
+  useEffect(() => {
+    registrationRef.current?.(registeredControlsRef.current);
+    return () => registrationRef.current?.(null);
+  }, [projectId]);
   const lastScheduledDesignsRef = useRef(JSON.stringify(designs));
   useEffect(() => {
     const serialized = JSON.stringify(designs);
@@ -442,6 +456,7 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
       }
       if (serial !== saveVersionRef.current) return;
       await latestSaveRef.current(prepared);
+      lastSavedDesignsRef.current = JSON.stringify(prepared);
       if (JSON.stringify(prepared) !== JSON.stringify(snapshot)) onChange(prepared);
     });
     saveQueueRef.current = operation;
@@ -459,8 +474,16 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
     } catch (error) { setMessage('Export failed: ' + (error instanceof Error ? error.message : String(error))); }
     finally { setBusy(false); }
   };
-  const save = async () => { setBusy(true); try { await saveAllWithImages(designs); setMessage('Thumbnail designs and PNG previews saved.'); } catch (error) { setMessage('Save failed: ' + String(error)); } finally { setBusy(false); } };
+  const save = async () => { setBusy(true); try { await saveAllWithImages(designs); setMessage('Thumbnail designs and JPG previews saved.'); } catch (error) { setMessage('Save failed: ' + String(error)); } finally { setBusy(false); } };
   saveRendersRef.current = saveAllWithImages;
+  registeredControlsRef.current.save = async () => {
+    // Do not navigate away until the render/upload/database save is complete.
+    await saveAllWithImages(latestDesignsRef.current);
+    await saveQueueRef.current;
+  };
+  registeredControlsRef.current.hasUnsaved = () =>
+    JSON.stringify(latestDesignsRef.current) !== lastSavedDesignsRef.current;
+
   const control = { width: '100%', minWidth: 0 } as const;
   return <div className="thumbnail-studio">
     <div className="panel" style={{ padding: 16, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
