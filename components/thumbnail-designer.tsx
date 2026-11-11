@@ -331,7 +331,6 @@ export default function ThumbnailDesigner({ aiDefaults, projectId, characters, r
 
       </div>
       </div>
-      </div>
     </div>}
   </div>;
 }
