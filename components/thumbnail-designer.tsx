@@ -13,13 +13,13 @@ export type ThumbnailDesign = {
   referenceUrl?: string; updatedAt: number;
 };
 type Character = { id: string; name: string; imageUrl?: string; upscaledImageUrl?: string };
-type Props = { projectId: string; characters: Character[]; references: string[]; designs: ThumbnailDesign[]; onChange: (designs: ThumbnailDesign[]) => void; onSave: (designs: ThumbnailDesign[]) => Promise<void> };
+type Props = { aiDefaults: { provider: 'openai' | 'gemini'; openaiModel: string; geminiModel: string }; projectId: string; characters: Character[]; references: string[]; designs: ThumbnailDesign[]; onChange: (designs: ThumbnailDesign[]) => void; onSave: (designs: ThumbnailDesign[]) => Promise<void> };
 const id = () => crypto.randomUUID();
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 const newDesign = (index: number): ThumbnailDesign => ({ id: id(), name: 'Thumbnail ' + index, width: 2000, height: 2000, background: '#f7f1e9', elements: [], updatedAt: Date.now() });
 const newImage = (character: Character, index: number): ThumbnailElement => ({
   id: id(), type: 'image', characterId: character.id, source: character.upscaledImageUrl ? 'upscaled' : 'original',
-  x: 12 + (index % 4) * 19, y: 20 + Math.floor(index / 4) * 24, width: 22, height: 28, rotation: 0
+  x: 10 + (index % 4) * 21, y: 17 + (Math.floor(index / 4) % 3) * 25, width: 22, height: 28, rotation: 0
 });
 const newText = (): ThumbnailElement => ({ id: id(), type: 'text', text: 'YOUR CLIPART COLLECTION', x: 9, y: 7, width: 82, height: 14, rotation: 0, fontSize: 90, fontFamily: 'Arial', color: '#644a35', fontWeight: 'bold' });
 const normalizeDesign = (d: ThumbnailDesign): ThumbnailDesign => ({ ...d, updatedAt: Date.now() });
@@ -31,14 +31,38 @@ async function loadForExport(url: string): Promise<HTMLImageElement> {
   await image.decode();
   return image;
 }
-export default function ThumbnailDesigner({ projectId, characters, references, designs, onChange, onSave }: Props) {
+export default function ThumbnailDesigner({ aiDefaults, projectId, characters, references, designs, onChange, onSave }: Props) {
   const [activeId, setActiveId] = useState(designs[0]?.id || '');
   const [selectedId, setSelectedId] = useState('');
   const [previewZoom, setPreviewZoom] = useState(1);
   const [reference, setReference] = useState('');
   const [uploadedReference, setUploadedReference] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
-  const [provider, setProvider] = useState<'ai' | 'manual'>('ai');
+  const [layoutMode, setLayoutMode] = useState<'ai' | 'manual'>('ai');
+  const [provider, setProvider] = useState<'openai' | 'gemini'>(aiDefaults.provider);
+  const [model, setModel] = useState(aiDefaults.provider === 'gemini' ? aiDefaults.geminiModel : aiDefaults.openaiModel);
+  const [models, setModels] = useState<Record<string, Array<{ id: string; name: string }>>>({ openai: [], gemini: [] });
+  const [modelError, setModelError] = useState('');
+  useEffect(() => {
+    let live = true;
+    void Promise.all((['openai','gemini'] as const).map(async kind => {
+      try {
+        const response = await fetch('/api/settings?models=' + (kind === 'openai' ? 'openai-seo' : 'gemini'));
+        const result = await response.json() as { models?: Array<{ id: string; name: string }>; error?: string };
+        if (!response.ok) throw Error(result.error || 'Model list unavailable');
+        if (live) setModels(prev => ({ ...prev, [kind]: result.models || [] }));
+      } catch (error) { if (live) setModelError(error instanceof Error ? error.message : String(error)); }
+    }));
+    return () => { live = false; };
+  }, []);
+  useEffect(() => {
+    const linkId = 'paletteiq-thumbnail-fonts';
+    if (document.getElementById(linkId)) return;
+    const link = document.createElement('link');
+    link.id = linkId; link.rel = 'stylesheet';
+    link.href = 'https://fonts.googleapis.com/css2?family=Allura&family=Bodoni+Moda:wght@400;700&family=Cinzel:wght@400;700&family=Cormorant+Garamond:wght@400;700&family=DM+Serif+Display&family=EB+Garamond:wght@400;700&family=Great+Vibes&family=Libre+Baskerville:wght@400;700&family=Lora:wght@400;700&family=Marcellus&family=Montserrat:wght@400;700&family=Playfair+Display:wght@400;700&family=Poppins:wght@400;700&family=Prata&family=Raleway:wght@400;700&display=swap';
+    document.head.appendChild(link);
+  }, []);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState<ThumbnailDesign[]>([]);
@@ -95,7 +119,7 @@ export default function ThumbnailDesigner({ projectId, characters, references, d
     setAiBusy(true); setMessage('');
     try {
       const response = await fetch('/api/thumbnail-layout', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId, imageUrl: reference, count: Math.min(characters.filter(c => c.imageUrl).length, 24) }) });
+        body: JSON.stringify({ projectId, imageUrl: reference, provider, model, count: Math.min(characters.filter(c => c.imageUrl).length, 24) }) });
       const body = await response.json() as { error?: string; layout?: { slots?: Array<{ x: number; y: number; width: number; height: number; rotation?: number }>; texts?: Array<{ text: string; x: number; y: number; width: number; height: number }> ; background?: string } };
       if (!response.ok) throw new Error(body.error || 'AI layout analysis failed');
       const available = characters.filter(c => c.imageUrl);
@@ -137,6 +161,7 @@ export default function ThumbnailDesigner({ projectId, characters, references, d
           ctx.drawImage(img, -dw/2, -dh/2, dw, dh);
         } else {
           ctx.fillStyle = element.color || '#333333';
+          await document.fonts.load(`${element.fontWeight || 'bold'} ${(element.fontSize || 80)}px ${element.fontFamily || 'Arial'}`).catch(() => []);
           ctx.font = `${element.fontWeight || 'bold'} ${Math.round((element.fontSize || 80) * design.width / 2000)}px ${element.fontFamily || 'Arial'}`;
           ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
           const raw = (element.text || '').split('\n');
@@ -176,8 +201,18 @@ export default function ThumbnailDesigner({ projectId, characters, references, d
       <div className="panel" style={{ padding: 14, display: 'grid', gap: 12 }}>
         <h3>Reference & assets</h3>
         <label className="input-label">LAYOUT MODE</label>
-        <select value={provider} onChange={e => setProvider(e.target.value as 'ai' | 'manual')}><option value="ai">AI + manual</option><option value="manual">Manual only</option></select>
-        {provider === 'ai' && <>
+        <select value={layoutMode} onChange={e => setLayoutMode(e.target.value as 'ai' | 'manual')}><option value="ai">AI + manual</option><option value="manual">Manual only</option></select>
+        {layoutMode === 'ai' && <>
+          <label className="input-label">AI PROVIDER</label>
+          <select value={provider} onChange={e => { const next = e.target.value as 'openai' | 'gemini'; setProvider(next); setModel(next === 'openai' ? aiDefaults.openaiModel : aiDefaults.geminiModel); }}>
+            <option value="openai">OpenAI</option><option value="gemini">Google Gemini</option>
+          </select>
+          <label className="input-label">AI MODEL</label>
+          <select value={model} onChange={e => setModel(e.target.value)}>
+            {!models[provider].some(m => m.id === model) && <option value={model}>{model} (saved/default)</option>}
+            {models[provider].map(m => <option key={m.id} value={m.id}>{m.name} ({m.id})</option>)}
+          </select>
+          {modelError && <small>{modelError}</small>}
           <label className="input-label">REFERENCE IMAGE</label>
           <select style={control} value={reference.startsWith('data:') ? 'upload' : reference} onChange={e => setReference(e.target.value === 'upload' ? uploadedReference : e.target.value)}>
             <option value="">Choose listing reference</option>{references.map((r,i)=><option key={r} value={r}>Listing image {i+1}</option>)}{uploadedReference && <option value="upload">Uploaded image</option>}
@@ -189,7 +224,7 @@ export default function ThumbnailDesigner({ projectId, characters, references, d
         </>}
         <h3>Characters</h3>
         <div style={{ maxHeight: 400, overflowY: 'auto', display: 'grid', gap: 8 }}>
-          {characters.filter(c => c.imageUrl).map((c,i) => <button type="button" key={c.id} onClick={() => add(newImage(c, design.elements.length + i))} style={{ textAlign: 'left', display: 'flex', gap: 8, alignItems: 'center', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: 6 }}>
+          {characters.filter(c => c.imageUrl).map(c => <button type="button" key={c.id} onClick={() => add(newImage(c, design.elements.filter(e => e.type === 'image').length))} style={{ textAlign: 'left', display: 'flex', gap: 8, alignItems: 'center', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: 6 }}>
             <img src={c.upscaledImageUrl || c.imageUrl} alt="" style={{ width: 45, height: 45, objectFit: 'contain' }}/>
             <span style={{ fontSize: 12 }}>{c.name}{c.upscaledImageUrl ? ' · 4× ready' : ''}</span>
           </button>)}
@@ -197,6 +232,7 @@ export default function ThumbnailDesigner({ projectId, characters, references, d
         </div>
         <button className="outline-btn" onClick={() => add(newText())}>+ Add text</button>
       </div>
+      <div style={{ minWidth: 0, display: 'grid', gap: 12 }}>
       <div className="panel" style={{ padding: 12, minWidth: 0 }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginBottom: 10, alignItems: 'center' }}>
           <button className="outline-btn" disabled={!history.length} onClick={undo} title="Undo"><Undo2 size={15}/></button>
@@ -228,6 +264,31 @@ export default function ThumbnailDesigner({ projectId, characters, references, d
           <button className="outline-btn" disabled={busy} onClick={() => void exportPng('jpeg')}><Download size={15}/> Export JPG</button>
         </div>
       </div>
+      <div className="panel" style={{ padding: 14, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(165px, 1fr))', alignItems: 'start', gap: 12 }}>
+        <h3 style={{ gridColumn: '1 / -1' }}>Selected element</h3>
+        {selection ? <>
+          <h3>Selected element</h3>
+          {selection.type === 'text' ? <>
+            <label className="input-label">TEXT</label><textarea value={selection.text || ''} rows={3} onChange={e => updateElement({ text: e.target.value })}/>
+            <label className="input-label">FONT</label><select value={selection.fontFamily || 'Arial'} onChange={e => updateElement({ fontFamily: e.target.value })}>{["Arial","Georgia","Playfair Display","Cormorant Garamond","Cinzel","Bodoni Moda","DM Serif Display","Libre Baskerville","EB Garamond","Lora","Prata","Marcellus","Great Vibes","Allura","Poppins","Montserrat","Raleway","Times New Roman","Verdana"].map(f => <option key={f}>{f}</option>)}</select>
+            <label className="input-label">FONT SIZE</label><input type="number" min={8} max={500} value={selection.fontSize || 80} onChange={e => updateElement({ fontSize: clamp(Number(e.target.value),8,500) })}/>
+            <label className="input-label">TEXT COLOR</label><div style={{ display: 'flex', gap: 8 }}><input aria-label="Choose text color" type="color" value={selection.color || '#333333'} onChange={e => updateElement({ color: e.target.value })}/><input aria-label="Text color hex" value={selection.color || '#333333'} onChange={e => { if (/^#[0-9a-f]{6}$/i.test(e.target.value)) updateElement({ color: e.target.value }); }}/></div>
+            <label className="input-label">WEIGHT</label><select value={selection.fontWeight || 'bold'} onChange={e => updateElement({ fontWeight: e.target.value })}><option value="normal">Normal</option><option value="bold">Bold</option></select>
+          </> : <>
+            <label className="input-label">ASSET SOURCE</label><select value={selection.source || 'original'} onChange={e => updateElement({ source: e.target.value as 'original' | 'upscaled' })}><option value="original">Original</option><option value="upscaled" disabled={!assetMap.get(selection.characterId || '')?.upscaledImageUrl}>Upscaled 4×</option></select>
+          </>}
+          {(['x','y','width','height','rotation','opacity'] as const).map(key => <label key={key} style={{ display: 'grid', gap: 4 }}><span className="input-label">{key.toUpperCase()}{key === 'opacity' ? ' (0–1)' : key === 'rotation' ? ' (DEG)' : ' (%)'}</span><input type="number" step={key === 'opacity' ? .1 : 1} value={selection[key] ?? (key === 'opacity' ? 1 : 0)} onChange={e => updateElement({ [key]: Number(e.target.value) })}/></label>)}
+          <label><input type="checkbox" checked={Boolean(selection.locked)} onChange={e => updateElement({ locked: e.target.checked })}/> Lock element</label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            <button className="outline-btn" onClick={() => { const index = design.elements.findIndex(e => e.id === selectedId); if (index < design.elements.length-1) { const all = [...design.elements]; [all[index],all[index+1]]=[all[index+1],all[index]]; mutate({elements:all}); } }}>Bring forward</button>
+            <button className="outline-btn" onClick={() => { const index = design.elements.findIndex(e => e.id === selectedId); if (index > 0) { const all = [...design.elements]; [all[index],all[index-1]]=[all[index-1],all[index]]; mutate({elements:all}); } }}>Send backward</button>
+            <button className="outline-btn" onClick={() => add({ ...selection, id: id(), x: selection.x+3, y: selection.y+3 })}>Duplicate</button>
+            <button className="outline-btn" onClick={remove}><Trash2 size={15}/> Remove</button>
+          </div>
+        </> : <p className="sub">Click an element to edit its position, size, rotation, style or layer.</p>}
+
+      </div>
+      </div>
       <div className="panel" style={{ padding: 14, display: 'grid', gap: 9 }}>
         <h3>Design properties</h3>
         <label className="input-label">DESIGN NAME</label>
@@ -242,26 +303,6 @@ export default function ThumbnailDesigner({ projectId, characters, references, d
         <div style={{ display: 'grid', gap: 5, maxHeight: 190, overflowY: 'auto' }}>
           {[...design.elements].reverse().map(e => <button key={e.id} className="outline-btn" style={{ justifyContent: 'flex-start', background: e.id === selectedId ? '#fff0df' : undefined, overflow: 'hidden' }} onClick={() => setSelectedId(e.id)}>{e.type === 'text' ? 'T' : '◫'} {e.type === 'text' ? e.text?.slice(0,24) : assetMap.get(e.characterId || '')?.name || 'Image'}</button>)}
         </div>
-        {selection ? <>
-          <h3>Selected element</h3>
-          {selection.type === 'text' ? <>
-            <label className="input-label">TEXT</label><textarea value={selection.text || ''} rows={3} onChange={e => updateElement({ text: e.target.value })}/>
-            <label className="input-label">FONT</label><select value={selection.fontFamily || 'Arial'} onChange={e => updateElement({ fontFamily: e.target.value })}>{['Arial','Georgia','Verdana','Tahoma','Trebuchet MS','Times New Roman','Courier New'].map(f => <option key={f}>{f}</option>)}</select>
-            <label className="input-label">FONT SIZE</label><input type="number" min={8} max={500} value={selection.fontSize || 80} onChange={e => updateElement({ fontSize: clamp(Number(e.target.value),8,500) })}/>
-            <label className="input-label">COLOR</label><input type="color" value={selection.color || '#333333'} onChange={e => updateElement({ color: e.target.value })}/>
-            <label className="input-label">WEIGHT</label><select value={selection.fontWeight || 'bold'} onChange={e => updateElement({ fontWeight: e.target.value })}><option value="normal">Normal</option><option value="bold">Bold</option></select>
-          </> : <>
-            <label className="input-label">ASSET SOURCE</label><select value={selection.source || 'original'} onChange={e => updateElement({ source: e.target.value as 'original' | 'upscaled' })}><option value="original">Original</option><option value="upscaled" disabled={!assetMap.get(selection.characterId || '')?.upscaledImageUrl}>Upscaled 4×</option></select>
-          </>}
-          {(['x','y','width','height','rotation','opacity'] as const).map(key => <label key={key} style={{ display: 'grid', gap: 4 }}><span className="input-label">{key.toUpperCase()}{key === 'opacity' ? ' (0–1)' : key === 'rotation' ? ' (DEG)' : ' (%)'}</span><input type="number" step={key === 'opacity' ? .1 : 1} value={selection[key] ?? (key === 'opacity' ? 1 : 0)} onChange={e => updateElement({ [key]: Number(e.target.value) })}/></label>)}
-          <label><input type="checkbox" checked={Boolean(selection.locked)} onChange={e => updateElement({ locked: e.target.checked })}/> Lock element</label>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            <button className="outline-btn" onClick={() => { const index = design.elements.findIndex(e => e.id === selectedId); if (index < design.elements.length-1) { const all = [...design.elements]; [all[index],all[index+1]]=[all[index+1],all[index]]; mutate({elements:all}); } }}>Bring forward</button>
-            <button className="outline-btn" onClick={() => { const index = design.elements.findIndex(e => e.id === selectedId); if (index > 0) { const all = [...design.elements]; [all[index],all[index-1]]=[all[index-1],all[index]]; mutate({elements:all}); } }}>Send backward</button>
-            <button className="outline-btn" onClick={() => add({ ...selection, id: id(), x: selection.x+3, y: selection.y+3 })}>Duplicate</button>
-            <button className="outline-btn" onClick={remove}><Trash2 size={15}/> Remove</button>
-          </div>
-        </> : <p className="sub">Click an element to edit its position, size, rotation, style or layer.</p>}
       </div>
     </div>}
   </div>;
