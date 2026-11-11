@@ -53,6 +53,8 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const [aiBusy, setAiBusy] = useState(false);
   const [imageBusy, setImageBusy] = useState(false);
   const [upscaleBusy, setUpscaleBusy] = useState(false);
+  const [selectedThumbnailIds, setSelectedThumbnailIds] = useState<Set<string>>(() => new Set());
+  const [upscaleSubmitting, setUpscaleSubmitting] = useState({ done: 0, total: 0 });
   const [upscaleStatus, setUpscaleStatus] = useState('');
   const [imageProvider, setImageProvider] = useState<'openai' | 'gemini'>('openai');
   const [imageModel, setImageModel] = useState('gpt-image-1-mini');
@@ -421,31 +423,44 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     if (!result.url) throw new Error('Thumbnail upload returned no URL');
     return result.url;
   };
-  const upscaleThumbnail = async () => {
-    if (!design || upscaleBusy) return;
-    if (design.upscaleJob) { setMessage('This thumbnail is already queued for GPU upscale.'); return; }
-    if (design.upscaledImageUrl) { setMessage('This thumbnail already has an upscale result.'); return; }
-    setUpscaleBusy(true); setMessage('');
+  const upscaleSelectedThumbnails = async () => {
+    if (upscaleBusy) return;
+    const targets = latestDesignsRef.current.filter(item => selectedThumbnailIds.has(item.id) && !item.upscaleJob && !item.upscaledImageUrl);
+    if (!targets.length) { setMessage('Select at least one thumbnail that is not queued or already upscaled.'); return; }
+    if (!window.confirm('Submit ' + targets.length + ' selected thumbnails to Remote GPU? You can close PaletteIQ after all jobs are accepted.')) return;
+    setUpscaleBusy(true); setUpscaleSubmitting({ done: 0, total: targets.length }); setMessage('');
+    const errors: string[] = [];
+    let accepted = 0;
     try {
-      // Use the current rendered canvas; the GPU service accepts PNG input only.
-      const source = design.aiImageUrl ? await loadForExport(design.aiImageUrl) : null;
-      const png = source ? await (async () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = source.naturalWidth; canvas.height = source.naturalHeight;
-        const ctx = canvas.getContext('2d'); if (!ctx) throw new Error('Canvas unavailable');
-        ctx.drawImage(source, 0, 0);
-        return new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
-      })() : await renderDesignBlob(design, 'png');
-      if (!png) throw new Error('Could not prepare GPU input PNG');
-      const sourceUrl = await uploadRenderedThumbnail(png, 'image/png');
-      const response = await fetch('/api/thumbnail-upscale', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, thumbnailId: design.id, sourceUrl }) });
-      const result = await response.json() as { id?: string; error?: string };
-      if (!response.ok || !result.id) throw new Error(result.error || 'GPU did not accept the thumbnail');
-      onChange(designs.map(item => item.id === design.id ? { ...item, upscaleJob: { id: result.id!, sourceUrl, factor: 4 as const, submittedAt: Date.now() } } : item));
-      setUpscaleStatus('GPU job queued');
-      setMessage('Remote GPU accepted thumbnail. The job continues in the background.');
-    } catch (error) { setMessage('Thumbnail upscale failed: ' + (error instanceof Error ? error.message : String(error))); }
-    finally { setUpscaleBusy(false); }
+      for (const item of targets) {
+        setMessage('Uploading thumbnail ' + (accepted + errors.length + 1) + '/' + targets.length + ': ' + item.name);
+        try {
+          const source = item.aiImageUrl ? await loadForExport(item.aiImageUrl) : null;
+          const png = source ? await (async () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = source.naturalWidth; canvas.height = source.naturalHeight;
+            const ctx = canvas.getContext('2d'); if (!ctx) throw new Error('Canvas unavailable');
+            ctx.drawImage(source, 0, 0);
+            return new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
+          })() : await renderDesignBlob(item, 'png');
+          if (!png) throw new Error('Could not prepare GPU input PNG');
+          const sourceUrl = await uploadRenderedThumbnail(png, 'image/png');
+          const response = await fetch('/api/thumbnail-upscale', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, thumbnailId: item.id, sourceUrl }) });
+          const result = await response.json() as { id?: string; error?: string };
+          if (!response.ok || !result.id) throw new Error(result.error || 'GPU did not accept the thumbnail');
+          const next = latestDesignsRef.current.map(d => d.id === item.id ? { ...d, upscaleJob: { id: result.id!, sourceUrl, factor: 4 as const, submittedAt: Date.now() } } : d);
+          latestDesignsRef.current = next;
+          onChange(next);
+          // A remote job survives app exit only if its ID survives in the collection.
+          // Persist each accepted job before moving to the next submission.
+          await latestSaveRef.current(next);
+          accepted++;
+        } catch (error) { errors.push(item.name + ': ' + (error instanceof Error ? error.message : String(error))); }
+        setUpscaleSubmitting({ done: accepted + errors.length, total: targets.length });
+      }
+      setSelectedThumbnailIds(old => new Set([...old].filter(id => !targets.some(t => t.id === id))));
+      setMessage('GPU jobs submitted and saved: ' + accepted + '/' + targets.length + '. ' + (errors.length ? errors.join(' | ') : 'All submitted jobs will continue while the app is closed.'));
+    } finally { setUpscaleBusy(false); }
   };
   const activeThumbnailJobs = designs.filter(item => item.upscaleJob).map(item => item.id + ':' + item.upscaleJob!.id).join(',');
   useEffect(() => {
@@ -587,22 +602,6 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         {imageProvider === 'openai' && <><label className="input-label">IMAGE QUALITY</label>
         <select value={imageQuality} onChange={e => setImageQuality(e.target.value as 'low' | 'medium' | 'high')}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></>}
         <button className="primary-btn" disabled={imageBusy || !imageModel} type="button" onClick={() => void generateAiThumbnail()}><WandSparkles size={15}/> {imageBusy ? 'Generating AI thumbnail...' : 'Generate AI thumbnail'}</button>
-        {design.aiImageUrl && <div style={{ display: 'grid', gap: 8 }}>
-          <h3>AI generated thumbnail</h3>
-          <img src={design.aiImageUrl} alt="Generated listing thumbnail" style={{ width: '100%', height: 'auto', borderRadius: 8 }}/>
-          <button className="outline-btn" onClick={() => void downloadAiThumbnail()}><Download size={15}/> Download AI image</button>
-          <small>AI artwork is one image. Original clipart elements remain editable in the canvas.</small>
-        </div>}
-
-        <h3>Remote GPU Upscale</h3>
-        <button className="outline-btn" disabled={upscaleBusy || Boolean(design.upscaleJob) || Boolean(design.upscaledImageUrl)} onClick={() => void upscaleThumbnail()}>
-          {upscaleBusy ? 'Submitting thumbnail...' : design.upscaleJob ? 'GPU upscale queued' : design.upscaledImageUrl ? 'Upscale completed' : 'Remote GPU Upscale'}
-        </button>
-        {upscaleStatus && <small>{upscaleStatus}</small>}
-        {design.upscaledImageUrl && <div style={{ display: 'grid', gap: 6 }}>
-          <img src={design.upscaledImageUrl} alt="Upscaled thumbnail" style={{ width: '100%', borderRadius: 8 }}/>
-          <a className="outline-btn" href={design.upscaledImageUrl} target="_blank" rel="noreferrer">View upscaled image</a>
-        </div>}
         <h3>Characters</h3>
         <div style={{ maxHeight: 400, overflowY: 'auto', display: 'grid', gap: 8 }}>
           {characters.filter(c => c.imageUrl).map(c => <button type="button" key={c.id} onClick={() => add(newImage(c, design.elements.filter(e => e.type === 'image').length))} style={{ textAlign: 'left', display: 'flex', gap: 8, alignItems: 'center', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: 6 }}>
@@ -703,19 +702,35 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     </div>}
     <div className="panel" style={{ marginTop: 14, padding: 16, width: '100%' }}>
       <h3 style={{ marginTop: 0 }}>All collection thumbnails ({designs.length})</h3>
-      <p className="sub">Select a saved thumbnail to display it on the canvas. AI-generated images are saved as separate thumbnails.</p>
+      <p className="sub">Click a thumbnail to show it on the canvas. Check thumbnails for GPU upscale; completed submissions continue on the remote server even if PaletteIQ closes.</p>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+        <button type="button" className="outline-btn" disabled={upscaleBusy} onClick={() => setSelectedThumbnailIds(new Set(designs.filter(item => !item.upscaledImageUrl && !item.upscaleJob).map(item => item.id)))}>Select pending</button>
+        <button type="button" className="outline-btn" disabled={upscaleBusy} onClick={() => setSelectedThumbnailIds(new Set())}>Clear selection</button>
+        <button type="button" className="primary-btn" disabled={upscaleBusy || ![...selectedThumbnailIds].some(id => designs.some(item => item.id === id && !item.upscaleJob && !item.upscaledImageUrl))} onClick={() => void upscaleSelectedThumbnails()}>
+          {upscaleBusy ? 'Submitting ' + upscaleSubmitting.done + '/' + upscaleSubmitting.total : 'Remote GPU Upscale selected (' + [...selectedThumbnailIds].filter(id => designs.some(d => d.id === id && !d.upscaleJob && !d.upscaledImageUrl)).length + ')'}
+        </button>
+        {upscaleStatus && <small>{upscaleStatus}</small>}
+      </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <button className="outline-btn" type="button" aria-label="Scroll thumbnails left" onClick={() => scrollGallery(-1)} style={{ flexShrink: 0, minWidth: 38 }}>‹</button>
         <div ref={galleryStripRef} style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', overflowY: 'hidden', gap: 12, flex: 1, minWidth: 0, scrollBehavior: 'smooth', scrollSnapType: 'x mandatory', paddingBottom: 8 }}>
         {designs.map(item => (
-          <button key={item.id} type="button" onClick={() => { setActiveId(item.id); setSelectedId(''); }}
-            style={{ background: item.id === design?.id ? '#fff3e9' : '#fff', border: item.id === design?.id ? '2px solid #f1641e' : '1px solid #ddd', borderRadius: 10, padding: 8, textAlign: 'left', cursor: 'pointer', flex: '0 0 170px', scrollSnapAlign: 'start' }}>
+          <div key={item.id} style={{ background: item.id === design?.id ? '#fff3e9' : '#fff', border: item.id === design?.id ? '2px solid #f1641e' : '1px solid #ddd', borderRadius: 10, padding: 8, textAlign: 'left', flex: '0 0 170px', scrollSnapAlign: 'start' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, marginBottom: 6 }}>
+              <input type="checkbox" checked={selectedThumbnailIds.has(item.id)} disabled={upscaleBusy || Boolean(item.upscaledImageUrl) || Boolean(item.upscaleJob)} onChange={event => setSelectedThumbnailIds(old => { const next = new Set(old); if (event.target.checked) next.add(item.id); else next.delete(item.id); return next; })}/>
+              Select for upscale
+            </label>
+            <button type="button" onClick={() => { setActiveId(item.id); setSelectedId(''); }} style={{ border: 0, background: 'transparent', textAlign: 'left', padding: 0, width: '100%', cursor: 'pointer' }}>
             <div style={{ width: '100%', aspectRatio: item.width + '/' + item.height, position: 'relative', overflow: 'hidden', borderRadius: 6, background: item.background, backgroundImage: item.aiImageUrl || item.backgroundImageUrl ? 'url(' + JSON.stringify(item.aiImageUrl || item.backgroundImageUrl) + ')' : undefined, backgroundSize: 'cover', backgroundPosition: 'center' }}>
               {!item.aiImageUrl && item.elements.map(element => element.type === 'image' ? <img key={element.id} src={imageUrl(element)} alt="" style={{ position: 'absolute', left: element.x + '%', top: element.y + '%', width: element.width + '%', height: element.height + '%', objectFit: 'contain', transform: 'rotate(' + element.rotation + 'deg)' }}/> : <span key={element.id} style={{ position: 'absolute', left: element.x + '%', top: element.y + '%', width: element.width + '%', color: element.color, fontFamily: element.fontFamily, fontSize: 9, overflow: 'hidden' }}>{element.text}</span>)}
             </div>
             <strong style={{ display: 'block', marginTop: 7, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</strong>
             <small>{item.aiImageUrl ? 'AI image' : 'Editable design'} · {item.width}×{item.height}</small>
-          </button>
+            </button>
+            <small style={{ display: 'block', marginTop: 5 }}>{item.upscaledImageUrl ? '✓ Upscale completed' : item.upscaleJob ? 'GPU queued / processing' : 'Not upscaled'}</small>
+            {item.upscaledImageUrl && <a href={item.upscaledImageUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>View upscale</a>}
+            {item.aiImageUrl && <a href={item.aiImageUrl} download style={{ display: 'block', fontSize: 12 }}>View AI image</a>}
+          </div>
         ))}
         </div>
         <button className="outline-btn" type="button" aria-label="Scroll thumbnails right" onClick={() => scrollGallery(1)} style={{ flexShrink: 0, minWidth: 38 }}>›</button>
