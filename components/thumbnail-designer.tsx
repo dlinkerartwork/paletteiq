@@ -74,6 +74,15 @@ export default function ThumbnailDesigner({ aiDefaults, projectId, characters, r
   const assetMap = useMemo(() => new Map(characters.map(c => [c.id, c])), [characters]);
   useEffect(() => { if (designs.length && !designs.some(d => d.id === activeId)) setActiveId(designs[0].id); }, [activeId, designs]);
   useEffect(() => { setHistory([]); setFuture([]); setSelectedId(''); }, [activeId, projectId]);
+  useEffect(() => {
+    // Older builds positioned added assets using their library index, sometimes far below the canvas.
+    if (!designs.some(d => d.elements.some(e => e.type === 'image' && (e.y > 100 || e.x > 100)))) return;
+    onChange(designs.map(d => ({ ...d, elements: d.elements.map((e, index) =>
+      e.type === 'image' && (e.y > 100 || e.x > 100)
+        ? { ...e, x: newImage(characters.find(c => c.id === e.characterId) || { id: '', name: '' }, index).x, y: newImage(characters.find(c => c.id === e.characterId) || { id: '', name: '' }, index).y }
+        : e) })));
+  }, [designs, characters, onChange]);
+
   const commit = (next: ThumbnailDesign, record = true) => {
     if (record && design) { setHistory(old => [...old.slice(-29), design]); setFuture([]); }
     onChange(designs.map(d => d.id === next.id ? normalizeDesign(next) : d));
@@ -267,7 +276,6 @@ export default function ThumbnailDesigner({ aiDefaults, projectId, characters, r
       <div className="panel" style={{ padding: 14, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(165px, 1fr))', alignItems: 'start', gap: 12 }}>
         <h3 style={{ gridColumn: '1 / -1' }}>Selected element</h3>
         {selection ? <>
-          <h3>Selected element</h3>
           {selection.type === 'text' ? <>
             <label className="input-label">TEXT</label><textarea value={selection.text || ''} rows={3} onChange={e => updateElement({ text: e.target.value })}/>
             <label className="input-label">FONT</label><select value={selection.fontFamily || 'Arial'} onChange={e => updateElement({ fontFamily: e.target.value })}>{["Arial","Georgia","Playfair Display","Cormorant Garamond","Cinzel","Bodoni Moda","DM Serif Display","Libre Baskerville","EB Garamond","Lora","Prata","Marcellus","Great Vibes","Allura","Poppins","Montserrat","Raleway","Times New Roman","Verdana"].map(f => <option key={f}>{f}</option>)}</select>
