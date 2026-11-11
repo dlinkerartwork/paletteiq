@@ -93,6 +93,20 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
   const [backgroundUploading, setBackgroundUploading] = useState(false);
   const [history, setHistory] = useState<ThumbnailDesign[]>([]);
   const [future, setFuture] = useState<ThumbnailDesign[]>([]);
+  const latestSaveRef = useRef(onSave);
+  latestSaveRef.current = onSave;
+  const lastScheduledDesignsRef = useRef(JSON.stringify(designs));
+  useEffect(() => {
+    const serialized = JSON.stringify(designs);
+    if (serialized === lastScheduledDesignsRef.current) return;
+    lastScheduledDesignsRef.current = serialized;
+    const timeout = window.setTimeout(() => {
+      void latestSaveRef.current(designs).catch(error => {
+        setMessage('Automatic thumbnail save failed: ' + (error instanceof Error ? error.message : String(error)));
+      });
+    }, 1300);
+    return () => window.clearTimeout(timeout);
+  }, [designs, projectId]);
   const stageRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ id: string; mode: 'move' | 'resize' | 'rotate'; x: number; y: number; original: ThumbnailElement; centerX?: number; centerY?: number; startAngle?: number } | null>(null);
   const design = designs.find(d => d.id === activeId) || designs[0];
@@ -357,6 +371,13 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
         {imageProvider === 'openai' && <><label className="input-label">IMAGE QUALITY</label>
         <select value={imageQuality} onChange={e => setImageQuality(e.target.value as 'low' | 'medium' | 'high')}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></>}
         <button className="primary-btn" disabled={imageBusy || !imageModel} type="button" onClick={() => void generateAiThumbnail()}><WandSparkles size={15}/> {imageBusy ? 'Generating AI thumbnail...' : 'Generate AI thumbnail'}</button>
+        {design.aiImageUrl && <div style={{ display: 'grid', gap: 8 }}>
+          <h3>AI generated thumbnail</h3>
+          <img src={design.aiImageUrl} alt="Generated listing thumbnail" style={{ width: '100%', height: 'auto', borderRadius: 8 }}/>
+          <button className="outline-btn" onClick={() => void downloadAiThumbnail()}><Download size={15}/> Download AI image</button>
+          <small>AI artwork is one image. Original clipart elements remain editable in the canvas.</small>
+        </div>}
+
         <h3>Characters</h3>
         <div style={{ maxHeight: 400, overflowY: 'auto', display: 'grid', gap: 8 }}>
           {characters.filter(c => c.imageUrl).map(c => <button type="button" key={c.id} onClick={() => add(newImage(c, design.elements.filter(e => e.type === 'image').length))} style={{ textAlign: 'left', display: 'flex', gap: 8, alignItems: 'center', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: 6 }}>
@@ -419,12 +440,6 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
         <input type="file" accept="image/png,image/jpeg" disabled={backgroundUploading} onChange={e => void uploadBackground(e.target.files?.[0])}/>
         {backgroundUploading && <small>Uploading background…</small>}
         {design.backgroundImageUrl && <button className="outline-btn" type="button" onClick={() => mutate({ backgroundImageUrl: undefined })}>Remove background image</button>}
-        {design.aiImageUrl && <div style={{ display: 'grid', gap: 8 }}>
-          <h3>AI generated thumbnail</h3>
-          <img src={design.aiImageUrl} alt="Generated listing thumbnail" style={{ width: '100%', height: 'auto', borderRadius: 8 }}/>
-          <button className="outline-btn" onClick={() => void downloadAiThumbnail()}><Download size={15}/> Download AI PNG</button>
-          <small>AI artwork is one image. Original clipart elements remain editable in the canvas.</small>
-        </div>}
         <h3>Layers</h3>
         <div style={{ display: 'grid', gap: 5, maxHeight: 190, overflowY: 'auto' }}>
           {[...design.elements].reverse().map(e => <div key={e.id} style={{ display: 'flex', gap: 5, minWidth: 0 }}>
