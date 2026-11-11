@@ -108,6 +108,49 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
     return () => window.clearTimeout(timeout);
   }, [designs, projectId]);
   const stageRef = useRef<HTMLDivElement>(null);
+  const canvasViewportRef = useRef<HTMLDivElement>(null);
+  const galleryStripRef = useRef<HTMLDivElement>(null);
+  const panRef = useRef<{ pointerId: number; x: number; y: number; left: number; top: number } | null>(null);
+  const scrollGallery = (direction: -1 | 1) => galleryStripRef.current?.scrollBy({ left: direction * Math.max(180, (galleryStripRef.current?.clientWidth || 600) * .75), behavior: 'smooth' });
+  const zoomWithWheel = (event: WheelEvent) => {
+    event.preventDefault();
+    const viewport = canvasViewportRef.current;
+    if (!viewport) return;
+    const bounds = viewport.getBoundingClientRect();
+    const pointX = event.clientX - bounds.left;
+    const pointY = event.clientY - bounds.top;
+    const previousZoom = previewZoom;
+    const nextZoom = clamp(previousZoom * (event.deltaY < 0 ? 1.12 : 1 / 1.12), .5, 5);
+    const ratio = nextZoom / previousZoom;
+    const previousLeft = viewport.scrollLeft, previousTop = viewport.scrollTop;
+    setPreviewZoom(nextZoom);
+    requestAnimationFrame(() => {
+      viewport.scrollLeft = (previousLeft + pointX) * ratio - pointX;
+      viewport.scrollTop = (previousTop + pointY) * ratio - pointY;
+    });
+  };
+  useEffect(() => {
+    const viewport = canvasViewportRef.current;
+    if (!viewport) return;
+    viewport.addEventListener('wheel', zoomWithWheel, { passive: false });
+    return () => viewport.removeEventListener('wheel', zoomWithWheel);
+  }, [previewZoom, activeId, designs.length]);
+  const startPan = (event: React.PointerEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (event.button !== 0 || target.closest('[data-thumbnail-element="true"]')) return;
+    const viewport = canvasViewportRef.current;
+    if (!viewport) return;
+    panRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, left: viewport.scrollLeft, top: viewport.scrollTop };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const movePan = (event: React.PointerEvent<HTMLDivElement>) => {
+    const pan = panRef.current;
+    const viewport = canvasViewportRef.current;
+    if (!pan || !viewport || pan.pointerId !== event.pointerId) return;
+    viewport.scrollLeft = pan.left - (event.clientX - pan.x);
+    viewport.scrollTop = pan.top - (event.clientY - pan.y);
+  };
+  const stopPan = () => { panRef.current = null; };
   const dragRef = useRef<{ id: string; mode: 'move' | 'resize' | 'rotate'; x: number; y: number; original: ThumbnailElement; centerX?: number; centerY?: number; startAngle?: number } | null>(null);
   const design = designs.find(d => d.id === activeId) || designs[0];
   const selection = design?.elements.find(e => e.id === selectedId);
@@ -412,12 +455,12 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
           <button className="outline-btn" type="button" disabled={!selection || selection.locked} onClick={remove} title="Delete selected object"><Trash2 size={15}/> Delete</button>
           <span style={{ marginLeft: 'auto' }}>{design.width}×{design.height}</span>
         </div>
-        <div style={{ overflow: 'auto', maxHeight: 'min(66vh, 780px)', background: '#e8e8e8', padding: 16, borderRadius: 8 }}>
+        <div ref={canvasViewportRef} onPointerDown={startPan} onPointerMove={movePan} onPointerUp={stopPan} onPointerCancel={stopPan} style={{ overflow: 'auto', maxHeight: 'min(66vh, 780px)', background: '#e8e8e8', padding: 16, borderRadius: 8, cursor: panRef.current ? 'grabbing' : 'grab', touchAction: 'none' }}>
           <div style={{ width: `${previewZoom*100}%`, minWidth: 200, margin: 'auto' }}>
             <div ref={stageRef} onPointerDown={() => setSelectedId('')} style={{ width: '100%', aspectRatio: `${design.width}/${design.height}`, background: design.background, backgroundImage: (design.aiImageUrl || design.backgroundImageUrl) ? `url(${JSON.stringify(design.aiImageUrl || design.backgroundImageUrl)})` : undefined, backgroundPosition: 'center', backgroundSize: 'cover', position: 'relative', containerType: 'inline-size', overflow: 'hidden', boxShadow: '0 5px 25px #0002', touchAction: 'none' }}>
               {design.elements.map(e => {
                 const isSelected = e.id === selectedId;
-                return <div key={e.id} onPointerDown={event => startDrag(event,e,'move')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
+                return <div key={e.id} data-thumbnail-element="true" onPointerDown={event => startDrag(event,e,'move')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
                   style={{ position: 'absolute', left: e.x+'%', top: e.y+'%', width: e.width+'%', height: e.height+'%', transform: `rotate(${e.rotation}deg)`, opacity: e.opacity ?? 1, border: isSelected ? '2px dashed #e36a1b' : '1px solid transparent', cursor: e.locked ? 'not-allowed' : 'move', boxSizing: 'border-box', touchAction: 'none', userSelect: 'none' }}>
                   {e.type === 'image' ? (imageUrl(e) ? <img src={imageUrl(e)} alt={assetMap.get(e.characterId || '')?.name || 'Character'} draggable={false} style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }}/> : <div style={{ color: '#d33' }}>Image unavailable</div>) :
                     (e.curve ? <CurvedText element={e} designWidth={design.width}/> : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', fontSize: `clamp(5px, ${(e.fontSize || 80) / design.width * 100}cqw, 250px)`, fontFamily: e.fontFamily || 'Arial', fontWeight: e.fontWeight || 'bold', color: e.color || '#333', whiteSpace: 'pre-line', overflow: 'hidden', pointerEvents: 'none' }}>{e.text}</div>)}
@@ -490,10 +533,12 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
     <div className="panel" style={{ marginTop: 14, padding: 16, width: '100%' }}>
       <h3 style={{ marginTop: 0 }}>All collection thumbnails ({designs.length})</h3>
       <p className="sub">Select a saved thumbnail to display it on the canvas. AI-generated images are saved as separate thumbnails.</p>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <button className="outline-btn" type="button" aria-label="Scroll thumbnails left" onClick={() => scrollGallery(-1)} style={{ flexShrink: 0, minWidth: 38 }}>‹</button>
+        <div ref={galleryStripRef} style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', overflowY: 'hidden', gap: 12, flex: 1, minWidth: 0, scrollBehavior: 'smooth', scrollSnapType: 'x mandatory', paddingBottom: 8 }}>
         {designs.map(item => (
           <button key={item.id} type="button" onClick={() => { setActiveId(item.id); setSelectedId(''); }}
-            style={{ background: item.id === design?.id ? '#fff3e9' : '#fff', border: item.id === design?.id ? '2px solid #f1641e' : '1px solid #ddd', borderRadius: 10, padding: 8, textAlign: 'left', cursor: 'pointer' }}>
+            style={{ background: item.id === design?.id ? '#fff3e9' : '#fff', border: item.id === design?.id ? '2px solid #f1641e' : '1px solid #ddd', borderRadius: 10, padding: 8, textAlign: 'left', cursor: 'pointer', flex: '0 0 170px', scrollSnapAlign: 'start' }}>
             <div style={{ width: '100%', aspectRatio: item.width + '/' + item.height, position: 'relative', overflow: 'hidden', borderRadius: 6, background: item.background, backgroundImage: item.aiImageUrl || item.backgroundImageUrl ? 'url(' + JSON.stringify(item.aiImageUrl || item.backgroundImageUrl) + ')' : undefined, backgroundSize: 'cover', backgroundPosition: 'center' }}>
               {!item.aiImageUrl && item.elements.map(element => element.type === 'image' ? <img key={element.id} src={imageUrl(element)} alt="" style={{ position: 'absolute', left: element.x + '%', top: element.y + '%', width: element.width + '%', height: element.height + '%', objectFit: 'contain', transform: 'rotate(' + element.rotation + 'deg)' }}/> : <span key={element.id} style={{ position: 'absolute', left: element.x + '%', top: element.y + '%', width: element.width + '%', color: element.color, fontFamily: element.fontFamily, fontSize: 9, overflow: 'hidden' }}>{element.text}</span>)}
             </div>
@@ -501,6 +546,8 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
             <small>{item.aiImageUrl ? 'AI image' : 'Editable design'} · {item.width}×{item.height}</small>
           </button>
         ))}
+        </div>
+        <button className="outline-btn" type="button" aria-label="Scroll thumbnails right" onClick={() => scrollGallery(1)} style={{ flexShrink: 0, minWidth: 38 }}>›</button>
       </div>
     </div>
   </div>;
