@@ -135,7 +135,7 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
   const [remoteProgress, setRemoteProgress] = useState<Record<string, { status: string; elapsed: number }>>({});
   useEffect(() => {
     let live = true;
-    void fetch('/api/settings').then(r => r.json()).then((data: { preferences?: { upscaleFactor?: number } }) => {
+    void fetch('/api/settings').then(async r => await r.json() as { preferences?: { upscaleFactor?: number } }).then(data => {
       if (live) { setUpscaleProvider('remote'); setUpscaleFactor(data.preferences?.upscaleFactor || 4); }
     }).catch(() => {});
     return () => { live = false; };
