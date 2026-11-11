@@ -2,11 +2,12 @@ import { env } from 'cloudflare:workers';
 import { and, eq } from 'drizzle-orm';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { getDb } from '@/db';
-import { projects } from '@/db/schema';
+import { projects, studioSettings } from '@/db/schema';
 import { zipStream, type ZipEntry } from '@/lib/zip-stream';
-import { normalizeListing } from '@/lib/etsy-listing';
-import { auditSeo } from '@/lib/seo-intelligence';
+import { normalizeListing, selectSeoExportDraft, formatSeoExportText } from '@/lib/etsy-listing';
 import { nativeAssetBucket } from '@/lib/native-bridge';
+import { batchAssetKey } from '@/lib/batch-assets';
+import { createImageFileNamer, DEFAULT_IMAGE_NAMING } from '@/lib/image-file-naming';
 
 const enc = new TextEncoder();
 const slug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'collection';
@@ -20,28 +21,68 @@ export async function POST(request: Request) {
   if (typeof body.projectId !== 'string' || !['selected','all','package'].includes(body.scope || '')) return Response.json({ error: 'Invalid export request' }, { status: 400 });
   const rows = await getDb().select().from(projects).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId))).limit(1);
   if (!rows.length) return Response.json({ error: 'Collection not found' }, { status: 404 });
-  const project = JSON.parse(rows[0].data) as { name: string; listing?: unknown; seoReview?: unknown; characters: Array<{ id: string; name: string; imageUrl?: string }> };
+  const project = JSON.parse(rows[0].data) as { name: string; theme?: string; subtheme?: string; microtheme?: string; listing?: unknown; seoReview?: unknown; characters: Array<{ id: string; name: string; imageUrl?: string; upscaledImageUrl?: string }>; thumbnails?: Array<{ id: string; name: string; width: number; height: number; background?: string; backgroundImageUrl?: string; aiImageUrl?: string; renderedImageUrl?: string; upscaledImageUrl?: string; elements?: unknown[] }> };
   if (body.scope === 'package' && !(project.listing && typeof project.listing === 'object' && typeof (project.listing as { title?: string }).title === 'string' && (project.listing as { title: string }).title.trim())) return Response.json({ error: 'Create and save an Etsy listing draft before exporting the final package.' }, { status: 400 });
   const selectedIds = new Set(Array.isArray(body.ids) ? body.ids.filter(v => typeof v === 'string') : []);
-  const chosen = project.characters.filter(c => c.imageUrl && (body.scope !== 'selected' || selectedIds.has(c.id)));
+  const chosen = project.characters.filter(c => (c.upscaledImageUrl || c.imageUrl) && (body.scope !== 'selected' || selectedIds.has(c.id)));
   if (!chosen.length) return Response.json({ error: 'No generated images selected' }, { status: 400 });
   if (chosen.length > 1000) return Response.json({ error: 'Too many images in one ZIP' }, { status: 400 });
+  const settings = await getDb().select({ preferences: studioSettings.preferences }).from(studioSettings).where(eq(studioSettings.owner, user.userId)).limit(1);
+  let pattern = DEFAULT_IMAGE_NAMING;
+  let seoDraftFields: unknown = undefined;
+  try { if (settings[0]) { const prefs = JSON.parse(settings[0].preferences) as { seoFileNaming?: string; seoDraftFields?: unknown }; pattern = prefs.seoFileNaming || DEFAULT_IMAGE_NAMING; seoDraftFields = prefs.seoDraftFields; } }
+  catch { /* Older settings fall back to the original naming convention. */ }
+  const imageFileName = createImageFileNamer(pattern, { theme: project.theme || project.name, subtheme: project.subtheme, microtheme: project.microtheme, collection: project.name });
   const entries: ZipEntry[] = [];
   for (const [index, character] of chosen.entries()) {
-    const path = new URL(character.imageUrl!, 'https://app.local');
+    // Preserve the original PNG bytes from storage (including pHYs/300 DPI).
+    // Prefer the remotely upscaled asset when the collection has one.
+    const path = new URL(character.upscaledImageUrl || character.imageUrl!, 'https://app.local');
     const match = path.pathname.match(/^\/api\/images\/([0-9a-f-]{36})$/);
     if (!match) return Response.json({ error: 'Invalid stored image reference' }, { status: 400 });
     const extension = path.searchParams.get('format') === 'jpg' ? 'jpg' : 'png';
-    const key = `generated/${user.userId}/${match[1]}.${extension}`;
+    const batchId = path.searchParams.get('batch');
+    if (batchId && !/^[0-9a-f-]{36}$/.test(batchId)) return Response.json({ error: 'Invalid Batch image reference' }, { status: 400 });
+    const key = batchId ? batchAssetKey(user.userId, match[1], extension, batchId) : `generated/${user.userId}/${match[1]}.${extension}`;
     if (!await bucket.head(key)) return Response.json({ error: `Image file missing for ${character.name}` }, { status: 409 });
-    entries.push({ name: `images/${String(index + 1).padStart(3, '0')}-${slug(character.name).slice(0, 35)}-${character.id.slice(0, 8)}.${extension}`, stream: async () => (await bucket.get(key))?.body || null });
+    entries.push({ name: `images/${imageFileName(character.name, index, extension)}`, stream: async () => (await bucket.get(key))?.body || null });
+  }
+  // Include thumbnails in image-only and listing-package exports, using the latest upscale first.
+  // Manual layer-based designs remain editable and are also exported as JSON.
+  const thumbnails = Array.isArray(project.thumbnails) ? project.thumbnails.slice(0, 200) : [];
+  const thumbnailFiles: Array<{ id: string; name: string; file: string; width: number; height: number; imageAvailable: boolean }> = [];
+  for (const [index, thumbnail] of thumbnails.entries()) {
+    const label = slug(thumbnail.name || 'thumbnail-' + (index + 1));
+    const fileNameBase = 'thumbnails/' + String(index + 1).padStart(3, '0') + '-' + label;
+    let includedImage = false;
+    // Read authoritative saved upscale references; never substitute a lower-resolution original.
+    const storedUrl = thumbnail.upscaledImageUrl || thumbnail.aiImageUrl || thumbnail.renderedImageUrl;
+    if (typeof storedUrl === 'string') {
+      let url: URL;
+      try { url = new URL(storedUrl, 'https://app.local'); }
+      catch { return Response.json({ error: 'Invalid saved thumbnail URL' }, { status: 400 }); }
+      const id = url.searchParams.get('assetId') || '';
+      const format = url.searchParams.get('format') || '';
+      if (url.origin !== 'https://app.local' || url.pathname !== '/api/thumbnail-background' || url.searchParams.get('projectId') !== body.projectId || !/^[0-9a-f-]{36}$/.test(id) || !['png','jpg'].includes(format)) {
+        return Response.json({ error: 'Invalid saved thumbnail reference for ' + thumbnail.name }, { status: 400 });
+      }
+      const key = 'generated/' + user.userId + '/' + id + '.' + format;
+      if (!await bucket.head(key)) return Response.json({ error: 'Thumbnail image missing: ' + thumbnail.name }, { status: 409 });
+      entries.push({ name: fileNameBase + '.' + format, stream: async () => (await bucket.get(key))?.body || null });
+      includedImage = true;
+    }
+    if (!includedImage) return Response.json({ error: 'Thumbnail "' + thumbnail.name + '" is not rendered yet. Open Thumbnail Designer and click Save designs, then retry the ZIP.' }, { status: 409 });
+    thumbnailFiles.push({ id: thumbnail.id, name: thumbnail.name, file: fileNameBase + '.' + (new URL(storedUrl!, 'https://app.local')).searchParams.get('format'), width: thumbnail.width, height: thumbnail.height, imageAvailable: true });
+  }
+  if (thumbnails.length) {
+    entries.push({ name: 'thumbnails/thumbnail-designs.json', stream: file(JSON.stringify(thumbnails, null, 2)) });
+    entries.push({ name: 'thumbnails/manifest.json', stream: file(JSON.stringify(thumbnailFiles, null, 2)) });
   }
   if (body.scope === 'package') {
-    entries.push({ name: 'etsy-listing-draft.json', stream: file(JSON.stringify(project.listing || {}, null, 2)) });
-    entries.push({ name: 'seo-readiness-report.json', stream: file(JSON.stringify({ editorialAudit: auditSeo(normalizeListing(project.listing)), aiReview: project.seoReview || null, note: 'Editorial completeness only; not an Etsy search ranking, traffic, or sales prediction.' }, null, 2)) });
-    const listing = (project.listing || {}) as { title?: string; description?: string; tags?: string[]; primaryKeyword?: string };
-    entries.push({ name: 'etsy-listing-draft.txt', stream: file(`TITLE\n${listing.title || ''}\n\nDESCRIPTION\n${listing.description || ''}\n\nTAGS\n${(listing.tags || []).join(', ')}\n\nPRIMARY KEYWORD\n${listing.primaryKeyword || ''}\n`) });
-    entries.push({ name: 'collection-manifest.json', stream: file(JSON.stringify({ collection: project.name, images: chosen.map(c => ({ id: c.id, name: c.name, imageUrl: c.imageUrl })) }, null, 2)) });
+    const listing = normalizeListing(project.listing);
+    entries.push({ name: 'etsy-listing-draft.json', stream: file(JSON.stringify(selectSeoExportDraft(listing, seoDraftFields), null, 2)) });
+    entries.push({ name: 'etsy-listing-draft.txt', stream: file(formatSeoExportText(listing, seoDraftFields)) });
+    entries.push({ name: 'collection-manifest.json', stream: file(JSON.stringify({ collection: project.name, images: chosen.map(c => ({ id: c.id, name: c.name, imageUrl: c.upscaledImageUrl || c.imageUrl })) }, null, 2)) });
   }
   const name = `${slug(project.name)}-${body.scope === 'package' ? 'etsy-package' : 'images'}.zip`;
   return new Response(zipStream(entries), { headers: { 'Content-Type': 'application/zip', 'Content-Disposition': `attachment; filename="${name}"`, 'Cache-Control': 'private, no-store' } });

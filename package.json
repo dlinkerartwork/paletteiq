@@ -8,16 +8,19 @@
   },
   "scripts": {
     "desktop:dev": "npm run build && electron .",
-    "desktop:package:win": "npm run build && node scripts/prepare-desktop-bundle.mjs && electron-builder --win nsis --x64 --publish never",
-    "desktop:unpacked:win": "npm run build && node scripts/prepare-desktop-bundle.mjs && electron-builder --win dir --x64 --publish never",
+    "desktop:package:win": "npm run build && node scripts/prepare-desktop-bundle.mjs && node scripts/prepare-brand-icon.mjs && node scripts/prepare-release-notes.mjs && electron-builder --win nsis --x64 --publish never",
+    "desktop:package:win:no-license": "npm run build && node scripts/prepare-desktop-bundle.mjs --no-license && node scripts/prepare-brand-icon.mjs && node scripts/prepare-release-notes.mjs && electron-builder --config electron-builder.no-license.yml --win nsis --x64 --publish never",
+    "desktop:unpacked:win": "npm run build && node scripts/prepare-desktop-bundle.mjs && node scripts/prepare-brand-icon.mjs && node scripts/prepare-release-notes.mjs && electron-builder --win dir --x64 --publish never",
     "install:ci": "npx --yes pnpm@11.25.0 install --frozen-lockfile",
     "dev": "node scripts/run-framework.mjs dev",
     "build": "node scripts/run-framework.mjs build",
     "start": "node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js dev --config dist/server/wrangler.json --local --persist-to .wrangler/state --ip 127.0.0.1 --inspector-port 0",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "test:production": "node --experimental-strip-types --test tests/*.test.mjs",
     "db:generate": "drizzle-kit generate",
     "license:init": "node scripts/license-cli.mjs init",
-    "license:issue": "node scripts/license-cli.mjs issue"
+    "license:issue": "node scripts/license-cli.mjs issue",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

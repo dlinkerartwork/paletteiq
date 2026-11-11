@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { eq } from 'drizzle-orm';
 import { getDb } from '@/db';
 import { studioSettings } from '@/db/schema';
+import { parseGeminiKeyring } from '@/lib/gemini-keyring';
 
 const master = () => (env as unknown as Record<string, string | undefined>).STUDIO_CREDENTIAL_ENCRYPTION_KEY;
 const hexToBytes = (hex: string) => Uint8Array.from(hex.match(/.{2}/g) ?? [], x => parseInt(x, 16));
@@ -28,8 +29,12 @@ export async function decryptCredential(value: string, owner: string) {
   return new TextDecoder().decode(result);
 }
 
-export async function userCredential(owner: string, provider: 'etsy' | 'openai') {
+export async function userCredential(owner: string, provider: 'etsy' | 'openai' | 'gemini') {
   const rows = await getDb().select().from(studioSettings).where(eq(studioSettings.owner, owner)).limit(1);
-  const encrypted = provider === 'etsy' ? rows[0]?.etsyCredential : rows[0]?.openaiCredential;
+  const encrypted = provider === 'etsy' ? rows[0]?.etsyCredential : provider === 'gemini' ? rows[0]?.geminiCredential : rows[0]?.openaiCredential;
   return encrypted ? decryptCredential(encrypted, owner) : null;
+}
+
+export async function userGeminiKeys(owner: string): Promise<string[]> {
+  return parseGeminiKeyring(await userCredential(owner, 'gemini'));
 }

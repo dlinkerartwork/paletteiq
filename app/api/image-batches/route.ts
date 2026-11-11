@@ -1,14 +1,17 @@
 import { env } from 'cloudflare:workers';
-import { and, asc, desc, eq, notInArray } from 'drizzle-orm';
+import { and, asc, count, desc, eq, notInArray } from 'drizzle-orm';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { getDb } from '@/db';
 import { imageBatches, projects, studioSettings } from '@/db/schema';
 import { userCredential } from '@/lib/credentials';
-import { eligibleForBulk, isActiveBatchStatus } from '@/lib/production-rules';
+import { eligibleForBulk, retryableFailedImage, isActiveBatchStatus } from '@/lib/production-rules';
 import { originalImagePrompt } from '@/lib/originality';
 import { reviewImageSimilarity, type SimilarityReview } from '@/lib/similarity-review';
 import { nativeAssetBucket } from '@/lib/native-bridge';
 import { acquireProductionLocks } from '@/lib/production-locks';
+import { mergeNewBatchResults } from '@/lib/batch-recovery';
+import { batchAssetKey, batchAssetUrl } from '@/lib/batch-assets';
+import { awaitBatchOutputFiles } from '@/lib/batch-status';
 
 const MODELS = ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
 const syncingJobIds = new Set<string>();
@@ -24,7 +27,7 @@ const safeJob = (job: typeof imageBatches.$inferSelect) => ({
   id: job.id, status: job.status, model: job.model, createdAt: job.createdAt,
   characterIds: (JSON.parse(job.items) as BatchItem[]).map(i => i.id),
   total: job.total, completed: job.completed, failed: job.failed,
-  imported: (JSON.parse(job.items) as BatchItem[]).filter(i => i.status !== 'pending').length,
+  imported: (JSON.parse(job.items) as BatchItem[]).filter(i => i.status === 'done').length,
   assets: (JSON.parse(job.items) as BatchItem[]).filter(i => i.status !== 'pending'),
 });
 
@@ -43,11 +46,13 @@ export async function POST(req: Request) {
   if (!saved.length) return fail('Save the collection before submitting a batch.', 404);
   const project = JSON.parse(saved[0].data) as { characters?: Array<{ id: string; prompt: string; status?: string; imageUrl?: string }> };
   const selected = data.characterIds.map(id => project.characters?.find(c => c.id === id));
-  if (data.regenerate && data.characterIds.length !== 1) return fail('Regenerate must be submitted for one character at a time.');
-  if (selected.some(c => !c?.prompt || (!data.regenerate && !eligibleForBulk(c)))) return fail('Bulk Batch accepts only never-generated prompts. Use per-card Regenerate for existing images.');
+  if (data.regenerate && data.characterIds.length > 1 && selected.some(c => !c || !retryableFailedImage(c))) return fail('Bulk retry accepts only failed characters without saved images.');
+  if (selected.some(c => !c?.prompt || (!data.regenerate && !eligibleForBulk(c)))) return fail('Bulk Batch accepts only never-generated prompts. Use explicit Retry Failed for unsuccessful images.');
   const previous = await db.select().from(imageBatches).where(and(eq(imageBatches.owner, user.userId), eq(imageBatches.projectId, data.projectId)));
   const activeIds = new Set(previous.filter(b => isActiveBatchStatus(b.status)).flatMap(b => (JSON.parse(b.items) as BatchItem[]).filter(i => i.status === 'pending').map(i => i.id)));
   if (data.characterIds.some(id => activeIds.has(id))) return fail('Some characters already have a pending Batch job.');
+  // Validate output storage before creating a chargeable OpenAI Batch.
+  if (!(nativeAssetBucket() ?? env.BUCKET)) return fail('Image storage is unavailable. Batch was not submitted to OpenAI.', 503);
   const secret = (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
   const key = await userCredential(user.userId, 'openai') || secret;
   if (!key) return fail('Configure an OpenAI API key in Settings first.', 503);
@@ -108,10 +113,15 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
   const reviewSources = savedProject.length ? JSON.parse(savedProject[0].data) as { selectedImageUrls?: string[]; images?: string[] } : {};
   const references = reviewSources.selectedImageUrls ?? reviewSources.images ?? [];
   const batch = await (await openai(key, `batches/${encodeURIComponent(job.openaiBatchId)}`)).json() as OpenAIBatch;
+  if (awaitBatchOutputFiles(batch)) throw new Error('Batch completed at OpenAI, but result files are not yet available. Recovery will retry automatically.');
   const items = JSON.parse(job.items) as BatchItem[];
   const byId = new Map(items.map(i => [i.id, i]));
+  const changedIds = new Set<string>();
   const isTerminal = ['completed', 'expired', 'cancelled', 'failed'].includes(batch.status);
   const bucket = nativeAssetBucket() ?? env.BUCKET;
+  // Never mark a terminal Batch as imported when its image storage is offline.
+  // Leave its item records pending so the next recovery attempt can succeed.
+  if (isTerminal && !bucket) throw new Error('Batch recovery paused: image storage is unavailable. Retry when storage is restored.');
   if (isTerminal && bucket) {
     let handled = 0;
     let interrupted = false;
@@ -119,23 +129,27 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
       const result = await openai(key, `files/${encodeURIComponent(fileId)}/content`);
       if (!result.body) continue;
       for await (const line of jsonlLines(result.body)) {
-        let record: any;
+        let record: { custom_id?: string; response?: { body?: { data?: Array<{ b64_json?: string }>; error?: { message?: string } } }; error?: { message?: string } };
         try { record = JSON.parse(line); } catch { continue; }
-        const item = byId.get(record.custom_id);
+        const item = record.custom_id ? byId.get(record.custom_id) : undefined;
         if (!item || item.status !== 'pending') continue;
         const b64 = record.response?.body?.data?.[0]?.b64_json as string | undefined;
         if (b64) {
           const extension = job.format === 'jpeg' ? 'jpg' : 'png';
-          await bucket.put(`generated/${owner}/${record.custom_id}.${extension}`, Uint8Array.from(atob(b64), c => c.charCodeAt(0)), { httpMetadata: { contentType: extension === 'jpg' ? 'image/jpeg' : 'image/png' } });
-          item.status = 'done'; item.imageUrl = `/api/images/${record.custom_id}?format=${extension}&v=${Date.now()}`;
-          item.similarityReview = await reviewImageSimilarity(key, b64, extension === 'jpg' ? 'image/jpeg' : 'image/png', references);
+          await bucket.put(batchAssetKey(owner, record.custom_id!, extension, job.id), Uint8Array.from(atob(b64), c => c.charCodeAt(0)), { httpMetadata: { contentType: extension === 'jpg' ? 'image/jpeg' : 'image/png' } });
+          item.status = 'done'; item.imageUrl = batchAssetUrl(record.custom_id!, extension, job.id);
+          // Similarity QC is advisory. A review outage must never block paid image recovery.
+          try {
+            item.similarityReview = await reviewImageSimilarity(key, b64, extension === 'jpg' ? 'image/jpeg' : 'image/png', references);
+          } catch { item.similarityReview = undefined; }
         } else { item.status = 'error'; item.error = String(record.error?.message || record.response?.body?.error?.message || 'Batch item failed').slice(0, 260); }
+        changedIds.add(item.id);
         handled++;
         if (handled >= 5) { interrupted = true; break; }
       }
       if (handled >= 5) break;
     }
-    if (!interrupted) for (const item of items) if (item.status === 'pending') { item.status = 'error'; item.error = 'No output returned by OpenAI for this item.'; }
+    if (!interrupted) for (const item of items) if (item.status === 'pending') { item.status = 'error'; item.error = 'No output returned by OpenAI for this item.'; changedIds.add(item.id); }
   }
   const newCompleted = items.filter(i => i.status === 'done').length;
   const newFailed = items.filter(i => i.status === 'error').length;
@@ -145,13 +159,13 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
   const requestFailed = batch.request_counts?.failed || 0;
   // Persist asset references in the collection BEFORE advancing job bookkeeping.
   // If this write fails, the job remains retriable rather than incorrectly marked complete.
-  if (newCompleted || newFailed) {
+  if (changedIds.size) {
     const saved = await db.select().from(projects).where(and(eq(projects.id, job.projectId), eq(projects.owner, owner))).limit(1);
     if (saved.length) {
-      const project = JSON.parse(saved[0].data) as { characters?: Array<Record<string, any>> };
-      project.characters = project.characters?.map(c => { const item = byId.get(c.id); return item?.status === 'done' ? { ...c, imageUrl: item.imageUrl, status: 'done', error: '', similarityReview: item.similarityReview } : item?.status === 'error' ? { ...c, status: 'error', error: item.error } : c; });
+      const project = JSON.parse(saved[0].data) as { characters?: Array<{ id: string; imageUrl?: string; status?: string; error?: string; similarityReview?: SimilarityReview }> };
+      project.characters = project.characters ? mergeNewBatchResults(project.characters, items, changedIds) : undefined;
       await db.update(projects).set({ data: JSON.stringify(project), updatedAt: Date.now() }).where(and(eq(projects.id, job.projectId), eq(projects.owner, owner)));
-    }
+    } else throw new Error('Batch import paused: original collection missing; job remains recoverable.');
   }
   await db.update(imageBatches).set({ status, completed: Math.max(requestCompleted, newCompleted), failed: Math.max(requestFailed, newFailed), items: JSON.stringify(items), outputFileId: batch.output_file_id ?? null, errorFileId: batch.error_file_id ?? null, updatedAt: Date.now() }).where(and(eq(imageBatches.id, job.id), eq(imageBatches.owner, owner)));
   return { ...job, status, completed: Math.max(requestCompleted, newCompleted), failed: Math.max(requestFailed, newFailed), items: JSON.stringify(items) };
@@ -166,7 +180,14 @@ export async function GET(req: Request) {
     // Resume a bounded number of outstanding OpenAI batches after desktop
     // restart, even when the user is not on the Image Production page.
     const db = getDb();
-    const active = await db.select().from(imageBatches).where(and(eq(imageBatches.owner, user.userId), notInArray(imageBatches.status, ['completed', 'completed_with_errors', 'failed', 'cancelled', 'expired']))).orderBy(asc(imageBatches.updatedAt)).limit(2);
+    const activeCandidates = await db.select().from(imageBatches).where(and(eq(imageBatches.owner, user.userId), notInArray(imageBatches.status, ['completed', 'completed_with_errors', 'failed', 'cancelled', 'expired']))).orderBy(asc(imageBatches.updatedAt)).limit(30);
+    // Fair polling across collections, while serializing updates within each collection.
+    const seenProjects = new Set<string>();
+    const active = activeCandidates.filter(row => {
+      if (seenProjects.has(row.projectId) || seenProjects.size >= 2) return false;
+      seenProjects.add(row.projectId);
+      return true;
+    });
     const key = await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
     if (!key || !active.length) return Response.json({ updatedProjectIds: [], pendingJobs: active.length, credentialMissing: !key && active.length > 0 });
     const updatedProjectIds: string[] = [];
@@ -177,12 +198,26 @@ export async function GET(req: Request) {
     }
     return Response.json({ updatedProjectIds: [...new Set(updatedProjectIds)], pendingJobs: active.length, warnings });
   }
+  if (url.searchParams.get('activity') === '1') {
+    const pageSize = Number(url.searchParams.get('limit') || '25');
+    const offset = Number(url.searchParams.get('offset') || '0');
+    if (![10, 25, 50, 100].includes(pageSize) || !Number.isSafeInteger(offset) || offset < 0 || offset > 1_000_000) return fail('Invalid activity pagination');
+    const db = getDb();
+    const owner = eq(imageBatches.owner, user.userId);
+    const [totals, recent, ownedProjects] = await Promise.all([
+      db.select({ value: count() }).from(imageBatches).where(owner),
+      db.select().from(imageBatches).where(owner).orderBy(desc(imageBatches.createdAt), desc(imageBatches.id)).limit(pageSize).offset(offset),
+      db.select({ id: projects.id, name: projects.name }).from(projects).where(eq(projects.owner, user.userId)),
+    ]);
+    const labels = new Map(ownedProjects.map(project => [project.id, project.name]));
+    return Response.json({ total: totals[0]?.value ?? 0, activities: recent.map(job => ({ collection: labels.get(job.projectId) ?? 'Deleted collection', job: safeJob(job) })) });
+  }
   const projectId = url.searchParams.get('projectId');
   if (!projectId) return fail('Missing project ID');
   const db = getDb();
   const saved = await db.select().from(projects).where(and(eq(projects.id, projectId), eq(projects.owner, user.userId))).limit(1);
   if (!saved.length) return fail('Unknown project', 404);
-  const rows = await db.select().from(imageBatches).where(and(eq(imageBatches.owner, user.userId), eq(imageBatches.projectId, projectId))).orderBy(desc(imageBatches.createdAt)).limit(20);
+  const rows = await db.select().from(imageBatches).where(and(eq(imageBatches.owner, user.userId), eq(imageBatches.projectId, projectId))).orderBy(desc(imageBatches.createdAt)).limit(200);
   const key = await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
   const sync = new URL(req.url).searchParams.get('sync') === '1';
   const syncTarget = rows.find(row => isActiveBatchStatus(row.status))?.id;

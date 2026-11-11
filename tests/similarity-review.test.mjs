@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 const moduleText = readFileSync(new URL('../lib/similarity-review.ts', import.meta.url), 'utf8');
 const studio = readFileSync(new URL('../app/api/studio/route.ts', import.meta.url), 'utf8');
 const batch = readFileSync(new URL('../app/api/image-batches/route.ts', import.meta.url), 'utf8');
+const recovery = readFileSync(new URL('../lib/batch-recovery.ts', import.meta.url), 'utf8');
 
 test('similarity check compares generated image with selected Etsy references and never treats unknown as passed', () => {
   assert.match(moduleText, /selected Etsy reference images/);
@@ -20,5 +21,6 @@ test('single production persists similarity review after saving generated asset'
 
 test('batch imports persist similarity checks alongside generated assets', () => {
   assert.match(batch, /item\.similarityReview = await reviewImageSimilarity/);
-  assert.match(batch, /similarityReview: item\.similarityReview/);
+  assert.match(batch, /mergeNewBatchResults\(project\.characters, items, changedIds\)/);
+  assert.match(recovery, /similarityReview: item\.similarityReview/);
 });

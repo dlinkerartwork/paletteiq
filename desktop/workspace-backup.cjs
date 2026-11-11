@@ -2,7 +2,7 @@ const { DatabaseSync } = require('node:sqlite');
 const { randomUUID } = require('node:crypto');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
-const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, cpSync, renameSync, rmSync, statSync, readdirSync } = require('node:fs');
+const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, cpSync, renameSync, rmSync, statSync } = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 

@@ -8,6 +8,8 @@ export const studioSettings = sqliteTable('studio_settings', {
   preferences: text('preferences').notNull().default('{}'),
   etsyCredential: text('etsy_credential'),
   openaiCredential: text('openai_credential'),
+  geminiCredential: text('gemini_credential'),
+  upscaleCredential: text('upscale_credential'),
   updatedAt: integer('updated_at').notNull(),
 });
 
@@ -28,3 +30,4 @@ export const imageBatches = sqliteTable('image_batches', {
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 });
+

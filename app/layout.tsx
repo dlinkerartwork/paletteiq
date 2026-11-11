@@ -5,7 +5,7 @@ export const metadata: Metadata = {
   title: "Clipart Intelligence Studio | paletteIQ",
   description: "Analyze clipart market signals and create original character collections, prompts, and image assets.",
   icons: {
-    icon: "/favicon.svg",
+    icon: "/paletteiq-icon.svg",
     shortcut: "/favicon.svg",
   },
 };

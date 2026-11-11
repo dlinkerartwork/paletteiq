@@ -1,6 +1,6 @@
 const { app, BrowserWindow, dialog, shell, safeStorage, Menu } = require('electron');
 const { spawn } = require('node:child_process');
-const { mkdirSync, existsSync, readFileSync, writeFileSync, unlinkSync, copyFileSync } = require('node:fs');
+const { mkdirSync, existsSync, readFileSync, writeFileSync, unlinkSync, copyFileSync, appendFileSync, statSync, renameSync } = require('node:fs');
 const { randomBytes } = require('node:crypto');
 const path = require('node:path');
 const { loadOrCreateKey } = require('./key-vault.cjs');
@@ -34,6 +34,40 @@ function dataDirectory() {
   return directory;
 }
 
+const MAX_DIAGNOSTIC_LOG_BYTES = 2 * 1024 * 1024;
+function sanitizeDiagnostic(value) {
+  return String(value)
+    .replace(/piq_[A-Za-z0-9_=-]{12,}/g, '[REDACTED_CLIENT_KEY]')
+    .replace(/sk-[A-Za-z0-9_-]{12,}/g, '[REDACTED_API_KEY]')
+    .replace(/(Bearer\s+)[^\s"'<>]+/gi, '$1[REDACTED]')
+    .replace(/(X-API-Key\s*[:=]\s*)[^\s,"'}]+/gi, '$1[REDACTED]')
+    .replace(/(STUDIO_CREDENTIAL_ENCRYPTION_KEY|PALETTEIQ_NATIVE_BRIDGE_TOKEN|PALETTEIQ_UPSCALE_SERVER_KEY|api[_-]?key|password|authorization|access[_-]?token)(\s*[=:]\s*)[^\s,"'}]+/gi, '$1$2[REDACTED]');
+}
+function diagnosticLogger(directory) {
+  const folder = path.join(directory, 'logs');
+  mkdirSync(folder, { recursive: true });
+  const filename = path.join(folder, 'desktop-backend.log');
+  const rotate = () => {
+    for (let i = 2; i >= 1; i--) {
+      const source = i === 1 ? filename : path.join(folder, `desktop-backend.${i - 1}.log`);
+      const target = path.join(folder, `desktop-backend.${i}.log`);
+      if (existsSync(source)) { if (existsSync(target)) unlinkSync(target); renameSync(source, target); }
+    }
+  };
+  if (existsSync(filename) && statSync(filename).size >= MAX_DIAGNOSTIC_LOG_BYTES) rotate();
+  const write = (kind, chunk) => {
+    for (const raw of String(chunk).split(/\r?\n/)) {
+      if (!raw.trim()) continue;
+      const line = `[${new Date().toISOString()}] [${kind}] ${sanitizeDiagnostic(raw).slice(0, 2000)}\n`;
+      try {
+        if (existsSync(filename) && statSync(filename).size + Buffer.byteLength(line) > MAX_DIAGNOSTIC_LOG_BYTES) rotate();
+        appendFileSync(filename, line, { encoding: 'utf8', mode: 0o600 });
+      } catch { /* Logging must never stop the application. */ }
+    }
+  };
+  return { folder, write };
+}
+
 function ensureCredentials(directory) {
   return loadOrCreateKey(directory, safeStorage);
 }
@@ -47,7 +81,10 @@ function runtimeConfig(directory, secret, nativeBridge) {
   config.vars = { ...(config.vars || {}), PALETTEIQ_DESKTOP: '1', PALETTEIQ_LOCAL_NO_AUTH: '1', PALETTEIQ_NATIVE_BRIDGE_URL: `http://127.0.0.1:${nativeBridge.port}` };
   const configPath = path.join(directory, 'wrangler.json');
   writeFileSync(configPath, JSON.stringify(config, null, 2));
-  writeFileSync(path.join(directory, '.dev.vars'), `STUDIO_CREDENTIAL_ENCRYPTION_KEY=${secret}\nPALETTEIQ_NATIVE_BRIDGE_TOKEN=${nativeBridge.token}\n`, { mode: 0o600 });
+  const remoteUrl = process.env.PALETTEIQ_UPSCALE_SERVER_URL || '';
+  const remoteKey = process.env.PALETTEIQ_UPSCALE_SERVER_KEY || '';
+  if (/[\r\n]/.test(remoteUrl + remoteKey)) throw new Error('Invalid Remote GPU configuration');
+  writeFileSync(path.join(directory, '.dev.vars'), `STUDIO_CREDENTIAL_ENCRYPTION_KEY=${secret}\nPALETTEIQ_NATIVE_BRIDGE_TOKEN=${nativeBridge.token}\nPALETTEIQ_UPSCALE_SERVER_URL=${remoteUrl}\nPALETTEIQ_UPSCALE_SERVER_KEY=${remoteKey}\n`, { mode: 0o600 });
   return configPath;
 }
 
@@ -150,6 +187,7 @@ function configureWorkspaceMenu(directory) {
       writeFileSync(path.join(workspaceRoot(), 'active-workspace.json'), JSON.stringify({ name }));
       app.relaunch(); app.quit();
     } catch (e) { await error(e); } } },
+    { label: 'Open Logs Folder', click: () => { const folder = path.join(directory, 'logs'); mkdirSync(folder, { recursive: true }); void shell.openPath(folder); } },
     { label: 'Switch to original workspace…', enabled: selectedName !== 'paletteiq-data', click: async () => { try {
       const confirmation = await dialog.showMessageBox({ type: 'question', buttons: ['Cancel', 'Switch and restart'], defaultId: 0, cancelId: 0, message: 'Return to your original workspace? The restored workspace will remain saved.' });
       if (confirmation.response !== 1) return;
@@ -160,8 +198,16 @@ function configureWorkspaceMenu(directory) {
   ] }]));
 }
 
+function isUnlicensedEdition() {
+  if (!app.isPackaged) return false;
+  // Only the installer edition metadata controls activation. Environment
+  // variables and user settings must never disable licensing.
+  const metadata = JSON.parse(readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf8'));
+  return metadata.paletteiqEdition === 'unlicensed';
+}
+
 async function requireActivation() {
-  if (!app.isPackaged) return; // Developer preview remains available for development.
+  if (!app.isPackaged || isUnlicensedEdition()) return; // Developer preview and explicit unlicensed edition.
   const publicKeyFile = path.join(ROOT, 'license-public.pem');
   if (!existsSync(publicKeyFile)) throw new Error('Desktop license verification key is missing from the installer.');
   const publicKey = readFileSync(publicKeyFile, 'utf8');
@@ -201,7 +247,13 @@ async function launch() {
   nativeStorage = await startNativeStorage({ directory, migrationsDir: path.join(ROOT, 'drizzle'), token: nativeBridge.token });
   const configPath = runtimeConfig(directory, secret, { ...nativeBridge, port: nativeStorage.port });
   await migrateLegacyDatabase(directory, secret, configPath, { ...nativeStorage, token: nativeBridge.token });
-  server = launchWrangler(['dev', '--local', '--config', configPath, '--persist-to', path.join(directory, 'state'), '--ip', '127.0.0.1', '--port', String(SERVER_PORT)], directory, secret, { stdio: 'inherit' });
+  const diagnostics = diagnosticLogger(directory);
+  diagnostics.write('desktop', 'PaletteIQ backend starting.');
+  server = launchWrangler(['dev', '--local', '--config', configPath, '--persist-to', path.join(directory, 'state'), '--ip', '127.0.0.1', '--port', String(SERVER_PORT)], directory, secret, { stdio: 'pipe' });
+  server.stdout?.on('data', chunk => diagnostics.write('stdout', chunk));
+  server.stderr?.on('data', chunk => diagnostics.write('stderr', chunk));
+  server.on('error', error => diagnostics.write('process', error.message));
+
   server.on('exit', () => { server = null; if (!closing) app.quit(); });
   await waitForLocalServer();
   configureWorkspaceMenu(directory);
@@ -222,3 +274,4 @@ app.on('before-quit', () => {
     try { unlinkSync(path.join(activeDirectory, '.dev.vars')); } catch (error) { if (error.code !== 'ENOENT') console.error('Could not remove temporary credential environment', error); }
   }
 });
+

@@ -39,7 +39,7 @@ export function nativeAssetBucket(): R2Bucket | null {
   const config = bridgeConfig();
   if (!config) return null;
   const endpoint = (key: string) => {
-    if (!/^generated\/[\w-]{1,120}\/[0-9a-f-]{36}\.(?:jpg|png)$/.test(key)) throw new Error('Invalid image key');
+    if (!/^generated\/[\w-]{1,120}\/(?:batches\/[0-9a-f-]{36}\/)?[0-9a-f-]{36}\.(?:jpg|png)$/.test(key)) throw new Error('Invalid image key');
     return `/assets/${key}`;
   };
   return {
@@ -54,12 +54,12 @@ export function nativeAssetBucket(): R2Bucket | null {
     },
     async get(key: string) {
       const result = await fetch(`${config.url}${endpoint(key)}`, { headers: { Authorization: `Bearer ${config.token}` } });
-      if (result.ok) return { key, body: result.body };
+      if (result.ok) return { key, body: result.body, arrayBuffer: () => result.arrayBuffer() };
       const legacy = await env.BUCKET?.get(key);
       if (!legacy) return null;
       const data = await legacy.arrayBuffer();
       await bridgeRequest(config, endpoint(key), { method: 'PUT', body: data });
-      return { key, body: new Response(data).body };
+      return { key, body: new Response(data).body, arrayBuffer: async () => data };
     },
   } as unknown as R2Bucket;
 }

@@ -8,8 +8,17 @@ if (process.arch !== 'x64') throw new Error('Use 64-bit Node.js to build the Win
 const sourceNode = process.execPath;
 if (!sourceNode.toLowerCase().endsWith('node.exe') || !existsSync(sourceNode)) throw new Error('A real Windows node.exe is required for bundling.');
 
+// Both editions include the Microsoft runtime needed by native Windows tools.
+const vcRedist = path.join(root, 'desktop', 'prerequisites', 'vc_redist.x64.exe');
+if (!existsSync(vcRedist)) throw new Error('Run scripts/prepare-windows-prerequisites.ps1 before packaging.');
+const verifiedPrerequisite = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+  "$s = Get-AuthenticodeSignature -LiteralPath $env:PALETTEIQ_BUILD_VC_REDIST; if ($s.Status -ne 'Valid' -or $s.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') { exit 1 }"
+], { env: { ...process.env, PALETTEIQ_BUILD_VC_REDIST: vcRedist }, windowsHide: true, encoding: 'utf8' });
+if (verifiedPrerequisite.error || verifiedPrerequisite.status !== 0) throw new Error('Bundled Visual C++ installer must have a valid Microsoft signature.');
+
+const unlicensedEdition = process.argv.includes('--no-license');
 const publicKey = path.join(root, 'license-issuer', 'public.pem');
-if (!existsSync(publicKey)) throw new Error('Missing license issuer public key. Run npm run license:init before building a distributable EXE.');
+if (!unlicensedEdition && !existsSync(publicKey)) throw new Error('Missing license issuer public key. Keep the existing issuer key for licensed builds.');
 const stage = path.join(root, 'dist', 'desktop-runtime');
 const paths = ['dist/server/wrangler.json', 'dist/server/index.js', 'dist/client', 'drizzle', 'node_modules/wrangler/bin/wrangler.js'];
 for (const item of paths) if (!existsSync(path.join(root, item))) throw new Error(`Desktop packaging prerequisite missing: ${item}`);
@@ -17,7 +26,7 @@ for (const item of paths) if (!existsSync(path.join(root, item))) throw new Erro
 if (existsSync(stage)) rmSync(stage, { recursive: true, force: true });
 mkdirSync(path.join(stage, 'node'), { recursive: true });
 copyFileSync(sourceNode, path.join(stage, 'node', 'node.exe'));
-copyFileSync(publicKey, path.join(stage, 'license-public.pem'));
+if (!unlicensedEdition) copyFileSync(publicKey, path.join(stage, 'license-public.pem'));
 cpSync(path.join(root, 'dist', 'server'), path.join(stage, 'dist', 'server'), { recursive: true });
 cpSync(path.join(root, 'dist', 'client'), path.join(stage, 'dist', 'client'), { recursive: true });
 cpSync(path.join(root, 'drizzle'), path.join(stage, 'drizzle'), { recursive: true });

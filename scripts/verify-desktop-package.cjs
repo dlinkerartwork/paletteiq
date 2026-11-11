@@ -1,5 +1,6 @@
 const { cpSync, existsSync, lstatSync, realpathSync, statSync } = require('node:fs');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 // electron-builder excludes node_modules from some extraResources file matching
 // paths. Copy the prepared runtime dependencies directly into the unpacked app
@@ -21,11 +22,14 @@ module.exports = async function verifyDesktopPackage(context) {
 
   const required = [
     'node/node.exe',
-    'license-public.pem',
+    'node_modules/@cloudflare/workerd-windows-64/bin/workerd.exe',
+    'node_modules/@esbuild/win32-x64/esbuild.exe',
     'dist/server/index.js',
     'dist/server/wrangler.json',
     'node_modules/wrangler/bin/wrangler.js',
   ];
+  const edition = context.packager.config?.extraMetadata?.paletteiqEdition;
+  if (edition !== 'unlicensed') required.push('license-public.pem');
   const base = realpathSync(runtime) + path.sep;
   for (const relative of required) {
     const file = path.join(runtime, relative);
@@ -40,5 +44,12 @@ module.exports = async function verifyDesktopPackage(context) {
       throw new Error(`Desktop packaging failed: unexpected runtime symlink: ${file}`);
     }
   }
+  const vcRedist = path.join(context.appOutDir, 'resources', 'prerequisites', 'vc_redist.x64.exe');
+  if (!existsSync(vcRedist)) throw new Error('Bundled Visual C++ runtime installer is missing.');
+  const smoke = spawnSync(path.join(runtime, 'node', 'node.exe'), [path.join(runtime, 'node_modules', 'wrangler', 'bin', 'wrangler.js'), '--version'], {
+    cwd: runtime, encoding: 'utf8', windowsHide: true,
+    env: { ...process.env, WRANGLER_SEND_METRICS: 'false', PATH: path.join(process.env.SystemRoot || 'C:\\Windows', 'System32') },
+  });
+  if (smoke.error || smoke.status !== 0) throw new Error('Packaged standalone runtime smoke test failed: ' + (smoke.error?.message || smoke.stderr));
   console.log('Desktop package verified: standalone Node.js and Wrangler are present inside win-unpacked.');
 };

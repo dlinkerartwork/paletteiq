@@ -1,0 +1,51 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { readFileSync } from 'node:fs';
+
+const read = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
+
+test('Remote GPU is the only configured upscale provider', () => {
+  const settings = read('components/studio-settings.tsx');
+  const api = read('app/api/settings/route.ts');
+  const production = read('components/image-production.tsx');
+  assert.match(settings, /upscaleProvider: 'remote'/);
+  assert.match(api, /upscaleProvider: 'remote'/);
+  assert.match(production, /Remote GPU upscale/);
+  assert.doesNotMatch(settings, /Replicate API|Canva Companion|Fal\.ai —/);
+  assert.doesNotMatch(production, /Send to Canva|Replicate upscale/);
+});
+
+test('GPU key only travels through backend route', () => {
+  const route = read('app/api/upscale/route.ts');
+  assert.match(route, /PALETTEIQ_UPSCALE_SERVER_KEY/);
+  assert.match(route, /'X-API-Key': key/);
+  assert.match(route, /parsed\.protocol !== 'https:'/);
+  assert.match(route, /PALETTEIQ_DESKTOP === '1'/);
+  assert.match(route, /PALETTEIQ_ALLOW_PRIVATE_HTTP_UPSCALE === '1'/);
+  assert.match(route, /PALETTEIQ_LOCAL_NO_AUTH === '1'/);
+  assert.match(route, /allowPrivateHttp && parsed\.protocol === 'http:' && local/);
+  assert.match(route, /upscaleJob =/);
+  assert.doesNotMatch(read('components/image-production.tsx'), /PALETTEIQ_UPSCALE_SERVER_KEY|NEXT_PUBLIC_UPSCALE/);
+});
+
+test('ZIP export prioritizes unmodified remote upscale PNGs', () => {
+  const route = read('app/api/exports/route.ts');
+  const image = read('app/api/images/[id]/route.ts');
+  const upscale = read('app/api/upscale/route.ts');
+  const zip = read('lib/zip-stream.ts');
+  assert.match(upscale, /await bucket\.put\(`generated\/\$\{user\.userId\}\/\$\{assetId\}\.png`, bytes\)/);
+  assert.match(route, /character\.upscaledImageUrl \|\| character\.imageUrl/);
+  assert.match(route, /stream: async \(\) => \(await bucket\.get\(key\)\)\?\.body \|\| null/);
+  assert.match(image, /new Response\(obj\.body,/);
+  assert.match(zip, /u16\(lv, 8, 0\)/); // ZIP store method: no transcoding.
+});
+
+test('Remote upscale exposes cancellation and elapsed-time updates without leaking GPU keys', () => {
+  const api = read('app/api/upscale/route.ts');
+  const ui = read('components/image-production.tsx');
+  assert.match(api, /\/cancel\`, \{ method: 'POST' \}/);
+  assert.match(api, /elapsedSeconds: result\.elapsed_seconds/);
+  assert.match(ui, /Cancel upscale/);
+  assert.match(ui, /remoteProgress/);
+  assert.doesNotMatch(ui, /PALETTEIQ_UPSCALE_SERVER_KEY/);
+});
