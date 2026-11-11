@@ -235,11 +235,42 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
         if (!analysisResponse.ok) throw Error(analysis.error || 'Could not analyze reference before image generation');
         layout = [...(analysis.layout?.slots || []).map(e => ({ ...e, type: 'image' as const, text: undefined })), ...(analysis.layout?.texts || []).map(e => ({ ...e, type: 'text' as const }))];
       }
-      const response = await fetch('/api/thumbnail-ai-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, provider: imageProvider, model: imageModel, quality: imageQuality, layout }) });
+      const response = await fetch('/api/thumbnail-ai-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, provider: imageProvider, model: imageModel, quality: imageQuality, width: design.width, height: design.height, layout }) });
       const result = await response.json() as { error?: string; imageUrl?: string; prompt?: string };
       if (!response.ok || !result.imageUrl) throw Error(result.error || 'AI image generation failed');
-      mutate({ aiImageUrl: result.imageUrl, aiImagePrompt: result.prompt });
-      setMessage('AI thumbnail generated. Save designs to keep it. AI output is a separate raster image; characters in it are not independently editable.');
+      let savedImageUrl = result.imageUrl;
+      // Provider dimensions are discrete: resample into the exact user-selected canvas dimensions.
+      const sourceImage = await loadForExport(result.imageUrl);
+      if (sourceImage.naturalWidth !== design.width || sourceImage.naturalHeight !== design.height) {
+        const output = document.createElement('canvas');
+        output.width = design.width; output.height = design.height;
+        const ctx = output.getContext('2d');
+        if (!ctx) throw new Error('Image resize canvas unavailable');
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(sourceImage, 0, 0, design.width, design.height);
+        const blob = await new Promise<Blob | null>(resolve => output.toBlob(resolve, 'image/png'));
+        if (!blob) throw new Error('Could not prepare thumbnail at the selected size');
+        const form = new FormData();
+        form.set('projectId', projectId);
+        form.set('file', new File([blob], 'thumbnail.png', { type: 'image/png' }));
+        const uploaded = await fetch('/api/thumbnail-background', { method: 'POST', body: form });
+        const stored = await uploaded.json() as { url?: string; error?: string };
+        if (!uploaded.ok || !stored.url) throw new Error(stored.error || 'Could not save resized thumbnail');
+        savedImageUrl = stored.url;
+      }
+      const generated: ThumbnailDesign = {
+        ...newDesign(designs.length + 1),
+        name: design.name + ' · AI ' + (designs.length + 1),
+        width: design.width, height: design.height,
+        background: design.background, elements: [],
+        aiImageUrl: savedImageUrl, aiImagePrompt: result.prompt,
+        referenceUrl: reference || design.referenceUrl
+      };
+      const nextDesigns = [...designs, generated];
+      onChange(nextDesigns);
+      setActiveId(generated.id);
+      setMessage('AI thumbnail added to the thumbnail gallery. It is a single image, sized ' + design.width + '×' + design.height + ', and will be saved automatically.');
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
     finally { setImageBusy(false); }
   };
@@ -261,8 +292,8 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
       const canvas = document.createElement('canvas'); canvas.width = design.width; canvas.height = design.height;
       const ctx = canvas.getContext('2d'); if (!ctx) throw new Error('Canvas unavailable');
       ctx.fillStyle = design.background; ctx.fillRect(0, 0, canvas.width, canvas.height);
-      if (design.backgroundImageUrl) {
-        const background = await loadForExport(design.backgroundImageUrl);
+      if (design.aiImageUrl || design.backgroundImageUrl) {
+        const background = await loadForExport(design.aiImageUrl || design.backgroundImageUrl!);
         const scale = Math.max(design.width / background.naturalWidth, design.height / background.naturalHeight);
         const w = background.naturalWidth * scale, h = background.naturalHeight * scale;
         ctx.drawImage(background, (design.width - w) / 2, (design.height - h) / 2, w, h);
@@ -403,7 +434,7 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
         </div>
         <div style={{ overflow: 'auto', maxHeight: 'min(66vh, 780px)', background: '#e8e8e8', padding: 16, borderRadius: 8 }}>
           <div style={{ width: `${previewZoom*100}%`, minWidth: 200, margin: 'auto' }}>
-            <div ref={stageRef} onPointerDown={() => setSelectedId('')} style={{ width: '100%', aspectRatio: `${design.width}/${design.height}`, background: design.background, backgroundImage: design.backgroundImageUrl ? `url(${JSON.stringify(design.backgroundImageUrl)})` : undefined, backgroundPosition: 'center', backgroundSize: 'cover', position: 'relative', containerType: 'inline-size', overflow: 'hidden', boxShadow: '0 5px 25px #0002', touchAction: 'none' }}>
+            <div ref={stageRef} onPointerDown={() => setSelectedId('')} style={{ width: '100%', aspectRatio: `${design.width}/${design.height}`, background: design.background, backgroundImage: (design.aiImageUrl || design.backgroundImageUrl) ? `url(${JSON.stringify(design.aiImageUrl || design.backgroundImageUrl)})` : undefined, backgroundPosition: 'center', backgroundSize: 'cover', position: 'relative', containerType: 'inline-size', overflow: 'hidden', boxShadow: '0 5px 25px #0002', touchAction: 'none' }}>
               {design.elements.map(e => {
                 const isSelected = e.id === selectedId;
                 return <div key={e.id} onPointerDown={event => startDrag(event,e,'move')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
@@ -476,5 +507,21 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
       </div>
       </div>
     </div>}
+    <div className="panel" style={{ marginTop: 14, padding: 16, width: '100%' }}>
+      <h3 style={{ marginTop: 0 }}>All collection thumbnails ({designs.length})</h3>
+      <p className="sub">Select a saved thumbnail to display it on the canvas. AI-generated images are saved as separate thumbnails.</p>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12 }}>
+        {designs.map(item => (
+          <button key={item.id} type="button" onClick={() => { setActiveId(item.id); setSelectedId(''); }}
+            style={{ background: item.id === design?.id ? '#fff3e9' : '#fff', border: item.id === design?.id ? '2px solid #f1641e' : '1px solid #ddd', borderRadius: 10, padding: 8, textAlign: 'left', cursor: 'pointer' }}>
+            <div style={{ width: '100%', aspectRatio: item.width + '/' + item.height, position: 'relative', overflow: 'hidden', borderRadius: 6, background: item.background, backgroundImage: item.aiImageUrl || item.backgroundImageUrl ? 'url(' + JSON.stringify(item.aiImageUrl || item.backgroundImageUrl) + ')' : undefined, backgroundSize: 'cover', backgroundPosition: 'center' }}>
+              {!item.aiImageUrl && item.elements.map(element => element.type === 'image' ? <img key={element.id} src={imageUrl(element)} alt="" style={{ position: 'absolute', left: element.x + '%', top: element.y + '%', width: element.width + '%', height: element.height + '%', objectFit: 'contain', transform: 'rotate(' + element.rotation + 'deg)' }}/> : <span key={element.id} style={{ position: 'absolute', left: element.x + '%', top: element.y + '%', width: element.width + '%', color: element.color, fontFamily: element.fontFamily, fontSize: 9, overflow: 'hidden' }}>{element.text}</span>)}
+            </div>
+            <strong style={{ display: 'block', marginTop: 7, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</strong>
+            <small>{item.aiImageUrl ? 'AI image' : 'Editable design'} · {item.width}×{item.height}</small>
+          </button>
+        ))}
+      </div>
+    </div>
   </div>;
 }
