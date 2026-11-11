@@ -7,7 +7,7 @@ import { userCredential, userGeminiKeys } from '@/lib/credentials';
 import { nativeAssetBucket } from '@/lib/native-bridge';
 
 type LayoutItem = { type: 'image' | 'text'; x: number; y: number; width: number; height: number; text?: string };
-type RequestBody = { projectId?: string; provider?: string; model?: string; quality?: string; layout?: LayoutItem[] };
+type RequestBody = { projectId?: string; provider?: string; model?: string; quality?: string; width?: number; height?: number; layout?: LayoutItem[] };
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 const bucket = () => nativeAssetBucket() ?? env.BUCKET;
 
@@ -26,6 +26,9 @@ export async function POST(req: Request) {
   if (provider === 'gemini' && !/^gemini-[a-z0-9.-]{1,80}$/.test(model)) return bad('Invalid Gemini image model');
   if (provider === 'gemini' && !model.includes('image')) return bad('Select a Gemini image-generation model');
   if (!['low', 'medium', 'high'].includes(String(input.quality))) return bad('Invalid image quality');
+  const width = Number(input.width || 2000), height = Number(input.height || 2000);
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 256 || height < 256 || width > 4096 || height > 4096) return bad('Canvas dimensions must be 256–4096 pixels');
+  if (width !== height) return bad('AI thumbnail generation currently requires a square canvas');
   const storage = bucket();
   if (!storage) return bad('Image storage is unavailable', 503);
   const collection = JSON.parse(rows[0].data) as { name?: string; theme?: string; subtheme?: string; style?: string; characters?: Array<{ name?: string }> };
@@ -42,7 +45,8 @@ export async function POST(req: Request) {
     'Approximate composition (percentage coordinates; abstract layout only):', JSON.stringify(layout),
     'Use an organic, irregular, playful asymmetric arrangement with characters of varied scale distributed to fill the canvas, including some edge-cropped ornaments. Preserve a clear central or intentionally placed text zone.',
     'Use a theme-specific elegant readable main title, show the exact count ' + (collection.characters?.length || 0) + ' PNG Clipart and legible text 300 DPI. Never use third-party shop names, brands, logos, or watermarks.',
-    'This is a promotional graphic, not a source for individually editable characters. Make visual elements cohesive and typography premium, polished and readable.'
+    'This is a promotional graphic, not a source for individually editable characters. Make visual elements cohesive and typography premium, polished and readable.',
+    'Target square canvas dimensions: ' + width + 'x' + height + ' pixels. Provider may generate a nearby supported size; the editor will resize the result precisely.'
   ].join('\\n');
   let imageBase64 = '';
   let imageMime = 'image/png';
@@ -64,7 +68,7 @@ export async function POST(req: Request) {
     for (const key of keys) {
       const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent', {
         method: 'POST', headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { responseModalities: ['IMAGE', 'TEXT'] } }),
+        body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { responseModalities: ['IMAGE', 'TEXT'], ...(model.startsWith('gemini-3') ? { imageConfig: { aspectRatio: '1:1', imageSize: width > 2048 ? '4K' : width > 1024 ? '2K' : '1K' } } : {}) } }),
         signal: AbortSignal.timeout(120000)
       });
       if (!response.ok) {
