@@ -47,11 +47,14 @@ export async function POST(req: Request) {
     const assembled = new Uint8Array(total);
     let offset = 0;
     for (const chunk of chunks) { assembled.set(chunk, offset); offset += chunk.length; }
-    if (!(assembled.length >= 8 && assembled[0] === 137 && assembled[1] === 80 && assembled[2] === 78 && assembled[3] === 71)) return bad('Invalid rendered thumbnail PNG');
+    const isPng = assembled.length >= 8 && assembled[0] === 137 && assembled[1] === 80 && assembled[2] === 78 && assembled[3] === 71;
+    const isJpg = assembled.length >= 3 && assembled[0] === 255 && assembled[1] === 216 && assembled[2] === 255;
+    if (!isPng && !isJpg) return bad('Invalid rendered thumbnail image');
+    const format = isPng ? 'png' : 'jpg';
     const assetId = crypto.randomUUID();
-    await storage.put('generated/' + user.userId + '/' + assetId + '.png', assembled);
+    await storage.put('generated/' + user.userId + '/' + assetId + '.' + format, assembled);
     await Promise.all(chunks.map((_, i) => storage.delete(prefix + i)));
-    return Response.json({ url: '/api/thumbnail-background?projectId=' + encodeURIComponent(projectId) + '&assetId=' + assetId + '&format=png' });
+    return Response.json({ url: '/api/thumbnail-background?projectId=' + encodeURIComponent(projectId) + '&assetId=' + assetId + '&format=' + format });
   }
   if (!(file instanceof File)) return bad('Choose a PNG or JPG background image');
   if (file.size < 1 || file.size > 20_000_000) return bad('Background image must be 20 MB or smaller', 413);
