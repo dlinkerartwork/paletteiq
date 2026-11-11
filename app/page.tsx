@@ -22,7 +22,16 @@ const blank = (): Project => ({ id: uid(), name: 'Untitled collection', url: '',
 const makeChar = (name: string, origin: Character['origin'], description = ''): Character => ({ id: uid(), name, description, prompt: '', status: 'draft', origin });
 type Concept = { name: string; description?: string };
 type StudioApiResponse = { error?: string; source: { title: string; images: string[]; tags: string[] }; analysis: { theme?: string; subtheme?: string; style?: string; palette?: string; texture?: string; notes?: string; keywords?: string[]; characters: Array<string | Concept> }; selectedImages: string[]; characters: Concept[]; prompts: Array<{ id: string; prompt: string }> };
-const api = async (body: object): Promise<StudioApiResponse> => { const r = await fetch('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); const json = await r.json() as StudioApiResponse; if (!r.ok) throw new Error(json.error ?? 'Request failed'); return json; };
+const api = async (body: object): Promise<StudioApiResponse> => {
+  const payload = JSON.stringify(body);
+  const r = await fetch('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload });
+  const responseText = await r.text();
+  let json: StudioApiResponse;
+  try { json = JSON.parse(responseText) as StudioApiResponse; }
+  catch { throw new Error(r.status === 413 ? 'Collection data exceeds the server request limit (' + (new Blob([payload]).size / 1_000_000).toFixed(1) + ' MB). Remove embedded image data URLs before saving.' : 'Studio request failed (HTTP ' + r.status + '): ' + responseText.slice(0, 160)); }
+  if (!r.ok) throw new Error(json.error ?? 'Request failed (HTTP ' + r.status + ')');
+  return json;
+};
 const steps = [{ id: 'analysis', label: 'Research & analysis' }, { id: 'characters', label: 'Character library' }, { id: 'prompts', label: 'OpenAI prompts' }, { id: 'production', label: 'Image production' }, { id: 'thumbnails', label: 'Thumbnail designer' }, { id: 'listing', label: 'Etsy listing draft' }];
 const nextIncomplete = (p: Project) => !p.theme && !p.title ? 'analysis' : !p.characters.length ? 'characters' : p.characters.some(c => !c.prompt) ? 'prompts' : p.characters.some(c => c.status !== 'done') ? 'production' : !p.listing?.title ? 'listing' : 'listing';
 
