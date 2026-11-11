@@ -324,9 +324,10 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     finally { setImageBusy(false); }
   };
   const downloadAiThumbnail = async () => {
-    if (!design?.aiImageUrl) return;
+    const sourceUrl = design?.upscaledImageUrl || design?.aiImageUrl;
+    if (!design || !sourceUrl) return;
     try {
-      const response = await fetch(design.aiImageUrl);
+      const response = await fetch(sourceUrl);
       if (!response.ok) throw Error('Could not download generated thumbnail');
       const blob = await response.blob();
       const link = document.createElement('a'); const url = URL.createObjectURL(blob);
@@ -561,11 +562,35 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     if (!design) return;
     setBusy(true); setMessage('');
     try {
-      const blob = await renderDesignBlob(design, format);
+      let blob: Blob;
+      let width = design.width, height = design.height;
+      if (design.upscaledImageUrl) {
+        const source = await loadForExport(design.upscaledImageUrl);
+        width = source.naturalWidth; height = source.naturalHeight;
+        const response = await fetch(design.upscaledImageUrl);
+        if (!response.ok) throw new Error('Could not download upscaled thumbnail');
+        const stored = await response.blob();
+        if (stored.type === 'image/' + format) {
+          // Preserve the stored JPEG bytes and DPI when exporting JPG.
+          blob = stored;
+        } else {
+          const canvas = document.createElement('canvas');
+          canvas.width = width; canvas.height = height;
+          const context = canvas.getContext('2d');
+          if (!context) throw new Error('Canvas unavailable');
+          if (format === 'jpeg') { context.fillStyle = '#ffffff'; context.fillRect(0, 0, width, height); }
+          context.drawImage(source, 0, 0);
+          const converted = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/' + format, .95));
+          if (!converted) throw new Error('Could not encode upscaled thumbnail');
+          blob = converted;
+        }
+      } else {
+        blob = await renderDesignBlob(design, format);
+      }
       const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url;
       link.download = (design.name.replace(/[^a-z0-9_-]/gi, '_') || 'thumbnail') + '.' + (format === 'png' ? 'png' : 'jpg');
       link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 5000);
-      setMessage('Export ready: ' + design.width + '×' + design.height);
+      setMessage('Export ready: ' + width + '×' + height + (design.upscaledImageUrl ? ' · Upscaled' : ''));
     } catch (error) { setMessage('Export failed: ' + (error instanceof Error ? error.message : String(error))); }
     finally { setBusy(false); }
   };

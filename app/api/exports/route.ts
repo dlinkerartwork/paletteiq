@@ -47,7 +47,7 @@ export async function POST(request: Request) {
     if (!await bucket.head(key)) return Response.json({ error: `Image file missing for ${character.name}` }, { status: 409 });
     entries.push({ name: `images/${imageFileName(character.name, index, extension)}`, stream: async () => (await bucket.get(key))?.body || null });
   }
-  // Include every stored AI thumbnail image with both image-only and listing-package exports.
+  // Include thumbnails in image-only and listing-package exports, using the latest upscale first.
   // Manual layer-based designs remain editable and are also exported as JSON.
   const thumbnails = Array.isArray(project.thumbnails) ? project.thumbnails.slice(0, 200) : [];
   const thumbnailFiles: Array<{ id: string; name: string; file: string; width: number; height: number; imageAvailable: boolean }> = [];
@@ -55,6 +55,7 @@ export async function POST(request: Request) {
     const label = slug(thumbnail.name || 'thumbnail-' + (index + 1));
     const fileNameBase = 'thumbnails/' + String(index + 1).padStart(3, '0') + '-' + label;
     let includedImage = false;
+    // Read authoritative saved upscale references; never substitute a lower-resolution original.
     const storedUrl = thumbnail.upscaledImageUrl || thumbnail.aiImageUrl || thumbnail.renderedImageUrl;
     if (typeof storedUrl === 'string') {
       let url: URL;
