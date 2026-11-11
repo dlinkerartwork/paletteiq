@@ -3,7 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import { getDb } from '@/db';
 import { projects } from '@/db/schema';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
-import { userCredential } from '@/lib/credentials';
+import { userCredential, userGeminiKeys } from '@/lib/credentials';
 
 type Layout = {
   slots?: Array<{ x: number; y: number; width: number; height: number; rotation?: number }>;
@@ -19,7 +19,7 @@ const sanitizeBox = (item: Record<string, unknown>) => ({
 export async function POST(req: Request) {
   const user = await getChatGPTUser();
   if (!user) return Response.json({ error: 'Sign in required' }, { status: 401 });
-  let body: { projectId?: string; imageUrl?: string; count?: number };
+  let body: { projectId?: string; imageUrl?: string; count?: number; provider?: string; model?: string };
   try { body = await req.json(); } catch { return Response.json({ error: 'Invalid JSON' }, { status: 400 }); }
   if (!body.projectId || !/^[\w-]{8,80}$/.test(body.projectId)) return Response.json({ error: 'Invalid collection' }, { status: 400 });
   const stored = await getDb().select().from(projects).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId))).limit(1);
@@ -31,21 +31,67 @@ export async function POST(req: Request) {
     try { const url = new URL(reference); return url.protocol === 'https:' && (url.hostname === 'etsystatic.com' || url.hostname.endsWith('.etsystatic.com')); } catch { return false; }
   })();
   if (!isUpload && !isListingImage) return Response.json({ error: 'Choose a saved Etsy listing image or upload an image up to 4 MB.' }, { status: 400 });
-  const key = await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
-  if (!key) return Response.json({ error: 'Configure your OpenAI API key in Settings to analyze reference layouts.' }, { status: 503 });
+  const provider = body.provider || 'openai';
+  if (provider !== 'openai' && provider !== 'gemini') return Response.json({ error: 'Invalid AI provider' }, { status: 400 });
+  const model = body.model || (provider === 'openai' ? 'gpt-4.1-mini' : 'gemini-2.5-pro');
+  if (typeof model !== 'string' || !(provider === 'openai' ? /^gpt-[a-z0-9.-]{1,80}$/ : /^gemini-[a-z0-9.-]{1,80}$/).test(model)) return Response.json({ error: 'Invalid AI model' }, { status: 400 });
+  const key = provider === 'openai' ? await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY : undefined;
+  const geminiKeys = provider === 'gemini' ? await userGeminiKeys(user.userId) : [];
+  if (provider === 'openai' && !key) return Response.json({ error: 'Configure your OpenAI API key in Settings.' }, { status: 503 });
+  if (provider === 'gemini' && !geminiKeys.length) return Response.json({ error: 'Configure your Gemini API key in Settings.' }, { status: 503 });
   const count = Math.round(clamp(Number(body.count) || 8, 1, 24));
   const prompt = 'Analyze only the ABSTRACT composition of this product thumbnail to guide an ORIGINAL Etsy listing mockup. Do not reproduce any reference artwork, shop branding, watermarks, or distinctive text. Suggest up to ' + count + ' rectangles where our own clipart characters can be placed. Return JSON only: {"slots":[{"x":15,"y":20,"width":25,"height":30,"rotation":0}],"texts":[{"text":"CUSTOMIZE YOUR TITLE","x":10,"y":5,"width":80,"height":12}],"background":"#f5ede3"}. Units are percentages of image width and height from top-left (0–100). Text must be generic editable placeholder copy, never transcribe source text. Avoid overlapping major elements; include a balanced readable title area. Return 1–' + count + ' slots and 0–3 generic text placeholders.';
   try {
-    const response = await fetch('https://api.openai.com/v1/responses', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'gpt-4.1-mini', input: [{ role: 'user', content: [{ type: 'input_text', text: prompt }, { type: 'input_image', image_url: reference }] }], text: { format: { type: 'json_object' } } }),
-      signal: AbortSignal.timeout(60_000)
-    });
-    if (!response.ok) return Response.json({ error: 'OpenAI layout analysis failed (HTTP ' + response.status + ').' }, { status: 502 });
-    const result = await response.json() as { output?: Array<{ content?: Array<{ text?: string }> }> };
-    const raw = result.output?.flatMap(block => block.content || []).map(item => item.text || '').join('') || '{}';
-    const parsed = JSON.parse(raw) as Layout;
+    let parsed: Layout;
+    if (provider === 'openai') {
+      const response = await fetch('https://api.openai.com/v1/responses', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, input: [{ role: 'user', content: [{ type: 'input_text', text: prompt }, { type: 'input_image', image_url: reference }] }], text: { format: { type: 'json_object' } } }),
+        signal: AbortSignal.timeout(60_000)
+      });
+      if (!response.ok) return Response.json({ error: 'OpenAI layout analysis failed (HTTP ' + response.status + '). The selected model may not support image input.' }, { status: 502 });
+      const result = await response.json() as { output?: Array<{ content?: Array<{ text?: string }> }> };
+      const raw = result.output?.flatMap(block => block.content || []).map(item => item.text || '').join('') || '{}';
+      parsed = JSON.parse(raw) as Layout;
+    } else {
+      let mime = 'image/jpeg';
+      let imageBase64 = '';
+      if (isUpload) {
+        const match = reference.match(/^data:(image\/(?:png|jpeg|webp));base64,(.+)$/);
+        if (!match) return Response.json({ error: 'Invalid uploaded image format' }, { status: 400 });
+        mime = match[1]; imageBase64 = match[2];
+      } else {
+        const image = await fetch(reference, { redirect: 'error', signal: AbortSignal.timeout(15000) });
+        if (!image.ok) return Response.json({ error: 'Could not load reference image' }, { status: 502 });
+        mime = (image.headers.get('content-type') || '').split(';')[0];
+        if (!['image/png', 'image/jpeg', 'image/webp'].includes(mime)) return Response.json({ error: 'Unsupported reference image type' }, { status: 422 });
+        const bytes = new Uint8Array(await image.arrayBuffer());
+        if (bytes.length > 4_000_000) return Response.json({ error: 'Reference image exceeds 4 MB' }, { status: 413 });
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+        imageBase64 = btoa(binary);
+      }
+      let responseText = '';
+      let lastError = 'Gemini layout analysis unavailable';
+      for (const geminiKey of geminiKeys) {
+        const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent', {
+          method: 'POST', headers: { 'x-goog-api-key': geminiKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }, { inline_data: { mime_type: mime, data: imageBase64 } }] }], generationConfig: { responseMimeType: 'application/json' } }),
+          signal: AbortSignal.timeout(60000)
+        });
+        if (!response.ok) {
+          lastError = 'Gemini layout analysis failed (HTTP ' + response.status + '). The selected model may not support image input.';
+          if ([401, 403, 429, 500, 502, 503, 504].includes(response.status)) continue;
+          break;
+        }
+        const body = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+        responseText = body.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('') || '';
+        break;
+      }
+      if (!responseText) return Response.json({ error: lastError }, { status: 502 });
+      parsed = JSON.parse(responseText) as Layout;
+    }
     const slots = Array.isArray(parsed.slots) ? parsed.slots.filter(s => s && typeof s === 'object').slice(0, count).map(s => ({
       ...sanitizeBox(s as unknown as Record<string, unknown>), rotation: clamp(Number(s.rotation) || 0, -90, 90)
     })) : [];
