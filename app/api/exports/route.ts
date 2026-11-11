@@ -21,7 +21,7 @@ export async function POST(request: Request) {
   if (typeof body.projectId !== 'string' || !['selected','all','package'].includes(body.scope || '')) return Response.json({ error: 'Invalid export request' }, { status: 400 });
   const rows = await getDb().select().from(projects).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId))).limit(1);
   if (!rows.length) return Response.json({ error: 'Collection not found' }, { status: 404 });
-  const project = JSON.parse(rows[0].data) as { name: string; theme?: string; subtheme?: string; microtheme?: string; listing?: unknown; seoReview?: unknown; characters: Array<{ id: string; name: string; imageUrl?: string; upscaledImageUrl?: string }>; thumbnails?: Array<{ id: string; name: string; width: number; height: number; background?: string; backgroundImageUrl?: string; aiImageUrl?: string; renderedImageUrl?: string; elements?: unknown[] }> };
+  const project = JSON.parse(rows[0].data) as { name: string; theme?: string; subtheme?: string; microtheme?: string; listing?: unknown; seoReview?: unknown; characters: Array<{ id: string; name: string; imageUrl?: string; upscaledImageUrl?: string }>; thumbnails?: Array<{ id: string; name: string; width: number; height: number; background?: string; backgroundImageUrl?: string; aiImageUrl?: string; renderedImageUrl?: string; upscaledImageUrl?: string; elements?: unknown[] }> };
   if (body.scope === 'package' && !(project.listing && typeof project.listing === 'object' && typeof (project.listing as { title?: string }).title === 'string' && (project.listing as { title: string }).title.trim())) return Response.json({ error: 'Create and save an Etsy listing draft before exporting the final package.' }, { status: 400 });
   const selectedIds = new Set(Array.isArray(body.ids) ? body.ids.filter(v => typeof v === 'string') : []);
   const chosen = project.characters.filter(c => (c.upscaledImageUrl || c.imageUrl) && (body.scope !== 'selected' || selectedIds.has(c.id)));
@@ -55,7 +55,7 @@ export async function POST(request: Request) {
     const label = slug(thumbnail.name || 'thumbnail-' + (index + 1));
     const fileNameBase = 'thumbnails/' + String(index + 1).padStart(3, '0') + '-' + label;
     let includedImage = false;
-    const storedUrl = thumbnail.aiImageUrl || thumbnail.renderedImageUrl;
+    const storedUrl = thumbnail.upscaledImageUrl || thumbnail.aiImageUrl || thumbnail.renderedImageUrl;
     if (typeof storedUrl === 'string') {
       let url: URL;
       try { url = new URL(storedUrl, 'https://app.local'); }
