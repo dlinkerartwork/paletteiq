@@ -60,7 +60,7 @@ export default function ThumbnailDesigner({ aiDefaults, projectId, characters, r
     if (document.getElementById(linkId)) return;
     const link = document.createElement('link');
     link.id = linkId; link.rel = 'stylesheet';
-    link.href = 'https://fonts.googleapis.com/css2?family=Allura&family=Bodoni+Moda:wght@400;700&family=Cinzel:wght@400;700&family=Cormorant+Garamond:wght@400;700&family=DM+Serif+Display&family=EB+Garamond:wght@400;700&family=Great+Vibes&family=Libre+Baskerville:wght@400;700&family=Lora:wght@400;700&family=Marcellus&family=Montserrat:wght@400;700&family=Playfair+Display:wght@400;700&family=Poppins:wght@400;700&family=Prata&family=Raleway:wght@400;700&display=swap';
+    link.href = 'https://fonts.googleapis.com/css2?family=Abril+Fatface&family=Allura&family=Amatic+SC:wght@400;700&family=Bebas+Neue&family=Caveat:wght@400;700&family=Fredericka+the+Great&family=Kalam:wght@400;700&family=Lobster+Two:wght@400;700&family=Oswald:wght@400;700&family=Pacifico&family=Patrick+Hand&family=Permanent+Marker&family=Rye&family=Satisfy&family=Special+Elite&family=Bodoni+Moda:wght@400;700&family=Cinzel:wght@400;700&family=Cormorant+Garamond:wght@400;700&family=DM+Serif+Display&family=EB+Garamond:wght@400;700&family=Great+Vibes&family=Libre+Baskerville:wght@400;700&family=Lora:wght@400;700&family=Marcellus&family=Montserrat:wght@400;700&family=Playfair+Display:wght@400;700&family=Poppins:wght@400;700&family=Prata&family=Raleway:wght@400;700&display=swap';
     document.head.appendChild(link);
   }, []);
   const [message, setMessage] = useState('');
@@ -94,6 +94,21 @@ export default function ThumbnailDesigner({ aiDefaults, projectId, characters, r
   };
   const add = (element: ThumbnailElement) => { if (design) { commit({ ...design, elements: [...design.elements, element] }); setSelectedId(element.id); } };
   const remove = () => { if (design && selection) { commit({ ...design, elements: design.elements.filter(e => e.id !== selection.id) }); setSelectedId(''); } };
+  useEffect(() => {
+    const keyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!selectedId || !design || target?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+      const element = design.elements.find(e => e.id === selectedId);
+      if (!element || element.locked) return;
+      event.preventDefault();
+      onChange(designs.map(item => item.id === design.id ? { ...item, elements: item.elements.filter(e => e.id !== selectedId) } : item));
+      setSelectedId('');
+    };
+    window.addEventListener('keydown', keyDown);
+    return () => window.removeEventListener('keydown', keyDown);
+  }, [selectedId, design, designs, onChange]);
+
   const create = () => { const next = newDesign(designs.length + 1); onChange([...designs, next]); setActiveId(next.id); };
   const duplicate = () => { if (!design) return; const copy = { ...design, id: id(), name: design.name + ' copy', elements: design.elements.map(e => ({ ...e, id: id() })), updatedAt: Date.now() }; onChange([...designs, copy]); setActiveId(copy.id); };
   const removeDesign = () => { if (!design || !window.confirm('Delete this thumbnail design?')) return; onChange(designs.filter(d => d.id !== design.id)); setActiveId(designs.find(d => d.id !== design.id)?.id || ''); };
@@ -206,8 +221,8 @@ export default function ThumbnailDesigner({ aiDefaults, projectId, characters, r
     </div>
     {message && <p className="notice">{message}</p>}
     {!design ? <div className="panel empty-state"><h2>No thumbnails yet</h2><p>Create a design for this listing.</p><button className="primary-btn" onClick={create}>Create first thumbnail</button></div> :
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(190px, 240px) minmax(0, 1fr) minmax(220px, 275px)', gap: 12, alignItems: 'start' }}>
-      <div className="panel" style={{ padding: 14, display: 'grid', gap: 12 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(190px, 245px) minmax(0, 1fr) minmax(245px, 290px)', gap: 12, alignItems: 'start' }}>
+      <div className="panel" style={{ padding: 14, display: 'grid', gap: 12, alignContent: 'start', maxHeight: 'min(82vh, 950px)', overflowY: 'auto', overscrollBehavior: 'contain' }}>
         <h3>Reference & assets</h3>
         <label className="input-label">LAYOUT MODE</label>
         <select value={layoutMode} onChange={e => setLayoutMode(e.target.value as 'ai' | 'manual')}><option value="ai">AI + manual</option><option value="manual">Manual only</option></select>
@@ -241,7 +256,7 @@ export default function ThumbnailDesigner({ aiDefaults, projectId, characters, r
         </div>
         <button className="outline-btn" onClick={() => add(newText())}>+ Add text</button>
       </div>
-      <div style={{ minWidth: 0, display: 'grid', gap: 12 }}>
+      <div style={{ minWidth: 0, position: 'sticky', top: 12, alignSelf: 'start' }}>
       <div className="panel" style={{ padding: 12, minWidth: 0 }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginBottom: 10, alignItems: 'center' }}>
           <button className="outline-btn" disabled={!history.length} onClick={undo} title="Undo"><Undo2 size={15}/></button>
@@ -250,9 +265,11 @@ export default function ThumbnailDesigner({ aiDefaults, projectId, characters, r
           <span>{Math.round(previewZoom*100)}%</span>
           <button className="outline-btn" onClick={() => setPreviewZoom(z => clamp(z + .25, .5, 3))}>+</button>
           <button className="outline-btn" onClick={() => setPreviewZoom(1)} title="Reset zoom"><RotateCcw size={15}/></button>
+          <button className="outline-btn" type="button" onClick={() => add(newText())}><Plus size={15}/> Text</button>
+          <button className="outline-btn" type="button" disabled={!selection || selection.locked} onClick={remove} title="Delete selected object"><Trash2 size={15}/> Delete</button>
           <span style={{ marginLeft: 'auto' }}>{design.width}×{design.height}</span>
         </div>
-        <div style={{ overflow: 'auto', maxHeight: '75vh', background: '#e8e8e8', padding: 16, borderRadius: 8 }}>
+        <div style={{ overflow: 'auto', maxHeight: 'min(66vh, 780px)', background: '#e8e8e8', padding: 16, borderRadius: 8 }}>
           <div style={{ width: `${previewZoom*100}%`, minWidth: 200, margin: 'auto' }}>
             <div ref={stageRef} onPointerDown={() => setSelectedId('')} style={{ width: '100%', aspectRatio: `${design.width}/${design.height}`, background: design.background, position: 'relative', containerType: 'inline-size', overflow: 'hidden', boxShadow: '0 5px 25px #0002', touchAction: 'none' }}>
               {design.elements.map(e => {
@@ -273,12 +290,29 @@ export default function ThumbnailDesigner({ aiDefaults, projectId, characters, r
           <button className="outline-btn" disabled={busy} onClick={() => void exportPng('jpeg')}><Download size={15}/> Export JPG</button>
         </div>
       </div>
-      <div className="panel" style={{ padding: 14, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(165px, 1fr))', alignItems: 'start', gap: 12 }}>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 'min(82vh, 950px)', minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain' }}>
+      <div className="panel" style={{ padding: 14, display: 'grid', gap: 9 }}>
+        <h3>Design properties</h3>
+        <label className="input-label">DESIGN NAME</label>
+        <input value={design.name} onChange={e => mutate({ name: e.target.value })}/>
+        <label className="input-label">CANVAS WIDTH (PX)</label>
+        <input type="number" min={256} max={8000} value={design.width} onChange={e => mutate({ width: clamp(Number(e.target.value) || 2000, 256, 8000) })}/>
+        <label className="input-label">CANVAS HEIGHT (PX)</label>
+        <input type="number" min={256} max={8000} value={design.height} onChange={e => mutate({ height: clamp(Number(e.target.value) || 2000, 256, 8000) })}/>
+        <label className="input-label">BACKGROUND</label>
+        <input type="color" value={design.background} onChange={e => mutate({ background: e.target.value })}/>
+        <h3>Layers</h3>
+        <div style={{ display: 'grid', gap: 5, maxHeight: 190, overflowY: 'auto' }}>
+          {[...design.elements].reverse().map(e => <button key={e.id} className="outline-btn" style={{ justifyContent: 'flex-start', background: e.id === selectedId ? '#fff0df' : undefined, overflow: 'hidden' }} onClick={() => setSelectedId(e.id)}>{e.type === 'text' ? 'T' : '◫'} {e.type === 'text' ? e.text?.slice(0,24) : assetMap.get(e.characterId || '')?.name || 'Image'}</button>)}
+        </div>
+      </div>
+      <div className="panel" style={{ padding: 14, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', alignItems: 'start', gap: 8 }}>
         <h3 style={{ gridColumn: '1 / -1' }}>Selected element</h3>
         {selection ? <>
           {selection.type === 'text' ? <>
             <label className="input-label">TEXT</label><textarea value={selection.text || ''} rows={3} onChange={e => updateElement({ text: e.target.value })}/>
-            <label className="input-label">FONT</label><select value={selection.fontFamily || 'Arial'} onChange={e => updateElement({ fontFamily: e.target.value })}>{["Arial","Georgia","Playfair Display","Cormorant Garamond","Cinzel","Bodoni Moda","DM Serif Display","Libre Baskerville","EB Garamond","Lora","Prata","Marcellus","Great Vibes","Allura","Poppins","Montserrat","Raleway","Times New Roman","Verdana"].map(f => <option key={f}>{f}</option>)}</select>
+            <label className="input-label">FONT</label><select value={selection.fontFamily || 'Arial'} onChange={e => updateElement({ fontFamily: e.target.value })}>{["Arial","Georgia","Caveat","Amatic SC","Kalam","Patrick Hand","Permanent Marker","Pacifico","Satisfy","Lobster Two","Bebas Neue","Oswald","Abril Fatface","Fredericka the Great","Rye","Special Elite","Playfair Display","Cormorant Garamond","Cinzel","Bodoni Moda","DM Serif Display","Libre Baskerville","EB Garamond","Lora","Prata","Marcellus","Great Vibes","Allura","Poppins","Montserrat","Raleway","Times New Roman","Verdana"].map(f => <option key={f}>{f}</option>)}</select>
             <label className="input-label">FONT SIZE</label><input type="number" min={8} max={500} value={selection.fontSize || 80} onChange={e => updateElement({ fontSize: clamp(Number(e.target.value),8,500) })}/>
             <label className="input-label">TEXT COLOR</label><div style={{ display: 'flex', gap: 8 }}><input aria-label="Choose text color" type="color" value={selection.color || '#333333'} onChange={e => updateElement({ color: e.target.value })}/><input aria-label="Text color hex" value={selection.color || '#333333'} onChange={e => { if (/^#[0-9a-f]{6}$/i.test(e.target.value)) updateElement({ color: e.target.value }); }}/></div>
             <label className="input-label">WEIGHT</label><select value={selection.fontWeight || 'bold'} onChange={e => updateElement({ fontWeight: e.target.value })}><option value="normal">Normal</option><option value="bold">Bold</option></select>
@@ -297,20 +331,6 @@ export default function ThumbnailDesigner({ aiDefaults, projectId, characters, r
 
       </div>
       </div>
-      <div className="panel" style={{ padding: 14, display: 'grid', gap: 9 }}>
-        <h3>Design properties</h3>
-        <label className="input-label">DESIGN NAME</label>
-        <input value={design.name} onChange={e => mutate({ name: e.target.value })}/>
-        <label className="input-label">CANVAS WIDTH (PX)</label>
-        <input type="number" min={256} max={8000} value={design.width} onChange={e => mutate({ width: clamp(Number(e.target.value) || 2000, 256, 8000) })}/>
-        <label className="input-label">CANVAS HEIGHT (PX)</label>
-        <input type="number" min={256} max={8000} value={design.height} onChange={e => mutate({ height: clamp(Number(e.target.value) || 2000, 256, 8000) })}/>
-        <label className="input-label">BACKGROUND</label>
-        <input type="color" value={design.background} onChange={e => mutate({ background: e.target.value })}/>
-        <h3>Layers</h3>
-        <div style={{ display: 'grid', gap: 5, maxHeight: 190, overflowY: 'auto' }}>
-          {[...design.elements].reverse().map(e => <button key={e.id} className="outline-btn" style={{ justifyContent: 'flex-start', background: e.id === selectedId ? '#fff0df' : undefined, overflow: 'hidden' }} onClick={() => setSelectedId(e.id)}>{e.type === 'text' ? 'T' : '◫'} {e.type === 'text' ? e.text?.slice(0,24) : assetMap.get(e.characterId || '')?.name || 'Image'}</button>)}
-        </div>
       </div>
     </div>}
   </div>;
