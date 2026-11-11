@@ -137,7 +137,7 @@ export default function ThumbnailDesigner({ projectId, characters, references, d
           ctx.drawImage(img, -dw/2, -dh/2, dw, dh);
         } else {
           ctx.fillStyle = element.color || '#333333';
-          ctx.font = \`\${element.fontWeight || 'bold'} \${Math.round((element.fontSize || 80) * design.width / 2000)}px \${element.fontFamily || 'Arial'}\`;
+          ctx.font = `${element.fontWeight || 'bold'} ${Math.round((element.fontSize || 80) * design.width / 2000)}px ${element.fontFamily || 'Arial'}`;
           ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
           const raw = (element.text || '').split('\n');
           const lineHeight = (element.fontSize || 80) * design.width / 2000 * 1.2;
@@ -208,14 +208,14 @@ export default function ThumbnailDesigner({ projectId, characters, references, d
           <span style={{ marginLeft: 'auto' }}>{design.width}×{design.height}</span>
         </div>
         <div style={{ overflow: 'auto', maxHeight: '75vh', background: '#e8e8e8', padding: 16, borderRadius: 8 }}>
-          <div style={{ width: \`\${previewZoom*100}%\`, minWidth: 200, margin: 'auto' }}>
-            <div ref={stageRef} onPointerDown={() => setSelectedId('')} style={{ width: '100%', aspectRatio: \`\${design.width}/\${design.height}\`, background: design.background, position: 'relative', containerType: 'inline-size', overflow: 'hidden', boxShadow: '0 5px 25px #0002', touchAction: 'none' }}>
+          <div style={{ width: `${previewZoom*100}%`, minWidth: 200, margin: 'auto' }}>
+            <div ref={stageRef} onPointerDown={() => setSelectedId('')} style={{ width: '100%', aspectRatio: `${design.width}/${design.height}`, background: design.background, position: 'relative', containerType: 'inline-size', overflow: 'hidden', boxShadow: '0 5px 25px #0002', touchAction: 'none' }}>
               {design.elements.map(e => {
                 const isSelected = e.id === selectedId;
                 return <div key={e.id} onPointerDown={event => startDrag(event,e,'move')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
-                  style={{ position: 'absolute', left: e.x+'%', top: e.y+'%', width: e.width+'%', height: e.height+'%', transform: \`rotate(\${e.rotation}deg)\`, opacity: e.opacity ?? 1, border: isSelected ? '2px dashed #e36a1b' : '1px solid transparent', cursor: e.locked ? 'not-allowed' : 'move', boxSizing: 'border-box', touchAction: 'none', userSelect: 'none' }}>
+                  style={{ position: 'absolute', left: e.x+'%', top: e.y+'%', width: e.width+'%', height: e.height+'%', transform: `rotate(${e.rotation}deg)`, opacity: e.opacity ?? 1, border: isSelected ? '2px dashed #e36a1b' : '1px solid transparent', cursor: e.locked ? 'not-allowed' : 'move', boxSizing: 'border-box', touchAction: 'none', userSelect: 'none' }}>
                   {e.type === 'image' ? (imageUrl(e) ? <img src={imageUrl(e)} alt={assetMap.get(e.characterId || '')?.name || 'Character'} draggable={false} style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }}/> : <div style={{ color: '#d33' }}>Image unavailable</div>) :
-                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', fontSize: \`clamp(5px, \${(e.fontSize || 80) / design.width * 100}cqw, 250px)\`, fontFamily: e.fontFamily || 'Arial', fontWeight: e.fontWeight || 'bold', color: e.color || '#333', whiteSpace: 'pre-line', overflow: 'hidden', pointerEvents: 'none' }}>{e.text}</div>}
+                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', fontSize: `clamp(5px, ${(e.fontSize || 80) / design.width * 100}cqw, 250px)`, fontFamily: e.fontFamily || 'Arial', fontWeight: e.fontWeight || 'bold', color: e.color || '#333', whiteSpace: 'pre-line', overflow: 'hidden', pointerEvents: 'none' }}>{e.text}</div>}
                   {isSelected && !e.locked && <div onPointerDown={event => startDrag(event,e,'resize')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
                     style={{ position: 'absolute', right: -7, bottom: -7, width: 15, height: 15, background: '#e36a1b', border: '2px solid white', borderRadius: 3, cursor: 'nwse-resize', touchAction: 'none' }}/>}
                 </div>;
