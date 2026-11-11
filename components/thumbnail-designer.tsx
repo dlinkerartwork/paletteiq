@@ -9,7 +9,7 @@ export type ThumbnailElement = {
   fontSize?: number; fontFamily?: string; color?: string; fontWeight?: string; opacity?: number; locked?: boolean;
 };
 export type ThumbnailDesign = {
-  id: string; name: string; width: number; height: number; background: string; elements: ThumbnailElement[];
+  id: string; name: string; width: number; height: number; background: string; backgroundImageUrl?: string; elements: ThumbnailElement[];
   referenceUrl?: string; updatedAt: number;
 };
 type Character = { id: string; name: string; imageUrl?: string; upscaledImageUrl?: string };
@@ -60,15 +60,16 @@ export default function ThumbnailDesigner({ aiDefaults, projectId, characters, r
     if (document.getElementById(linkId)) return;
     const link = document.createElement('link');
     link.id = linkId; link.rel = 'stylesheet';
-    link.href = 'https://fonts.googleapis.com/css2?family=Abril+Fatface&family=Allura&family=Amatic+SC:wght@400;700&family=Bebas+Neue&family=Caveat:wght@400;700&family=Fredericka+the+Great&family=Kalam:wght@400;700&family=Lobster+Two:wght@400;700&family=Oswald:wght@400;700&family=Pacifico&family=Patrick+Hand&family=Permanent+Marker&family=Rye&family=Satisfy&family=Special+Elite&family=Bodoni+Moda:wght@400;700&family=Cinzel:wght@400;700&family=Cormorant+Garamond:wght@400;700&family=DM+Serif+Display&family=EB+Garamond:wght@400;700&family=Great+Vibes&family=Libre+Baskerville:wght@400;700&family=Lora:wght@400;700&family=Marcellus&family=Montserrat:wght@400;700&family=Playfair+Display:wght@400;700&family=Poppins:wght@400;700&family=Prata&family=Raleway:wght@400;700&display=swap';
+    link.href = 'https://fonts.googleapis.com/css2?family=Architects+Daughter&family=Bangers&family=Chewy&family=Courgette&family=Dancing+Script:wght@400;700&family=Gloria+Hallelujah&family=Indie+Flower&family=Josefin+Sans:wght@400;700&family=Kaushan+Script&family=Petit+Formal+Script&family=Playball&family=Sacramento&family=Tangerine:wght@400;700&family=Yeseva+One&family=Abril+Fatface&family=Allura&family=Amatic+SC:wght@400;700&family=Bebas+Neue&family=Caveat:wght@400;700&family=Fredericka+the+Great&family=Kalam:wght@400;700&family=Lobster+Two:wght@400;700&family=Oswald:wght@400;700&family=Pacifico&family=Patrick+Hand&family=Permanent+Marker&family=Rye&family=Satisfy&family=Special+Elite&family=Bodoni+Moda:wght@400;700&family=Cinzel:wght@400;700&family=Cormorant+Garamond:wght@400;700&family=DM+Serif+Display&family=EB+Garamond:wght@400;700&family=Great+Vibes&family=Libre+Baskerville:wght@400;700&family=Lora:wght@400;700&family=Marcellus&family=Montserrat:wght@400;700&family=Playfair+Display:wght@400;700&family=Poppins:wght@400;700&family=Prata&family=Raleway:wght@400;700&display=swap';
     document.head.appendChild(link);
   }, []);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [backgroundUploading, setBackgroundUploading] = useState(false);
   const [history, setHistory] = useState<ThumbnailDesign[]>([]);
   const [future, setFuture] = useState<ThumbnailDesign[]>([]);
   const stageRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{ id: string; mode: 'move' | 'resize'; x: number; y: number; original: ThumbnailElement } | null>(null);
+  const dragRef = useRef<{ id: string; mode: 'move' | 'resize' | 'rotate'; x: number; y: number; original: ThumbnailElement; centerX?: number; centerY?: number; startAngle?: number } | null>(null);
   const design = designs.find(d => d.id === activeId) || designs[0];
   const selection = design?.elements.find(e => e.id === selectedId);
   const assetMap = useMemo(() => new Map(characters.map(c => [c.id, c])), [characters]);
@@ -118,10 +119,13 @@ export default function ThumbnailDesigner({ aiDefaults, projectId, characters, r
     const character = assetMap.get(e.characterId || '');
     return e.source === 'upscaled' ? character?.upscaledImageUrl || character?.imageUrl : character?.imageUrl || character?.upscaledImageUrl;
   };
-  const startDrag = (event: React.PointerEvent<HTMLElement>, element: ThumbnailElement, mode: 'move' | 'resize') => {
+  const startDrag = (event: React.PointerEvent<HTMLElement>, element: ThumbnailElement, mode: 'move' | 'resize' | 'rotate') => {
     if (element.locked || !stageRef.current) return;
     event.stopPropagation(); event.preventDefault(); setSelectedId(element.id);
-    dragRef.current = { id: element.id, mode, x: event.clientX, y: event.clientY, original: { ...element } };
+    const bounds = stageRef.current.getBoundingClientRect();
+    const centerX = bounds.left + (element.x + element.width / 2) / 100 * bounds.width;
+    const centerY = bounds.top + (element.y + element.height / 2) / 100 * bounds.height;
+    dragRef.current = { id: element.id, mode, x: event.clientX, y: event.clientY, original: { ...element }, centerX, centerY, startAngle: Math.atan2(event.clientY - centerY, event.clientX - centerX) };
     event.currentTarget.setPointerCapture(event.pointerId);
     if (design) setHistory(old => [...old.slice(-29), design]);
     setFuture([]);
@@ -132,7 +136,9 @@ export default function ThumbnailDesigner({ aiDefaults, projectId, characters, r
     if (!drag || !bounds || !design) return;
     const dx = (event.clientX - drag.x) / bounds.width * 100;
     const dy = (event.clientY - drag.y) / bounds.height * 100;
-    const next = drag.mode === 'move'
+    const next = drag.mode === 'rotate'
+      ? { rotation: Math.round(drag.original.rotation + (Math.atan2(event.clientY - (drag.centerY || 0), event.clientX - (drag.centerX || 0)) - (drag.startAngle || 0)) * 180 / Math.PI) }
+      : drag.mode === 'move'
       ? { x: clamp(drag.original.x + dx, -100, 200), y: clamp(drag.original.y + dy, -100, 200) }
       : { width: clamp(drag.original.width + dx, 1, 200), height: clamp(drag.original.height + dy, 1, 200) };
     commit({ ...design, elements: design.elements.map(e => e.id === drag.id ? { ...e, ...next } : e) }, false);
@@ -165,6 +171,19 @@ export default function ThumbnailDesigner({ aiDefaults, projectId, characters, r
     const data = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(new Error('Could not read file')); reader.readAsDataURL(file); });
     setUploadedReference(data); setReference(data); setMessage('Reference loaded for this editing session. The uploaded reference is not embedded in the saved collection.');
   };
+  const uploadBackground = async (file?: File) => {
+    if (!file || !design) return;
+    setBackgroundUploading(true); setMessage('');
+    try {
+      const form = new FormData(); form.append('projectId', projectId); form.append('file', file);
+      const response = await fetch('/api/thumbnail-background', { method: 'POST', body: form });
+      const result = await response.json() as { url?: string; error?: string };
+      if (!response.ok || !result.url) throw Error(result.error || 'Background upload failed');
+      mutate({ backgroundImageUrl: result.url });
+      setMessage('Background uploaded. Save designs to keep the new background.');
+    } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
+    finally { setBackgroundUploading(false); }
+  };
   const exportPng = async (format: 'png' | 'jpeg') => {
     if (!design) return;
     setBusy(true); setMessage('');
@@ -172,6 +191,12 @@ export default function ThumbnailDesigner({ aiDefaults, projectId, characters, r
       const canvas = document.createElement('canvas'); canvas.width = design.width; canvas.height = design.height;
       const ctx = canvas.getContext('2d'); if (!ctx) throw new Error('Canvas unavailable');
       ctx.fillStyle = design.background; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      if (design.backgroundImageUrl) {
+        const background = await loadForExport(design.backgroundImageUrl);
+        const scale = Math.max(design.width / background.naturalWidth, design.height / background.naturalHeight);
+        const w = background.naturalWidth * scale, h = background.naturalHeight * scale;
+        ctx.drawImage(background, (design.width - w) / 2, (design.height - h) / 2, w, h);
+      }
       for (const element of design.elements) {
         const x = element.x / 100 * design.width, y = element.y / 100 * design.height;
         const w = element.width / 100 * design.width, h = element.height / 100 * design.height;
@@ -271,13 +296,15 @@ export default function ThumbnailDesigner({ aiDefaults, projectId, characters, r
         </div>
         <div style={{ overflow: 'auto', maxHeight: 'min(66vh, 780px)', background: '#e8e8e8', padding: 16, borderRadius: 8 }}>
           <div style={{ width: `${previewZoom*100}%`, minWidth: 200, margin: 'auto' }}>
-            <div ref={stageRef} onPointerDown={() => setSelectedId('')} style={{ width: '100%', aspectRatio: `${design.width}/${design.height}`, background: design.background, position: 'relative', containerType: 'inline-size', overflow: 'hidden', boxShadow: '0 5px 25px #0002', touchAction: 'none' }}>
+            <div ref={stageRef} onPointerDown={() => setSelectedId('')} style={{ width: '100%', aspectRatio: `${design.width}/${design.height}`, background: design.background, backgroundImage: design.backgroundImageUrl ? `url(${JSON.stringify(design.backgroundImageUrl)})` : undefined, backgroundPosition: 'center', backgroundSize: 'cover', position: 'relative', containerType: 'inline-size', overflow: 'hidden', boxShadow: '0 5px 25px #0002', touchAction: 'none' }}>
               {design.elements.map(e => {
                 const isSelected = e.id === selectedId;
                 return <div key={e.id} onPointerDown={event => startDrag(event,e,'move')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
                   style={{ position: 'absolute', left: e.x+'%', top: e.y+'%', width: e.width+'%', height: e.height+'%', transform: `rotate(${e.rotation}deg)`, opacity: e.opacity ?? 1, border: isSelected ? '2px dashed #e36a1b' : '1px solid transparent', cursor: e.locked ? 'not-allowed' : 'move', boxSizing: 'border-box', touchAction: 'none', userSelect: 'none' }}>
                   {e.type === 'image' ? (imageUrl(e) ? <img src={imageUrl(e)} alt={assetMap.get(e.characterId || '')?.name || 'Character'} draggable={false} style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }}/> : <div style={{ color: '#d33' }}>Image unavailable</div>) :
                     <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', fontSize: `clamp(5px, ${(e.fontSize || 80) / design.width * 100}cqw, 250px)`, fontFamily: e.fontFamily || 'Arial', fontWeight: e.fontWeight || 'bold', color: e.color || '#333', whiteSpace: 'pre-line', overflow: 'hidden', pointerEvents: 'none' }}>{e.text}</div>}
+                  {isSelected && !e.locked && <div title="Drag to rotate" onPointerDown={event => startDrag(event,e,'rotate')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
+                    style={{ position: 'absolute', left: '50%', top: -30, transform: 'translateX(-50%)', width: 22, height: 22, background: '#fff', border: '2px solid #e36a1b', borderRadius: '50%', cursor: 'grab', display: 'grid', placeItems: 'center', touchAction: 'none', zIndex: 3 }}>↻</div>}
                   {isSelected && !e.locked && <div onPointerDown={event => startDrag(event,e,'resize')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
                     style={{ position: 'absolute', right: -7, bottom: -7, width: 15, height: 15, background: '#e36a1b', border: '2px solid white', borderRadius: 3, cursor: 'nwse-resize', touchAction: 'none' }}/>}
                 </div>;
@@ -300,11 +327,18 @@ export default function ThumbnailDesigner({ aiDefaults, projectId, characters, r
         <input type="number" min={256} max={8000} value={design.width} onChange={e => mutate({ width: clamp(Number(e.target.value) || 2000, 256, 8000) })}/>
         <label className="input-label">CANVAS HEIGHT (PX)</label>
         <input type="number" min={256} max={8000} value={design.height} onChange={e => mutate({ height: clamp(Number(e.target.value) || 2000, 256, 8000) })}/>
-        <label className="input-label">BACKGROUND</label>
+        <label className="input-label">BACKGROUND COLOR</label>
         <input type="color" value={design.background} onChange={e => mutate({ background: e.target.value })}/>
+        <label className="input-label">BACKGROUND IMAGE (LOCAL PNG/JPG)</label>
+        <input type="file" accept="image/png,image/jpeg" disabled={backgroundUploading} onChange={e => void uploadBackground(e.target.files?.[0])}/>
+        {backgroundUploading && <small>Uploading background…</small>}
+        {design.backgroundImageUrl && <button className="outline-btn" type="button" onClick={() => mutate({ backgroundImageUrl: undefined })}>Remove background image</button>}
         <h3>Layers</h3>
         <div style={{ display: 'grid', gap: 5, maxHeight: 190, overflowY: 'auto' }}>
-          {[...design.elements].reverse().map(e => <button key={e.id} className="outline-btn" style={{ justifyContent: 'flex-start', background: e.id === selectedId ? '#fff0df' : undefined, overflow: 'hidden' }} onClick={() => setSelectedId(e.id)}>{e.type === 'text' ? 'T' : '◫'} {e.type === 'text' ? e.text?.slice(0,24) : assetMap.get(e.characterId || '')?.name || 'Image'}</button>)}
+          {[...design.elements].reverse().map(e => <div key={e.id} style={{ display: 'flex', gap: 5, minWidth: 0 }}>
+            <button type="button" className="outline-btn" style={{ flex: 1, justifyContent: 'flex-start', minWidth: 0, background: e.id === selectedId ? '#fff0df' : undefined, overflow: 'hidden', textOverflow: 'ellipsis' }} onClick={() => setSelectedId(e.id)}>{e.type === 'text' ? 'T' : '◫'} {e.type === 'text' ? e.text?.slice(0,24) : assetMap.get(e.characterId || '')?.name || 'Image'}</button>
+            <button type="button" className="outline-btn" disabled={e.locked} aria-label={`Delete ${e.type === 'text' ? 'text' : 'character'} from layers`} title="Delete layer" onClick={() => { commit({ ...design, elements: design.elements.filter(item => item.id !== e.id) }); if (selectedId === e.id) setSelectedId(''); }}><Trash2 size={14}/></button>
+          </div>)}
         </div>
       </div>
       <div className="panel" style={{ padding: 14, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', alignItems: 'start', gap: 8 }}>
@@ -312,7 +346,7 @@ export default function ThumbnailDesigner({ aiDefaults, projectId, characters, r
         {selection ? <>
           {selection.type === 'text' ? <>
             <label className="input-label">TEXT</label><textarea value={selection.text || ''} rows={3} onChange={e => updateElement({ text: e.target.value })}/>
-            <label className="input-label">FONT</label><select value={selection.fontFamily || 'Arial'} onChange={e => updateElement({ fontFamily: e.target.value })}>{["Arial","Georgia","Caveat","Amatic SC","Kalam","Patrick Hand","Permanent Marker","Pacifico","Satisfy","Lobster Two","Bebas Neue","Oswald","Abril Fatface","Fredericka the Great","Rye","Special Elite","Playfair Display","Cormorant Garamond","Cinzel","Bodoni Moda","DM Serif Display","Libre Baskerville","EB Garamond","Lora","Prata","Marcellus","Great Vibes","Allura","Poppins","Montserrat","Raleway","Times New Roman","Verdana"].map(f => <option key={f}>{f}</option>)}</select>
+            <label className="input-label">FONT</label><select value={selection.fontFamily || 'Arial'} onChange={e => updateElement({ fontFamily: e.target.value })}>{["Arial","Georgia","Dancing Script","Sacramento","Tangerine","Kaushan Script","Courgette","Playball","Petit Formal Script","Indie Flower","Gloria Hallelujah","Architects Daughter","Chewy","Bangers","Yeseva One","Josefin Sans","Caveat","Amatic SC","Kalam","Patrick Hand","Permanent Marker","Pacifico","Satisfy","Lobster Two","Bebas Neue","Oswald","Abril Fatface","Fredericka the Great","Rye","Special Elite","Playfair Display","Cormorant Garamond","Cinzel","Bodoni Moda","DM Serif Display","Libre Baskerville","EB Garamond","Lora","Prata","Marcellus","Great Vibes","Allura","Poppins","Montserrat","Raleway","Times New Roman","Verdana"].map(f => <option key={f}>{f}</option>)}</select>
             <label className="input-label">FONT SIZE</label><input type="number" min={8} max={500} value={selection.fontSize || 80} onChange={e => updateElement({ fontSize: clamp(Number(e.target.value),8,500) })}/>
             <label className="input-label">TEXT COLOR</label><div style={{ display: 'flex', gap: 8 }}><input aria-label="Choose text color" type="color" value={selection.color || '#333333'} onChange={e => updateElement({ color: e.target.value })}/><input aria-label="Text color hex" value={selection.color || '#333333'} onChange={e => { if (/^#[0-9a-f]{6}$/i.test(e.target.value)) updateElement({ color: e.target.value }); }}/></div>
             <label className="input-label">WEIGHT</label><select value={selection.fontWeight || 'bold'} onChange={e => updateElement({ fontWeight: e.target.value })}><option value="normal">Normal</option><option value="bold">Bold</option></select>
