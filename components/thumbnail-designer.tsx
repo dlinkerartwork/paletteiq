@@ -62,6 +62,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const [upscaleStatus, setUpscaleStatus] = useState('');
   const [upscaleJobs, setUpscaleJobs] = useState<Record<string, { status: string; elapsed?: number; remaining?: number | null; error?: string }>>({});
   const [upscaleRemaining, setUpscaleRemaining] = useState<Record<string, number | null>>({});
+  const [thumbnailMode, setThumbnailMode] = useState<'existing' | 'redraw'>('existing');
   const [imageProvider, setImageProvider] = useState<'openai' | 'gemini'>('openai');
   const [imageModel, setImageModel] = useState('gpt-image-1-mini');
   const [includeTitle, setIncludeTitle] = useState(true);
@@ -291,6 +292,25 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
       setMessage('Background uploaded. Save designs to keep the new background.');
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
     finally { setBackgroundUploading(false); }
+  };
+  const generateExistingThumbnail = async () => {
+    if (!design || imageBusy) return;
+    setImageBusy(true); setMessage('Planning a thumbnail with your existing characters…');
+    try {
+      const response = await fetch('/api/thumbnail-layout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, mode: 'existing', provider, model, includeTitle, width: design.width, height: design.height, count: 24 }) });
+      const result = await response.json() as { error?: string; layout?: { slots: Array<{ characterId: string; x: number; y: number; width: number; height: number; rotation?: number }>; texts?: Array<{ text: string; x: number; y: number; width: number; height: number; curve?: number }>; background?: string } };
+      if (!response.ok || !result.layout?.slots?.length) throw new Error(result.error || 'AI returned no character layout');
+      const images = result.layout.slots.flatMap((slot, index): ThumbnailElement[] => {
+        const character = characters.find(c => c.id === slot.characterId && (c.upscaledImageUrl || c.imageUrl));
+        return character ? [{ ...newImage(character, index), x: slot.x, y: slot.y, width: slot.width, height: slot.height, rotation: slot.rotation || 0 }] : [];
+      });
+      if (!images.length) throw new Error('No matching character images available. Refresh the collection and retry.');
+      const texts = includeTitle ? (result.layout.texts || []).map(slot => ({ ...newText(slot.text), x: slot.x, y: slot.y, width: slot.width, height: slot.height, curve: slot.curve || 0 })) : [];
+      const generated: ThumbnailDesign = { ...newDesign(designs.length + 1), name: design.name + ' · AI layout ' + (designs.length + 1), width: design.width, height: design.height, background: result.layout.background || design.background, elements: [...images, ...texts] };
+      onChange([...latestDesignsRef.current, generated]); setActiveId(generated.id);
+      setMessage('Thumbnail composed from your existing Image Production artwork. Layout is editable; no character images were sent to the AI provider.');
+    } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
+    finally { setImageBusy(false); }
   };
   const generateAiThumbnail = async () => {
     if (!design || imageBusy) return;
@@ -641,6 +661,13 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
           <button className="primary-btn" disabled={!reference || aiBusy} onClick={() => void analyze()}><WandSparkles size={15}/> {aiBusy ? 'Analyzing...' : 'Analyze & apply layout'}</button>
           <small>Reference composition is inspiration only. The artwork and copy should be original.</small>
         </>}
+        <h3>AI thumbnail creation</h3>
+        <select aria-label="Thumbnail creation mode" value={thumbnailMode} disabled={imageBusy} onChange={event => setThumbnailMode(event.target.value as 'existing' | 'redraw')}><option value="existing">AI layout · use existing characters</option><option value="redraw">Generate new AI artwork</option></select>
+        {thumbnailMode === 'existing' ? <>
+          <small>Arrange your existing Image Production artwork into editable layers. AI receives character names and collection context only. Upscaled character files are used when available.</small>
+          <label className="input-label">LAYOUT PROVIDER</label><select aria-label="Existing character layout provider" value={provider} onChange={event => { const next = event.target.value as 'openai' | 'gemini'; setProvider(next); setModel(next === 'openai' ? aiDefaults.openaiModel : aiDefaults.geminiModel); }}><option value="openai">OpenAI</option><option value="gemini">Gemini</option></select>
+          <label className="input-label">LAYOUT MODEL</label><select aria-label="Existing character layout model" value={model} onChange={event => setModel(event.target.value)}>{!models[provider].some(m => m.id === model) && <option value={model}>{model} (saved/default)</option>}{models[provider].map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
+        </> : <>
         <h3>AI Image Generation</h3>
         <small>Generate a complete thumbnail using OpenAI or Gemini. Reference composition and character names guide the image; output is a single raster and may differ from your existing character artwork.</small>
         <label className="input-label">IMAGE PROVIDER</label>
@@ -651,9 +678,10 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         </select>
         {imageProvider === 'openai' && <><label className="input-label">IMAGE QUALITY</label>
         <select value={imageQuality} onChange={e => setImageQuality(e.target.value as 'low' | 'medium' | 'high')}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></>}
+        </>}
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '12px 0' }}><input type="checkbox" checked={includeTitle} disabled={imageBusy} onChange={event => setIncludeTitle(event.target.checked)}/> Include title / theme text</label>
         {!includeTitle && <small>The AI thumbnail will be requested without text or lettering.</small>}
-        <button className="primary-btn" disabled={imageBusy || !imageModel} type="button" onClick={() => void generateAiThumbnail()}><WandSparkles size={15}/> {imageBusy ? 'Generating AI thumbnail...' : 'Generate AI thumbnail'}</button>
+        <button className="primary-btn" disabled={imageBusy || (thumbnailMode === 'existing' ? !characters.some(c => c.imageUrl || c.upscaledImageUrl) : !imageModel)} type="button" onClick={() => thumbnailMode === 'existing' ? void generateExistingThumbnail() : void generateAiThumbnail()}><WandSparkles size={15}/> {imageBusy ? 'Creating thumbnail...' : thumbnailMode === 'existing' ? 'Create thumbnail with existing characters' : 'Generate AI thumbnail'}</button>
         <h3>Characters</h3>
         <div style={{ maxHeight: 400, overflowY: 'auto', display: 'grid', gap: 8 }}>
           {characters.filter(c => c.imageUrl).map(c => <button type="button" key={c.id} onClick={() => add(newImage(c, design.elements.filter(e => e.type === 'image').length))} style={{ textAlign: 'left', display: 'flex', gap: 8, alignItems: 'center', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: 6 }}>
