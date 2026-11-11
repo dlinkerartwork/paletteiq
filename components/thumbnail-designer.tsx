@@ -49,6 +49,8 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const [activeId, setActiveId] = useState(designs[0]?.id || '');
   const [selectedId, setSelectedId] = useState('');
   const [previewZoom, setPreviewZoom] = useState(1);
+  const [sideTab, setSideTab] = useState<'reference' | 'generation'>('reference');
+  const [viewportSize, setViewportSize] = useState({ width: 300, height: 300 });
   const [reference, setReference] = useState('');
   const [uploadedReference, setUploadedReference] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
@@ -179,6 +181,25 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const stopPan = () => { panRef.current = null; };
   const dragRef = useRef<{ id: string; mode: 'move' | 'resize' | 'rotate'; x: number; y: number; original: ThumbnailElement; centerX?: number; centerY?: number; startAngle?: number } | null>(null);
   const design = designs.find(d => d.id === activeId) || designs[0];
+  useEffect(() => {
+    const viewport = canvasViewportRef.current;
+    if (!viewport) return;
+    const observer = new ResizeObserver(entries => {
+      const { width, height } = entries[0].contentRect;
+      setViewportSize({ width: Math.max(1, Math.floor(width)), height: Math.max(1, Math.floor(height)) });
+    });
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [Boolean(design)]);
+  useEffect(() => {
+    if (previewZoom <= 1 && canvasViewportRef.current) {
+      canvasViewportRef.current.scrollLeft = 0;
+      canvasViewportRef.current.scrollTop = 0;
+    }
+  }, [previewZoom, activeId]);
+  const canvasAspect = design ? design.width / design.height : 1;
+  const fittedWidth = Math.min(viewportSize.width, viewportSize.height * canvasAspect);
+  const fittedHeight = fittedWidth / canvasAspect;
   const selection = design?.elements.find(e => e.id === selectedId);
   const assetMap = useMemo(() => new Map(characters.map(c => [c.id, c])), [characters]);
   useEffect(() => { if (designs.length && !designs.some(d => d.id === activeId)) setActiveId(designs[0].id); }, [activeId, designs]);
@@ -617,7 +638,17 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     {message && <p className="notice">{message}</p>}
     {!design ? <div className="panel empty-state"><h2>No thumbnails yet</h2><p>Create a design for this listing.</p><button className="primary-btn" onClick={create}>Create first thumbnail</button></div> :
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(190px, 245px) minmax(0, 1fr) minmax(245px, 290px)', gap: 12, alignItems: 'start' }}>
-      <div className="panel" style={{ padding: 14, display: 'grid', gap: 12, alignContent: 'start', maxHeight: 'min(82vh, 950px)', overflowY: 'auto', overscrollBehavior: 'contain' }}>
+      <div className="panel" style={{ padding: 14, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0, gap: 12, alignContent: 'start', overflowX: 'hidden', maxHeight: 'min(82vh, 950px)', overflowY: 'auto', overscrollBehavior: 'contain' }}>
+        <div role="tablist" aria-label="Thumbnail tools" style={{ display: 'flex', gap: 4 }} onKeyDown={event => {
+          if (!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
+          event.preventDefault();
+          const next = event.key === 'Home' ? 'reference' : event.key === 'End' ? 'generation' : sideTab === 'reference' ? 'generation' : 'reference';
+          setSideTab(next); document.getElementById('thumbnail-' + next + '-tab')?.focus();
+        }}>
+          <button id="thumbnail-reference-tab" role="tab" type="button" aria-selected={sideTab === 'reference'} aria-controls="thumbnail-reference-panel" tabIndex={sideTab === 'reference' ? 0 : -1} className={sideTab === 'reference' ? 'primary-btn' : 'outline-btn'} style={{ flex: 1, minWidth: 0, whiteSpace: 'normal', justifyContent: 'center', fontSize: 12, padding: '8px 6px' }} onClick={() => setSideTab('reference')}>Reference &amp; Assets</button>
+          <button id="thumbnail-generation-tab" role="tab" type="button" aria-selected={sideTab === 'generation'} aria-controls="thumbnail-generation-panel" tabIndex={sideTab === 'generation' ? 0 : -1} className={sideTab === 'generation' ? 'primary-btn' : 'outline-btn'} style={{ flex: 1, minWidth: 0, whiteSpace: 'normal', justifyContent: 'center', fontSize: 12, padding: '8px 6px' }} onClick={() => setSideTab('generation')}>AI Image Generation</button>
+        </div>
+        {sideTab === 'reference' && <div id="thumbnail-reference-panel" role="tabpanel" aria-labelledby="thumbnail-reference-tab" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0, gap: 12 }}>
         <h3>Reference & assets</h3>
         <label className="input-label">LAYOUT MODE</label>
         <select value={layoutMode} onChange={e => setLayoutMode(e.target.value as 'ai' | 'manual')}><option value="ai">AI + manual</option><option value="manual">Manual only</option></select>
@@ -641,6 +672,17 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
           <button className="primary-btn" disabled={!reference || aiBusy} onClick={() => void analyze()}><WandSparkles size={15}/> {aiBusy ? 'Analyzing...' : 'Analyze & apply layout'}</button>
           <small>Reference composition is inspiration only. The artwork and copy should be original.</small>
         </>}
+        <h3>Characters</h3>
+        <div style={{ maxHeight: 400, overflowY: 'auto', display: 'grid', gap: 8 }}>
+          {characters.filter(c => c.imageUrl).map(c => <button type="button" key={c.id} onClick={() => add(newImage(c, design.elements.filter(e => e.type === 'image').length))} style={{ textAlign: 'left', display: 'flex', gap: 8, alignItems: 'center', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: 6 }}>
+            <img src={c.upscaledImageUrl || c.imageUrl} alt="" style={{ width: 45, height: 45, objectFit: 'contain' }}/>
+            <span style={{ fontSize: 12 }}>{c.name}{c.upscaledImageUrl ? ' · Upscaled' : ''}</span>
+          </button>)}
+          {!characters.some(c => c.imageUrl) && <p className="sub">Generate character images first.</p>}
+        </div>
+        <button className="outline-btn" onClick={() => add(newText(title))}>+ Add text</button>
+        </div>}
+        {sideTab === 'generation' && <div id="thumbnail-generation-panel" role="tabpanel" aria-labelledby="thumbnail-generation-tab" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0, gap: 12 }}>
         <h3>AI Image Generation</h3>
         <small>Generate a complete thumbnail using OpenAI or Gemini. Reference composition and character names guide the image; output is a single raster and may differ from your existing character artwork.</small>
         <label className="input-label">IMAGE PROVIDER</label>
@@ -654,31 +696,24 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '12px 0' }}><input type="checkbox" checked={includeTitle} disabled={imageBusy} onChange={event => setIncludeTitle(event.target.checked)}/> Include title / theme text</label>
         {!includeTitle && <small>The AI thumbnail will be requested without text or lettering.</small>}
         <button className="primary-btn" disabled={imageBusy || !imageModel} type="button" onClick={() => void generateAiThumbnail()}><WandSparkles size={15}/> {imageBusy ? 'Generating AI thumbnail...' : 'Generate AI thumbnail'}</button>
-        <h3>Characters</h3>
-        <div style={{ maxHeight: 400, overflowY: 'auto', display: 'grid', gap: 8 }}>
-          {characters.filter(c => c.imageUrl).map(c => <button type="button" key={c.id} onClick={() => add(newImage(c, design.elements.filter(e => e.type === 'image').length))} style={{ textAlign: 'left', display: 'flex', gap: 8, alignItems: 'center', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: 6 }}>
-            <img src={c.upscaledImageUrl || c.imageUrl} alt="" style={{ width: 45, height: 45, objectFit: 'contain' }}/>
-            <span style={{ fontSize: 12 }}>{c.name}{c.upscaledImageUrl ? ' · Upscaled' : ''}</span>
-          </button>)}
-          {!characters.some(c => c.imageUrl) && <p className="sub">Generate character images first.</p>}
-        </div>
-        <button className="outline-btn" onClick={() => add(newText(title))}>+ Add text</button>
+
+        </div>}
       </div>
       <div style={{ minWidth: 0, position: 'sticky', top: 12, alignSelf: 'start' }}>
       <div className="panel" style={{ padding: 12, minWidth: 0 }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginBottom: 10, alignItems: 'center' }}>
           <button className="outline-btn" disabled={!history.length} onClick={undo} title="Undo"><Undo2 size={15}/></button>
           <button className="outline-btn" disabled={!future.length} onClick={redo} title="Redo"><Redo2 size={15}/></button>
-          <button className="outline-btn" onClick={() => setPreviewZoom(z => clamp(z - .25, .5, 3))}>−</button>
+          <button className="outline-btn" aria-label="Zoom out canvas" onClick={() => setPreviewZoom(z => clamp(z - .25, .5, 3))}>−</button>
           <span>{Math.round(previewZoom*100)}%</span>
-          <button className="outline-btn" onClick={() => setPreviewZoom(z => clamp(z + .25, .5, 3))}>+</button>
+          <button className="outline-btn" aria-label="Zoom in canvas" onClick={() => setPreviewZoom(z => clamp(z + .25, .5, 3))}>+</button>
           <button className="outline-btn" onClick={() => setPreviewZoom(1)} title="Reset zoom"><RotateCcw size={15}/></button>
           <button className="outline-btn" type="button" onClick={() => add(newText())}><Plus size={15}/> Text</button>
           <button className="outline-btn" type="button" disabled={!selection || selection.locked} onClick={remove} title="Delete selected object"><Trash2 size={15}/> Delete</button>
           <span style={{ marginLeft: 'auto' }}>{design.width}×{design.height}</span>
         </div>
-        <div ref={canvasViewportRef} onPointerDown={startPan} onPointerMove={movePan} onPointerUp={stopPan} onPointerCancel={stopPan} style={{ overflow: 'auto', maxHeight: 'min(66vh, 780px)', background: '#e8e8e8', padding: 16, borderRadius: 8, cursor: panRef.current ? 'grabbing' : 'grab', touchAction: 'none' }}>
-          <div style={{ width: `${previewZoom*100}%`, minWidth: 200, margin: 'auto' }}>
+        <div ref={canvasViewportRef} onPointerDown={startPan} onPointerMove={movePan} onPointerUp={stopPan} onPointerCancel={stopPan} aria-label="Thumbnail canvas viewport" style={{ overflow: previewZoom > 1 ? 'auto' : 'hidden', height: 'min(66vh, 780px)', minHeight: 240, boxSizing: 'border-box', background: '#e8e8e8', padding: 16, borderRadius: 8, cursor: previewZoom > 1 ? 'grab' : 'default', touchAction: 'none' }}>
+          <div style={{ width: fittedWidth * previewZoom, margin: '0 auto', marginTop: Math.max(0, (viewportSize.height - fittedHeight * previewZoom) / 2) }}>
             <div ref={stageRef} onPointerDown={() => setSelectedId('')} style={{ width: '100%', aspectRatio: `${design.width}/${design.height}`, background: design.background, backgroundImage: (design.aiImageUrl || design.backgroundImageUrl) ? `url(${JSON.stringify(design.aiImageUrl || design.backgroundImageUrl)})` : undefined, backgroundPosition: 'center', backgroundSize: 'cover', position: 'relative', containerType: 'inline-size', overflow: 'hidden', boxShadow: '0 5px 25px #0002', touchAction: 'none' }}>
               {design.elements.map(e => {
                 const isSelected = e.id === selectedId;
