@@ -17,7 +17,9 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
     "license:init": "node scripts/license-cli.mjs init",
-    "license:issue": "node scripts/license-cli.mjs issue"
+    "license:issue": "node scripts/license-cli.mjs issue",
+    "desktop:package:win:personal": "node scripts/package-desktop-personal.mjs",
+    "desktop:package:win:licensed": "npm run desktop:package:win"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
