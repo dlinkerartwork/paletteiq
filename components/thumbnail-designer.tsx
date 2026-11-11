@@ -51,6 +51,7 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
   const [uploadedReference, setUploadedReference] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
   const [imageBusy, setImageBusy] = useState(false);
+  const [imageProvider, setImageProvider] = useState<'openai' | 'gemini'>('openai');
   const [imageModel, setImageModel] = useState('gpt-image-1-mini');
   const [imageQuality, setImageQuality] = useState<'low' | 'medium' | 'high'>('low');
   const [imageModels, setImageModels] = useState<Array<{ id: string; name: string }>>([]);
@@ -210,7 +211,7 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
   };
   const generateAiThumbnail = async () => {
     if (!design || imageBusy) return;
-    if (!window.confirm('Generate a new AI thumbnail? This uses your OpenAI image API key and may incur generation charges.')) return;
+    if (!window.confirm('Generate a new AI thumbnail with ' + imageProvider + '? This uses the configured provider API key and may incur charges.')) return;
     setImageBusy(true); setMessage('');
     try {
       let layout = design.elements.map(e => ({ type: e.type, x: e.x, y: e.y, width: e.width, height: e.height, text: e.type === 'text' ? e.text : undefined }));
@@ -220,7 +221,7 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
         if (!analysisResponse.ok) throw Error(analysis.error || 'Could not analyze reference before image generation');
         layout = [...(analysis.layout?.slots || []).map(e => ({ ...e, type: 'image', text: undefined })), ...(analysis.layout?.texts || []).map(e => ({ ...e, type: 'text' }))];
       }
-      const response = await fetch('/api/thumbnail-ai-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, model: imageModel, quality: imageQuality, layout }) });
+      const response = await fetch('/api/thumbnail-ai-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, provider: imageProvider, model: imageModel, quality: imageQuality, layout }) });
       const result = await response.json() as { error?: string; imageUrl?: string; prompt?: string };
       if (!response.ok || !result.imageUrl) throw Error(result.error || 'AI image generation failed');
       mutate({ aiImageUrl: result.imageUrl, aiImagePrompt: result.prompt });
@@ -346,14 +347,15 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
           <small>Reference composition is inspiration only. The artwork and copy should be original.</small>
         </>}
         <h3>AI Image Generation</h3>
-        <small>Generate a complete thumbnail illustration directly with OpenAI. It follows the reference's abstract layout and your collection theme/characters; the raster result is not a set of editable layers.</small>
+        <small>Generate a complete thumbnail using OpenAI or Gemini. Reference composition and character names guide the image; output is a single raster and may differ from your existing character artwork.</small>
+        <label className="input-label">IMAGE PROVIDER</label>
+        <select value={imageProvider} onChange={e => { const next = e.target.value as 'openai' | 'gemini'; setImageProvider(next); setImageModel(next === 'gemini' ? 'gemini-2.5-flash-image' : (imageModels[0]?.id || 'gpt-image-1-mini')); }}><option value="openai">OpenAI</option><option value="gemini">Gemini</option></select>
         <label className="input-label">IMAGE MODEL</label>
         <select value={imageModel} onChange={e => setImageModel(e.target.value)}>
-          {!imageModels.some(m => m.id === imageModel) && <option value={imageModel}>{imageModel} (default)</option>}
-          {imageModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+          {imageProvider === 'openai' ? <>{!imageModels.some(m => m.id === imageModel) && <option value={imageModel}>{imageModel} (default)</option>}{imageModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</> : <><option value="gemini-2.5-flash-image">Gemini 2.5 Flash Image</option><option value="gemini-3-pro-image-preview">Gemini 3 Pro Image (preview)</option></>}
         </select>
-        <label className="input-label">IMAGE QUALITY</label>
-        <select value={imageQuality} onChange={e => setImageQuality(e.target.value as 'low' | 'medium' | 'high')}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select>
+        {imageProvider === 'openai' && <><label className="input-label">IMAGE QUALITY</label>
+        <select value={imageQuality} onChange={e => setImageQuality(e.target.value as 'low' | 'medium' | 'high')}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></>}
         <button className="primary-btn" disabled={imageBusy || !imageModel} type="button" onClick={() => void generateAiThumbnail()}><WandSparkles size={15}/> {imageBusy ? 'Generating AI thumbnail...' : 'Generate AI thumbnail'}</button>
         <h3>Characters</h3>
         <div style={{ maxHeight: 400, overflowY: 'auto', display: 'grid', gap: 8 }}>
