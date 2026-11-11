@@ -7,7 +7,7 @@ import { userCredential, userGeminiKeys } from '@/lib/credentials';
 
 type Layout = {
   slots?: Array<{ x: number; y: number; width: number; height: number; rotation?: number }>;
-  texts?: Array<{ text: string; x: number; y: number; width: number; height: number }>;
+  texts?: Array<{ text: string; x: number; y: number; width: number; height: number; curve?: number }>;
   background?: string;
 };
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, Number.isFinite(n) ? n : min));
@@ -40,7 +40,7 @@ export async function POST(req: Request) {
   if (provider === 'openai' && !key) return Response.json({ error: 'Configure your OpenAI API key in Settings.' }, { status: 503 });
   if (provider === 'gemini' && !geminiKeys.length) return Response.json({ error: 'Configure your Gemini API key in Settings.' }, { status: 503 });
   const count = Math.round(clamp(Number(body.count) || 8, 1, 24));
-  const prompt = 'Analyze only the ABSTRACT composition of this product thumbnail to guide an ORIGINAL Etsy listing mockup. Do not reproduce any reference artwork, shop branding, watermarks, or distinctive text. Suggest up to ' + count + ' rectangles where our own clipart characters can be placed. Return JSON only: {"slots":[{"x":15,"y":20,"width":25,"height":30,"rotation":0}],"texts":[{"text":"CUSTOMIZE YOUR TITLE","x":10,"y":5,"width":80,"height":12}],"background":"#f5ede3"}. Units are percentages of image width and height from top-left (0–100). Text must be generic editable placeholder copy, never transcribe source text. Avoid overlapping major elements; include a balanced readable title area. Return 1–' + count + ' slots and 0–3 generic text placeholders.';
+  const prompt = 'Analyze only the ABSTRACT composition of this product thumbnail to guide an ORIGINAL Etsy listing mockup. Do not reproduce any reference artwork, shop branding, watermarks, or distinctive text. Suggest up to ' + count + ' rectangles where our own clipart characters can be placed. Return JSON only: {"slots":[{"x":15,"y":20,"width":25,"height":30,"rotation":0}],"texts":[{"text":"CUSTOMIZE YOUR TITLE","x":10,"y":5,"width":80,"height":12,"curve":0}],"background":"#f5ede3"}. Units are percentages of image width and height from top-left (0–100). Text must be generic editable placeholder copy, never transcribe source text. Avoid overlapping major elements; include a balanced readable title area. Count every distinct visible text block, subtitle, badge, caption and headline in the reference, preserving approximately the SAME NUMBER of independently editable text regions (up to 32); do NOT combine many separate text blocks into one. Use generic placeholder copy, never copy source wording. If the reference text follows an arch or curved baseline, set curve from -100 to 100 (positive curves upward); otherwise use 0. Return 1–' + count + ' character slots and as many text placeholders as the reference visibly contains, capped at 32.';
   try {
     let parsed: Layout;
     if (provider === 'openai') {
@@ -95,8 +95,8 @@ export async function POST(req: Request) {
     const slots = Array.isArray(parsed.slots) ? parsed.slots.filter(s => s && typeof s === 'object').slice(0, count).map(s => ({
       ...sanitizeBox(s as unknown as Record<string, unknown>), rotation: clamp(Number(s.rotation) || 0, -90, 90)
     })) : [];
-    const texts = Array.isArray(parsed.texts) ? parsed.texts.filter(t => t && typeof t === 'object').slice(0, 3).map(t => ({
-      ...sanitizeBox(t as unknown as Record<string, unknown>), text: String(t.text || 'CUSTOMIZE TITLE').slice(0, 100)
+    const texts = Array.isArray(parsed.texts) ? parsed.texts.filter(t => t && typeof t === 'object').slice(0, 32).map(t => ({
+      ...sanitizeBox(t as unknown as Record<string, unknown>), text: String(t.text || 'CUSTOMIZE TITLE').slice(0, 100), curve: clamp(Number(t.curve) || 0, -100, 100)
     })) : [];
     const background = typeof parsed.background === 'string' && /^#[0-9a-fA-F]{6}$/.test(parsed.background) ? parsed.background : '#f7f1e9';
     return Response.json({ layout: { slots, texts, background } });
