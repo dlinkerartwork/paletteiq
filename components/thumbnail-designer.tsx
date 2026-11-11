@@ -219,7 +219,7 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
         const analysisResponse = await fetch('/api/thumbnail-layout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, imageUrl: reference, provider, model, count: Math.min(characters.filter(c => c.imageUrl).length, 24) }) });
         const analysis = await analysisResponse.json() as { error?: string; layout?: { slots?: Array<{ x: number; y: number; width: number; height: number }>; texts?: Array<{ text: string; x: number; y: number; width: number; height: number }> } };
         if (!analysisResponse.ok) throw Error(analysis.error || 'Could not analyze reference before image generation');
-        layout = [...(analysis.layout?.slots || []).map(e => ({ ...e, type: 'image', text: undefined })), ...(analysis.layout?.texts || []).map(e => ({ ...e, type: 'text' }))];
+        layout = [...(analysis.layout?.slots || []).map(e => ({ ...e, type: 'image' as const, text: undefined })), ...(analysis.layout?.texts || []).map(e => ({ ...e, type: 'text' as const }))];
       }
       const response = await fetch('/api/thumbnail-ai-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, provider: imageProvider, model: imageModel, quality: imageQuality, layout }) });
       const result = await response.json() as { error?: string; imageUrl?: string; prompt?: string };
