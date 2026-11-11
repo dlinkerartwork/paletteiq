@@ -236,7 +236,7 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
       if (!response.ok) throw Error('Could not download generated thumbnail');
       const blob = await response.blob();
       const link = document.createElement('a'); const url = URL.createObjectURL(blob);
-      link.href = url; link.download = (design.name.replace(/[^\w-]/g, '_') || 'ai-thumbnail') + '-ai.png';
+      link.href = url; link.download = (design.name.replace(/[^\w-]/g, '_') || 'ai-thumbnail') + '-ai.' + (blob.type === 'image/jpeg' ? 'jpg' : 'png');
       link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
   };
