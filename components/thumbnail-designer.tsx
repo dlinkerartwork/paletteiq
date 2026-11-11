@@ -6,7 +6,7 @@ import { Download, Plus, Trash2, Copy, Undo2, Redo2, WandSparkles, RotateCcw } f
 export type ThumbnailElement = {
   id: string; type: 'image' | 'text'; characterId?: string; source?: 'original' | 'upscaled';
   text?: string; x: number; y: number; width: number; height: number; rotation: number;
-  fontSize?: number; fontFamily?: string; color?: string; fontWeight?: string; opacity?: number; locked?: boolean;
+  fontSize?: number; curve?: number; fontFamily?: string; color?: string; fontWeight?: string; opacity?: number; locked?: boolean;
 };
 export type ThumbnailDesign = {
   id: string; name: string; width: number; height: number; background: string; backgroundImageUrl?: string; elements: ThumbnailElement[];
@@ -21,8 +21,20 @@ const newImage = (character: Character, index: number): ThumbnailElement => ({
   id: id(), type: 'image', characterId: character.id, source: character.upscaledImageUrl ? 'upscaled' : 'original',
   x: 10 + (index % 4) * 21, y: 17 + (Math.floor(index / 4) % 3) * 25, width: 22, height: 28, rotation: 0
 });
-const newText = (): ThumbnailElement => ({ id: id(), type: 'text', text: 'YOUR CLIPART COLLECTION', x: 9, y: 7, width: 82, height: 14, rotation: 0, fontSize: 90, fontFamily: 'Arial', color: '#644a35', fontWeight: 'bold' });
+const newText = (): ThumbnailElement => ({ id: id(), type: 'text', text: 'YOUR CLIPART COLLECTION', x: 9, y: 7, width: 82, height: 14, rotation: 0, fontSize: 90, curve: 0, fontFamily: 'Arial', color: '#644a35', fontWeight: 'bold' });
 const normalizeDesign = (d: ThumbnailDesign): ThumbnailDesign => ({ ...d, updatedAt: Date.now() });
+
+function CurvedText({ element, designWidth }: { element: ThumbnailElement; designWidth: number }) {
+  const curve = clamp(element.curve || 0, -100, 100);
+  const lines = (element.text || '').split('\n');
+  const fontSize = clamp((element.fontSize || 80) / (designWidth * element.width / 100) * 1000, 18, 300);
+  return <svg width="100%" height="100%" viewBox="0 0 1000 400" preserveAspectRatio="none" style={{ overflow: 'hidden', pointerEvents: 'none' }} aria-label={element.text || ''}>
+    <defs>{lines.map((_, i) => <path key={i} id={`thumbnail-arc-${element.id}-${i}`} d={`M 25 ${200 + (i-(lines.length-1)/2)*fontSize*1.2} Q 500 ${200 + (i-(lines.length-1)/2)*fontSize*1.2 - curve*2.0} 975 ${200 + (i-(lines.length-1)/2)*fontSize*1.2}`}/>)}</defs>
+    {lines.map((line, i) => <text key={i} fill={element.color || '#333333'} fontFamily={element.fontFamily || 'Arial'} fontWeight={element.fontWeight || 'bold'} fontSize={fontSize} textAnchor="middle" dominantBaseline="middle">
+      <textPath href={`#thumbnail-arc-${element.id}-${i}`} startOffset="50%">{line}</textPath>
+    </text>)}
+  </svg>;
+}
 
 async function loadForExport(url: string): Promise<HTMLImageElement> {
   const image = new window.Image();
@@ -150,15 +162,15 @@ export default function ThumbnailDesigner({ aiDefaults, projectId, characters, r
     try {
       const response = await fetch('/api/thumbnail-layout', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ projectId, imageUrl: reference, provider, model, count: Math.min(characters.filter(c => c.imageUrl).length, 24) }) });
-      const body = await response.json() as { error?: string; layout?: { slots?: Array<{ x: number; y: number; width: number; height: number; rotation?: number }>; texts?: Array<{ text: string; x: number; y: number; width: number; height: number }> ; background?: string } };
+      const body = await response.json() as { error?: string; layout?: { slots?: Array<{ x: number; y: number; width: number; height: number; rotation?: number }>; texts?: Array<{ text: string; x: number; y: number; width: number; height: number; curve?: number }> ; background?: string } };
       if (!response.ok) throw new Error(body.error || 'AI layout analysis failed');
       const available = characters.filter(c => c.imageUrl);
       const slots = (body.layout?.slots || []).slice(0, available.length);
       const images = slots.map((slot, i): ThumbnailElement => ({
         ...newImage(available[i], i), x: clamp(slot.x, 0, 100), y: clamp(slot.y, 0, 100), width: clamp(slot.width, 1, 100), height: clamp(slot.height, 1, 100), rotation: clamp(slot.rotation || 0, -180, 180)
       }));
-      const texts = (body.layout?.texts || []).slice(0, 8).map((slot): ThumbnailElement => ({
-        ...newText(), id: id(), text: slot.text || 'CUSTOMIZE TITLE', x: clamp(slot.x, 0, 100), y: clamp(slot.y, 0, 100), width: clamp(slot.width, 5, 100), height: clamp(slot.height, 3, 100)
+      const texts = (body.layout?.texts || []).slice(0, 32).map((slot): ThumbnailElement => ({
+        ...newText(), id: id(), text: slot.text || 'CUSTOMIZE TITLE', curve: clamp(Number(slot.curve) || 0, -100, 100), x: clamp(slot.x, 0, 100), y: clamp(slot.y, 0, 100), width: clamp(slot.width, 5, 100), height: clamp(slot.height, 3, 100)
       }));
       commit({ ...design, elements: [...design.elements, ...images, ...texts], background: /^#[0-9a-f]{6}$/i.test(body.layout?.background || '') ? body.layout!.background! : design.background, referenceUrl: reference.startsWith('https://') ? reference : undefined });
       setMessage('Layout applied. Review the arrangement and customize all elements.');
@@ -219,7 +231,26 @@ export default function ThumbnailDesigner({ aiDefaults, projectId, characters, r
             const available = Math.max(1, w - 8);
             const actual = ctx.measureText(line).width;
             ctx.save(); if (actual > available) ctx.scale(available / actual, 1);
-            ctx.fillText(line, 0, (i - (raw.length - 1)/2) * lineHeight); ctx.restore();
+            const baseline = (i - (raw.length - 1)/2) * lineHeight;
+            if (element.curve) {
+              const letters = Array.from(line);
+              const widths = letters.map(letter => ctx.measureText(letter).width);
+              const total = widths.reduce((sum, width) => sum + width, 0);
+              const bend = clamp(element.curve, -100, 100) / 100 * h * .45;
+              let cursor = -total / 2;
+              letters.forEach((letter, index) => {
+                const position = cursor + widths[index] / 2;
+                const t = total ? clamp(position / (total / 2), -1, 1) : 0;
+                const heightOffset = -bend * (1 - t * t);
+                const slope = total ? (4 * bend * t / total) : 0;
+                ctx.save(); ctx.translate(position, baseline + heightOffset);
+                ctx.rotate(Math.atan(slope));
+                ctx.fillText(letter, 0, 0);
+                ctx.restore();
+                cursor += widths[index];
+              });
+            } else ctx.fillText(line, 0, baseline);
+            ctx.restore();
           });
         }
         ctx.restore();
@@ -302,7 +333,7 @@ export default function ThumbnailDesigner({ aiDefaults, projectId, characters, r
                 return <div key={e.id} onPointerDown={event => startDrag(event,e,'move')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
                   style={{ position: 'absolute', left: e.x+'%', top: e.y+'%', width: e.width+'%', height: e.height+'%', transform: `rotate(${e.rotation}deg)`, opacity: e.opacity ?? 1, border: isSelected ? '2px dashed #e36a1b' : '1px solid transparent', cursor: e.locked ? 'not-allowed' : 'move', boxSizing: 'border-box', touchAction: 'none', userSelect: 'none' }}>
                   {e.type === 'image' ? (imageUrl(e) ? <img src={imageUrl(e)} alt={assetMap.get(e.characterId || '')?.name || 'Character'} draggable={false} style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }}/> : <div style={{ color: '#d33' }}>Image unavailable</div>) :
-                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', fontSize: `clamp(5px, ${(e.fontSize || 80) / design.width * 100}cqw, 250px)`, fontFamily: e.fontFamily || 'Arial', fontWeight: e.fontWeight || 'bold', color: e.color || '#333', whiteSpace: 'pre-line', overflow: 'hidden', pointerEvents: 'none' }}>{e.text}</div>}
+                    (e.curve ? <CurvedText element={e} designWidth={design.width}/> : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', fontSize: `clamp(5px, ${(e.fontSize || 80) / design.width * 100}cqw, 250px)`, fontFamily: e.fontFamily || 'Arial', fontWeight: e.fontWeight || 'bold', color: e.color || '#333', whiteSpace: 'pre-line', overflow: 'hidden', pointerEvents: 'none' }}>{e.text}</div>)}
                   {isSelected && !e.locked && <div title="Drag to rotate" onPointerDown={event => startDrag(event,e,'rotate')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
                     style={{ position: 'absolute', left: '50%', top: -30, transform: 'translateX(-50%)', width: 22, height: 22, background: '#fff', border: '2px solid #e36a1b', borderRadius: '50%', cursor: 'grab', display: 'grid', placeItems: 'center', touchAction: 'none', zIndex: 3 }}>↻</div>}
                   {isSelected && !e.locked && <div onPointerDown={event => startDrag(event,e,'resize')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
@@ -348,6 +379,9 @@ export default function ThumbnailDesigner({ aiDefaults, projectId, characters, r
             <label className="input-label">TEXT</label><textarea value={selection.text || ''} rows={3} onChange={e => updateElement({ text: e.target.value })}/>
             <label className="input-label">FONT</label><select value={selection.fontFamily || 'Arial'} onChange={e => updateElement({ fontFamily: e.target.value })}>{["Arial","Georgia","Dancing Script","Sacramento","Tangerine","Kaushan Script","Courgette","Playball","Petit Formal Script","Indie Flower","Gloria Hallelujah","Architects Daughter","Chewy","Bangers","Yeseva One","Josefin Sans","Caveat","Amatic SC","Kalam","Patrick Hand","Permanent Marker","Pacifico","Satisfy","Lobster Two","Bebas Neue","Oswald","Abril Fatface","Fredericka the Great","Rye","Special Elite","Playfair Display","Cormorant Garamond","Cinzel","Bodoni Moda","DM Serif Display","Libre Baskerville","EB Garamond","Lora","Prata","Marcellus","Great Vibes","Allura","Poppins","Montserrat","Raleway","Times New Roman","Verdana"].map(f => <option key={f}>{f}</option>)}</select>
             <label className="input-label">FONT SIZE</label><input type="number" min={8} max={500} value={selection.fontSize || 80} onChange={e => updateElement({ fontSize: clamp(Number(e.target.value),8,500) })}/>
+            <label className="input-label">TEXT CURVE ({selection.curve || 0}%)</label>
+            <input aria-label="Curve text" type="range" min={-100} max={100} step={1} value={selection.curve || 0} onChange={e => updateElement({ curve: Number(e.target.value) })}/>
+            <button type="button" className="outline-btn" onClick={() => updateElement({ curve: 0 })}>Straight text</button>
             <label className="input-label">TEXT COLOR</label><div style={{ display: 'flex', gap: 8 }}><input aria-label="Choose text color" type="color" value={selection.color || '#333333'} onChange={e => updateElement({ color: e.target.value })}/><input aria-label="Text color hex" value={selection.color || '#333333'} onChange={e => { if (/^#[0-9a-f]{6}$/i.test(e.target.value)) updateElement({ color: e.target.value }); }}/></div>
             <label className="input-label">WEIGHT</label><select value={selection.fontWeight || 'bold'} onChange={e => updateElement({ fontWeight: e.target.value })}><option value="normal">Normal</option><option value="bold">Bold</option></select>
           </> : <>
