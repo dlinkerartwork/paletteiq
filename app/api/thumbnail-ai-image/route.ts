@@ -16,7 +16,7 @@ export async function POST(req: Request) {
   if (!user) return bad('Sign in required', 401);
   let input: RequestBody;
   try { input = await req.json() as RequestBody; } catch { return bad('Invalid JSON'); }
-  if (typeof input.projectId !== 'string' || !/^[\\w-]{8,80}$/.test(input.projectId)) return bad('Invalid collection');
+  if (typeof input.projectId !== 'string' || !/^[\w-]{8,80}$/.test(input.projectId)) return bad('Invalid collection');
   const rows = await getDb().select().from(projects).where(and(eq(projects.id, input.projectId), eq(projects.owner, user.userId))).limit(1);
   if (!rows.length) return bad('Collection not found', 404);
   const provider = input.provider;
@@ -45,6 +45,7 @@ export async function POST(req: Request) {
     'This is a promotional graphic, not a source for individually editable characters. Make visual elements cohesive and typography premium, polished and readable.'
   ].join('\\n');
   let imageBase64 = '';
+  let imageMime = 'image/png';
   if (provider === 'openai') {
     const key = await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
     if (!key) return bad('Configure the OpenAI API key in Settings', 503);
@@ -72,8 +73,9 @@ export async function POST(req: Request) {
         break;
       }
       const result = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ inlineData?: { mimeType?: string; data?: string } }> } }> };
-      const part = result.candidates?.flatMap(c => c.content?.parts || []).find(p => p.inlineData?.data && p.inlineData.mimeType === 'image/png');
+      const part = result.candidates?.flatMap(c => c.content?.parts || []).find(p => p.inlineData?.data && ['image/png', 'image/jpeg'].includes(p.inlineData.mimeType || ''));
       imageBase64 = part?.inlineData?.data || '';
+      imageMime = part?.inlineData?.mimeType || 'image/png';
       if (imageBase64) break;
       failure = 'Gemini returned no PNG image. Choose a supported image generation model.';
     }
@@ -81,9 +83,12 @@ export async function POST(req: Request) {
   }
   if (!imageBase64) return bad('AI provider returned no image', 502);
   const bytes = Uint8Array.from(atob(imageBase64), ch => ch.charCodeAt(0));
-  if (bytes.length < 8 || bytes[0] !== 137 || bytes[1] !== 80 || bytes[2] !== 78 || bytes[3] !== 71) return bad('Provider did not return a valid PNG image', 502);
+  const isPng = bytes.length >= 8 && bytes[0] === 137 && bytes[1] === 80 && bytes[2] === 78 && bytes[3] === 71;
+  const isJpg = bytes.length >= 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
+  if (!(isPng || isJpg) || (imageMime === 'image/png' && !isPng) || (imageMime === 'image/jpeg' && !isJpg)) return bad('Provider did not return a valid image', 502);
+  const format = isPng ? 'png' : 'jpg';
   if (bytes.length > 20_000_000) return bad('Generated image is too large', 413);
   const assetId = crypto.randomUUID();
-  await storage.put('generated/' + user.userId + '/' + assetId + '.png', bytes);
-  return Response.json({ imageUrl: '/api/thumbnail-background?projectId=' + encodeURIComponent(input.projectId) + '&assetId=' + assetId + '&format=png', prompt });
+  await storage.put('generated/' + user.userId + '/' + assetId + '.' + format, bytes);
+  return Response.json({ imageUrl: '/api/thumbnail-background?projectId=' + encodeURIComponent(input.projectId) + '&assetId=' + assetId + '&format=' + format, prompt });
 }
