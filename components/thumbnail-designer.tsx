@@ -9,11 +9,11 @@ export type ThumbnailElement = {
   fontSize?: number; curve?: number; fontFamily?: string; color?: string; fontWeight?: string; opacity?: number; locked?: boolean;
 };
 export type ThumbnailDesign = {
-  id: string; name: string; width: number; height: number; background: string; backgroundImageUrl?: string; elements: ThumbnailElement[];
+  id: string; name: string; width: number; height: number; background: string; backgroundImageUrl?: string; aiImageUrl?: string; aiImagePrompt?: string; elements: ThumbnailElement[];
   referenceUrl?: string; updatedAt: number;
 };
 type Character = { id: string; name: string; imageUrl?: string; upscaledImageUrl?: string };
-type Props = { aiDefaults: { provider: 'openai' | 'gemini'; openaiModel: string; geminiModel: string }; projectId: string; characters: Character[]; references: string[]; designs: ThumbnailDesign[]; onChange: (designs: ThumbnailDesign[]) => void; onSave: (designs: ThumbnailDesign[]) => Promise<void> };
+type Props = { title: string; aiDefaults: { provider: 'openai' | 'gemini'; openaiModel: string; geminiModel: string }; projectId: string; characters: Character[]; references: string[]; designs: ThumbnailDesign[]; onChange: (designs: ThumbnailDesign[]) => void; onSave: (designs: ThumbnailDesign[]) => Promise<void> };
 const id = () => crypto.randomUUID();
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 const newDesign = (index: number): ThumbnailDesign => ({ id: id(), name: 'Thumbnail ' + index, width: 2000, height: 2000, background: '#f7f1e9', elements: [], updatedAt: Date.now() });
@@ -21,7 +21,7 @@ const newImage = (character: Character, index: number): ThumbnailElement => ({
   id: id(), type: 'image', characterId: character.id, source: character.upscaledImageUrl ? 'upscaled' : 'original',
   x: 10 + (index % 4) * 21, y: 17 + (Math.floor(index / 4) % 3) * 25, width: 22, height: 28, rotation: 0
 });
-const newText = (): ThumbnailElement => ({ id: id(), type: 'text', text: 'YOUR CLIPART COLLECTION', x: 9, y: 7, width: 82, height: 14, rotation: 0, fontSize: 90, curve: 0, fontFamily: 'Arial', color: '#644a35', fontWeight: 'bold' });
+const newText = (title = 'YOUR CLIPART COLLECTION'): ThumbnailElement => ({ id: id(), type: 'text', text: title, x: 9, y: 7, width: 82, height: 14, rotation: 0, fontSize: 90, curve: 0, fontFamily: 'Arial', color: '#644a35', fontWeight: 'bold' });
 const normalizeDesign = (d: ThumbnailDesign): ThumbnailDesign => ({ ...d, updatedAt: Date.now() });
 
 function CurvedText({ element, designWidth }: { element: ThumbnailElement; designWidth: number }) {
@@ -43,13 +43,17 @@ async function loadForExport(url: string): Promise<HTMLImageElement> {
   await image.decode();
   return image;
 }
-export default function ThumbnailDesigner({ aiDefaults, projectId, characters, references, designs, onChange, onSave }: Props) {
+export default function ThumbnailDesigner({ title, aiDefaults, projectId, characters, references, designs, onChange, onSave }: Props) {
   const [activeId, setActiveId] = useState(designs[0]?.id || '');
   const [selectedId, setSelectedId] = useState('');
   const [previewZoom, setPreviewZoom] = useState(1);
   const [reference, setReference] = useState('');
   const [uploadedReference, setUploadedReference] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
+  const [imageBusy, setImageBusy] = useState(false);
+  const [imageModel, setImageModel] = useState('gpt-image-1-mini');
+  const [imageQuality, setImageQuality] = useState<'low' | 'medium' | 'high'>('low');
+  const [imageModels, setImageModels] = useState<Array<{ id: string; name: string }>>([]);
   const [layoutMode, setLayoutMode] = useState<'ai' | 'manual'>('ai');
   const [provider, setProvider] = useState<'openai' | 'gemini'>(aiDefaults.provider);
   const [model, setModel] = useState(aiDefaults.provider === 'gemini' ? aiDefaults.geminiModel : aiDefaults.openaiModel);
@@ -65,6 +69,14 @@ export default function ThumbnailDesigner({ aiDefaults, projectId, characters, r
         if (live) setModels(prev => ({ ...prev, [kind]: result.models || [] }));
       } catch (error) { if (live) setModelError(error instanceof Error ? error.message : String(error)); }
     }));
+    return () => { live = false; };
+  }, []);
+  useEffect(() => {
+    let live = true;
+    void fetch('/api/settings?models=openai').then(async r => {
+      const result = await r.json() as { models?: Array<{ id: string; name: string }> };
+      if (live && r.ok) setImageModels(result.models || []);
+    }).catch(() => {});
     return () => { live = false; };
   }, []);
   useEffect(() => {
@@ -196,6 +208,37 @@ export default function ThumbnailDesigner({ aiDefaults, projectId, characters, r
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
     finally { setBackgroundUploading(false); }
   };
+  const generateAiThumbnail = async () => {
+    if (!design || imageBusy) return;
+    if (!window.confirm('Generate a new AI thumbnail? This uses your OpenAI image API key and may incur generation charges.')) return;
+    setImageBusy(true); setMessage('');
+    try {
+      let layout = design.elements.map(e => ({ type: e.type, x: e.x, y: e.y, width: e.width, height: e.height, text: e.type === 'text' ? e.text : undefined }));
+      if (reference && layoutMode === 'ai') {
+        const analysisResponse = await fetch('/api/thumbnail-layout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, imageUrl: reference, provider, model, count: Math.min(characters.filter(c => c.imageUrl).length, 24) }) });
+        const analysis = await analysisResponse.json() as { error?: string; layout?: { slots?: Array<{ x: number; y: number; width: number; height: number }>; texts?: Array<{ text: string; x: number; y: number; width: number; height: number }> } };
+        if (!analysisResponse.ok) throw Error(analysis.error || 'Could not analyze reference before image generation');
+        layout = [...(analysis.layout?.slots || []).map(e => ({ ...e, type: 'image', text: undefined })), ...(analysis.layout?.texts || []).map(e => ({ ...e, type: 'text' }))];
+      }
+      const response = await fetch('/api/thumbnail-ai-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, model: imageModel, quality: imageQuality, layout }) });
+      const result = await response.json() as { error?: string; imageUrl?: string; prompt?: string };
+      if (!response.ok || !result.imageUrl) throw Error(result.error || 'AI image generation failed');
+      mutate({ aiImageUrl: result.imageUrl, aiImagePrompt: result.prompt });
+      setMessage('AI thumbnail generated. Save designs to keep it. AI output is a separate raster image; characters in it are not independently editable.');
+    } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
+    finally { setImageBusy(false); }
+  };
+  const downloadAiThumbnail = async () => {
+    if (!design?.aiImageUrl) return;
+    try {
+      const response = await fetch(design.aiImageUrl);
+      if (!response.ok) throw Error('Could not download generated thumbnail');
+      const blob = await response.blob();
+      const link = document.createElement('a'); const url = URL.createObjectURL(blob);
+      link.href = url; link.download = (design.name.replace(/[^\w-]/g, '_') || 'ai-thumbnail') + '-ai.png';
+      link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
+  };
   const exportPng = async (format: 'png' | 'jpeg') => {
     if (!design) return;
     setBusy(true); setMessage('');
@@ -302,6 +345,16 @@ export default function ThumbnailDesigner({ aiDefaults, projectId, characters, r
           <button className="primary-btn" disabled={!reference || aiBusy} onClick={() => void analyze()}><WandSparkles size={15}/> {aiBusy ? 'Analyzing...' : 'Analyze & apply layout'}</button>
           <small>Reference composition is inspiration only. The artwork and copy should be original.</small>
         </>}
+        <h3>AI Image Generation</h3>
+        <small>Generate a complete thumbnail illustration directly with OpenAI. It follows the reference's abstract layout and your collection theme/characters; the raster result is not a set of editable layers.</small>
+        <label className="input-label">IMAGE MODEL</label>
+        <select value={imageModel} onChange={e => setImageModel(e.target.value)}>
+          {!imageModels.some(m => m.id === imageModel) && <option value={imageModel}>{imageModel} (default)</option>}
+          {imageModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select>
+        <label className="input-label">IMAGE QUALITY</label>
+        <select value={imageQuality} onChange={e => setImageQuality(e.target.value as 'low' | 'medium' | 'high')}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select>
+        <button className="primary-btn" disabled={imageBusy || !imageModel} type="button" onClick={() => void generateAiThumbnail()}><WandSparkles size={15}/> {imageBusy ? 'Generating AI thumbnail...' : 'Generate AI thumbnail'}</button>
         <h3>Characters</h3>
         <div style={{ maxHeight: 400, overflowY: 'auto', display: 'grid', gap: 8 }}>
           {characters.filter(c => c.imageUrl).map(c => <button type="button" key={c.id} onClick={() => add(newImage(c, design.elements.filter(e => e.type === 'image').length))} style={{ textAlign: 'left', display: 'flex', gap: 8, alignItems: 'center', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: 6 }}>
@@ -310,7 +363,7 @@ export default function ThumbnailDesigner({ aiDefaults, projectId, characters, r
           </button>)}
           {!characters.some(c => c.imageUrl) && <p className="sub">Generate character images first.</p>}
         </div>
-        <button className="outline-btn" onClick={() => add(newText())}>+ Add text</button>
+        <button className="outline-btn" onClick={() => add(newText(title))}>+ Add text</button>
       </div>
       <div style={{ minWidth: 0, position: 'sticky', top: 12, alignSelf: 'start' }}>
       <div className="panel" style={{ padding: 12, minWidth: 0 }}>
@@ -364,6 +417,12 @@ export default function ThumbnailDesigner({ aiDefaults, projectId, characters, r
         <input type="file" accept="image/png,image/jpeg" disabled={backgroundUploading} onChange={e => void uploadBackground(e.target.files?.[0])}/>
         {backgroundUploading && <small>Uploading background…</small>}
         {design.backgroundImageUrl && <button className="outline-btn" type="button" onClick={() => mutate({ backgroundImageUrl: undefined })}>Remove background image</button>}
+        {design.aiImageUrl && <div style={{ display: 'grid', gap: 8 }}>
+          <h3>AI generated thumbnail</h3>
+          <img src={design.aiImageUrl} alt="Generated listing thumbnail" style={{ width: '100%', height: 'auto', borderRadius: 8 }}/>
+          <button className="outline-btn" onClick={() => void downloadAiThumbnail()}><Download size={15}/> Download AI PNG</button>
+          <small>AI artwork is one image. Original clipart elements remain editable in the canvas.</small>
+        </div>}
         <h3>Layers</h3>
         <div style={{ display: 'grid', gap: 5, maxHeight: 190, overflowY: 'auto' }}>
           {[...design.elements].reverse().map(e => <div key={e.id} style={{ display: 'flex', gap: 5, minWidth: 0 }}>
