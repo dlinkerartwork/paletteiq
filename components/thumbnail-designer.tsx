@@ -235,42 +235,22 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
         if (!analysisResponse.ok) throw Error(analysis.error || 'Could not analyze reference before image generation');
         layout = [...(analysis.layout?.slots || []).map(e => ({ ...e, type: 'image' as const, text: undefined })), ...(analysis.layout?.texts || []).map(e => ({ ...e, type: 'text' as const }))];
       }
-      const response = await fetch('/api/thumbnail-ai-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, provider: imageProvider, model: imageModel, quality: imageQuality, width: design.width, height: design.height, layout }) });
+      const response = await fetch('/api/thumbnail-ai-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, provider: imageProvider, model: imageModel, quality: imageQuality, layout }) });
       const result = await response.json() as { error?: string; imageUrl?: string; prompt?: string };
       if (!response.ok || !result.imageUrl) throw Error(result.error || 'AI image generation failed');
-      let savedImageUrl = result.imageUrl;
-      // Provider dimensions are discrete: resample into the exact user-selected canvas dimensions.
       const sourceImage = await loadForExport(result.imageUrl);
-      if (sourceImage.naturalWidth !== design.width || sourceImage.naturalHeight !== design.height) {
-        const output = document.createElement('canvas');
-        output.width = design.width; output.height = design.height;
-        const ctx = output.getContext('2d');
-        if (!ctx) throw new Error('Image resize canvas unavailable');
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(sourceImage, 0, 0, design.width, design.height);
-        const blob = await new Promise<Blob | null>(resolve => output.toBlob(resolve, 'image/png'));
-        if (!blob) throw new Error('Could not prepare thumbnail at the selected size');
-        const form = new FormData();
-        form.set('projectId', projectId);
-        form.set('file', new File([blob], 'thumbnail.png', { type: 'image/png' }));
-        const uploaded = await fetch('/api/thumbnail-background', { method: 'POST', body: form });
-        const stored = await uploaded.json() as { url?: string; error?: string };
-        if (!uploaded.ok || !stored.url) throw new Error(stored.error || 'Could not save resized thumbnail');
-        savedImageUrl = stored.url;
-      }
       const generated: ThumbnailDesign = {
         ...newDesign(designs.length + 1),
         name: design.name + ' · AI ' + (designs.length + 1),
-        width: design.width, height: design.height,
+        width: sourceImage.naturalWidth, height: sourceImage.naturalHeight,
         background: design.background, elements: [],
-        aiImageUrl: savedImageUrl, aiImagePrompt: result.prompt,
+        aiImageUrl: result.imageUrl, aiImagePrompt: result.prompt,
         referenceUrl: reference || design.referenceUrl
       };
       const nextDesigns = [...designs, generated];
       onChange(nextDesigns);
       setActiveId(generated.id);
-      setMessage('AI thumbnail added to the thumbnail gallery. It is a single image, sized ' + design.width + '×' + design.height + ', and will be saved automatically.');
+      setMessage('AI thumbnail added to the thumbnail gallery. It is a single image, sized ' + sourceImage.naturalWidth + '×' + sourceImage.naturalHeight + ', and will be saved automatically.');
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
     finally { setImageBusy(false); }
   };
