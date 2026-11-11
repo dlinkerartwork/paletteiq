@@ -369,6 +369,42 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
       if (!blob) throw new Error('Could not encode thumbnail');
       return blob;
   };
+  const uploadRenderedThumbnail = async (blob: Blob): Promise<string> => {
+    if (blob.size > 20_000_000) throw new Error('Rendered thumbnail exceeds 20 MB (' + (blob.size / 1_000_000).toFixed(1) + ' MB). Reduce the canvas size.');
+    const parse = async (response: Response): Promise<{ url?: string; error?: string }> => {
+      const body = await response.text();
+      let data: { url?: string; error?: string } = {};
+      try { data = JSON.parse(body) as typeof data; }
+      catch { throw new Error('Thumbnail upload failed (HTTP ' + response.status + '): ' + body.slice(0, 150)); }
+      if (!response.ok) throw new Error(data.error || 'Thumbnail upload failed (HTTP ' + response.status + ')');
+      return data;
+    };
+    const send = async (form: FormData) => parse(await fetch('/api/thumbnail-background', { method: 'POST', body: form }));
+    if (blob.size <= 1_000_000) {
+      const form = new FormData();
+      form.set('projectId', projectId);
+      form.set('file', new File([blob], 'thumbnail.png', { type: 'image/png' }));
+      const result = await send(form);
+      if (!result.url) throw new Error('Thumbnail upload returned no URL');
+      return result.url;
+    }
+    const uploadId = crypto.randomUUID();
+    const count = Math.ceil(blob.size / 1_000_000);
+    for (let index = 0; index < count; index++) {
+      const form = new FormData();
+      form.set('projectId', projectId);
+      form.set('action', 'chunk'); form.set('uploadId', uploadId);
+      form.set('count', String(count)); form.set('index', String(index));
+      form.set('file', new File([blob.slice(index * 1_000_000, (index + 1) * 1_000_000)], 'part', { type: 'application/octet-stream' }));
+      await send(form);
+    }
+    const finish = new FormData();
+    finish.set('projectId', projectId); finish.set('action', 'complete');
+    finish.set('uploadId', uploadId); finish.set('count', String(count));
+    const result = await send(finish);
+    if (!result.url) throw new Error('Thumbnail upload returned no URL');
+    return result.url;
+  };
   const renderCacheRef = useRef(new Map<string, { signature: string; url: string }>());
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const saveVersionRef = useRef(0);
@@ -386,14 +422,9 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
           continue;
         }
         const blob = await renderDesignBlob(item);
-        const form = new FormData();
-        form.set('projectId', projectId);
-        form.set('file', new File([blob], 'thumbnail.png', { type: 'image/png' }));
-        const response = await fetch('/api/thumbnail-background', { method: 'POST', body: form });
-        const result = await response.json() as { url?: string; error?: string };
-        if (!response.ok || !result.url) throw new Error('Could not store thumbnail ' + item.name + ': ' + (result.error || response.status));
-        renderCacheRef.current.set(item.id, { signature, url: result.url });
-        prepared.push({ ...item, renderedImageUrl: result.url });
+        const storedUrl = await uploadRenderedThumbnail(blob).catch(error => { throw new Error('Could not store thumbnail ' + item.name + ': ' + (error instanceof Error ? error.message : String(error))); });
+        renderCacheRef.current.set(item.id, { signature, url: storedUrl });
+        prepared.push({ ...item, renderedImageUrl: storedUrl });
       }
       if (serial !== saveVersionRef.current) return;
       await latestSaveRef.current(prepared);
