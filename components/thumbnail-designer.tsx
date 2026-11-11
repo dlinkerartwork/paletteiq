@@ -1,0 +1,268 @@
+'use client';
+
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Download, Plus, Trash2, Copy, Undo2, Redo2, WandSparkles, RotateCcw } from 'lucide-react';
+
+export type ThumbnailElement = {
+  id: string; type: 'image' | 'text'; characterId?: string; source?: 'original' | 'upscaled';
+  text?: string; x: number; y: number; width: number; height: number; rotation: number;
+  fontSize?: number; fontFamily?: string; color?: string; fontWeight?: string; opacity?: number; locked?: boolean;
+};
+export type ThumbnailDesign = {
+  id: string; name: string; width: number; height: number; background: string; elements: ThumbnailElement[];
+  referenceUrl?: string; updatedAt: number;
+};
+type Character = { id: string; name: string; imageUrl?: string; upscaledImageUrl?: string };
+type Props = { projectId: string; characters: Character[]; references: string[]; designs: ThumbnailDesign[]; onChange: (designs: ThumbnailDesign[]) => void; onSave: (designs: ThumbnailDesign[]) => Promise<void> };
+const id = () => crypto.randomUUID();
+const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
+const newDesign = (index: number): ThumbnailDesign => ({ id: id(), name: 'Thumbnail ' + index, width: 2000, height: 2000, background: '#f7f1e9', elements: [], updatedAt: Date.now() });
+const newImage = (character: Character, index: number): ThumbnailElement => ({
+  id: id(), type: 'image', characterId: character.id, source: character.upscaledImageUrl ? 'upscaled' : 'original',
+  x: 12 + (index % 4) * 19, y: 20 + Math.floor(index / 4) * 24, width: 22, height: 28, rotation: 0
+});
+const newText = (): ThumbnailElement => ({ id: id(), type: 'text', text: 'YOUR CLIPART COLLECTION', x: 9, y: 7, width: 82, height: 14, rotation: 0, fontSize: 90, fontFamily: 'Arial', color: '#644a35', fontWeight: 'bold' });
+const normalizeDesign = (d: ThumbnailDesign): ThumbnailDesign => ({ ...d, updatedAt: Date.now() });
+
+async function loadForExport(url: string): Promise<HTMLImageElement> {
+  const image = new window.Image();
+  image.crossOrigin = 'anonymous';
+  image.src = url;
+  await image.decode();
+  return image;
+}
+export default function ThumbnailDesigner({ projectId, characters, references, designs, onChange, onSave }: Props) {
+  const [activeId, setActiveId] = useState(designs[0]?.id || '');
+  const [selectedId, setSelectedId] = useState('');
+  const [previewZoom, setPreviewZoom] = useState(1);
+  const [reference, setReference] = useState('');
+  const [uploadedReference, setUploadedReference] = useState('');
+  const [aiBusy, setAiBusy] = useState(false);
+  const [provider, setProvider] = useState<'ai' | 'manual'>('ai');
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [history, setHistory] = useState<ThumbnailDesign[]>([]);
+  const [future, setFuture] = useState<ThumbnailDesign[]>([]);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ id: string; mode: 'move' | 'resize'; x: number; y: number; original: ThumbnailElement } | null>(null);
+  const design = designs.find(d => d.id === activeId) || designs[0];
+  const selection = design?.elements.find(e => e.id === selectedId);
+  const assetMap = useMemo(() => new Map(characters.map(c => [c.id, c])), [characters]);
+  useEffect(() => { if (designs.length && !designs.some(d => d.id === activeId)) setActiveId(designs[0].id); }, [activeId, designs]);
+  useEffect(() => { setHistory([]); setFuture([]); setSelectedId(''); }, [activeId, projectId]);
+  const commit = (next: ThumbnailDesign, record = true) => {
+    if (record && design) { setHistory(old => [...old.slice(-29), design]); setFuture([]); }
+    onChange(designs.map(d => d.id === next.id ? normalizeDesign(next) : d));
+  };
+  const mutate = (changes: Partial<ThumbnailDesign>) => { if (design) commit({ ...design, ...changes }); };
+  const updateElement = (changes: Partial<ThumbnailElement>, record = true) => {
+    if (!design || !selection) return;
+    commit({ ...design, elements: design.elements.map(e => e.id === selection.id ? { ...e, ...changes } : e) }, record);
+  };
+  const add = (element: ThumbnailElement) => { if (design) { commit({ ...design, elements: [...design.elements, element] }); setSelectedId(element.id); } };
+  const remove = () => { if (design && selection) { commit({ ...design, elements: design.elements.filter(e => e.id !== selection.id) }); setSelectedId(''); } };
+  const create = () => { const next = newDesign(designs.length + 1); onChange([...designs, next]); setActiveId(next.id); };
+  const duplicate = () => { if (!design) return; const copy = { ...design, id: id(), name: design.name + ' copy', elements: design.elements.map(e => ({ ...e, id: id() })), updatedAt: Date.now() }; onChange([...designs, copy]); setActiveId(copy.id); };
+  const removeDesign = () => { if (!design || !window.confirm('Delete this thumbnail design?')) return; onChange(designs.filter(d => d.id !== design.id)); setActiveId(designs.find(d => d.id !== design.id)?.id || ''); };
+  const undo = () => { if (!history.length || !design) return; const previous = history[history.length - 1]; setHistory(history.slice(0, -1)); setFuture(old => [...old, design]); commit(previous, false); };
+  const redo = () => { if (!future.length || !design) return; const next = future[future.length - 1]; setFuture(future.slice(0, -1)); setHistory(old => [...old, design]); commit(next, false); };
+  const imageUrl = (e: ThumbnailElement) => {
+    const character = assetMap.get(e.characterId || '');
+    return e.source === 'upscaled' ? character?.upscaledImageUrl || character?.imageUrl : character?.imageUrl || character?.upscaledImageUrl;
+  };
+  const startDrag = (event: React.PointerEvent<HTMLElement>, element: ThumbnailElement, mode: 'move' | 'resize') => {
+    if (element.locked || !stageRef.current) return;
+    event.stopPropagation(); event.preventDefault(); setSelectedId(element.id);
+    dragRef.current = { id: element.id, mode, x: event.clientX, y: event.clientY, original: { ...element } };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    if (design) setHistory(old => [...old.slice(-29), design]);
+    setFuture([]);
+  };
+  const moveDrag = (event: React.PointerEvent<HTMLElement>) => {
+    const drag = dragRef.current;
+    const bounds = stageRef.current?.getBoundingClientRect();
+    if (!drag || !bounds || !design) return;
+    const dx = (event.clientX - drag.x) / bounds.width * 100;
+    const dy = (event.clientY - drag.y) / bounds.height * 100;
+    const next = drag.mode === 'move'
+      ? { x: clamp(drag.original.x + dx, -100, 200), y: clamp(drag.original.y + dy, -100, 200) }
+      : { width: clamp(drag.original.width + dx, 1, 200), height: clamp(drag.original.height + dy, 1, 200) };
+    commit({ ...design, elements: design.elements.map(e => e.id === drag.id ? { ...e, ...next } : e) }, false);
+  };
+  const endDrag = () => { dragRef.current = null; };
+  const analyze = async () => {
+    if (!design || !reference) { setMessage('Choose or upload a reference image first.'); return; }
+    setAiBusy(true); setMessage('');
+    try {
+      const response = await fetch('/api/thumbnail-layout', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId, imageUrl: reference, count: Math.min(characters.filter(c => c.imageUrl).length, 24) }) });
+      const body = await response.json() as { error?: string; layout?: { slots?: Array<{ x: number; y: number; width: number; height: number; rotation?: number }>; texts?: Array<{ text: string; x: number; y: number; width: number; height: number }> ; background?: string } };
+      if (!response.ok) throw new Error(body.error || 'AI layout analysis failed');
+      const available = characters.filter(c => c.imageUrl);
+      const slots = (body.layout?.slots || []).slice(0, available.length);
+      const images = slots.map((slot, i): ThumbnailElement => ({
+        ...newImage(available[i], i), x: clamp(slot.x, 0, 100), y: clamp(slot.y, 0, 100), width: clamp(slot.width, 1, 100), height: clamp(slot.height, 1, 100), rotation: clamp(slot.rotation || 0, -180, 180)
+      }));
+      const texts = (body.layout?.texts || []).slice(0, 8).map((slot): ThumbnailElement => ({
+        ...newText(), id: id(), text: slot.text || 'CUSTOMIZE TITLE', x: clamp(slot.x, 0, 100), y: clamp(slot.y, 0, 100), width: clamp(slot.width, 5, 100), height: clamp(slot.height, 3, 100)
+      }));
+      commit({ ...design, elements: [...design.elements, ...images, ...texts], background: /^#[0-9a-f]{6}$/i.test(body.layout?.background || '') ? body.layout!.background! : design.background, referenceUrl: reference.startsWith('https://') ? reference : undefined });
+      setMessage('Layout applied. Review the arrangement and customize all elements.');
+    } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
+    finally { setAiBusy(false); }
+  };
+  const onReferenceUpload = async (file?: File) => {
+    if (!file) return;
+    if (!['image/png','image/jpeg','image/webp'].includes(file.type) || file.size > 4_000_000) { setMessage('Use PNG/JPG/WebP up to 4 MB for AI reference.'); return; }
+    const data = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(new Error('Could not read file')); reader.readAsDataURL(file); });
+    setUploadedReference(data); setReference(data); setMessage('Reference loaded for this editing session. The uploaded reference is not embedded in the saved collection.');
+  };
+  const exportPng = async (format: 'png' | 'jpeg') => {
+    if (!design) return;
+    setBusy(true); setMessage('');
+    try {
+      const canvas = document.createElement('canvas'); canvas.width = design.width; canvas.height = design.height;
+      const ctx = canvas.getContext('2d'); if (!ctx) throw new Error('Canvas unavailable');
+      ctx.fillStyle = design.background; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      for (const element of design.elements) {
+        const x = element.x / 100 * design.width, y = element.y / 100 * design.height;
+        const w = element.width / 100 * design.width, h = element.height / 100 * design.height;
+        ctx.save(); ctx.globalAlpha = element.opacity ?? 1;
+        ctx.translate(x + w/2, y + h/2); ctx.rotate(element.rotation * Math.PI/180);
+        if (element.type === 'image') {
+          const url = imageUrl(element); if (!url) { ctx.restore(); continue; }
+          const img = await loadForExport(url);
+          const scale = Math.min(w/img.naturalWidth, h/img.naturalHeight);
+          const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
+          ctx.drawImage(img, -dw/2, -dh/2, dw, dh);
+        } else {
+          ctx.fillStyle = element.color || '#333333';
+          ctx.font = \`\${element.fontWeight || 'bold'} \${Math.round((element.fontSize || 80) * design.width / 2000)}px \${element.fontFamily || 'Arial'}\`;
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          const raw = (element.text || '').split('\n');
+          const lineHeight = (element.fontSize || 80) * design.width / 2000 * 1.2;
+          raw.forEach((line,i) => {
+            const available = Math.max(1, w - 8);
+            const actual = ctx.measureText(line).width;
+            ctx.save(); if (actual > available) ctx.scale(available / actual, 1);
+            ctx.fillText(line, 0, (i - (raw.length - 1)/2) * lineHeight); ctx.restore();
+          });
+        }
+        ctx.restore();
+      }
+      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, format === 'png' ? 'image/png' : 'image/jpeg', .95));
+      if (!blob) throw new Error('Could not encode thumbnail');
+      const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url;
+      link.download = (design.name.replace(/[^a-z0-9_-]/gi, '_') || 'thumbnail') + '.' + (format === 'png' ? 'png' : 'jpg');
+      link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 5000);
+      setMessage('Export ready: ' + design.width + '×' + design.height);
+    } catch (error) { setMessage('Export failed: ' + (error instanceof Error ? error.message : String(error))); }
+    finally { setBusy(false); }
+  };
+  const save = async () => { setBusy(true); try { await onSave(designs); setMessage('Thumbnail designs saved.'); } catch (error) { setMessage('Save failed: ' + String(error)); } finally { setBusy(false); } };
+  const control = { width: '100%', minWidth: 0 } as const;
+  return <div className="thumbnail-studio">
+    <div className="panel" style={{ padding: 16, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+      <h2 style={{ marginRight: 'auto' }}>Etsy Thumbnail Designer</h2>
+      <select aria-label="Select thumbnail" value={design?.id || ''} onChange={e => setActiveId(e.target.value)}><option value="">Select thumbnail</option>{designs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select>
+      <button className="outline-btn" type="button" onClick={create}><Plus size={15}/> New</button>
+      <button className="outline-btn" disabled={!design} type="button" onClick={duplicate}><Copy size={15}/> Duplicate</button>
+      <button className="outline-btn" disabled={!design} type="button" onClick={removeDesign}><Trash2 size={15}/> Delete</button>
+      <button className="primary-btn" disabled={!design || busy} type="button" onClick={() => void save()}>Save designs</button>
+    </div>
+    {message && <p className="notice">{message}</p>}
+    {!design ? <div className="panel empty-state"><h2>No thumbnails yet</h2><p>Create a design for this listing.</p><button className="primary-btn" onClick={create}>Create first thumbnail</button></div> :
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(190px, 240px) minmax(0, 1fr) minmax(220px, 275px)', gap: 12, alignItems: 'start' }}>
+      <div className="panel" style={{ padding: 14, display: 'grid', gap: 12 }}>
+        <h3>Reference & assets</h3>
+        <label className="input-label">LAYOUT MODE</label>
+        <select value={provider} onChange={e => setProvider(e.target.value as 'ai' | 'manual')}><option value="ai">AI + manual</option><option value="manual">Manual only</option></select>
+        {provider === 'ai' && <>
+          <label className="input-label">REFERENCE IMAGE</label>
+          <select style={control} value={reference.startsWith('data:') ? 'upload' : reference} onChange={e => setReference(e.target.value === 'upload' ? uploadedReference : e.target.value)}>
+            <option value="">Choose listing reference</option>{references.map((r,i)=><option key={r} value={r}>Listing image {i+1}</option>)}{uploadedReference && <option value="upload">Uploaded image</option>}
+          </select>
+          <input aria-label="Upload reference" type="file" accept="image/png,image/jpeg,image/webp" onChange={e => void onReferenceUpload(e.target.files?.[0])}/>
+          {reference && <img src={reference} alt="Layout reference" style={{ maxWidth: '100%', maxHeight: 140, objectFit: 'contain' }}/>}
+          <button className="primary-btn" disabled={!reference || aiBusy} onClick={() => void analyze()}><WandSparkles size={15}/> {aiBusy ? 'Analyzing...' : 'Analyze & apply layout'}</button>
+          <small>Reference composition is inspiration only. The artwork and copy should be original.</small>
+        </>}
+        <h3>Characters</h3>
+        <div style={{ maxHeight: 400, overflowY: 'auto', display: 'grid', gap: 8 }}>
+          {characters.filter(c => c.imageUrl).map((c,i) => <button type="button" key={c.id} onClick={() => add(newImage(c, design.elements.length + i))} style={{ textAlign: 'left', display: 'flex', gap: 8, alignItems: 'center', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: 6 }}>
+            <img src={c.upscaledImageUrl || c.imageUrl} alt="" style={{ width: 45, height: 45, objectFit: 'contain' }}/>
+            <span style={{ fontSize: 12 }}>{c.name}{c.upscaledImageUrl ? ' · 4× ready' : ''}</span>
+          </button>)}
+          {!characters.some(c => c.imageUrl) && <p className="sub">Generate character images first.</p>}
+        </div>
+        <button className="outline-btn" onClick={() => add(newText())}>+ Add text</button>
+      </div>
+      <div className="panel" style={{ padding: 12, minWidth: 0 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginBottom: 10, alignItems: 'center' }}>
+          <button className="outline-btn" disabled={!history.length} onClick={undo} title="Undo"><Undo2 size={15}/></button>
+          <button className="outline-btn" disabled={!future.length} onClick={redo} title="Redo"><Redo2 size={15}/></button>
+          <button className="outline-btn" onClick={() => setPreviewZoom(z => clamp(z - .25, .5, 3))}>−</button>
+          <span>{Math.round(previewZoom*100)}%</span>
+          <button className="outline-btn" onClick={() => setPreviewZoom(z => clamp(z + .25, .5, 3))}>+</button>
+          <button className="outline-btn" onClick={() => setPreviewZoom(1)} title="Reset zoom"><RotateCcw size={15}/></button>
+          <span style={{ marginLeft: 'auto' }}>{design.width}×{design.height}</span>
+        </div>
+        <div style={{ overflow: 'auto', maxHeight: '75vh', background: '#e8e8e8', padding: 16, borderRadius: 8 }}>
+          <div style={{ width: \`\${previewZoom*100}%\`, minWidth: 200, margin: 'auto' }}>
+            <div ref={stageRef} onPointerDown={() => setSelectedId('')} style={{ width: '100%', aspectRatio: \`\${design.width}/\${design.height}\`, background: design.background, position: 'relative', containerType: 'inline-size', overflow: 'hidden', boxShadow: '0 5px 25px #0002', touchAction: 'none' }}>
+              {design.elements.map(e => {
+                const isSelected = e.id === selectedId;
+                return <div key={e.id} onPointerDown={event => startDrag(event,e,'move')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
+                  style={{ position: 'absolute', left: e.x+'%', top: e.y+'%', width: e.width+'%', height: e.height+'%', transform: \`rotate(\${e.rotation}deg)\`, opacity: e.opacity ?? 1, border: isSelected ? '2px dashed #e36a1b' : '1px solid transparent', cursor: e.locked ? 'not-allowed' : 'move', boxSizing: 'border-box', touchAction: 'none', userSelect: 'none' }}>
+                  {e.type === 'image' ? (imageUrl(e) ? <img src={imageUrl(e)} alt={assetMap.get(e.characterId || '')?.name || 'Character'} draggable={false} style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }}/> : <div style={{ color: '#d33' }}>Image unavailable</div>) :
+                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', fontSize: \`clamp(5px, \${(e.fontSize || 80) / design.width * 100}cqw, 250px)\`, fontFamily: e.fontFamily || 'Arial', fontWeight: e.fontWeight || 'bold', color: e.color || '#333', whiteSpace: 'pre-line', overflow: 'hidden', pointerEvents: 'none' }}>{e.text}</div>}
+                  {isSelected && !e.locked && <div onPointerDown={event => startDrag(event,e,'resize')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
+                    style={{ position: 'absolute', right: -7, bottom: -7, width: 15, height: 15, background: '#e36a1b', border: '2px solid white', borderRadius: 3, cursor: 'nwse-resize', touchAction: 'none' }}/>}
+                </div>;
+              })}
+            </div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+          <button className="primary-btn" disabled={busy} onClick={() => void exportPng('png')}><Download size={15}/> Export PNG</button>
+          <button className="outline-btn" disabled={busy} onClick={() => void exportPng('jpeg')}><Download size={15}/> Export JPG</button>
+        </div>
+      </div>
+      <div className="panel" style={{ padding: 14, display: 'grid', gap: 9 }}>
+        <h3>Design properties</h3>
+        <label className="input-label">DESIGN NAME</label>
+        <input value={design.name} onChange={e => mutate({ name: e.target.value })}/>
+        <label className="input-label">CANVAS WIDTH (PX)</label>
+        <input type="number" min={256} max={8000} value={design.width} onChange={e => mutate({ width: clamp(Number(e.target.value) || 2000, 256, 8000) })}/>
+        <label className="input-label">CANVAS HEIGHT (PX)</label>
+        <input type="number" min={256} max={8000} value={design.height} onChange={e => mutate({ height: clamp(Number(e.target.value) || 2000, 256, 8000) })}/>
+        <label className="input-label">BACKGROUND</label>
+        <input type="color" value={design.background} onChange={e => mutate({ background: e.target.value })}/>
+        <h3>Layers</h3>
+        <div style={{ display: 'grid', gap: 5, maxHeight: 190, overflowY: 'auto' }}>
+          {[...design.elements].reverse().map(e => <button key={e.id} className="outline-btn" style={{ justifyContent: 'flex-start', background: e.id === selectedId ? '#fff0df' : undefined, overflow: 'hidden' }} onClick={() => setSelectedId(e.id)}>{e.type === 'text' ? 'T' : '◫'} {e.type === 'text' ? e.text?.slice(0,24) : assetMap.get(e.characterId || '')?.name || 'Image'}</button>)}
+        </div>
+        {selection ? <>
+          <h3>Selected element</h3>
+          {selection.type === 'text' ? <>
+            <label className="input-label">TEXT</label><textarea value={selection.text || ''} rows={3} onChange={e => updateElement({ text: e.target.value })}/>
+            <label className="input-label">FONT</label><select value={selection.fontFamily || 'Arial'} onChange={e => updateElement({ fontFamily: e.target.value })}>{['Arial','Georgia','Verdana','Tahoma','Trebuchet MS','Times New Roman','Courier New'].map(f => <option key={f}>{f}</option>)}</select>
+            <label className="input-label">FONT SIZE</label><input type="number" min={8} max={500} value={selection.fontSize || 80} onChange={e => updateElement({ fontSize: clamp(Number(e.target.value),8,500) })}/>
+            <label className="input-label">COLOR</label><input type="color" value={selection.color || '#333333'} onChange={e => updateElement({ color: e.target.value })}/>
+            <label className="input-label">WEIGHT</label><select value={selection.fontWeight || 'bold'} onChange={e => updateElement({ fontWeight: e.target.value })}><option value="normal">Normal</option><option value="bold">Bold</option></select>
+          </> : <>
+            <label className="input-label">ASSET SOURCE</label><select value={selection.source || 'original'} onChange={e => updateElement({ source: e.target.value as 'original' | 'upscaled' })}><option value="original">Original</option><option value="upscaled" disabled={!assetMap.get(selection.characterId || '')?.upscaledImageUrl}>Upscaled 4×</option></select>
+          </>}
+          {(['x','y','width','height','rotation','opacity'] as const).map(key => <label key={key} style={{ display: 'grid', gap: 4 }}><span className="input-label">{key.toUpperCase()}{key === 'opacity' ? ' (0–1)' : key === 'rotation' ? ' (DEG)' : ' (%)'}</span><input type="number" step={key === 'opacity' ? .1 : 1} value={selection[key] ?? (key === 'opacity' ? 1 : 0)} onChange={e => updateElement({ [key]: Number(e.target.value) })}/></label>)}
+          <label><input type="checkbox" checked={Boolean(selection.locked)} onChange={e => updateElement({ locked: e.target.checked })}/> Lock element</label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            <button className="outline-btn" onClick={() => { const index = design.elements.findIndex(e => e.id === selectedId); if (index < design.elements.length-1) { const all = [...design.elements]; [all[index],all[index+1]]=[all[index+1],all[index]]; mutate({elements:all}); } }}>Bring forward</button>
+            <button className="outline-btn" onClick={() => { const index = design.elements.findIndex(e => e.id === selectedId); if (index > 0) { const all = [...design.elements]; [all[index],all[index-1]]=[all[index-1],all[index]]; mutate({elements:all}); } }}>Send backward</button>
+            <button className="outline-btn" onClick={() => add({ ...selection, id: id(), x: selection.x+3, y: selection.y+3 })}>Duplicate</button>
+            <button className="outline-btn" onClick={remove}><Trash2 size={15}/> Remove</button>
+          </div>
+        </> : <p className="sub">Click an element to edit its position, size, rotation, style or layer.</p>}
+      </div>
+    </div>}
+  </div>;
+}
