@@ -60,6 +60,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const [upscaleRemaining, setUpscaleRemaining] = useState<Record<string, number | null>>({});
   const [imageProvider, setImageProvider] = useState<'openai' | 'gemini'>('openai');
   const [imageModel, setImageModel] = useState('gpt-image-1-mini');
+  const [includeTitle, setIncludeTitle] = useState(true);
   const [imageQuality, setImageQuality] = useState<'low' | 'medium' | 'high'>('low');
   const [imageModels, setImageModels] = useState<Array<{ id: string; name: string }>>([]);
   const [layoutMode, setLayoutMode] = useState<'ai' | 'manual'>('ai');
@@ -299,7 +300,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         if (!analysisResponse.ok) throw Error(analysis.error || 'Could not analyze reference before image generation');
         layout = [...(analysis.layout?.slots || []).map(e => ({ ...e, type: 'image' as const, text: undefined })), ...(analysis.layout?.texts || []).map(e => ({ ...e, type: 'text' as const }))];
       }
-      const response = await fetch('/api/thumbnail-ai-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, provider: imageProvider, model: imageModel, quality: imageQuality, layout }) });
+      const response = await fetch('/api/thumbnail-ai-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, provider: imageProvider, model: imageModel, quality: imageQuality, includeTitle, layout: includeTitle ? layout : layout.filter(item => item.type !== 'text') }) });
       const result = await response.json() as { error?: string; imageUrl?: string; prompt?: string };
       if (!response.ok || !result.imageUrl) throw Error(result.error || 'AI image generation failed');
       const sourceImage = await loadForExport(result.imageUrl);
@@ -605,6 +606,8 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         </select>
         {imageProvider === 'openai' && <><label className="input-label">IMAGE QUALITY</label>
         <select value={imageQuality} onChange={e => setImageQuality(e.target.value as 'low' | 'medium' | 'high')}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></>}
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '12px 0' }}><input type="checkbox" checked={includeTitle} disabled={imageBusy} onChange={event => setIncludeTitle(event.target.checked)}/> Include title / theme text</label>
+        {!includeTitle && <small>The AI thumbnail will be requested without text or lettering.</small>}
         <button className="primary-btn" disabled={imageBusy || !imageModel} type="button" onClick={() => void generateAiThumbnail()}><WandSparkles size={15}/> {imageBusy ? 'Generating AI thumbnail...' : 'Generate AI thumbnail'}</button>
         <h3>Characters</h3>
         <div style={{ maxHeight: 400, overflowY: 'auto', display: 'grid', gap: 8 }}>

@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { thumbnailImagePrompt } from '@/lib/thumbnail-image-prompt';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '@/db';
 import { projects } from '@/db/schema';
@@ -7,7 +8,7 @@ import { userCredential, userGeminiKeys } from '@/lib/credentials';
 import { nativeAssetBucket } from '@/lib/native-bridge';
 
 type LayoutItem = { type: 'image' | 'text'; x: number; y: number; width: number; height: number; text?: string };
-type RequestBody = { projectId?: string; provider?: string; model?: string; quality?: string; width?: number; height?: number; layout?: LayoutItem[] };
+type RequestBody = { projectId?: string; provider?: string; model?: string; quality?: string; width?: number; height?: number; layout?: LayoutItem[]; includeTitle?: boolean };
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 const bucket = () => nativeAssetBucket() ?? env.BUCKET;
 
@@ -17,6 +18,7 @@ export async function POST(req: Request) {
   let input: RequestBody;
   try { input = await req.json() as RequestBody; } catch { return bad('Invalid JSON'); }
   if (typeof input.projectId !== 'string' || !/^[\w-]{8,80}$/.test(input.projectId)) return bad('Invalid collection');
+  if (input.includeTitle !== undefined && typeof input.includeTitle !== 'boolean') return bad('includeTitle must be a boolean');
   const rows = await getDb().select().from(projects).where(and(eq(projects.id, input.projectId), eq(projects.owner, user.userId))).limit(1);
   if (!rows.length) return bad('Collection not found', 404);
   const provider = input.provider;
@@ -31,22 +33,12 @@ export async function POST(req: Request) {
   const storage = bucket();
   if (!storage) return bad('Image storage is unavailable', 503);
   const collection = JSON.parse(rows[0].data) as { name?: string; theme?: string; subtheme?: string; style?: string; characters?: Array<{ name?: string }> };
-  const characters = (collection.characters || []).map(item => String(item.name || '').slice(0, 100)).filter(Boolean).slice(0, 30);
   const layout = Array.isArray(input.layout) ? input.layout.slice(0, 48).filter(item => item && (item.type === 'image' || item.type === 'text')).map(item => ({
     type: item.type, x: Math.max(-20, Math.min(120, Number(item.x) || 0)), y: Math.max(-20, Math.min(120, Number(item.y) || 0)),
     width: Math.max(1, Math.min(120, Number(item.width) || 10)), height: Math.max(1, Math.min(120, Number(item.height) || 10)),
     text: item.type === 'text' ? String(item.text || '').slice(0, 120) : undefined
   })) : [];
-  const prompt = [
-    'Create one ORIGINAL high-quality square promotional thumbnail for an Etsy digital clipart collection.',
-    'Theme and identity:', JSON.stringify({ title: collection.name, theme: collection.theme, subtheme: collection.subtheme, style: collection.style }),
-    'Suggested characters (generate original illustrations, do not copy any third-party reference):', JSON.stringify(characters),
-    'Approximate composition (percentage coordinates; abstract layout only):', JSON.stringify(layout),
-    'Use an organic, irregular, playful asymmetric arrangement with characters of varied scale distributed to fill the canvas, including some edge-cropped ornaments. Preserve a clear central or intentionally placed text zone.',
-    'Use a theme-specific elegant readable main title, show the exact count ' + (collection.characters?.length || 0) + ' PNG Clipart and legible text 300 DPI. Never use third-party shop names, brands, logos, or watermarks.',
-    'This is a promotional graphic, not a source for individually editable characters. Make visual elements cohesive and typography premium, polished and readable.',
-    'Target canvas dimensions: ' + width + 'x' + height + ' pixels. Provider may generate a nearby supported size; the editor will resize the result precisely.'
-  ].join('\\n');
+  const prompt = thumbnailImagePrompt(collection, layout, width, height, input.includeTitle !== false);
   let imageBase64 = '';
   let imageMime = 'image/png';
   if (provider === 'openai') {
