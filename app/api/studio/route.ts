@@ -76,10 +76,17 @@ export async function POST(req: Request) {
     if (current.length && current[0].owner !== user.userId) return fail('Forbidden', 403);
     if (current.length) {
       // An older browser snapshot must not erase assets already persisted by the image worker.
-      const old = JSON.parse(current[0].data) as { characters?: Array<{ id: string; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: { id: string }; status?: string; similarityReview?: SimilarityReview }>; lastDownloadedAt?: number; downloadCount?: number; lastDownloadImageCount?: number; downloadedImageIds?: string[] };
+      const old = JSON.parse(current[0].data) as { thumbnails?: Array<{ id: string; upscaledImageUrl?: string; upscaleJob?: { id: string } }>; characters?: Array<{ id: string; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: { id: string }; status?: string; similarityReview?: SimilarityReview }>; lastDownloadedAt?: number; downloadCount?: number; lastDownloadImageCount?: number; downloadedImageIds?: string[] };
       // Download history belongs to the persisted collection, not a potentially stale browser snapshot.
       if (old.lastDownloadedAt) { incoming.lastDownloadedAt = old.lastDownloadedAt; incoming.downloadCount = old.downloadCount ?? 1; incoming.lastDownloadImageCount = old.lastDownloadImageCount; incoming.downloadedImageIds = old.downloadedImageIds; }
       const storedImages = new Map((old.characters || []).filter(c => c.imageUrl).map(c => [c.id, c]));
+      if (Array.isArray(incoming.thumbnails)) {
+        const storedThumbnails = new Map((old.thumbnails || []).map(t => [t.id, t]));
+        incoming.thumbnails = (incoming.thumbnails as Array<{ id: string; upscaledImageUrl?: string; upscaleJob?: { id: string } }>).map(t => {
+          const saved = storedThumbnails.get(t.id);
+          return saved ? { ...t, upscaledImageUrl: saved.upscaledImageUrl || t.upscaledImageUrl, upscaleJob: saved.upscaleJob } : t;
+        });
+      }
       incoming.characters = incoming.characters.map((c: SubjectInput) => {
         const persisted = storedImages.get(c.id);
         return persisted?.imageUrl ? { ...c, imageUrl: persisted.imageUrl, status: 'done', error: '', similarityReview: persisted.similarityReview, upscaledImageUrl: persisted.upscaledImageUrl, upscaledAt: persisted.upscaledAt, upscaleJob: persisted.upscaleJob } : c;
