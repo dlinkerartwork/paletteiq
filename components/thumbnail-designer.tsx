@@ -9,7 +9,7 @@ export type ThumbnailElement = {
   fontSize?: number; curve?: number; fontFamily?: string; color?: string; fontWeight?: string; opacity?: number; locked?: boolean;
 };
 export type ThumbnailDesign = {
-  id: string; name: string; width: number; height: number; background: string; backgroundImageUrl?: string; aiImageUrl?: string; aiImagePrompt?: string; renderedImageUrl?: string; elements: ThumbnailElement[];
+  id: string; name: string; width: number; height: number; background: string; backgroundImageUrl?: string; aiImageUrl?: string; aiImagePrompt?: string; renderedImageUrl?: string; upscaledImageUrl?: string; upscaleJob?: { id: string; sourceUrl: string; factor: 2 | 4; submittedAt: number }; elements: ThumbnailElement[];
   referenceUrl?: string; updatedAt: number;
 };
 type Character = { id: string; name: string; imageUrl?: string; upscaledImageUrl?: string };
@@ -52,6 +52,8 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const [uploadedReference, setUploadedReference] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
   const [imageBusy, setImageBusy] = useState(false);
+  const [upscaleBusy, setUpscaleBusy] = useState(false);
+  const [upscaleStatus, setUpscaleStatus] = useState('');
   const [imageProvider, setImageProvider] = useState<'openai' | 'gemini'>('openai');
   const [imageModel, setImageModel] = useState('gpt-image-1-mini');
   const [imageQuality, setImageQuality] = useState<'low' | 'medium' | 'high'>('low');
@@ -383,7 +385,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
       if (!blob) throw new Error('Could not encode thumbnail');
       return blob;
   };
-  const uploadRenderedThumbnail = async (blob: Blob): Promise<string> => {
+  const uploadRenderedThumbnail = async (blob: Blob, mime: 'image/jpeg' | 'image/png' = 'image/jpeg'): Promise<string> => {
     if (blob.size > 20_000_000) throw new Error('Rendered thumbnail exceeds 20 MB (' + (blob.size / 1_000_000).toFixed(1) + ' MB). Reduce the canvas size.');
     const parse = async (response: Response): Promise<{ url?: string; error?: string }> => {
       const body = await response.text();
@@ -397,7 +399,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     if (blob.size <= 1_000_000) {
       const form = new FormData();
       form.set('projectId', projectId);
-      form.set('file', new File([blob], 'thumbnail.jpg', { type: 'image/jpeg' }));
+      form.set('file', new File([blob], mime === 'image/png' ? 'thumbnail.png' : 'thumbnail.jpg', { type: mime }));
       const result = await send(form);
       if (!result.url) throw new Error('Thumbnail upload returned no URL');
       return result.url;
@@ -419,6 +421,59 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     if (!result.url) throw new Error('Thumbnail upload returned no URL');
     return result.url;
   };
+  const upscaleThumbnail = async () => {
+    if (!design || upscaleBusy) return;
+    if (design.upscaleJob) { setMessage('This thumbnail is already queued for GPU upscale.'); return; }
+    if (design.upscaledImageUrl) { setMessage('This thumbnail already has an upscale result.'); return; }
+    setUpscaleBusy(true); setMessage('');
+    try {
+      // Use the current rendered canvas; the GPU service accepts PNG input only.
+      const source = design.aiImageUrl ? await loadForExport(design.aiImageUrl) : null;
+      const png = source ? await (async () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = source.naturalWidth; canvas.height = source.naturalHeight;
+        const ctx = canvas.getContext('2d'); if (!ctx) throw new Error('Canvas unavailable');
+        ctx.drawImage(source, 0, 0);
+        return new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
+      })() : await renderDesignBlob(design, 'png');
+      if (!png) throw new Error('Could not prepare GPU input PNG');
+      const sourceUrl = await uploadRenderedThumbnail(png, 'image/png');
+      const response = await fetch('/api/thumbnail-upscale', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, thumbnailId: design.id, sourceUrl }) });
+      const result = await response.json() as { id?: string; error?: string };
+      if (!response.ok || !result.id) throw new Error(result.error || 'GPU did not accept the thumbnail');
+      onChange(designs.map(item => item.id === design.id ? { ...item, upscaleJob: { id: result.id!, sourceUrl, factor: 4 as const, submittedAt: Date.now() } } : item));
+      setUpscaleStatus('GPU job queued');
+      setMessage('Remote GPU accepted thumbnail. The job continues in the background.');
+    } catch (error) { setMessage('Thumbnail upscale failed: ' + (error instanceof Error ? error.message : String(error))); }
+    finally { setUpscaleBusy(false); }
+  };
+  const activeThumbnailJobs = designs.filter(item => item.upscaleJob).map(item => item.id + ':' + item.upscaleJob!.id).join(',');
+  useEffect(() => {
+    if (!activeThumbnailJobs) return;
+    let stopped = false, running = false;
+    const poll = async () => {
+      if (running) return;
+      running = true;
+      try {
+        for (const item of designs.filter(d => d.upscaleJob)) {
+          const response = await fetch('/api/thumbnail-upscale?projectId=' + encodeURIComponent(projectId) + '&thumbnailId=' + encodeURIComponent(item.id));
+          const result = await response.json() as { status?: string; url?: string; error?: string };
+          if (!response.ok) throw new Error(result.error || 'GPU status unavailable');
+          if (stopped) return;
+          if (result.status === 'succeeded' && result.url) {
+            onChange(latestDesignsRef.current.map(d => d.id === item.id ? { ...d, upscaledImageUrl: result.url, upscaleJob: undefined } : d));
+            setUpscaleStatus('Thumbnail GPU upscale completed');
+          } else if (result.status === 'failed') {
+            setUpscaleStatus('GPU upscale failed: ' + (result.error || 'Unknown error'));
+          } else setUpscaleStatus('Remote GPU: ' + result.status);
+        }
+      } catch (error) { if (!stopped) setUpscaleStatus('GPU polling: ' + (error instanceof Error ? error.message : String(error))); }
+      finally { running = false; }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 5000);
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [projectId, activeThumbnailJobs]);
   const renderCacheRef = useRef(new Map<string, { signature: string; url: string }>());
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const saveVersionRef = useRef(0);
@@ -539,6 +594,15 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
           <small>AI artwork is one image. Original clipart elements remain editable in the canvas.</small>
         </div>}
 
+        <h3>Remote GPU Upscale</h3>
+        <button className="outline-btn" disabled={upscaleBusy || Boolean(design.upscaleJob) || Boolean(design.upscaledImageUrl)} onClick={() => void upscaleThumbnail()}>
+          {upscaleBusy ? 'Submitting thumbnail...' : design.upscaleJob ? 'GPU upscale queued' : design.upscaledImageUrl ? 'Upscale completed' : 'Remote GPU Upscale'}
+        </button>
+        {upscaleStatus && <small>{upscaleStatus}</small>}
+        {design.upscaledImageUrl && <div style={{ display: 'grid', gap: 6 }}>
+          <img src={design.upscaledImageUrl} alt="Upscaled thumbnail" style={{ width: '100%', borderRadius: 8 }}/>
+          <a className="outline-btn" href={design.upscaledImageUrl} target="_blank" rel="noreferrer">View upscaled image</a>
+        </div>}
         <h3>Characters</h3>
         <div style={{ maxHeight: 400, overflowY: 'auto', display: 'grid', gap: 8 }}>
           {characters.filter(c => c.imageUrl).map(c => <button type="button" key={c.id} onClick={() => add(newImage(c, design.elements.filter(e => e.type === 'image').length))} style={{ textAlign: 'left', display: 'flex', gap: 8, alignItems: 'center', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: 6 }}>
