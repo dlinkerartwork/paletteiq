@@ -727,26 +727,6 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
       </div>
       </div>
     </div>}
-    <section className="panel" aria-label="Thumbnail upscale job queue" style={{ marginTop: 14, padding: 16 }}>
-      <h3 style={{ marginTop: 0 }}>Upscale job queue</h3>
-      <p className="sub">Jobs for this collection · Updates every 5 seconds. GPU processing continues when PaletteIQ is closed.</p>
-      {upscaleBusy && <p role="status">Submitting {upscaleSubmitting.done} / {upscaleSubmitting.total} thumbnails…</p>}
-      {!queueItems.length ? <p>No thumbnail upscale jobs yet.</p> : <div style={{ overflowX: 'auto' }}><table style={{ width: '100%' }}>
-        <thead><tr><th>Thumbnail</th><th>Job ID</th><th>Scale</th><th>Status</th><th>Elapsed</th><th>Est. remaining</th><th>Result / details</th></tr></thead>
-        <tbody>{queueItems.map(item => {
-          const job = item.upscaleJob;
-          const progress = job ? upscaleJobs[job.id] : undefined;
-          const status = job ? progress?.status || 'checking' : 'succeeded';
-          const label = ({ checking: 'Checking…', queued: 'Queued', processing: 'Processing', succeeded: 'Completed', failed: 'Failed', cancelled: 'Cancelled', cancelling: 'Cancelling', sync_error: 'Status unavailable' } as Record<string, string>)[status] || status;
-          return <tr key={item.id}>
-            <td>{item.name}</td><td title={job?.id}>{job ? job.id.slice(0, 12) : '—'}</td><td>{job ? job.factor + '×' : '—'}</td>
-            <td>{label}</td><td>{queueDuration(progress?.elapsed)}</td>
-            <td>{status === 'processing' ? progress?.remaining != null ? '≈ ' + queueDuration(progress.remaining) : 'Estimating…' : status === 'queued' ? 'Waiting for GPU' : '—'}</td>
-            <td>{progress?.error || (job ? 'Submitted ' + new Date(job.submittedAt).toLocaleString() : item.upscaledImageUrl ? <a href={item.upscaledImageUrl} target="_blank" rel="noreferrer">View JPG</a> : '—')}</td>
-          </tr>;
-        })}</tbody>
-      </table></div>}
-    </section>
     <div className="panel" style={{ marginTop: 14, padding: 16, width: '100%' }}>
       <h3 style={{ marginTop: 0 }}>All collection thumbnails ({designs.length})</h3>
       <p className="sub">Click a thumbnail to show it on the canvas. Check thumbnails for GPU upscale; completed submissions continue on the remote server even if PaletteIQ closes.</p>
@@ -784,6 +764,26 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         <button className="outline-btn" type="button" aria-label="Scroll thumbnails right" onClick={() => scrollGallery(1)} style={{ flexShrink: 0, minWidth: 38 }}>›</button>
       </div>
     </div>
+    <section className="panel" aria-label="Thumbnail upscale job queue" style={{ marginTop: 14, padding: 16 }}>
+      <h3 style={{ marginTop: 0 }}>Upscale job queue</h3>
+      <p className="sub">Jobs for this collection · Updates every 5 seconds. GPU processing continues when PaletteIQ is closed.</p>
+      {upscaleBusy && <p role="status">Submitting {upscaleSubmitting.done} / {upscaleSubmitting.total} thumbnails…</p>}
+      {!queueItems.length ? <p>No thumbnail upscale jobs yet.</p> : <div style={{ overflowX: 'auto' }}><table style={{ width: '100%' }}>
+        <thead><tr><th>Thumbnail</th><th>Job ID</th><th>Scale</th><th>Status</th><th>Elapsed</th><th>Est. remaining</th><th>Result / details</th></tr></thead>
+        <tbody>{queueItems.map(item => {
+          const job = item.upscaleJob;
+          const progress = job ? upscaleJobs[job.id] : undefined;
+          const status = job ? progress?.status || 'checking' : 'succeeded';
+          const label = ({ checking: 'Checking…', queued: 'Queued', processing: 'Processing', succeeded: 'Completed', failed: 'Failed', cancelled: 'Cancelled', cancelling: 'Cancelling', sync_error: 'Status unavailable' } as Record<string, string>)[status] || status;
+          return <tr key={item.id}>
+            <td>{item.name}</td><td title={job?.id}>{job ? job.id.slice(0, 12) : '—'}</td><td>{job ? job.factor + '×' : '—'}</td>
+            <td>{label}</td><td>{queueDuration(progress?.elapsed)}</td>
+            <td>{status === 'processing' ? progress?.remaining != null ? '≈ ' + queueDuration(progress.remaining) : 'Estimating…' : status === 'queued' ? 'Waiting for GPU' : '—'}</td>
+            <td>{progress?.error || (job ? 'Submitted ' + new Date(job.submittedAt).toLocaleString() : item.upscaledImageUrl ? <a href={item.upscaledImageUrl} target="_blank" rel="noreferrer">View JPG</a> : '—')}</td>
+          </tr>;
+        })}</tbody>
+      </table></div>}
+    </section>
     {comparePreview && <UpscaleCompare name={comparePreview.name} originalUrl={comparePreview.originalUrl} upscaledUrl={comparePreview.upscaledUrl} onClose={() => setComparePreview(null)}/>}
   </div>;
 }

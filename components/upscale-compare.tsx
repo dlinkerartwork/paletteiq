@@ -6,6 +6,8 @@ import { useEffect, useRef, useState } from 'react';
 type UpscaleCompareProps = { name: string; originalUrl: string; upscaledUrl: string; onClose: () => void };
 
 export default function UpscaleCompare({ name, originalUrl, upscaledUrl, onClose }: UpscaleCompareProps) {
+  const [imageSizes, setImageSizes] = useState<Record<string, { width: number; height: number } | null>>({});
+  const sizeLabel = (url: string) => imageSizes[url] ? `${imageSizes[url].width} × ${imageSizes[url].height} px` : imageSizes[url] === null ? 'Unavailable' : 'Loading…';
   const [split, setSplit] = useState(50);
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
@@ -64,12 +66,16 @@ export default function UpscaleCompare({ name, originalUrl, upscaledUrl, onClose
           <button className="outline-btn" type="button" onClick={onClose}>Close</button>
         </div>
       </div>
+      <div aria-live="polite" style={{ display: 'flex', gap: 20, flexWrap: 'wrap', color: '#475569', fontSize: 13 }}>
+        <span>Original: {sizeLabel(originalUrl)}</span>
+        <span>Upscaled: {sizeLabel(upscaledUrl)}</span>
+      </div>
       <div ref={canvasRef} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={endGesture} onPointerCancel={endGesture}
         onWheel={event => { if (event.deltaY !== 0) setMagnification(zoom * (event.deltaY < 0 ? 1.15 : 1 / 1.15)); }}
         style={{ position: 'relative', height: 'min(75vh, 780px)', minHeight: 240, overflow: 'hidden', borderRadius: 8, backgroundColor: '#eee', backgroundImage: 'linear-gradient(45deg, #ddd 25%, transparent 25%), linear-gradient(-45deg, #ddd 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #ddd 75%), linear-gradient(-45deg, transparent 75%, #ddd 75%)', backgroundSize: '24px 24px', backgroundPosition: '0 0, 0 12px, 12px -12px, -12px 0', touchAction: 'none', cursor: zoom > 1 ? 'grab' : 'col-resize' }}>
-        <Image unoptimized src={originalUrl} alt={`Original ${name}`} width={4096} height={4096} draggable={false} style={imageStyle}/>
+        <Image unoptimized src={originalUrl} onLoad={event => { const image = event.currentTarget; setImageSizes(old => ({ ...old, [originalUrl]: { width: image.naturalWidth, height: image.naturalHeight } })); }} onError={() => setImageSizes(old => ({ ...old, [originalUrl]: null }))} alt={`Original ${name}`} width={4096} height={4096} draggable={false} style={imageStyle}/>
         <div style={{ position: 'absolute', inset: 0, clipPath: `inset(0 0 0 ${split}%)`, pointerEvents: 'none' }}>
-          <Image unoptimized src={upscaledUrl} alt={`Upscaled ${name}`} width={4096} height={4096} draggable={false} style={imageStyle}/>
+          <Image unoptimized src={upscaledUrl} onLoad={event => { const image = event.currentTarget; setImageSizes(old => ({ ...old, [upscaledUrl]: { width: image.naturalWidth, height: image.naturalHeight } })); }} onError={() => setImageSizes(old => ({ ...old, [upscaledUrl]: null }))} alt={`Upscaled ${name}`} width={4096} height={4096} draggable={false} style={imageStyle}/>
         </div>
         <div style={{ position: 'absolute', left: `${split}%`, top: 0, bottom: 0, width: 2, background: '#fff', boxShadow: '0 0 0 1px #444, 0 0 8px #222', pointerEvents: 'none' }}>
           <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', width: 36, height: 36, display: 'grid', placeItems: 'center', borderRadius: '50%', border: '2px solid #fff', background: '#242424', color: '#fff', fontSize: 17 }}>↔</div>
