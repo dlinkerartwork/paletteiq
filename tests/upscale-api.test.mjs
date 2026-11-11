@@ -44,6 +44,7 @@ function setup() {
     put: async (key,bytes) => {state.objects.set(key, bytes);},
   };
   globalThis.fetch = async (url, init) => {
+    if (url.endsWith('/v1/health')) return Response.json({status:'ok',supported_scales:[2,4,6,8]});
     if (init?.method === 'POST' && url.endsWith('/v1/jobs')) {
       const file = new Uint8Array(await init.body.get('file').arrayBuffer());
       const view = new DataView(file.buffer); const factor=Number(init.body.get('scale'));
@@ -98,4 +99,24 @@ test('unsupported scale is rejected before sending a GPU request', async () => {
   assert.equal((await post(imageApi,{projectId:'project',characterId:'character',factor:5})).status,400);
   assert.equal((await post(thumbnailApi,{projectId:'project',thumbnailId:'thumbnail',sourceUrl:tempRef(temp),factor:5})).status,400);
   assert.equal(state.requests.length,0);
+});
+
+test('6x detects an outdated running GPU server before uploading a job', async () => {
+  setup();
+  const remoteFetch = globalThis.fetch;
+  globalThis.fetch = (url, init) => url.endsWith('/v1/health') ? Promise.resolve(Response.json({status:'ok'})) : remoteFetch(url,init);
+  const response = await post(imageApi,{projectId:'project',characterId:'character',factor:6});
+  assert.equal(response.status,422);
+  assert.match((await response.json()).error,/running GPU server.*6×.*Update and restart/);
+  assert.equal(state.requests.length,0);
+});
+
+test('processing GPU time remaining is forwarded to the client', async () => {
+  setup();
+  await post(imageApi,{projectId:'project',characterId:'character',factor:4});
+  globalThis.fetch = async () => Response.json({status:'processing',elapsed_seconds:30,estimated_remaining_seconds:90});
+  const response = await imageApi.GET(new Request('https://app.test/api/upscale?projectId=project&characterId=character'));
+  const body = await response.json();
+  assert.equal(body.elapsedSeconds,30);
+  assert.equal(body.estimatedRemainingSeconds,90);
 });

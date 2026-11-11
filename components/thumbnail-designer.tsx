@@ -57,6 +57,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const [selectedThumbnailIds, setSelectedThumbnailIds] = useState<Set<string>>(() => new Set());
   const [upscaleSubmitting, setUpscaleSubmitting] = useState({ done: 0, total: 0 });
   const [upscaleStatus, setUpscaleStatus] = useState('');
+  const [upscaleRemaining, setUpscaleRemaining] = useState<Record<string, number | null>>({});
   const [imageProvider, setImageProvider] = useState<'openai' | 'gemini'>('openai');
   const [imageModel, setImageModel] = useState('gpt-image-1-mini');
   const [imageQuality, setImageQuality] = useState<'low' | 'medium' | 'high'>('low');
@@ -474,7 +475,8 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
       try {
         for (const item of designs.filter(d => d.upscaleJob)) {
           const response = await fetch('/api/thumbnail-upscale?projectId=' + encodeURIComponent(projectId) + '&thumbnailId=' + encodeURIComponent(item.id));
-          const result = await response.json() as { status?: string; url?: string; error?: string };
+          const result = await response.json() as { status?: string; url?: string; error?: string; estimatedRemainingSeconds?: number | null };
+          setUpscaleRemaining(old => ({ ...old, [item.id]: result.estimatedRemainingSeconds ?? null }));
           if (!response.ok) throw new Error(result.error || 'GPU status unavailable');
           if (stopped) return;
           if (result.status === 'succeeded' && result.url) {
@@ -730,7 +732,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
             <strong style={{ display: 'block', marginTop: 7, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</strong>
             <small>{item.aiImageUrl ? 'AI image' : 'Editable design'} · {item.width}×{item.height}</small>
             </button>
-            <small style={{ display: 'block', marginTop: 5 }}>{item.upscaleJob ? 'GPU queued / processing' : item.upscaledImageUrl ? '✓ Upscale completed' : 'Not upscaled'}</small>
+            <small style={{ display: 'block', marginTop: 5 }}>{item.upscaleJob ? (upscaleRemaining[item.id] != null ? 'Est. remaining: ' + Math.ceil(upscaleRemaining[item.id]! / 60) + ' min' : 'Time remaining: waiting for GPU / estimating…') : item.upscaledImageUrl ? '✓ Upscale completed' : 'Not upscaled'}</small>
             {item.upscaledImageUrl && <a href={item.upscaledImageUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>View upscale</a>}
             {item.aiImageUrl && <a href={item.aiImageUrl} download style={{ display: 'block', fontSize: 12 }}>View AI image</a>}
           </div>

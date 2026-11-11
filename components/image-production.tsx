@@ -132,7 +132,7 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
   const [upscaleFactor, setUpscaleFactor] = useState(4);
   const [upscaling, setUpscaling] = useState(false);
   const [upscalePreview, setUpscalePreview] = useState<{ name: string; originalUrl: string; upscaledUrl: string } | null>(null);
-  const [remoteProgress, setRemoteProgress] = useState<Record<string, { status: string; elapsed: number }>>({});
+  const [remoteProgress, setRemoteProgress] = useState<Record<string, { status: string; elapsed: number; remaining?: number | null }>>({});
   useEffect(() => {
     let live = true;
     void fetch('/api/settings').then(async r => await r.json() as { preferences?: { upscaleFactor?: number } }).then(data => {
@@ -166,11 +166,11 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
             }
             continue;
           }
-          const result = await response.json() as { status: string; error?: string; elapsedSeconds?: number };
+          const result = await response.json() as { status: string; error?: string; elapsedSeconds?: number; estimatedRemainingSeconds?: number | null };
           if (stopped) return;
           if (result.status === 'succeeded') { window.location.reload(); return; }
           if (result.status === 'cancelled') { window.location.reload(); return; }
-          setRemoteProgress(old => ({ ...old, [characterId]: { status: result.status, elapsed: result.elapsedSeconds || 0 } }));
+          setRemoteProgress(old => ({ ...old, [characterId]: { status: result.status, elapsed: result.elapsedSeconds || 0, remaining: result.estimatedRemainingSeconds } }));
           if (result.status === 'failed') setMessage(`Remote upscale failed: ${result.error || 'Unknown error'}`);
           else setMessage(`Remote GPU upscale: ${result.status} · ${Math.floor((result.elapsedSeconds || 0) / 60)}m ${Math.floor((result.elapsedSeconds || 0) % 60)}s. This job continues on the GPU server.`);
         }
@@ -397,7 +397,7 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
             const status = progress?.status || 'queued';
             const seconds = progress?.elapsed || Math.max(0, Math.floor((Date.now() - (c.upscaleJob?.submittedAt || Date.now())) / 1000));
             return <div key={c.id} className="batch-job remote-upscale-job">
-              <div className="batch-job-top"><div><b title={c.name}>{c.name}</b><small>Real-ESRGAN {c.upscaleJob?.factor ?? upscaleFactor}× · {Math.floor(seconds / 60)}m {Math.floor(seconds % 60)}s</small></div><span className={`status ${status === 'failed' || status === 'sync_error' ? 'error' : 'ready'}`}>{status === 'sync_error' ? 'Import failed' : status}</span></div>
+              <div className="batch-job-top"><div><b title={c.name}>{c.name}</b><small>Real-ESRGAN {c.upscaleJob?.factor ?? upscaleFactor}× · {Math.floor(seconds / 60)}m {Math.floor(seconds % 60)}s · {progress?.remaining != null ? `Est. remaining: ${Math.ceil(progress.remaining / 60)} min` : status === 'queued' ? 'Time remaining: waiting for GPU' : 'Time remaining: estimating…'}</small></div><span className={`status ${status === 'failed' || status === 'sync_error' ? 'error' : 'ready'}`}>{status === 'sync_error' ? 'Import failed' : status}</span></div>
               <div className={`remote-activity-track ${status === 'processing' ? 'is-processing' : ''}`} role="progressbar" aria-label={`Upscale ${c.name}: ${status}`} aria-valuetext={status === 'processing' ? 'Processing on GPU' : status}><i/></div>
               <button type="button" className="outline-btn remote-job-cancel" onClick={() => void cancelRemoteUpscale(c)}>Cancel</button>
             </div>;

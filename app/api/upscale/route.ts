@@ -11,7 +11,7 @@ import { normalizeUpscaleServerUrl } from '@/lib/upscale-server-url';
 type RemoteJob = { id: string; sourceUrl: string; originalUrl?: string; factor: 2 | 4 | 6 | 8; requireTransparency: boolean; qc: boolean; submittedAt: number };
 type Character = { id: string; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: RemoteJob };
 type ProjectData = { characters: Character[] };
-type RemoteStatus = { status: 'queued' | 'processing' | 'cancelling' | 'cancelled' | 'completed' | 'failed'; error?: string | null; qc?: unknown; elapsed_seconds?: number; started_at?: number | null };
+type RemoteStatus = { status: 'queued' | 'processing' | 'cancelling' | 'cancelled' | 'completed' | 'failed'; error?: string | null; qc?: unknown; elapsed_seconds?: number; estimated_remaining_seconds?: number | null; started_at?: number | null };
 
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 const variables = () => env as unknown as Record<string, string | undefined>;
@@ -111,6 +111,10 @@ export async function POST(req: Request) {
     const prefs = saved[0] ? JSON.parse(saved[0].preferences) as Record<string, unknown> : {};
     const factor = body.factor ?? prefs.upscaleFactor ?? 4;
     if (![2,4,6,8].includes(factor as number)) return bad('Choose 2×, 4×, 6× or 8×');
+    if (Number(factor) > 4) {
+      const health = await (await remote(user.userId, '/v1/health')).json() as { supported_scales?: number[] };
+      if (!health.supported_scales?.includes(Number(factor))) return bad('The running GPU server does not advertise ' + factor + '× support. Update and restart the server at the GPU Server URL in Settings. If installed as a Windows Service/EXE, updating a separate Git checkout does not update that installation.', 422);
+    }
     const model = typeof prefs.upscaleModel === 'string' ? prefs.upscaleModel : 'realesrgan-x4plus';
     if (!['realesrgan-x4plus','realesrgan-x4plus-anime','realesrnet-x4plus','realesr-animevideov3','real-hat-gan-sharper-x4'].includes(model)) return bad('Invalid remote model');
     const strength = typeof prefs.upscaleCleanupStrength === 'string' ? prefs.upscaleCleanupStrength : 'low';
@@ -169,7 +173,7 @@ export async function GET(req: Request) {
       }
       return Response.json({ status: 'cancelled', id: task.id, elapsedSeconds: result.elapsed_seconds });
     }
-    if (result.status !== 'completed') return Response.json({ status: result.status, id: task.id, elapsedSeconds: result.elapsed_seconds, startedAt: result.started_at });
+    if (result.status !== 'completed') return Response.json({ status: result.status, id: task.id, elapsedSeconds: result.elapsed_seconds, estimatedRemainingSeconds: result.estimated_remaining_seconds ?? null, startedAt: result.started_at });
     syncStage = 'download completed upscale PNG';
     const response = await remote(user.userId, `/v1/jobs/${task.id}/result`);
     const length = Number(response.headers.get('content-length') || 0);

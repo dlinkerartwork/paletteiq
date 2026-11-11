@@ -12,7 +12,7 @@ import { jpegDimensions } from '@/lib/jpeg-dimensions';
 type ThumbnailJob = { id: string; sourceUrl: string; factor: 2 | 4 | 6 | 8; submittedAt: number; previousUpscaledUrl?: string | null };
 type Thumbnail = { id: string; aiImageUrl?: string; renderedImageUrl?: string; upscaledImageUrl?: string; upscaleJob?: ThumbnailJob };
 type ProjectData = { characters: Array<{ id: string }>; thumbnails?: Thumbnail[] };
-type RemoteStatus = { status: 'queued' | 'processing' | 'cancelled' | 'completed' | 'failed'; error?: string | null; elapsed_seconds?: number; qc?: unknown };
+type RemoteStatus = { status: 'queued' | 'processing' | 'cancelled' | 'completed' | 'failed'; error?: string | null; elapsed_seconds?: number; estimated_remaining_seconds?: number | null; qc?: unknown };
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 const variables = () => env as unknown as Record<string, string | undefined>;
 const storage = () => nativeAssetBucket() ?? env.BUCKET;
@@ -96,6 +96,10 @@ export async function POST(req: Request) {
     const prefs = settings[0] ? JSON.parse(settings[0].preferences) as Record<string, unknown> : {};
     const factor = body.factor ?? prefs.upscaleFactor ?? 4;
     if (![2,4,6,8].includes(factor as number)) return bad('Choose 2×, 4×, 6× or 8×');
+    if (Number(factor) > 4) {
+      const health = await (await remote(user.userId, '/v1/health')).json() as { supported_scales?: number[] };
+      if (!health.supported_scales?.includes(Number(factor))) return bad('The running GPU server does not advertise ' + factor + '× support. Update and restart the server at the GPU Server URL in Settings. If installed as a Windows Service/EXE, updating a separate Git checkout does not update that installation.', 422);
+    }
     const model = typeof prefs.upscaleModel === 'string' ? prefs.upscaleModel : 'realesrgan-x4plus';
     if (!['realesrgan-x4plus','realesrgan-x4plus-anime','realesrnet-x4plus','realesr-animevideov3','real-hat-gan-sharper-x4'].includes(model)) return bad('Invalid upscale model');
     const form = new FormData();
@@ -129,7 +133,7 @@ export async function GET(req: Request) {
     const status = await (await remote(user.userId, '/v1/jobs/' + task.id)).json() as RemoteStatus;
     if (status.status === 'failed') return Response.json({ status: 'failed', error: status.error, id: task.id });
     if (status.status === 'cancelled') return Response.json({ status: 'cancelled', id: task.id });
-    if (status.status !== 'completed') return Response.json({ status: status.status, id: task.id, elapsedSeconds: status.elapsed_seconds });
+    if (status.status !== 'completed') return Response.json({ status: status.status, id: task.id, elapsedSeconds: status.elapsed_seconds, estimatedRemainingSeconds: status.estimated_remaining_seconds ?? null });
     const res = await remote(user.userId, '/v1/jobs/' + task.id + '/result?format=jpg');
     const bytes = new Uint8Array(await res.arrayBuffer());
     if (bytes.byteLength > 100 * 1024 * 1024) return bad('Upscaled image exceeds 100 MB', 413);
