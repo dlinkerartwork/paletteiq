@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import UpscaleCompare from '@/components/upscale-compare';
 import { Download, Plus, Trash2, Copy, Undo2, Redo2, WandSparkles, RotateCcw } from 'lucide-react';
 
 export type ThumbnailElement = {
@@ -52,6 +53,8 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const [uploadedReference, setUploadedReference] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
   const [imageBusy, setImageBusy] = useState(false);
+  const [comparePreview, setComparePreview] = useState<{ name: string; originalUrl: string; upscaledUrl: string; temporary?: boolean } | null>(null);
+  useEffect(() => () => { if (comparePreview?.temporary) URL.revokeObjectURL(comparePreview.originalUrl); }, [comparePreview]);
   const [upscaleBusy, setUpscaleBusy] = useState(false);
   const [upscaleFactor, setUpscaleFactor] = useState<2 | 4 | 6 | 8>(4);
   const [selectedThumbnailIds, setSelectedThumbnailIds] = useState<Set<string>>(() => new Set());
@@ -427,6 +430,14 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     if (!result.url) throw new Error('Thumbnail upload returned no URL');
     return result.url;
   };
+  const compareThumbnail = async (item: ThumbnailDesign) => {
+    if (!item.upscaledImageUrl) return;
+    try {
+      const originalUrl = item.aiImageUrl || item.renderedImageUrl;
+      const source = originalUrl || URL.createObjectURL(await renderDesignBlob(item, 'jpeg'));
+      setComparePreview({ name: item.name, originalUrl: source, upscaledUrl: item.upscaledImageUrl, temporary: !originalUrl });
+    } catch (error) { setMessage('Could not open comparison: ' + (error instanceof Error ? error.message : String(error))); }
+  };
   const upscaleSelectedThumbnails = async () => {
     if (upscaleBusy) return;
     const targets = latestDesignsRef.current.filter(item => selectedThumbnailIds.has(item.id) && !item.upscaleJob);
@@ -765,13 +776,14 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
             <small>{item.aiImageUrl ? 'AI image' : 'Editable design'} · {item.width}×{item.height}</small>
             </button>
             <small style={{ display: 'block', marginTop: 5 }}>{item.upscaleJob ? (upscaleRemaining[item.id] != null ? 'Est. remaining: ' + Math.ceil(upscaleRemaining[item.id]! / 60) + ' min' : 'Time remaining: waiting for GPU / estimating…') : item.upscaledImageUrl ? '✓ Upscale completed' : 'Not upscaled'}</small>
-            {item.upscaledImageUrl && <a href={item.upscaledImageUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>View upscale</a>}
-            {item.aiImageUrl && <a href={item.aiImageUrl} download style={{ display: 'block', fontSize: 12 }}>View AI image</a>}
+            {item.upscaledImageUrl ? <button type="button" className="outline-btn" style={{ fontSize: 12, marginTop: 6 }} onClick={() => void compareThumbnail(item)}>Compare images</button>
+              : item.aiImageUrl && <a href={item.aiImageUrl} download style={{ display: 'block', fontSize: 12 }}>View AI image</a>}
           </div>
         ))}
         </div>
         <button className="outline-btn" type="button" aria-label="Scroll thumbnails right" onClick={() => scrollGallery(1)} style={{ flexShrink: 0, minWidth: 38 }}>›</button>
       </div>
     </div>
+    {comparePreview && <UpscaleCompare name={comparePreview.name} originalUrl={comparePreview.originalUrl} upscaledUrl={comparePreview.upscaledUrl} onClose={() => setComparePreview(null)}/>}
   </div>;
 }
