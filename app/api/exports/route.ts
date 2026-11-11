@@ -21,7 +21,7 @@ export async function POST(request: Request) {
   if (typeof body.projectId !== 'string' || !['selected','all','package'].includes(body.scope || '')) return Response.json({ error: 'Invalid export request' }, { status: 400 });
   const rows = await getDb().select().from(projects).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId))).limit(1);
   if (!rows.length) return Response.json({ error: 'Collection not found' }, { status: 404 });
-  const project = JSON.parse(rows[0].data) as { name: string; theme?: string; subtheme?: string; microtheme?: string; listing?: unknown; seoReview?: unknown; characters: Array<{ id: string; name: string; imageUrl?: string; upscaledImageUrl?: string }> };
+  const project = JSON.parse(rows[0].data) as { name: string; theme?: string; subtheme?: string; microtheme?: string; listing?: unknown; seoReview?: unknown; characters: Array<{ id: string; name: string; imageUrl?: string; upscaledImageUrl?: string }>; thumbnails?: Array<{ id: string; name: string; width: number; height: number; background?: string; backgroundImageUrl?: string; aiImageUrl?: string; elements?: unknown[] }> };
   if (body.scope === 'package' && !(project.listing && typeof project.listing === 'object' && typeof (project.listing as { title?: string }).title === 'string' && (project.listing as { title: string }).title.trim())) return Response.json({ error: 'Create and save an Etsy listing draft before exporting the final package.' }, { status: 400 });
   const selectedIds = new Set(Array.isArray(body.ids) ? body.ids.filter(v => typeof v === 'string') : []);
   const chosen = project.characters.filter(c => (c.upscaledImageUrl || c.imageUrl) && (body.scope !== 'selected' || selectedIds.has(c.id)));
@@ -46,6 +46,34 @@ export async function POST(request: Request) {
     const key = batchId ? batchAssetKey(user.userId, match[1], extension, batchId) : `generated/${user.userId}/${match[1]}.${extension}`;
     if (!await bucket.head(key)) return Response.json({ error: `Image file missing for ${character.name}` }, { status: 409 });
     entries.push({ name: `images/${imageFileName(character.name, index, extension)}`, stream: async () => (await bucket.get(key))?.body || null });
+  }
+  // Include every stored AI thumbnail image with both image-only and listing-package exports.
+  // Manual layer-based designs remain editable and are also exported as JSON.
+  const thumbnails = Array.isArray(project.thumbnails) ? project.thumbnails.slice(0, 200) : [];
+  const thumbnailFiles: Array<{ id: string; name: string; file: string; width: number; height: number; imageAvailable: boolean }> = [];
+  for (const [index, thumbnail] of thumbnails.entries()) {
+    const label = slug(thumbnail.name || 'thumbnail-' + (index + 1));
+    const fileNameBase = 'thumbnails/' + String(index + 1).padStart(3, '0') + '-' + label;
+    let includedImage = false;
+    if (typeof thumbnail.aiImageUrl === 'string') {
+      let url: URL;
+      try { url = new URL(thumbnail.aiImageUrl, 'https://app.local'); }
+      catch { return Response.json({ error: 'Invalid saved thumbnail URL' }, { status: 400 }); }
+      const id = url.searchParams.get('assetId') || '';
+      const format = url.searchParams.get('format') || '';
+      if (url.origin !== 'https://app.local' || url.pathname !== '/api/thumbnail-background' || url.searchParams.get('projectId') !== body.projectId || !/^[0-9a-f-]{36}$/.test(id) || !['png','jpg'].includes(format)) {
+        return Response.json({ error: 'Invalid saved thumbnail reference for ' + thumbnail.name }, { status: 400 });
+      }
+      const key = 'generated/' + user.userId + '/' + id + '.' + format;
+      if (!await bucket.head(key)) return Response.json({ error: 'Thumbnail image missing: ' + thumbnail.name }, { status: 409 });
+      entries.push({ name: fileNameBase + '.' + format, stream: async () => (await bucket.get(key))?.body || null });
+      includedImage = true;
+    }
+    thumbnailFiles.push({ id: thumbnail.id, name: thumbnail.name, file: fileNameBase + (includedImage ? '.' + (new URL(thumbnail.aiImageUrl!, 'https://app.local')).searchParams.get('format') : '.json'), width: thumbnail.width, height: thumbnail.height, imageAvailable: includedImage });
+  }
+  if (thumbnails.length) {
+    entries.push({ name: 'thumbnails/thumbnail-designs.json', stream: file(JSON.stringify(thumbnails, null, 2)) });
+    entries.push({ name: 'thumbnails/manifest.json', stream: file(JSON.stringify(thumbnailFiles, null, 2)) });
   }
   if (body.scope === 'package') {
     const listing = normalizeListing(project.listing);
