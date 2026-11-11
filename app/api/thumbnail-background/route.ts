@@ -20,6 +20,39 @@ export async function POST(req: Request) {
   const projectId = form?.get('projectId');
   const file = form?.get('file');
   if (typeof projectId !== 'string' || !await belongsToOwner(projectId, user.userId)) return bad('Save the collection before uploading a background.', 404);
+  const uploadId = form?.get('uploadId');
+  const action = form?.get('action');
+  if (typeof uploadId === 'string' && /^[0-9a-f-]{36}$/.test(uploadId) && (action === 'chunk' || action === 'complete')) {
+    const storage = bucket();
+    if (!storage) return bad('Image storage is not configured.', 503);
+    const count = Number(form?.get('count'));
+    if (!Number.isInteger(count) || count < 1 || count > 30) return bad('Invalid thumbnail upload parts');
+    const prefix = 'thumbnail-upload/' + user.userId + '/' + projectId + '/' + uploadId + '/';
+    if (action === 'chunk') {
+      const index = Number(form?.get('index'));
+      if (!(file instanceof File) || !Number.isInteger(index) || index < 0 || index >= count || file.size < 1 || file.size > 1_200_000) return bad('Invalid thumbnail upload chunk', 413);
+      await storage.put(prefix + index, new Uint8Array(await file.arrayBuffer()));
+      return Response.json({ ok: true });
+    }
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    for (let i = 0; i < count; i++) {
+      const part = await storage.get(prefix + i);
+      if (!part) return bad('Upload chunk ' + (i + 1) + ' is missing. Retry Save designs.', 409);
+      const bytes = new Uint8Array(await part.arrayBuffer());
+      total += bytes.length;
+      if (total > 20_000_000) return bad('Rendered thumbnail PNG is larger than 20 MB.', 413);
+      chunks.push(bytes);
+    }
+    const assembled = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) { assembled.set(chunk, offset); offset += chunk.length; }
+    if (!(assembled.length >= 8 && assembled[0] === 137 && assembled[1] === 80 && assembled[2] === 78 && assembled[3] === 71)) return bad('Invalid rendered thumbnail PNG');
+    const assetId = crypto.randomUUID();
+    await storage.put('generated/' + user.userId + '/' + assetId + '.png', assembled);
+    await Promise.all(chunks.map((_, i) => storage.delete(prefix + i)));
+    return Response.json({ url: '/api/thumbnail-background?projectId=' + encodeURIComponent(projectId) + '&assetId=' + assetId + '&format=png' });
+  }
   if (!(file instanceof File)) return bad('Choose a PNG or JPG background image');
   if (file.size < 1 || file.size > 20_000_000) return bad('Background image must be 20 MB or smaller', 413);
   if (!['image/png', 'image/jpeg'].includes(file.type)) return bad('Choose a PNG or JPG image');
