@@ -365,7 +365,7 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
         }
         ctx.restore();
       }
-      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, format === 'png' ? 'image/png' : 'image/jpeg', .95));
+      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, format === 'png' ? 'image/png' : 'image/jpeg', .92));
       if (!blob) throw new Error('Could not encode thumbnail');
       return blob;
   };
@@ -383,7 +383,7 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
     if (blob.size <= 1_000_000) {
       const form = new FormData();
       form.set('projectId', projectId);
-      form.set('file', new File([blob], 'thumbnail.png', { type: 'image/png' }));
+      form.set('file', new File([blob], 'thumbnail.jpg', { type: 'image/jpeg' }));
       const result = await send(form);
       if (!result.url) throw new Error('Thumbnail upload returned no URL');
       return result.url;
@@ -413,15 +413,29 @@ export default function ThumbnailDesigner({ title, aiDefaults, projectId, charac
     const operation = saveQueueRef.current.catch(() => {}).then(async () => {
       const prepared: ThumbnailDesign[] = [];
       for (const item of snapshot) {
-        if (item.aiImageUrl) { prepared.push(item); continue; }
-        // Cached PNG is reusable until the editable content changes.
-        const signature = JSON.stringify({ width: item.width, height: item.height, background: item.background, backgroundImageUrl: item.backgroundImageUrl, elements: item.elements });
+        if (item.aiImageUrl) {
+          if (item.aiImageUrl.includes('format=jpg')) { prepared.push(item); continue; }
+          // Preserve the AI artwork, but persist its collection thumbnail as JPEG.
+          const original = await loadForExport(item.aiImageUrl);
+          const canvas = document.createElement('canvas');
+          canvas.width = original.naturalWidth; canvas.height = original.naturalHeight;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) throw new Error('Could not convert AI thumbnail to JPEG');
+          ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(original, 0, 0);
+          const jpeg = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', .92));
+          if (!jpeg) throw new Error('Could not encode AI thumbnail as JPEG');
+          prepared.push({ ...item, aiImageUrl: await uploadRenderedThumbnail(jpeg) });
+          continue;
+        }
+        // Cached JPEG is reusable until the editable content changes.
+        const signature = JSON.stringify({ format: 'jpeg', width: item.width, height: item.height, background: item.background, backgroundImageUrl: item.backgroundImageUrl, elements: item.elements });
         const cached = renderCacheRef.current.get(item.id);
         if (cached?.signature === signature) {
           prepared.push({ ...item, renderedImageUrl: cached.url });
           continue;
         }
-        const blob = await renderDesignBlob(item);
+        const blob = await renderDesignBlob(item, 'jpeg');
         const storedUrl = await uploadRenderedThumbnail(blob).catch(error => { throw new Error('Could not store thumbnail ' + item.name + ': ' + (error instanceof Error ? error.message : String(error))); });
         renderCacheRef.current.set(item.id, { signature, url: storedUrl });
         prepared.push({ ...item, renderedImageUrl: storedUrl });
