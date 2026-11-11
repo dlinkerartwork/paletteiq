@@ -8,7 +8,7 @@ import { batchAssetKey } from '@/lib/batch-assets';
 import { decryptCredential } from '@/lib/credentials';
 import { normalizeUpscaleServerUrl } from '@/lib/upscale-server-url';
 
-type RemoteJob = { id: string; sourceUrl: string; factor: 2 | 4; requireTransparency: boolean; qc: boolean; submittedAt: number };
+type RemoteJob = { id: string; sourceUrl: string; originalUrl?: string; factor: 2 | 4 | 6 | 8; requireTransparency: boolean; qc: boolean; submittedAt: number };
 type Character = { id: string; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: RemoteJob };
 type ProjectData = { characters: Character[] };
 type RemoteStatus = { status: 'queued' | 'processing' | 'cancelling' | 'cancelled' | 'completed' | 'failed'; error?: string | null; qc?: unknown; elapsed_seconds?: number; started_at?: number | null };
@@ -71,7 +71,7 @@ export async function POST(req: Request) {
   try {
     const user = await getChatGPTUser();
     if (!user) return bad('Sign in required', 401);
-    const body = await req.json() as { projectId?: string; characterId?: string; action?: 'cancel' };
+    const body = await req.json() as { projectId?: string; characterId?: string; action?: 'cancel'; factor?: number };
     if (!body.projectId || !body.characterId) return bad('Select a generated image');
     const { row, data } = await ownedProject(user.userId, body.projectId);
     const character = data.characters.find(c => c.id === body.characterId);
@@ -101,20 +101,21 @@ export async function POST(req: Request) {
       }
       return Response.json({ id: staleId, status, cleared: missing || status === 'cancelled' });
     }
+    const sourceUrl = character.upscaledImageUrl || character.imageUrl;
     if (character.upscaleJob) {
-      if (character.upscaleJob.sourceUrl !== character.imageUrl) return bad('Original image changed; previous job requires review', 409);
+      if ((character.upscaleJob.sourceUrl !== sourceUrl || (character.upscaleJob.originalUrl && character.upscaleJob.originalUrl !== character.imageUrl))) return bad('Original image changed; previous job requires review', 409);
       const previous = await (await remote(user.userId, `/v1/jobs/${character.upscaleJob.id}`)).json() as RemoteStatus;
       if (!['failed', 'cancelled'].includes(previous.status)) return Response.json({ id: character.upscaleJob.id, status: previous.status });
     }
     const saved = await getDb().select().from(studioSettings).where(eq(studioSettings.owner, user.userId)).limit(1);
     const prefs = saved[0] ? JSON.parse(saved[0].preferences) as Record<string, unknown> : {};
-    const factor: 2 | 4 = prefs.upscaleFactor === 2 ? 2 : 4;
+    const factor = body.factor ?? prefs.upscaleFactor ?? 4;
+    if (![2,4,6,8].includes(factor as number)) return bad('Choose 2×, 4×, 6× or 8×');
     const model = typeof prefs.upscaleModel === 'string' ? prefs.upscaleModel : 'realesrgan-x4plus';
     if (!['realesrgan-x4plus','realesrgan-x4plus-anime','realesrnet-x4plus','realesr-animevideov3','real-hat-gan-sharper-x4'].includes(model)) return bad('Invalid remote model');
-    if (model === 'real-hat-gan-sharper-x4' && factor !== 4) return bad('Real-HAT Sharper supports only 4×', 422);
     const strength = typeof prefs.upscaleCleanupStrength === 'string' ? prefs.upscaleCleanupStrength : 'low';
     if (!['low','medium','high'].includes(strength)) return bad('Invalid cleanup strength');
-    const obj = await storage()?.get(sourceKey(user.userId, character.imageUrl));
+    const obj = await storage()?.get(sourceKey(user.userId, sourceUrl));
     if (!obj) return bad('Source PNG not found', 404);
     const bytes = new Uint8Array(await obj.arrayBuffer());
     if (bytes.length > 30 * 1024 * 1024) return bad('Source PNG exceeds 30 MB', 413);
@@ -130,8 +131,8 @@ export async function POST(req: Request) {
     // Re-read latest collection to avoid overwriting unrelated edits made while uploading.
     const latest = await ownedProject(user.userId, body.projectId);
     const target = latest.data.characters.find(c => c.id === body.characterId);
-    if (!target || target.imageUrl !== character.imageUrl || target.upscaleJob?.id !== character.upscaleJob?.id) return bad('Original image changed or another upscale started; remote job requires manual review', 409);
-    target.upscaleJob = { id: submitted.id, sourceUrl: character.imageUrl, factor, requireTransparency: prefs.upscaleRequireTransparency !== false, qc: prefs.upscaleQc !== false, submittedAt: Date.now() };
+    if (!target || (target.upscaledImageUrl || target.imageUrl) !== sourceUrl || target.imageUrl !== character.imageUrl || target.upscaleJob?.id !== character.upscaleJob?.id) return bad('Original image changed or another upscale started; remote job requires manual review', 409);
+    target.upscaleJob = { id: submitted.id, sourceUrl, originalUrl: character.imageUrl, factor: factor as RemoteJob['factor'], requireTransparency: prefs.upscaleRequireTransparency !== false, qc: prefs.upscaleQc !== false, submittedAt: Date.now() };
     await getDb().update(projects).set({ data: JSON.stringify(latest.data), updatedAt: Date.now() }).where(and(eq(projects.id, row.id), eq(projects.owner, user.userId)));
     return Response.json({ id: submitted.id, status: 'queued' });
   } catch (e) { return bad(e instanceof Error ? e.message : String(e), 502); }
@@ -155,7 +156,7 @@ export async function GET(req: Request) {
     if (!character) return bad('Character not found', 404);
     const task = character.upscaleJob;
     if (!task) return Response.json({ status: character.upscaledImageUrl ? 'succeeded' : 'idle', url: character.upscaledImageUrl });
-    if (character.imageUrl !== task.sourceUrl) return bad('Original image changed during upscale; previous job was not applied', 409);
+    if (((character.upscaledImageUrl || character.imageUrl) !== task.sourceUrl || (task.originalUrl && task.originalUrl !== character.imageUrl))) return bad('Original image changed during upscale; previous job was not applied', 409);
     syncStage = 'read remote job status';
     const result = await (await remote(user.userId, `/v1/jobs/${task.id}`)).json() as RemoteStatus;
     if (result.status === 'failed') return Response.json({ status: 'failed', error: result.error || 'Remote upscale failed', id: task.id });
@@ -186,7 +187,7 @@ export async function GET(req: Request) {
     syncStage = 'read latest collection state';
     const latest = await ownedProject(user.userId, projectId);
     const target = latest.data.characters.find(c => c.id === characterId);
-    if (!target || target.imageUrl !== task.sourceUrl || target.upscaleJob?.id !== task.id) return bad('Collection changed before upscale completed', 409);
+    if (!target || (target.upscaledImageUrl || target.imageUrl) !== task.sourceUrl || (task.originalUrl && target.imageUrl !== task.originalUrl) || target.upscaleJob?.id !== task.id) return bad('Collection changed before upscale completed', 409);
     const assetId = crypto.randomUUID();
     const bucket = storage();
     if (!bucket) return bad('Storage unavailable', 503);
