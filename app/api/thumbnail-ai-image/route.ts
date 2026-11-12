@@ -8,7 +8,7 @@ import { userCredential, userGeminiKeys } from '@/lib/credentials';
 import { nativeAssetBucket } from '@/lib/native-bridge';
 
 type LayoutItem = { type: 'image' | 'text'; x: number; y: number; width: number; height: number; text?: string };
-type RequestBody = { projectId?: string; provider?: string; model?: string; quality?: string; width?: number; height?: number; layout?: LayoutItem[]; includeTitle?: boolean; mode?: 'full-thumbnail' | 'background-only' };
+type RequestBody = { projectId?: string; provider?: string; model?: string; quality?: string; width?: number; height?: number; layout?: LayoutItem[]; includeTitle?: boolean; mode?: 'full-thumbnail' | 'background-only'; backgroundStyle?: 'watercolor' | 'paper' | 'gradient' | 'botanical' | 'vintage'; backgroundIntensity?: 'soft' | 'balanced' | 'vibrant' };
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 const bucket = () => nativeAssetBucket() ?? env.BUCKET;
 
@@ -22,6 +22,10 @@ export async function POST(req: Request) {
   const mode = input.mode || 'full-thumbnail';
   if (!['full-thumbnail', 'background-only'].includes(mode)) return bad('Invalid image generation mode');
   if (mode === 'background-only' && input.provider !== 'openai') return bad('Background-only generation uses OpenAI');
+  const backgroundStyle = input.backgroundStyle || 'watercolor';
+  const backgroundIntensity = input.backgroundIntensity || 'balanced';
+  if (!['watercolor', 'paper', 'gradient', 'botanical', 'vintage'].includes(backgroundStyle)) return bad('Invalid background style');
+  if (!['soft', 'balanced', 'vibrant'].includes(backgroundIntensity)) return bad('Invalid background intensity');
   const rows = await getDb().select().from(projects).where(and(eq(projects.id, input.projectId), eq(projects.owner, user.userId))).limit(1);
   if (!rows.length) return bad('Collection not found', 404);
   const provider = input.provider;
@@ -41,16 +45,31 @@ export async function POST(req: Request) {
     width: Math.max(1, Math.min(120, Number(item.width) || 10)), height: Math.max(1, Math.min(120, Number(item.height) || 10)),
     text: item.type === 'text' ? String(item.text || '').slice(0, 120) : undefined
   })) : [];
+  const styleGuidance: Record<string, string> = {
+    watercolor: 'Distinct layered watercolor pigment washes sweeping diagonally across the canvas, visible wet-on-wet edges, pigment blooms and delicate splatter-like granulation. The composition has artistic motion and meaningful color variation.',
+    paper: 'Beautiful artisanal paper surface with clearly perceptible handmade fibers, subtle embossed textures, torn paper collage shapes and softly tinted overlapping paper layers.',
+    gradient: 'Rich multidirectional pastel gradient with softly radiating colored light, warm-to-cool color transitions, translucent overlapping color fields and elegant depth.',
+    botanical: 'Abstract botanical-inspired filigree silhouettes and soft organic leafy shadow patterns around the outer corners. Keep these decorative background shapes abstract, not individual clipart illustrations.',
+    vintage: 'Vintage decorative printing texture, softly weathered colored parchment, faded ornamental corner flourishes, halftone pigment details and gentle aged-paper tonal variation.'
+  };
+  const intensityGuidance: Record<string, string> = {
+    soft: 'Understated but undeniably visible artwork: at least three distinct pastel color regions, recognizable textural details, and a noticeable vignette. Avoid near-white blank surfaces.',
+    balanced: 'Clearly visible decorative design with medium contrast, multiple complementary colored areas and varied textures. Decoration should be recognizable at small Etsy search thumbnail size.',
+    vibrant: 'Expressive colorful decorative backdrop with stronger saturation, layered visual depth and lively abstract detailing. Keep a quiet central text zone despite the energetic edges.'
+  };
   const prompt = mode === 'background-only'
     ? [
-        'Create ONLY a decorative BACKGROUND for an Etsy digital clipart product thumbnail.',
-        'The background must contain NO characters, animals, flowers as isolated clipart, portraits, objects resembling the collection subjects, product mockups, text, lettering, digits, logos, watermarks, badges or typography.',
-        'Design a subtle sophisticated material backdrop, atmospheric watercolor washes, delicate gradients, fine paper grain and soft ornamental texture with generous clear space.',
-        'IMPORTANT: The actual original clipart and editable typography will be composited on top by another system. Do not draw them or imitate them in any way.',
-        'Collection styling context:', JSON.stringify({ theme: collection.theme, subtheme: collection.subtheme, style: collection.style }).slice(0,900),
-        'Approximate regions reserved for later placement of original assets and typography (percent coordinates):', JSON.stringify(layout).slice(0,3500),
-        'Keep these reserved regions visually calm, maintain legibility and avoid strong distracting contrasts. Square image, no borders, no frames, no text.'
-      ].join('\n')
+        'Create a VISIBLY DECORATED, PREMIUM, ORIGINAL SQUARE BACKGROUND ARTWORK for an Etsy digital clipart bundle listing.',
+        'CRITICAL: The entire canvas must have obvious visual design. A plain white, flat ivory, uniform near-white, blank or empty background is NOT acceptable.',
+        'Mandatory decorative direction:', styleGuidance[backgroundStyle],
+        'Required color/contrast:', intensityGuidance[backgroundIntensity],
+        'Use a theme-appropriate harmonized palette with clear colored washes and textures across the canvas. Keep central areas readable without becoming plain white. Make the result attractive even when viewed without any foreground content.',
+        'Do NOT depict characters, animals, people, isolated clipart, logos, lettering, numbers, product mockups or any standalone subject from the collection. This is a decorative background layer only.',
+        'The actual original collection clipart and editable typography will be composited above this image, so leave deliberate calm areas for them. Do not create their substitutes.',
+        'Collection visual context:', JSON.stringify({ theme: collection.theme, subtheme: collection.subtheme, style: collection.style }).slice(0,900),
+        'Reserved overlay areas (percentage boxes):', JSON.stringify(layout).slice(0,3500),
+        'Absolutely no text, no watermarks, no frames or hard borders. Professional commercial design background, edge-to-edge square composition.'
+      ].join('\\n')
     : thumbnailImagePrompt(collection, layout, width, height, input.includeTitle !== false);
   let imageBase64 = '';
   let imageMime = 'image/png';
