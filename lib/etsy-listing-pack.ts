@@ -48,24 +48,24 @@ export function buildPack(preset: PackPreset, title: string, characters: PackCha
     preview, category(0), category(1), closeup, bundle];
 }
 
-const foodTerms = /\\b(sushi|sashimi|nigiri|maki|temaki|uramaki|hosomaki|futomaki|gunkan|chirashi|onigiri|inari|toro|salmon|tuna|ebi|ikura|uni)\\b/i;
-const notSushi = /\\b(ramen|udon|soba|noodle|pho|bibimbap|kimchi|dumpling|bao|dim sum|soup|curry|pad thai|takoyaki|tempura|bento|mochi|tea|coffee|hot pot|satay|spring roll)\\b/i;
+const foodTerms = /\b(sushi|sashimi|nigiri|maki|temaki|uramaki|hosomaki|futomaki|gunkan|chirashi|onigiri|inari|toro|salmon|tuna|ebi|ikura|uni)\b/i;
+const notSushi = /\b(ramen|udon|soba|noodle|pho|bibimbap|kimchi|dumpling|bao|dim sum|soup|curry|pad thai|takoyaki|tempura|bento|mochi|tea|coffee|hot pot|satay|spring roll)\b/i;
 const relevant = (slide: PackSlide, character: PackCharacter) => {
   if (slide.ids) return slide.ids.includes(character.id);
   const title = slide.headline.toLowerCase(), name = character.name.toLowerCase();
   // A narrow product title must never borrow visually unrelated illustrations.
-  if (/\\b(sushi|sashimi)\\b/.test(title)) return foodTerms.test(name) && !notSushi.test(name);
+  if (/\b(sushi|sashimi)\b/.test(title)) return foodTerms.test(name) && !notSushi.test(name);
   const category = character.category || character.subtheme || character.group || '';
   if (category && title.toLowerCase().includes(category.toLowerCase())) return true;
-  if (/\\b(ramen|noodles?)\\b/.test(title)) return /\\b(ramen|noodle|udon|soba)\\b/i.test(name);
+  if (/\b(ramen|noodles?)\b/.test(title)) return /\b(ramen|noodle|udon|soba)\b/i.test(name);
   return true;
 };
 export function filterThemeCharacters(title: string, characters: PackCharacter[]): PackCharacter[] {
   const term = title.toLowerCase();
-  if (/\\b(sushi|sashimi)\\b/.test(term))
+  if (/\b(sushi|sashimi)\b/.test(term))
     return characters.filter(c => c.imageUrl && foodTerms.test(c.name) && !notSushi.test(c.name));
-  if (/\\b(ramen|noodles?)\\b/.test(term))
-    return characters.filter(c => c.imageUrl && /\\b(ramen|noodle|udon|soba)\\b/i.test(c.name));
+  if (/\b(ramen|noodles?)\b/.test(term))
+    return characters.filter(c => c.imageUrl && /\b(ramen|noodle|udon|soba)\b/i.test(c.name));
   return characters.filter(c => c.imageUrl);
 }
 export function selectPackCharacters(slide: PackSlide, characters: PackCharacter[]) {
