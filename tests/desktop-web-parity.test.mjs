@@ -16,7 +16,10 @@ test('desktop packaging rebuilds and copies the same web client and server bundl
 test('Gemini alt model is visible on desktop and SEO review provider remains configurable', () => {
   const listing = readFileSync('components/etsy-listing-draft.tsx', 'utf8');
   assert.match(listing, /listing-provider-status/);
-  assert.match(listing, /GEMINI MODEL/);
-  assert.match(listing, /seoProvider === 'gemini'/);
-  assert.doesNotMatch(listing, /isDesktop.*GEMINI MODEL/);
+  assert.match(listing, /SEO MODEL/);
+  assert.match(listing, /selectedProvider === 'gemini' \? selectedGeminiModel : selectedOpenaiModel/);
+  assert.match(listing, /geminiModels\.map\(/);
+  assert.match(listing, /selectedProvider === 'gemini'/);
+  assert.match(listing, /SEO PROVIDER/);
+  assert.doesNotMatch(listing, /isDesktop.*SEO MODEL/);
 });

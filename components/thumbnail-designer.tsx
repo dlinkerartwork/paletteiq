@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import UpscaleCompare from '@/components/upscale-compare';
+import { buildPack, filterThemeCharacters, placeOriginals, type PackPreset, type PackSlide } from '@/lib/etsy-listing-pack';
 import { Download, Plus, Trash2, Copy, Undo2, Redo2, WandSparkles, RotateCcw } from 'lucide-react';
 
 export type ThumbnailElement = {
@@ -11,20 +12,21 @@ export type ThumbnailElement = {
 };
 export type ThumbnailDesign = {
   id: string; name: string; width: number; height: number; background: string; backgroundImageUrl?: string; aiImageUrl?: string; aiImagePrompt?: string; renderedImageUrl?: string; upscaledImageUrl?: string; upscaleJob?: { id: string; sourceUrl: string; factor: 2 | 4 | 6 | 8; submittedAt: number }; elements: ThumbnailElement[];
-  referenceUrl?: string; updatedAt: number;
+  referenceUrl?: string; originalAssetsOnly?: boolean; generationError?: string; updatedAt: number;
 };
-type Character = { id: string; name: string; imageUrl?: string; upscaledImageUrl?: string };
+type Character = { id: string; name: string; imageUrl?: string; upscaledImageUrl?: string; category?: string; subtheme?: string; group?: string };
 export type ThumbnailSaveControls = { save: () => Promise<void>; hasUnsaved: () => boolean };
 type Props = { registerSaveControls?: (controls: ThumbnailSaveControls | null) => void; title: string; aiDefaults: { provider: 'openai' | 'gemini'; openaiModel: string; geminiModel: string }; projectId: string; characters: Character[]; references: string[]; designs: ThumbnailDesign[]; onChange: (designs: ThumbnailDesign[]) => void; onSave: (designs: ThumbnailDesign[]) => Promise<void> };
 const id = () => crypto.randomUUID();
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
-const newDesign = (index: number): ThumbnailDesign => ({ id: id(), name: 'Thumbnail ' + index, width: 2000, height: 2000, background: '#f7f1e9', elements: [], updatedAt: Date.now() });
-const newImage = (character: Character, index: number): ThumbnailElement => ({
-  id: id(), type: 'image', characterId: character.id, source: character.upscaledImageUrl ? 'upscaled' : 'original',
+const THUMBNAIL_SIZE = 1024;
+const newDesign = (index: number): ThumbnailDesign => ({ id: id(), name: 'Thumbnail ' + index, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, background: '#f7f1e9', elements: [], updatedAt: Date.now() });
+const newImage = (character: Character, index: number, preferredSource: 'auto' | 'original' | 'upscaled' = 'auto'): ThumbnailElement => ({
+  id: id(), type: 'image', characterId: character.id, source: preferredSource === 'auto' ? (character.upscaledImageUrl ? 'upscaled' : 'original') : preferredSource,
   x: 10 + (index % 4) * 21, y: 17 + (Math.floor(index / 4) % 3) * 25, width: 22, height: 28, rotation: 0
 });
 const newText = (title = 'YOUR CLIPART COLLECTION'): ThumbnailElement => ({ id: id(), type: 'text', text: title, x: 9, y: 7, width: 82, height: 14, rotation: 0, fontSize: 90, curve: 0, fontFamily: 'Arial', color: '#644a35', fontWeight: 'bold' });
-const normalizeDesign = (d: ThumbnailDesign): ThumbnailDesign => ({ ...d, updatedAt: Date.now() });
+const normalizeDesign = (d: ThumbnailDesign): ThumbnailDesign => ({ ...d, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, updatedAt: Date.now() });
 
 function CurvedText({ element, designWidth }: { element: ThumbnailElement; designWidth: number }) {
   const curve = clamp(element.curve || 0, -100, 100);
@@ -54,6 +56,11 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const [reference, setReference] = useState('');
   const [uploadedReference, setUploadedReference] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
+  const [packPreset, setPackPreset] = useState<PackPreset>('complete-10');
+  const [packQuality, setPackQuality] = useState<'low' | 'medium' | 'high'>('medium');
+  const [packStatus, setPackStatus] = useState('');
+  const cancelPackRef = useRef(false);
+  const [referenceStyle, setReferenceStyle] = useState<'creative' | 'similar' | 'palette'>('creative');
   const [imageBusy, setImageBusy] = useState(false);
   const [comparePreview, setComparePreview] = useState<{ name: string; originalUrl: string; upscaledUrl: string; temporary?: boolean } | null>(null);
   useEffect(() => () => { if (comparePreview?.temporary) URL.revokeObjectURL(comparePreview.originalUrl); }, [comparePreview]);
@@ -105,6 +112,10 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [backgroundUploading, setBackgroundUploading] = useState(false);
+  const [backgroundGenerating, setBackgroundGenerating] = useState(false);
+  const [backgroundStyle, setBackgroundStyle] = useState<'watercolor' | 'paper' | 'gradient' | 'botanical' | 'vintage'>('watercolor');
+  const [backgroundIntensity, setBackgroundIntensity] = useState<'soft' | 'balanced' | 'vibrant'>('balanced');
+  const [backgroundLoadError, setBackgroundLoadError] = useState('');
   const [history, setHistory] = useState<ThumbnailDesign[]>([]);
   const [future, setFuture] = useState<ThumbnailDesign[]>([]);
   const saveRendersRef = useRef<(snapshot: ThumbnailDesign[]) => Promise<void>>(onSave);
@@ -215,14 +226,15 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
 
   const commit = (next: ThumbnailDesign, record = true) => {
     if (record && design) { setHistory(old => [...old.slice(-29), design]); setFuture([]); }
-    onChange(designs.map(d => d.id === next.id ? normalizeDesign(next) : d));
+    const safeNext = next.originalAssetsOnly ? { ...next, elements: next.elements.map(e => e.type === 'image' ? { ...e, source: 'original' as const } : e) } : next;
+    onChange(designs.map(d => d.id === next.id ? normalizeDesign(safeNext) : d));
   };
   const mutate = (changes: Partial<ThumbnailDesign>) => { if (design) commit({ ...design, ...changes }); };
   const updateElement = (changes: Partial<ThumbnailElement>, record = true) => {
     if (!design || !selection) return;
     commit({ ...design, elements: design.elements.map(e => e.id === selection.id ? { ...e, ...changes } : e) }, record);
   };
-  const add = (element: ThumbnailElement) => { if (design) { commit({ ...design, elements: [...design.elements, element] }); setSelectedId(element.id); } };
+  const add = (element: ThumbnailElement) => { if (design) { const safe = design.originalAssetsOnly && element.type === 'image' ? { ...element, source: 'original' as const } : element; commit({ ...design, elements: [...design.elements, safe] }); setSelectedId(element.id); } };
   const remove = () => { if (design && selection) { commit({ ...design, elements: design.elements.filter(e => e.id !== selection.id) }); setSelectedId(''); } };
   useEffect(() => {
     const keyDown = (event: KeyboardEvent) => {
@@ -246,7 +258,8 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const redo = () => { if (!future.length || !design) return; const next = future[future.length - 1]; setFuture(future.slice(0, -1)); setHistory(old => [...old, design]); commit(next, false); };
   const imageUrl = (e: ThumbnailElement) => {
     const character = assetMap.get(e.characterId || '');
-    return e.source === 'upscaled' ? character?.upscaledImageUrl || character?.imageUrl : character?.imageUrl || character?.upscaledImageUrl;
+    // Never silently fall back to an upscaled file when the layer explicitly requests original.
+    return e.source === 'upscaled' ? character?.upscaledImageUrl || character?.imageUrl : character?.imageUrl;
   };
   const startDrag = (event: React.PointerEvent<HTMLElement>, element: ThumbnailElement, mode: 'move' | 'resize' | 'rotate') => {
     if (element.locked || !stageRef.current) return;
@@ -284,21 +297,217 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
       const available = characters.filter(c => c.imageUrl);
       const slots = (body.layout?.slots || []).slice(0, available.length);
       const images = slots.map((slot, i): ThumbnailElement => ({
-        ...newImage(available[i], i), x: clamp(slot.x, 0, 100), y: clamp(slot.y, 0, 100), width: clamp(slot.width, 1, 100), height: clamp(slot.height, 1, 100), rotation: clamp(slot.rotation || 0, -180, 180)
+        ...newImage(available[i], i, 'original'), x: clamp(slot.x, 0, 100), y: clamp(slot.y, 0, 100), width: clamp(slot.width, 1, 100), height: clamp(slot.height, 1, 100), rotation: clamp(slot.rotation || 0, -180, 180)
       }));
       const texts = (body.layout?.texts || []).slice(0, 32).map((slot): ThumbnailElement => ({
         ...newText(), id: id(), text: slot.text || 'CUSTOMIZE TITLE', curve: clamp(Number(slot.curve) || 0, -100, 100), x: clamp(slot.x, 0, 100), y: clamp(slot.y, 0, 100), width: clamp(slot.width, 5, 100), height: clamp(slot.height, 3, 100)
       }));
-      commit({ ...design, elements: [...design.elements, ...images, ...texts], background: /^#[0-9a-f]{6}$/i.test(body.layout?.background || '') ? body.layout!.background! : design.background, referenceUrl: reference.startsWith('https://') ? reference : undefined });
+      commit({ ...design, elements: [...design.elements.map(e => e.type === 'image' ? { ...e, source: 'original' as const } : e), ...images, ...texts], background: /^#[0-9a-f]{6}$/i.test(body.layout?.background || '') ? body.layout!.background! : design.background, referenceUrl: reference.startsWith('https://') ? reference : undefined, originalAssetsOnly: true });
       setMessage('Layout applied. Review the arrangement and customize all elements.');
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
     finally { setAiBusy(false); }
   };
+
+  // Exact human-readable typography. Unlike AI-rendered lettering, this cannot
+  // hallucinate random words, and can be edited after generation.
+  const typographyForSlide = (slide: PackSlide): ThumbnailElement[] => {
+    const z = slide.textZone;
+    const hero = slide.layout === 'hero';
+    const boutique = slide.layout === 'boutique';
+    const headline = slide.headline.trim();
+    const cut = headline.length > 20 ? headline.lastIndexOf(' ', 20) : -1;
+    const exactTitle = cut > 7 ? headline.slice(0, cut) + '\n' + headline.slice(cut + 1) : headline;
+    const x = z.x + 3, width = z.width - 6;
+    const ink = '#244c40';
+    const eyebrowY = z.y + z.height * (boutique ? .17 : .08);
+    const titleY = z.y + z.height * (boutique ? .29 : hero ? .25 : .27);
+    const titleHeight = z.height * (boutique ? .32 : hero ? .46 : .45);
+    const captionY = z.y + z.height * (boutique ? .70 : hero ? .78 : .78);
+    const eyebrow: ThumbnailElement = {
+      ...newText(slide.layout === 'hero' ? 'THE ARTWORK COLLECTION' : 'A CURATED CLIPART COLLECTION'),
+      x, y: eyebrowY, width, height: Math.max(3,z.height*.10),
+      fontSize: 25, fontFamily: 'Montserrat', fontWeight: 'normal',
+      color: '#926a4f', rotation: 0
+    };
+    const main: ThumbnailElement = {
+      ...newText(exactTitle), x, y: titleY, width, height: titleHeight,
+      fontSize: hero ? 108 : boutique ? 104 : 90,
+      fontFamily: 'Playfair Display', fontWeight: 'bold', color: ink, rotation: 0
+    };
+    const caption: ThumbnailElement = {
+      ...newText(slide.subtitle),
+      x:x+1,y:captionY,width:width-2,height:Math.max(4,z.height*.10),
+      fontSize: 31, fontFamily: 'Montserrat', fontWeight: 'normal',
+      color: '#8a624a', rotation: 0
+    };
+    return [eyebrow,main,caption];
+  };
+
+  // AI plans character placements and renders typography/badges/background;
+  // PaletteIQ composites exact original PNGs over that single AI background layer.
+  const generateReferenceBatch = async () => {
+    let available = filterThemeCharacters(title, characters);
+    if (!available.length) { setMessage('No original collection images match this specific theme (' + title + '). Generate theme-matching clipart first; unrelated artwork will not be added.'); return; }
+    let slides = buildPack(packPreset, title, available);
+    if (!slides.length) { setMessage('No collection images available for this pack.'); return; }
+    const needsCategories = packPreset !== 'core-5' && !available.some(c => c.category || c.subtheme || c.group);
+    if (!window.confirm('Create ' + slides.length + ' Etsy listing thumbnails? This makes up to ' + slides.length + ' paid OpenAI image requests, ' + slides.length + ' layout planning requests, and ' + slides.length + ' visual checks' + (reference ? ' plus one reference analysis' : '') + (needsCategories ? ' plus one category analysis' : '') + '. Existing thumbnails are preserved. Continue?')) return;
+    cancelPackRef.current = false;
+    setAiBusy(true); setPackStatus('Preparing ' + slides.length + ' Etsy listing designs...');
+    const failures: string[] = [];
+    let completed = 0;
+    try {
+      let slots: Array<{ x: number; y: number; width: number; height: number }> = [];
+      let color = '#f7f1e9';
+      if (needsCategories) {
+        setPackStatus('Finding meaningful artwork categories...');
+        try {
+          const response = await fetch('/api/thumbnail-categories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId }) });
+          const result = await response.json() as { groups?: Array<{ name: string; ids: string[] }>; error?: string };
+          if (!response.ok) throw Error(result.error || 'Category analysis failed');
+          const groupById = new Map<string, string>();
+          for (const group of result.groups || []) for (const key of group.ids) groupById.set(key, group.name);
+          if (new Set(groupById.values()).size > 1) {
+            available = available.map(c => ({ ...c, category: groupById.get(c.id) }));
+            slides = buildPack(packPreset, title, available);
+          }
+        } catch (error) {
+          setPackStatus('Category analysis unavailable; using neutral collection selections.');
+        }
+      }
+      if (reference) {
+        setPackStatus('Analyzing optional reference...');
+        const response = await fetch('/api/thumbnail-layout', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId, imageUrl: reference, provider, model, count: Math.min(available.length, 24), referenceStyle })
+        });
+        const body = await response.json() as { error?: string; layout?: { slots?: typeof slots; background?: string } };
+        if (!response.ok) throw Error(body.error || 'Reference analysis failed');
+        slots = body.layout?.slots || [];
+        if (/^#[0-9a-f]{6}$/i.test(body.layout?.background || '')) color = body.layout!.background!;
+      }
+      // Each slot already avoids the title-safe-zone before we call the image API.
+      const created: ThumbnailDesign[] = slides.map((slide, index) => ({
+        ...newDesign(latestDesignsRef.current.length + index + 1),
+        name: String(index + 1).padStart(2, '0') + ' · ' + slide.name,
+        originalAssetsOnly: true,
+        background: color,
+        referenceUrl: reference.startsWith('https://') ? reference : undefined,
+        elements: [
+          ...placeOriginals(slide, available, slots).map(position => ({
+            ...newImage(available.find(c => c.id === position.characterId)!, index, 'original'),
+            ...position, source: 'original' as const
+          })),
+          ...typographyForSlide(slide)
+        ]
+      }));
+      const original = [...latestDesignsRef.current, ...created];
+      latestDesignsRef.current = original;
+      onChange(original);
+      setActiveId(created[0].id);
+      for (let i = 0; i < created.length; i++) {
+        if (cancelPackRef.current) { setPackStatus('Generation stopped. Completed thumbnails were kept.'); break; }
+        const slide = slides[i];
+        const item = created[i];
+        setPackStatus('AI arranging original clipart ' + (i + 1) + '/' + created.length + ': ' + slide.name);
+        try {
+          const originalChoices = item.elements.filter(e => e.type === 'image').map(e => {
+            const c = available.find(c => c.id === e.characterId);
+            return c ? { id: c.id, name: c.name } : null;
+          }).filter((c): c is {id: string; name: string} => c !== null);
+          const planResponse = await fetch('/api/thumbnail-art-direction', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              projectId, slideKey: slide.key, slideName: slide.name,
+              headline: slide.headline, subtitle: slide.subtitle, textZone: slide.textZone,
+              characters: originalChoices,
+              suggestedSlots: item.elements.filter(e => e.type === 'image').map(e => ({ characterId: e.characterId, x: e.x, y: e.y, width: e.width, height: e.height }))
+            })
+          });
+          const plan = await planResponse.json() as {
+            error?: string; artDirection?: string;
+            slots?: Array<{ characterId: string; x: number; y: number; width: number; height: number; rotation: number }>
+          };
+          if (!planResponse.ok || !plan.slots?.length) throw Error(plan.error || 'AI could not arrange safe character positions');
+          const plannedElements: ThumbnailElement[] = plan.slots.map(position => ({
+            ...newImage(available.find(c => c.id === position.characterId)!, i, 'original'),
+            ...position, source: 'original'
+          }));
+          // AI typography and badges are baked into the background; no local text overlay.
+          const plannedDesign = { ...item, elements: plannedElements };
+          let updated = latestDesignsRef.current.map(d => d.id === item.id ? plannedDesign : d);
+          latestDesignsRef.current = updated;
+          onChange(updated);
+          setPackStatus('AI designing typography, badges and background ' + (i + 1) + '/' + created.length + ': ' + slide.name);
+          const response = await fetch('/api/thumbnail-ai-image', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              projectId, provider: 'openai',
+              model: imageModel.startsWith('gpt-image-') ? imageModel : 'gpt-image-1-mini',
+              quality: packQuality, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE,
+              mode: 'background-with-typography',
+              backgroundStyle, backgroundIntensity,
+              headline: slide.headline, subtitle: slide.subtitle,
+              slideName: slide.name, artDirection: plan.artDirection, textZone: slide.textZone,
+              layout: plannedElements.map(e => ({ type: 'image', x: e.x, y: e.y, width: e.width, height: e.height }))
+            })
+          });
+          const result = await response.json() as { imageUrl?: string; error?: string };
+          if (!response.ok || !result.imageUrl) throw Error(result.error || 'Generation failed');
+          await loadForExport(result.imageUrl);
+          const next = latestDesignsRef.current.map(d => d.id === item.id ? { ...d, backgroundImageUrl: result.imageUrl, generationError: undefined } : d);
+          latestDesignsRef.current = next;
+          onChange(next);
+          completed += 1;
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          failures.push(slide.name + ': ' + reason);
+          const next = latestDesignsRef.current.map(d => d.id === item.id ? { ...d, generationError: reason } : d);
+          latestDesignsRef.current = next;
+          onChange(next);
+        }
+      }
+      setPackStatus(cancelPackRef.current ? 'Stopped. Generated images are retained.' : 'Pack generation finished.');
+      setMessage('Pack: ' + created.length + ' designs created with exact editable text; ' + completed + ' editorial backgrounds generated' + (failures.length ? '. Failed: ' + failures.join(' | ').slice(0,450) : '. Review AI spelling before publishing.') + '.');
+    } catch (error) {
+      setMessage('Etsy listing pack failed: ' + (error instanceof Error ? error.message : String(error)));
+    } finally { setAiBusy(false); }
+  };
+
   const onReferenceUpload = async (file?: File) => {
     if (!file) return;
     if (!['image/png','image/jpeg','image/webp'].includes(file.type) || file.size > 4_000_000) { setMessage('Use PNG/JPG/WebP up to 4 MB for AI reference.'); return; }
     const data = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(new Error('Could not read file')); reader.readAsDataURL(file); });
     setUploadedReference(data); setReference(data); setMessage('Reference loaded for this editing session. The uploaded reference is not embedded in the saved collection.');
+  };
+
+  const generateReferenceBackground = async () => {
+    if (!design || backgroundGenerating) return;
+    if (!window.confirm('Generate a decorative background using OpenAI? This may incur API charges. Original collection clipart and text will remain separate editable layers.')) return;
+    setBackgroundGenerating(true); setMessage('');
+    try {
+      const response = await fetch('/api/thumbnail-ai-image', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId, provider: 'openai', model: imageModel.startsWith('gpt-image-') ? imageModel : 'gpt-image-1-mini', quality: imageQuality, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, mode: 'background-only', backgroundStyle, backgroundIntensity, layout: design.elements.map(e => ({ type: e.type, x: e.x, y: e.y, width: e.width, height: e.height })) })
+      });
+      const result = await response.json() as { error?: string; imageUrl?: string };
+      if (!response.ok || !result.imageUrl) throw Error(result.error || 'Background generation failed');
+      // API success alone does not guarantee the stored background is reachable.
+      // Check the authenticated image endpoint and decoding before modifying the design.
+      const imageResponse = await fetch(result.imageUrl, { credentials: 'same-origin', cache: 'no-store' });
+      if (!imageResponse.ok || !(imageResponse.headers.get('content-type') || '').startsWith('image/')) {
+        throw Error('Generated background is not accessible (HTTP ' + imageResponse.status + '). Check image storage and authentication.');
+      }
+      const imageBytes = await imageResponse.blob();
+      if (!imageBytes.size) throw Error('Generated background is empty.');
+      const previewUrl = URL.createObjectURL(imageBytes);
+      try { await loadForExport(previewUrl); }
+      finally { URL.revokeObjectURL(previewUrl); }
+      setBackgroundLoadError('');
+      commit({ ...design, backgroundImageUrl: result.imageUrl });
+      setMessage('Decorative background loaded and applied to the canvas. Original clipart and editable typography remain separate layers.');
+    } catch (error) { setMessage('Background generation failed: ' + (error instanceof Error ? error.message : String(error))); }
+    finally { setBackgroundGenerating(false); }
   };
   const uploadBackground = async (file?: File) => {
     if (!file || !design) return;
@@ -357,22 +566,22 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
   };
   const renderDesignBlob = async (target: ThumbnailDesign, format: 'png' | 'jpeg' = 'png'): Promise<Blob> => {
-      const canvas = document.createElement('canvas'); canvas.width = target.width; canvas.height = target.height;
+      const canvas = document.createElement('canvas'); canvas.width = THUMBNAIL_SIZE; canvas.height = THUMBNAIL_SIZE;
       const ctx = canvas.getContext('2d'); if (!ctx) throw new Error('Canvas unavailable');
       ctx.fillStyle = target.background; ctx.fillRect(0, 0, canvas.width, canvas.height);
       if (target.aiImageUrl || target.backgroundImageUrl) {
         const background = await loadForExport(target.aiImageUrl || target.backgroundImageUrl!);
-        const scale = Math.max(target.width / background.naturalWidth, target.height / background.naturalHeight);
+        const scale = Math.max(THUMBNAIL_SIZE / background.naturalWidth, THUMBNAIL_SIZE / background.naturalHeight);
         const w = background.naturalWidth * scale, h = background.naturalHeight * scale;
-        ctx.drawImage(background, (target.width - w) / 2, (target.height - h) / 2, w, h);
+        ctx.drawImage(background, (THUMBNAIL_SIZE - w) / 2, (THUMBNAIL_SIZE - h) / 2, w, h);
       }
       for (const element of target.elements) {
-        const x = element.x / 100 * target.width, y = element.y / 100 * target.height;
-        const w = element.width / 100 * target.width, h = element.height / 100 * target.height;
+        const x = element.x / 100 * THUMBNAIL_SIZE, y = element.y / 100 * THUMBNAIL_SIZE;
+        const w = element.width / 100 * THUMBNAIL_SIZE, h = element.height / 100 * THUMBNAIL_SIZE;
         ctx.save(); ctx.globalAlpha = element.opacity ?? 1;
         ctx.translate(x + w/2, y + h/2); ctx.rotate(element.rotation * Math.PI/180);
         if (element.type === 'image') {
-          const url = imageUrl(element); if (!url) { ctx.restore(); continue; }
+          const url = imageUrl(element); if (!url) { ctx.restore(); throw new Error('Original clipart is missing: ' + (assetMap.get(element.characterId || '')?.name || element.characterId)); }
           const img = await loadForExport(url);
           const scale = Math.min(w/img.naturalWidth, h/img.naturalHeight);
           const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
@@ -380,10 +589,10 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         } else {
           ctx.fillStyle = element.color || '#333333';
           await document.fonts.load(`${element.fontWeight || 'bold'} ${(element.fontSize || 80)}px ${element.fontFamily || 'Arial'}`).catch(() => []);
-          ctx.font = `${element.fontWeight || 'bold'} ${Math.round((element.fontSize || 80) * target.width / 2000)}px ${element.fontFamily || 'Arial'}`;
+          ctx.font = `${element.fontWeight || 'bold'} ${Math.round((element.fontSize || 80) * THUMBNAIL_SIZE / 2000)}px ${element.fontFamily || 'Arial'}`;
           ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
           const raw = (element.text || '').split('\n');
-          const lineHeight = (element.fontSize || 80) * target.width / 2000 * 1.2;
+          const lineHeight = (element.fontSize || 80) * THUMBNAIL_SIZE / 2000 * 1.2;
           raw.forEach((line,i) => {
             const available = Math.max(1, w - 8);
             const actual = ctx.measureText(line).width;
@@ -584,7 +793,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     setBusy(true); setMessage('');
     try {
       let blob: Blob;
-      let width = design.width, height = design.height;
+      let width = THUMBNAIL_SIZE, height = THUMBNAIL_SIZE;
       if (design.upscaledImageUrl) {
         const source = await loadForExport(design.upscaledImageUrl);
         width = source.naturalWidth; height = source.naturalHeight;
@@ -636,7 +845,23 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
       <button className="primary-btn" disabled={!design || busy} type="button" onClick={() => void save()}>Save designs</button>
     </div>
     {message && <p className="notice">{message}</p>}
-    {!design ? <div className="panel empty-state"><h2>No thumbnails yet</h2><p>Create a design for this listing.</p><button className="primary-btn" onClick={create}>Create first thumbnail</button></div> :
+    {!design ? <div className="panel empty-state" style={{ display: 'grid', gap: 12, maxWidth: 520, margin: '20px auto', padding: 24 }}>
+      <h2>Generate Etsy Listing Pack</h2>
+      <p>Start with original collection clipart. A reference is optional. AI directs layout, background, artistic typography and badges; PaletteIQ places exact original PNGs in the approved positions.</p>
+      <label className="input-label">PACK PRESET</label>
+      <select aria-label="Etsy listing pack" value={packPreset} onChange={event => setPackPreset(event.target.value as PackPreset)}>
+        <option value="complete-10">Complete Etsy Listing Pack — 10 thumbnails</option>
+        <option value="core-5">Core Etsy Pack — 5 thumbnails</option>
+        <option value="category-showcase">Category Showcase Pack</option>
+      </select>
+      <label className="input-label">OPTIONAL REFERENCE IMAGE</label>
+      <input aria-label="Upload optional reference" type="file" accept="image/png,image/jpeg,image/webp" onChange={event => void onReferenceUpload(event.target.files?.[0])}/>
+      {reference && <img src={reference} alt="Optional reference" style={{ maxHeight: 130, maxWidth: '100%', objectFit: 'contain' }}/>}
+      <button className="primary-btn" disabled={aiBusy || !characters.some(c => c.imageUrl)} onClick={() => void generateReferenceBatch()}>{aiBusy ? 'Generating Etsy pack...' : 'Generate Etsy Listing Pack'}</button>
+      {aiBusy && <button className="outline-btn" onClick={() => { cancelPackRef.current = true; }}>Stop after current image</button>}
+      {packStatus && <small role="status">{packStatus}</small>}
+      <button className="outline-btn" onClick={create}>Or start with a blank design</button>
+    </div> :
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(190px, 245px) minmax(0, 1fr) minmax(245px, 290px)', gap: 12, alignItems: 'start' }}>
       <div className="panel" style={{ padding: 14, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0, gap: 12, alignContent: 'start', overflowX: 'hidden', maxHeight: 'min(82vh, 950px)', overflowY: 'auto', overscrollBehavior: 'contain' }}>
         <div role="tablist" aria-label="Thumbnail tools" style={{ display: 'flex', gap: 4 }} onKeyDown={event => {
@@ -663,19 +888,50 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
             {models[provider].map(m => <option key={m.id} value={m.id}>{m.name} ({m.id})</option>)}
           </select>
           {modelError && <small>{modelError}</small>}
-          <label className="input-label">REFERENCE IMAGE</label>
+          <label className="input-label">REFERENCE IMAGE (OPTIONAL)</label>
           <select style={control} value={reference.startsWith('data:') ? 'upload' : reference} onChange={e => setReference(e.target.value === 'upload' ? uploadedReference : e.target.value)}>
             <option value="">Choose listing reference</option>{references.map((r,i)=><option key={r} value={r}>Listing image {i+1}</option>)}{uploadedReference && <option value="upload">Uploaded image</option>}
           </select>
           <input aria-label="Upload reference" type="file" accept="image/png,image/jpeg,image/webp" onChange={e => void onReferenceUpload(e.target.files?.[0])}/>
           {reference && <img src={reference} alt="Layout reference" style={{ maxWidth: '100%', maxHeight: 140, objectFit: 'contain' }}/>}
+          <label className="input-label">REFERENCE INTERPRETATION</label>
+          <select aria-label="Reference interpretation" value={referenceStyle} onChange={e => setReferenceStyle(e.target.value as 'creative' | 'similar' | 'palette')}>
+            <option value="creative">Creative adaptation</option><option value="similar">Similar composition</option><option value="palette">Color and style inspiration</option>
+          </select>
           <button className="primary-btn" disabled={!reference || aiBusy} onClick={() => void analyze()}><WandSparkles size={15}/> {aiBusy ? 'Analyzing...' : 'Analyze & apply layout'}</button>
-          <small>Reference composition is inspiration only. The artwork and copy should be original.</small>
+          <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 12, display: 'grid', gap: 8 }}>
+            <strong>Generate Etsy Listing Pack</strong>
+            <small>Reference optional. AI designs the background, artistic typography, badges and original-asset positions. PaletteIQ composites unmodified original PNGs over the AI artwork.</small>
+            <label className="input-label">ETSY PACK PRESET</label>
+            <select aria-label="Etsy listing pack" value={packPreset} disabled={aiBusy} onChange={e => setPackPreset(e.target.value as PackPreset)}>
+              <option value="complete-10">Complete Etsy Listing Pack — 10 thumbnails</option>
+              <option value="core-5">Core Etsy Pack — 5 thumbnails</option>
+              <option value="category-showcase">Category Showcase Pack — based on collection groups</option>
+            </select>
+            <label className="input-label">BACKGROUND QUALITY</label>
+            <select aria-label="Etsy pack background quality" disabled={aiBusy} value={packQuality} onChange={e => setPackQuality(e.target.value as typeof packQuality)}><option value="low">Low · economical</option><option value="medium">Medium · recommended</option><option value="high">High · premium cost</option></select>
+            <label className="input-label">BACKGROUND + TYPOGRAPHY STYLE</label>
+            <select aria-label="Etsy pack background style" value={backgroundStyle} disabled={aiBusy} onChange={e => setBackgroundStyle(e.target.value as typeof backgroundStyle)}>
+              <option value="watercolor">Watercolor</option><option value="paper">Luxury paper</option><option value="gradient">Color gradient</option><option value="botanical">Botanical accents</option><option value="vintage">Vintage</option>
+            </select>
+            <label className="input-label">DECORATION INTENSITY</label>
+            <select aria-label="Etsy pack intensity" value={backgroundIntensity} disabled={aiBusy} onChange={e => setBackgroundIntensity(e.target.value as typeof backgroundIntensity)}>
+              <option value="soft">Soft</option><option value="balanced">Balanced</option><option value="vibrant">Vibrant</option>
+            </select>
+            <button className="primary-btn" type="button" disabled={aiBusy || !characters.some(c => c.imageUrl)} onClick={() => void generateReferenceBatch()}>
+              <WandSparkles size={15}/> {aiBusy ? 'Generating listing pack...' : 'Generate Etsy Listing Pack'}
+            </button>
+            {aiBusy && <button type="button" className="outline-btn" onClick={() => { cancelPackRef.current = true; setPackStatus('Stopping after current request...'); }}>Stop after current image</button>}
+            {packStatus && <small role="status">{packStatus}</small>}
+            <small>AI plans clipart positions only. Background generation is prohibited from drawing any collection objects; automated visual review rejects detected illustration objects. PaletteIQ inserts the exact original PNGs. Background, typography and badges form one AI layer. 1024 × 1024 px. AI text can contain spelling errors; API charges apply.</small>
+            <small>Only original collection clipart is placed on top. Upscaled assets are not used.</small>
+          </div>
+          <small>Optional references inspire layout. Automatically generated designs keep typography areas clear of collection clipart.</small>
         </>}
         <h3>Characters</h3>
         <div style={{ maxHeight: 400, overflowY: 'auto', display: 'grid', gap: 8 }}>
           {characters.filter(c => c.imageUrl).map(c => <button type="button" key={c.id} onClick={() => add(newImage(c, design.elements.filter(e => e.type === 'image').length))} style={{ textAlign: 'left', display: 'flex', gap: 8, alignItems: 'center', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: 6 }}>
-            <img src={c.upscaledImageUrl || c.imageUrl} alt="" style={{ width: 45, height: 45, objectFit: 'contain' }}/>
+            <img src={c.imageUrl} alt="" style={{ width: 45, height: 45, objectFit: 'contain' }}/>
             <span style={{ fontSize: 12 }}>{c.name}{c.upscaledImageUrl ? ' · Upscaled' : ''}</span>
           </button>)}
           {!characters.some(c => c.imageUrl) && <p className="sub">Generate character images first.</p>}
@@ -714,7 +970,16 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         </div>
         <div ref={canvasViewportRef} onPointerDown={startPan} onPointerMove={movePan} onPointerUp={stopPan} onPointerCancel={stopPan} aria-label="Thumbnail canvas viewport" style={{ overflow: previewZoom > 1 ? 'auto' : 'hidden', height: 'min(66vh, 780px)', minHeight: 240, boxSizing: 'border-box', background: '#e8e8e8', padding: 16, borderRadius: 8, cursor: previewZoom > 1 ? 'grab' : 'default', touchAction: 'none' }}>
           <div style={{ width: fittedWidth * previewZoom, margin: '0 auto', marginTop: Math.max(0, (viewportSize.height - fittedHeight * previewZoom) / 2) }}>
-            <div ref={stageRef} onPointerDown={() => setSelectedId('')} style={{ width: '100%', aspectRatio: `${design.width}/${design.height}`, background: design.background, backgroundImage: (design.aiImageUrl || design.backgroundImageUrl) ? `url(${JSON.stringify(design.aiImageUrl || design.backgroundImageUrl)})` : undefined, backgroundPosition: 'center', backgroundSize: 'cover', position: 'relative', containerType: 'inline-size', overflow: 'hidden', boxShadow: '0 5px 25px #0002', touchAction: 'none' }}>
+            <div ref={stageRef} onPointerDown={() => setSelectedId('')} style={{ width: '100%', aspectRatio: `${design.width}/${design.height}`, backgroundColor: design.background, position: 'relative', containerType: 'inline-size', overflow: 'hidden', boxShadow: '0 5px 25px #0002', touchAction: 'none' }}>
+              {(design.backgroundImageUrl || design.aiImageUrl) && <img
+                key={design.backgroundImageUrl || design.aiImageUrl}
+                src={design.backgroundImageUrl || design.aiImageUrl}
+                alt="Thumbnail background"
+                onLoad={() => setBackgroundLoadError('')}
+                onError={() => setBackgroundLoadError('Background image cannot be displayed. Check the generated image URL or your image storage.')}
+                draggable={false}
+                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none', userSelect: 'none' }}
+              />}
               {design.elements.map(e => {
                 const isSelected = e.id === selectedId;
                 return <div key={e.id} data-thumbnail-element="true" onPointerDown={event => startDrag(event,e,'move')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
@@ -741,16 +1006,24 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         <h3>Design properties</h3>
         <label className="input-label">DESIGN NAME</label>
         <input value={design.name} onChange={e => mutate({ name: e.target.value })}/>
-        <label className="input-label">CANVAS WIDTH (PX)</label>
-        <input type="number" min={256} max={8000} value={design.width} onChange={e => mutate({ width: clamp(Number(e.target.value) || 2000, 256, 8000) })}/>
-        <label className="input-label">CANVAS HEIGHT (PX)</label>
-        <input type="number" min={256} max={8000} value={design.height} onChange={e => mutate({ height: clamp(Number(e.target.value) || 2000, 256, 8000) })}/>
+        <label className="input-label">THUMBNAIL SIZE</label>
+        <input readOnly aria-label="Thumbnail size" value="1024 × 1024 px" />
+        <small>Fixed thumbnail creation and standard JPG/PNG export: 1024 × 1024 pixels. Remote upscale is a separate optional action.</small>
         <label className="input-label">BACKGROUND COLOR</label>
         <input type="color" value={design.background} onChange={e => mutate({ background: e.target.value })}/>
+        <label className="input-label">AI DECORATIVE BACKGROUND (OPENAI)</label>
+        <label className="input-label">BACKGROUND STYLE</label>
+        <select aria-label="Background style" value={backgroundStyle} disabled={backgroundGenerating} onChange={event => setBackgroundStyle(event.target.value as typeof backgroundStyle)}><option value="watercolor">Artistic watercolor washes</option><option value="paper">Luxury textured paper</option><option value="gradient">Premium colorful gradient</option><option value="botanical">Abstract botanical motifs</option><option value="vintage">Vintage decorative texture</option></select>
+        <label className="input-label">DECORATION INTENSITY</label>
+        <select aria-label="Background decoration intensity" value={backgroundIntensity} disabled={backgroundGenerating} onChange={event => setBackgroundIntensity(event.target.value as typeof backgroundIntensity)}><option value="soft">Soft — visible pastel details</option><option value="balanced">Balanced — recommended</option><option value="vibrant">Vibrant — stronger colors</option></select>
+        <button className="outline-btn" type="button" disabled={backgroundGenerating || imageBusy} onClick={() => void generateReferenceBackground()}><WandSparkles size={15}/> {backgroundGenerating ? 'Generating background...' : 'Generate background (no clipart or text)'}</button>
+        <small>Generate visible decorative textures and color variations. Original clipart and typography stay on top as independent layers. Generating again may incur API charges.</small>
         <label className="input-label">BACKGROUND IMAGE (LOCAL PNG/JPG)</label>
         <input type="file" accept="image/png,image/jpeg" disabled={backgroundUploading} onChange={e => void uploadBackground(e.target.files?.[0])}/>
         {backgroundUploading && <small>Uploading background…</small>}
-        {design.backgroundImageUrl && <button className="outline-btn" type="button" onClick={() => mutate({ backgroundImageUrl: undefined })}>Remove background image</button>}
+        {backgroundLoadError && <small role="alert" style={{ color: '#b91c1c' }}>{backgroundLoadError}</small>}
+        {design.backgroundImageUrl && <a href={design.backgroundImageUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>View current background image</a>}
+        {design.backgroundImageUrl && <button className="outline-btn" type="button" onClick={() => { setBackgroundLoadError(''); mutate({ backgroundImageUrl: undefined }); }}>Remove background image</button>}
         <h3>Layers</h3>
         <div style={{ display: 'grid', gap: 5, maxHeight: 190, overflowY: 'auto' }}>
           {[...design.elements].reverse().map(e => <div key={e.id} style={{ display: 'flex', gap: 5, minWidth: 0 }}>
@@ -772,7 +1045,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
             <label className="input-label">TEXT COLOR</label><div style={{ display: 'flex', gap: 8 }}><input aria-label="Choose text color" type="color" value={selection.color || '#333333'} onChange={e => updateElement({ color: e.target.value })}/><input aria-label="Text color hex" value={selection.color || '#333333'} onChange={e => { if (/^#[0-9a-f]{6}$/i.test(e.target.value)) updateElement({ color: e.target.value }); }}/></div>
             <label className="input-label">WEIGHT</label><select value={selection.fontWeight || 'bold'} onChange={e => updateElement({ fontWeight: e.target.value })}><option value="normal">Normal</option><option value="bold">Bold</option></select>
           </> : <>
-            <label className="input-label">ASSET SOURCE</label><select value={selection.source || 'original'} onChange={e => updateElement({ source: e.target.value as 'original' | 'upscaled' })}><option value="original">Original</option><option value="upscaled" disabled={!assetMap.get(selection.characterId || '')?.upscaledImageUrl}>Upscaled</option></select>
+            <label className="input-label">ASSET SOURCE</label><select disabled={Boolean(design.originalAssetsOnly)} value={design.originalAssetsOnly ? 'original' : selection.source || 'original'} onChange={e => updateElement({ source: e.target.value as 'original' | 'upscaled' })}><option value="original">Original</option><option value="upscaled" disabled={Boolean(design.originalAssetsOnly) || !assetMap.get(selection.characterId || '')?.upscaledImageUrl}>Upscaled</option></select>
           </>}
           {(['x','y','width','height','rotation','opacity'] as const).map(key => <label key={key} style={{ display: 'grid', gap: 4 }}><span className="input-label">{key.toUpperCase()}{key === 'opacity' ? ' (0–1)' : key === 'rotation' ? ' (DEG)' : ' (%)'}</span><input type="number" step={key === 'opacity' ? .1 : 1} value={selection[key] ?? (key === 'opacity' ? 1 : 0)} onChange={e => updateElement({ [key]: Number(e.target.value) })}/></label>)}
           <label><input type="checkbox" checked={Boolean(selection.locked)} onChange={e => updateElement({ locked: e.target.checked })}/> Lock element</label>
@@ -809,10 +1082,12 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
               Select for upscale
             </label>
             <button type="button" onClick={() => { setActiveId(item.id); setSelectedId(''); }} style={{ border: 0, background: 'transparent', textAlign: 'left', padding: 0, width: '100%', cursor: 'pointer' }}>
-            <div style={{ width: '100%', aspectRatio: item.width + '/' + item.height, position: 'relative', overflow: 'hidden', borderRadius: 6, background: item.background, backgroundImage: item.aiImageUrl || item.backgroundImageUrl ? 'url(' + JSON.stringify(item.aiImageUrl || item.backgroundImageUrl) + ')' : undefined, backgroundSize: 'cover', backgroundPosition: 'center' }}>
+            <div style={{ width: '100%', aspectRatio: item.width + '/' + item.height, position: 'relative', overflow: 'hidden', borderRadius: 6, backgroundColor: item.background }}>
+              {(item.backgroundImageUrl || item.aiImageUrl) && <img src={item.backgroundImageUrl || item.aiImageUrl} alt="" draggable={false} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}/>}
               {!item.aiImageUrl && item.elements.map(element => element.type === 'image' ? <img key={element.id} src={imageUrl(element)} alt="" style={{ position: 'absolute', left: element.x + '%', top: element.y + '%', width: element.width + '%', height: element.height + '%', objectFit: 'contain', transform: 'rotate(' + element.rotation + 'deg)' }}/> : <span key={element.id} style={{ position: 'absolute', left: element.x + '%', top: element.y + '%', width: element.width + '%', color: element.color, fontFamily: element.fontFamily, fontSize: 9, overflow: 'hidden' }}>{element.text}</span>)}
             </div>
             <strong style={{ display: 'block', marginTop: 7, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</strong>
+            {item.generationError && <small style={{ color: '#b91c1c' }} title={item.generationError}>AI background failed — retry by creating a new pack</small>}
             <small>{item.aiImageUrl ? 'AI image' : 'Editable design'} · {item.width}×{item.height}</small>
             </button>
             <small style={{ display: 'block', marginTop: 5 }}>{item.upscaleJob ? (upscaleRemaining[item.id] != null ? 'Est. remaining: ' + Math.ceil(upscaleRemaining[item.id]! / 60) + ' min' : 'Time remaining: waiting for GPU / estimating…') : item.upscaledImageUrl ? '✓ Upscale completed' : 'Not upscaled'}</small>

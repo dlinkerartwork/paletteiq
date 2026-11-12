@@ -27,8 +27,10 @@ test('custom smaller title and alt count are respected', () => {
 test('server routes honor configured provider and generation limits', () => {
   const route = readFileSync(new URL('../app/api/studio/route.ts', import.meta.url), 'utf8');
   const provider = readFileSync(new URL('../lib/seo-provider.ts', import.meta.url), 'utf8');
-  assert.match(route, /generateSeoJson\(user\.userId, instruction, 'gemini', seoConfig\.seoGeminiModel\)/);
-  assert.match(route, /generateSeoJson\(user\.userId, prompt, seoConfig\.seoProvider, seoConfig\.seoGeminiModel\)/);
+  assert.match(route, /generateSeoJson\(user\.userId, instruction, seoConfig\.seoProvider, seoConfig\.seoProvider === 'gemini' \? seoConfig\.seoGeminiModel : seoConfig\.seoOpenaiModel\)/);
+  assert.match(route, /seoConfig\.seoGeminiModel = body\.seoGeminiModel/);
+  assert.match(route, /seoConfig\.seoOpenaiModel = body\.seoOpenaiModel/);
+  assert.match(route, /generateSeoJson\(user\.userId, prompt, seoConfig\.seoProvider, seoConfig\.seoProvider === 'gemini' \? seoConfig\.seoGeminiModel : seoConfig\.seoOpenaiModel\)/);
   assert.match(provider, /models\/\$\{model\}:generateContent/);
   assert.match(provider, /thinkingBudget: 0/);
   assert.match(provider, /responseMimeType: 'application\/json'/);
@@ -47,7 +49,9 @@ test('ZIP export uses charactername default naming and supports saved custom pat
 test('Etsy API SEO is faithfully translated to English and alt text is length-validated', () => {
   const route = readFileSync(new URL('../app/api/studio/route.ts', import.meta.url), 'utf8');
   assert.match(route, /reference\.title, description: reference\.description, tags: reference\.tags/);
-  assert.match(route, /title: englishTitle, description: englishDescription, tags: englishTags/);
+  assert.match(route, /natural ENGLISH using the Etsy API listing TITLE, DESCRIPTION and TAGS/);
+  assert.match(route, /MUST be accurate English translations of the Etsy API fields/);
+  assert.match(route, /title: reference\.title, description: reference\.description, tags: reference\.tags/);
   assert.match(route, /imageAltTexts: \[alt\]/);
   assert.match(route, /hasTargetSeoAltLength\(alt\)/);
   assert.match(route, /attempt < 2 && !hasTargetSeoAltLength\(alt\)/);
