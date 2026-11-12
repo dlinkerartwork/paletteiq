@@ -8,7 +8,7 @@ import { userCredential, userGeminiKeys } from '@/lib/credentials';
 import { nativeAssetBucket } from '@/lib/native-bridge';
 
 type LayoutItem = { type: 'image' | 'text'; x: number; y: number; width: number; height: number; text?: string };
-type RequestBody = { projectId?: string; provider?: string; model?: string; quality?: string; width?: number; height?: number; layout?: LayoutItem[]; includeTitle?: boolean; mode?: 'full-thumbnail' | 'background-only' | 'background-with-typography'; headline?: string; subtitle?: string; slideName?: string; textZone?: { x: number; y: number; width: number; height: number }; backgroundStyle?: 'watercolor' | 'paper' | 'gradient' | 'botanical' | 'vintage'; backgroundIntensity?: 'soft' | 'balanced' | 'vibrant' };
+type RequestBody = { projectId?: string; provider?: string; model?: string; quality?: string; width?: number; height?: number; layout?: LayoutItem[]; includeTitle?: boolean; mode?: 'full-thumbnail' | 'background-only' | 'background-with-typography'; headline?: string; subtitle?: string; slideName?: string; artDirection?: string; textZone?: { x: number; y: number; width: number; height: number }; backgroundStyle?: 'watercolor' | 'paper' | 'gradient' | 'botanical' | 'vintage'; backgroundIntensity?: 'soft' | 'balanced' | 'vibrant' };
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 const bucket = () => nativeAssetBucket() ?? env.BUCKET;
 
@@ -65,18 +65,23 @@ export async function POST(req: Request) {
     ? 'Premium gourmet cookbook editorial design: warm ivory and natural cream paper, minimal refined fine gold or muted terracotta hairline rules, delicate circular medallion or centered elegant editorial panel, very subtle ink wash or handmade paper texture. Colors muted sage, deep forest green and warm clay. Absolutely avoid high-saturation abstract blotches, bright rainbow gradients or noisy decorative splashes.'
     : 'Premium independent boutique editorial design, restrained sophisticated palette appropriate to the collection theme, carefully balanced subtle paper texture, delicate ornament and tasteful negative space. No loud abstract paint blobs.';
   const combinedPrompt = [
-    'Create a premium SQUARE ETSY DIGITAL CLIPART PRODUCT BACKGROUND, ONLY A BACKGROUND LAYER. The finished listing will be assembled by a deterministic compositor.',
-    'CRITICAL: NO TEXT, NO TYPOGRAPHY, NO LETTERS, NO NUMBERS, NO PSEUDO-TEXT, NO LABELS OR LOGOS anywhere. Do not attempt to generate titles or badges. Separate exact typography will be placed above by the compositor.',
-    'NO product illustrations, no food dishes, no animals, no standalone clipart, no character drawings. The real ORIGINAL artwork will be placed over this background later.',
-    'Art direction:', designDirection,
-    'User-selected background material, subordinate to theme accuracy and restraint:', backgroundStyle === 'watercolor' ? 'very light controlled watercolor wash on ivory stock, no huge wet pigment blobs' : styleGuidance[backgroundStyle],
-    'Decoration intensity, but preserve elegant editorial restraint:', intensityGuidance[backgroundIntensity],
-    'Preserve a visibly light neutral typography-safe-panel inside this rectangle (percentage from upper-left):',JSON.stringify(titleZone),
-    'The typography panel should be clean, low contrast and visually legible. Add subtle thin framing or ornamental dividers around it but nothing inside.',
-    'The areas outside text panel should remain tasteful and almost unadorned because original clipart will be placed there. Do not create fake objects to fill those areas.',
-    'Avoid high saturation, noisy scattered watercolor textures, busy gradients, irregular splotches, starbursts or ornamental overload.',
-    'Reference theme information:',JSON.stringify({theme:collection.theme,subtheme:collection.subtheme,style:collection.style}).slice(0,900),
-    'Layout concept:',safeText(input.slideName || ''),'Elegant neutral edge-to-edge square artwork, refined paper surface, commercially polished high-end stationery.'
+    'Generate one premium, professionally art-directed SQUARE ETSY CLIPART BUNDLE BACKGROUND that INCLUDES artistic typography, tasteful ornamental badges and beautiful decorative framing.',
+    'This is ONLY the typography-and-background layer, not the full thumbnail. DO NOT draw any clipart subjects, food dishes, animals, flowers as standalone collection illustrations, or recreate any supplied product artwork.',
+    'The compositor will place EXACT original collection PNG assets in the specified outer image slots after this background is generated.',
+    'EXACT MAIN TITLE. Spell every letter carefully; do not paraphrase or add invented words:', JSON.stringify(safeText(input.headline || '')),
+    'EXACT SUBTITLE:', JSON.stringify(safeText(input.subtitle || '')),
+    'Place ALL lettering, title art and badges STRICTLY within the following typography safe zone in percentage coordinates:', JSON.stringify(titleZone),
+    'All space occupied by lettering or badges MUST be inside that zone. Do not put stray text, pseudo-lettering or extra claims anywhere else.',
+    'Professional graphic treatment: large expressive artistic title with strong hierarchy, smaller supporting line, thin gold frame, elegant editorial medallion or label, finely rendered decorative flourishes, beautifully spaced high-contrast typography.',
+    'Avoid any unverified DPI, commercial-use or resolution claims. Add no count unless it appears in the exact provided subtitle.',
+    'Make the rest of the canvas restrained, visually coherent and suitable for overlaying actual transparent artwork on top. Do not paint imaginary objects or silhouettes where the original PNGs will be positioned.',
+    'ART DIRECTOR COMPOSITION NOTES:', safeText(input.artDirection || '').slice(0,650),
+    'Theme-aware design direction:', designDirection,
+    'User material:', backgroundStyle === 'watercolor' ? 'subtle warm watercolor paper only, not dramatic color splashes' : styleGuidance[backgroundStyle],
+    'Decorative intensity:', intensityGuidance[backgroundIntensity],
+    'Collection theme:', JSON.stringify({theme:collection.theme,subtheme:collection.subtheme}).slice(0,500),
+    'Reserved original clipart positions. Do not draw any characters or lettering inside these outside-title regions:', JSON.stringify(layout).slice(0,3000),
+    'The final art should look like a premium Etsy listing COVER with the visual refinement of a professional editorial illustrator and brand designer.'
   ].join('\n');
   const prompt = mode === 'background-with-typography' ? combinedPrompt : mode === 'background-only'
     ? [
