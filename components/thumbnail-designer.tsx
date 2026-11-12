@@ -407,7 +407,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         if (cancelPackRef.current) { setPackStatus('Generation stopped. Completed thumbnails were kept.'); break; }
         const slide = slides[i];
         const item = created[i];
-        setPackStatus('Generating background + artistic typography ' + (i + 1) + '/' + created.length + ': ' + slide.name);
+        setPackStatus('Generating professional background ' + (i + 1) + '/' + created.length + ': ' + slide.name);
         try {
           const response = await fetch('/api/thumbnail-ai-image', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -817,7 +817,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     {message && <p className="notice">{message}</p>}
     {!design ? <div className="panel empty-state" style={{ display: 'grid', gap: 12, maxWidth: 520, margin: '20px auto', padding: 24 }}>
       <h2>Generate Etsy Listing Pack</h2>
-      <p>Start directly from original collection clipart. A reference is optional, and AI will generate the background with artistic lettering.</p>
+      <p>Start directly from original collection clipart. A reference is optional, and AI generates the theme-matched editorial background while PaletteIQ composes precise, readable artistic typography.</p>
       <label className="input-label">PACK PRESET</label>
       <select aria-label="Etsy listing pack" value={packPreset} onChange={event => setPackPreset(event.target.value as PackPreset)}>
         <option value="complete-10">Complete Etsy Listing Pack — 10 thumbnails</option>
@@ -871,7 +871,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
           <button className="primary-btn" disabled={!reference || aiBusy} onClick={() => void analyze()}><WandSparkles size={15}/> {aiBusy ? 'Analyzing...' : 'Analyze & apply layout'}</button>
           <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 12, display: 'grid', gap: 8 }}>
             <strong>Generate Etsy Listing Pack</strong>
-            <small>Reference image is optional. AI creates decorative background and artistic lettering together; original clipart stays as separate movable layers.</small>
+            <small>Reference image is optional. AI creates a theme-matched editorial background. PaletteIQ adds accurate artistic typography and original clipart as separate editable layers, then combines everything in the exported JPG.</small>
             <label className="input-label">ETSY PACK PRESET</label>
             <select aria-label="Etsy listing pack" value={packPreset} disabled={aiBusy} onChange={e => setPackPreset(e.target.value as PackPreset)}>
               <option value="complete-10">Complete Etsy Listing Pack — 10 thumbnails</option>
