@@ -146,8 +146,8 @@ export async function POST(req: Request) {
   if (!(isPng || isJpg) || (imageMime === 'image/png' && !isPng) || (imageMime === 'image/jpeg' && !isJpg)) return bad('Provider did not return a valid image', 502);
   const format = isPng ? 'png' : 'jpg';
   if (bytes.length > 20_000_000) return bad('Generated image is too large', 413);
-  if (mode === 'background-with-typography') {
-    // Fail closed: do not accept an AI image containing character-like artwork.
+  if (mode === 'background-with-typography' || mode === 'background-only') {
+    // Fail closed: neither decorative background mode may introduce generated clipart or objects.
     // Validation does not compare pixel identity and remains a best-effort visual check.
     const key = await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
     if (!key) return bad('OpenAI is required for background illustration validation', 503);
@@ -158,7 +158,7 @@ export async function POST(req: Request) {
         body: JSON.stringify({
           model: 'gpt-4.1-mini',
           input: [{role:'user',content:[
-            {type:'input_text',text:'Review this Etsy THUMBNAIL BACKGROUND ONLY. Reply with JSON {"containsObjects":true|false}. Mark true if you see ANY recognizable illustrated food, dish, plant, animal, person, standalone product, character or clipart-like object, even decorative miniatures or silhouettes. Ignore abstract frames, patterns, text, emblems and empty badge shapes. Be strict about food and collection artwork. Do not assess typography accuracy.'},
+            {type:'input_text',text:'Review an Etsy decorative thumbnail background. Return JSON {"containsObjects":true|false,"containsText":true|false}. containsObjects=true if ANY recognizable standalone illustration, food, drink, dish, floral item, animal, person, product, stock art or clipart-like object appears, including tiny icons or silhouettes; abstract washes, paper grain and lines are not standalone objects. containsText=true if you see readable text, letters, numbers or pseudo-lettering. This background mode is ' + JSON.stringify(mode) + '. In background-only mode, both fields MUST be false; in background-with-typography mode, text is allowed but objects are forbidden.'},
             {type:'input_image',image_url:'data:' + (isPng ? 'image/png' : 'image/jpeg') + ';base64,' + imageBase64}
           ]}],text:{format:{type:'json_object'}}
         }), signal: AbortSignal.timeout(60000)
@@ -168,8 +168,9 @@ export async function POST(req: Request) {
     try {
       const validation = await review.json() as {output?:Array<{content?:Array<{text?:string}>}>};
       const raw = validation.output?.flatMap(x=>x.content||[]).map(x=>x.text||'').join('') || '{}';
-      const decision = JSON.parse(raw) as {containsObjects?:boolean};
+      const decision = JSON.parse(raw) as {containsObjects?:boolean; containsText?:boolean};
       if (decision.containsObjects !== false) return bad('AI background contains or may contain generated clipart-like objects. Image rejected; retry generation.', 422);
+      if (mode === 'background-only' && decision.containsText !== false) return bad('Decorative background contains unexpected text. Image rejected; retry generation.', 422);
     } catch { return bad('Background validation returned an unreadable response; image rejected', 502); }
   }
   const assetId = crypto.randomUUID();
