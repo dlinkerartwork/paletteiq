@@ -352,7 +352,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     let slides = buildPack(packPreset, title, available);
     if (!slides.length) { setMessage('No collection images available for this pack.'); return; }
     const needsCategories = packPreset !== 'core-5' && !available.some(c => c.category || c.subtheme || c.group);
-    if (!window.confirm('Create ' + slides.length + ' Etsy listing thumbnails? This makes up to ' + slides.length + ' paid OpenAI image requests, ' + slides.length + ' layout planning requests' + (packTypography === 'ai-artwork' ? ', and ' + slides.length + ' visual checks' : '') + (reference ? ' plus one reference analysis' : '') + (needsCategories ? ' plus one category analysis' : '') + '. Existing thumbnails are preserved. Continue?')) return;
+    if (!window.confirm('Create ' + slides.length + ' Etsy listing thumbnails? This makes up to ' + slides.length + ' paid OpenAI image requests, ' + slides.length + ' layout planning requests, and ' + slides.length + ' visual checks' + (reference ? ' plus one reference analysis' : '') + (needsCategories ? ' plus one category analysis' : '') + '. Existing thumbnails are preserved. Continue?')) return;
     cancelPackRef.current = false;
     setAiBusy(true); setPackStatus('Preparing ' + slides.length + ' Etsy listing designs...');
     const failures: string[] = [];
