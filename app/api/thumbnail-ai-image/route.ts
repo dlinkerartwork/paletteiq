@@ -69,6 +69,8 @@ export async function POST(req: Request) {
     'CRITICAL: NO TEXT, NO TYPOGRAPHY, NO LETTERS, NO NUMBERS, NO PSEUDO-TEXT, NO LABELS OR LOGOS anywhere. Do not attempt to generate titles or badges. Separate exact typography will be placed above by the compositor.',
     'NO product illustrations, no food dishes, no animals, no standalone clipart, no character drawings. The real ORIGINAL artwork will be placed over this background later.',
     'Art direction:', designDirection,
+    'User-selected background material, subordinate to theme accuracy and restraint:', backgroundStyle === 'watercolor' ? 'very light controlled watercolor wash on ivory stock, no huge wet pigment blobs' : styleGuidance[backgroundStyle],
+    'Decoration intensity, but preserve elegant editorial restraint:', intensityGuidance[backgroundIntensity],
     'Preserve a visibly light neutral typography-safe-panel inside this rectangle (percentage from upper-left):',JSON.stringify(titleZone),
     'The typography panel should be clean, low contrast and visually legible. Add subtle thin framing or ornamental dividers around it but nothing inside.',
     'The areas outside text panel should remain tasteful and almost unadorned because original clipart will be placed there. Do not create fake objects to fill those areas.',
