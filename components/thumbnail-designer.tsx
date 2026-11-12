@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import UpscaleCompare from '@/components/upscale-compare';
+import { buildPack, placeOriginals, type PackPreset } from '@/lib/etsy-listing-pack';
 import { Download, Plus, Trash2, Copy, Undo2, Redo2, WandSparkles, RotateCcw } from 'lucide-react';
 
 export type ThumbnailElement = {
@@ -11,9 +12,9 @@ export type ThumbnailElement = {
 };
 export type ThumbnailDesign = {
   id: string; name: string; width: number; height: number; background: string; backgroundImageUrl?: string; aiImageUrl?: string; aiImagePrompt?: string; renderedImageUrl?: string; upscaledImageUrl?: string; upscaleJob?: { id: string; sourceUrl: string; factor: 2 | 4 | 6 | 8; submittedAt: number }; elements: ThumbnailElement[];
-  referenceUrl?: string; originalAssetsOnly?: boolean; updatedAt: number;
+  referenceUrl?: string; originalAssetsOnly?: boolean; generationError?: string; updatedAt: number;
 };
-type Character = { id: string; name: string; imageUrl?: string; upscaledImageUrl?: string };
+type Character = { id: string; name: string; imageUrl?: string; upscaledImageUrl?: string; category?: string; subtheme?: string; group?: string };
 export type ThumbnailSaveControls = { save: () => Promise<void>; hasUnsaved: () => boolean };
 type Props = { registerSaveControls?: (controls: ThumbnailSaveControls | null) => void; title: string; aiDefaults: { provider: 'openai' | 'gemini'; openaiModel: string; geminiModel: string }; projectId: string; characters: Character[]; references: string[]; designs: ThumbnailDesign[]; onChange: (designs: ThumbnailDesign[]) => void; onSave: (designs: ThumbnailDesign[]) => Promise<void> };
 const id = () => crypto.randomUUID();
@@ -54,7 +55,9 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const [reference, setReference] = useState('');
   const [uploadedReference, setUploadedReference] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
-  const [referenceBatchCount, setReferenceBatchCount] = useState<5 | 10 | 15>(10);
+  const [packPreset, setPackPreset] = useState<PackPreset>('complete-10');
+  const [packStatus, setPackStatus] = useState('');
+  const cancelPackRef = useRef(false);
   const [referenceStyle, setReferenceStyle] = useState<'creative' | 'similar' | 'palette'>('creative');
   const [imageBusy, setImageBusy] = useState(false);
   const [comparePreview, setComparePreview] = useState<{ name: string; originalUrl: string; upscaledUrl: string; temporary?: boolean } | null>(null);
@@ -304,63 +307,86 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     finally { setAiBusy(false); }
   };
 
-  // Reference-guided batch layouts remain editable and use real collection images,
-  // never AI-generated copies of clipart. One paid analysis can plan many variations.
+  // One-click Etsy listing pack. AI makes background + typography; original PNGs
+  // remain separate movable layers and never come from upscaled image URLs.
   const generateReferenceBatch = async () => {
-    if (!design || !reference) { setMessage('Select a reference image and create a thumbnail first.'); return; }
     const available = characters.filter(c => c.imageUrl);
-    if (!available.length) { setMessage('Generate collection clipart images first.'); return; }
-    if (!window.confirm('Analyze this reference with ' + provider + ' (API charges may apply) and add ' + referenceBatchCount + ' editable thumbnails using your original collection clipart? Existing designs will be preserved.')) return;
-    setAiBusy(true); setMessage('');
+    if (!available.length) { setMessage('Generate original collection clipart images first.'); return; }
+    const slides = buildPack(packPreset, title, available);
+    if (!slides.length) { setMessage('No collection images available for this pack.'); return; }
+    const estimated = slides.length + (reference ? 1 : 0);
+    if (!window.confirm('Create ' + slides.length + ' Etsy listing thumbnails? This makes approximately ' + slides.length + ' paid OpenAI image requests' + (reference ? ' plus one reference analysis' : '') + '. Existing thumbnails are preserved. Continue?')) return;
+    cancelPackRef.current = false;
+    setAiBusy(true); setPackStatus('Preparing ' + slides.length + ' Etsy listing designs...');
+    const failures: string[] = [];
     try {
-      const response = await fetch('/api/thumbnail-layout', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId, imageUrl: reference, provider, model, count: Math.min(available.length, 24), referenceStyle })
-      });
-      const body = await response.json() as { error?: string; layout?: { slots?: Array<{ x: number; y: number; width: number; height: number; rotation?: number }>; texts?: Array<{ text: string; x: number; y: number; width: number; height: number; curve?: number }>; background?: string } };
-      if (!response.ok) throw Error(body.error || 'Reference analysis failed');
-      if (!body.layout?.slots?.length) throw Error('Reference analysis returned no image positions.');
-      const slots = body.layout.slots;
-      const texts = body.layout.texts || [];
-      const baseBackground = /^#[0-9a-f]{6}$/i.test(body.layout.background || '') ? body.layout.background! : '#f7f1e9';
-      const variants: ThumbnailDesign[] = Array.from({ length: referenceBatchCount }, (_, index) => {
-        const concept = index % 5;
-        const alternate = Math.floor(index / 5);
-        const imageElements: ThumbnailElement[] = slots.slice(0, available.length).map((slot, i) => {
-          const character = available[(i + concept * 3 + alternate) % available.length];
-          const shift = concept === 0 ? 0 : (concept % 2 ? 1 : -1) * (2 + alternate);
-          return {
-            ...newImage(character, i, 'original'),
-            x: clamp(slot.x + shift, 0, Math.max(0, 100 - slot.width)),
-            y: clamp(slot.y + (i % 2 ? -shift : shift), 0, Math.max(0, 100 - slot.height)),
-            width: clamp(slot.width * (alternate % 2 ? 0.94 : 1), 3, 100),
-            height: clamp(slot.height * (alternate % 2 ? 0.94 : 1), 3, 100),
-            rotation: clamp((slot.rotation || 0) + (alternate % 2 ? 2 : 0), -90, 90)
-          };
+      let slots: Array<{ x: number; y: number; width: number; height: number }> = [];
+      let color = '#f7f1e9';
+      if (reference) {
+        setPackStatus('Analyzing optional reference...');
+        const response = await fetch('/api/thumbnail-layout', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId, imageUrl: reference, provider, model, count: Math.min(available.length, 24), referenceStyle })
         });
-        const textElements: ThumbnailElement[] = texts.slice(0, 32).map(slot => ({
-          ...newText(), id: id(), text: slot.text || title,
-          x: clamp(slot.x, 0, 95), y: clamp(slot.y, 0, 95),
-          width: clamp(slot.width, 5, 100), height: clamp(slot.height, 3, 100),
-          curve: clamp(Number(slot.curve) || 0, -100, 100),
-          color: ['#644a35', '#594935', '#465749', '#674f60', '#594d73'][concept],
-          fontFamily: alternate % 2 ? 'Georgia' : 'Arial'
-        }));
-        return {
-          ...newDesign(designs.length + index + 1),
-          name: 'Reference concept ' + (concept + 1) + ' · Variation ' + (alternate + 1),
-          background: baseBackground,
-          referenceUrl: reference.startsWith('https://') ? reference : undefined,
-          originalAssetsOnly: true,
-          elements: [...imageElements, ...textElements]
-        };
-      });
-      onChange([...designs, ...variants]);
-      setActiveId(variants[0].id);
-      setSideTab('reference');
-      setMessage(variants.length + ' editable designs created from one reference analysis. Review text and composition, then Save designs. Original clipart is preserved.');
-    } catch (error) { setMessage('Reference batch failed: ' + (error instanceof Error ? error.message : String(error))); }
-    finally { setAiBusy(false); }
+        const body = await response.json() as { error?: string; layout?: { slots?: typeof slots; background?: string } };
+        if (!response.ok) throw Error(body.error || 'Reference analysis failed');
+        slots = body.layout?.slots || [];
+        if (/^#[0-9a-f]{6}$/i.test(body.layout?.background || '')) color = body.layout!.background!;
+      }
+      // Each slot already avoids the title-safe-zone before we call the image API.
+      const created: ThumbnailDesign[] = slides.map((slide, index) => ({
+        ...newDesign(latestDesignsRef.current.length + index + 1),
+        name: String(index + 1).padStart(2, '0') + ' · ' + slide.name,
+        originalAssetsOnly: true,
+        background: color,
+        referenceUrl: reference.startsWith('https://') ? reference : undefined,
+        elements: placeOriginals(slide, available, slots).map(position => ({
+          ...newImage(available.find(c => c.id === position.characterId)!, index, 'original'),
+          ...position, source: 'original' as const
+        }))
+      }));
+      const original = [...latestDesignsRef.current, ...created];
+      latestDesignsRef.current = original;
+      onChange(original);
+      setActiveId(created[0].id);
+      for (let i = 0; i < created.length; i++) {
+        if (cancelPackRef.current) { setPackStatus('Generation stopped. Completed thumbnails were kept.'); break; }
+        const slide = slides[i];
+        const item = created[i];
+        setPackStatus('Generating background + artistic typography ' + (i + 1) + '/' + created.length + ': ' + slide.name);
+        try {
+          const response = await fetch('/api/thumbnail-ai-image', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              projectId, provider: 'openai',
+              model: imageModel.startsWith('gpt-image-') ? imageModel : 'gpt-image-1-mini',
+              quality: imageQuality, width: 2000, height: 2000,
+              mode: 'background-with-typography',
+              backgroundStyle, backgroundIntensity,
+              headline: slide.headline, subtitle: slide.subtitle,
+              slideName: slide.name, textZone: slide.textZone,
+              layout: item.elements.map(e => ({ type: 'image', x: e.x, y: e.y, width: e.width, height: e.height }))
+            })
+          });
+          const result = await response.json() as { imageUrl?: string; error?: string };
+          if (!response.ok || !result.imageUrl) throw Error(result.error || 'Generation failed');
+          await loadForExport(result.imageUrl);
+          const next = latestDesignsRef.current.map(d => d.id === item.id ? { ...d, backgroundImageUrl: result.imageUrl, generationError: undefined } : d);
+          latestDesignsRef.current = next;
+          onChange(next);
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          failures.push(slide.name + ': ' + reason);
+          const next = latestDesignsRef.current.map(d => d.id === item.id ? { ...d, generationError: reason } : d);
+          latestDesignsRef.current = next;
+          onChange(next);
+        }
+      }
+      setPackStatus(cancelPackRef.current ? 'Stopped. Generated images are retained.' : 'Pack generation finished.');
+      setMessage('Pack: ' + created.length + ' designs created; ' + (created.length - failures.length) + ' backgrounds generated' + (failures.length ? '. Failed: ' + failures.join(' | ').slice(0,450) : '. Review AI spelling before publishing.') + '.');
+    } catch (error) {
+      setMessage('Etsy listing pack failed: ' + (error instanceof Error ? error.message : String(error)));
+    } finally { setAiBusy(false); }
   };
 
   const onReferenceUpload = async (file?: File) => {
