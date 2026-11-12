@@ -419,7 +419,8 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
             body: JSON.stringify({
               projectId, slideKey: slide.key, slideName: slide.name,
               headline: slide.headline, subtitle: slide.subtitle, textZone: slide.textZone,
-              characters: originalChoices
+              characters: originalChoices,
+              suggestedSlots: item.elements.filter(e => e.type === 'image').map(e => ({ characterId: e.characterId, x: e.x, y: e.y, width: e.width, height: e.height }))
             })
           });
           const plan = await planResponse.json() as {
