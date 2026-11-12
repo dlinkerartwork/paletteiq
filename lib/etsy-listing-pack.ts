@@ -27,11 +27,11 @@ export function buildPack(preset: PackPreset, title: string, characters: PackCha
   const name = (title || 'Clipart Collection').slice(0, 70);
   const total = characters.filter(c => c.imageUrl).length;
   const summary = total + ' illustrated assets';
-  const hero = make('hero', 'Hero Cover', name, 'Digital Clipart Collection', 'hero', 5);
+  const hero = make('hero', 'Hero Cover', name, 'Digital Clipart Collection', 'hero', 6, { x: 22, y: 31, width: 56, height: 38 });
   const showcase = make('showcase', 'Collection Showcase', name, summary, 'showcase', 12);
   const preview = make('preview', 'Collection Preview', 'Explore the Collection', summary, 'grid', 35);
   const closeup = make('closeup', 'Artwork Closeups', 'Beautiful Details', 'A closer look at the artwork', 'closeup', 4);
-  const bundle = make('bundle', 'Complete Bundle', name, summary, 'hero', 7);
+  const bundle = make('bundle', 'Complete Bundle', name, summary, 'hero', 7, { x: 22, y: 31, width: 56, height: 38 });
   if (preset === 'core-5') return [hero, showcase, preview, closeup, bundle];
   const groups = categoryGroups(characters);
   const category = (i: number): PackSlide => {
@@ -42,7 +42,7 @@ export function buildPack(preset: PackPreset, title: string, characters: PackCha
   };
   if (preset === 'category-showcase') return [hero, ...groups.slice(0, 8).map((_, i) => category(i)), bundle];
   return [hero, showcase,
-    make('artistic', 'Artistic Typography', name, 'A curated illustration collection', 'showcase', 5),
+    make('artistic', 'Artistic Typography', name, 'A curated illustration collection', 'hero', 5, { x: 22, y: 31, width: 56, height: 38 }),
     make('storybook', 'Storybook Gallery', 'Inside the Collection', name, 'grid', 9),
     make('boutique', 'Modern Boutique', name, 'Creative artwork collection', 'boutique', 5, { x: 5, y: 7, width: 41, height: 83 }),
     preview, category(0), category(1), closeup, bundle];
@@ -98,7 +98,13 @@ export function placeOriginals(slide: PackSlide, characters: PackCharacter[], re
     const width=Math.min(cellW*.72,slide.layout==='closeup'?33:27);
     const height=Math.min(cellH*.70,slide.layout==='closeup'?32:28);
     const col=i%columns,row=Math.floor(i/columns);
-    const grid:Zone={x:area.x+col*cellW+(cellW-width)/2,y:area.y+row*cellH+(cellH-height)/2,width,height};
+    const heroPositions = [
+      [7, 12], [76, 13], [3, 41], [79, 44], [11, 73], [72, 75], [42, 6], [41, 77]
+    ];
+    const [hx,hy]=heroPositions[i % heroPositions.length];
+    const grid:Zone=slide.layout==='hero'
+      ? {x:hx,y:hy,width:Math.min(width,20),height:Math.min(height,20)}
+      : {x:area.x+col*cellW+(cellW-width)/2,y:area.y+row*cellH+(cellH-height)/2,width,height};
     const angle=slide.layout==='grid'||slide.layout==='showcase'?0:(i%3-1)*3;
     const candidates:Zone[]=[];
     // Reference slot positions are only hints; never override typography exclusion.
