@@ -351,7 +351,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     let slides = buildPack(packPreset, title, available);
     if (!slides.length) { setMessage('No collection images available for this pack.'); return; }
     const needsCategories = packPreset !== 'core-5' && !available.some(c => c.category || c.subtheme || c.group);
-    if (!window.confirm('Create ' + slides.length + ' Etsy listing thumbnails? This makes ' + slides.length + ' paid OpenAI image requests plus ' + slides.length + ' AI layout planning requests' + (reference ? ' plus one reference analysis' : '') + (needsCategories ? ' plus one category analysis' : '') + '. Existing thumbnails are preserved. Continue?')) return;
+    if (!window.confirm('Create ' + slides.length + ' Etsy listing thumbnails? This makes up to ' + slides.length + ' paid OpenAI image requests, ' + slides.length + ' layout planning requests, and ' + slides.length + ' visual checks' + (reference ? ' plus one reference analysis' : '') + (needsCategories ? ' plus one category analysis' : '') + '. Existing thumbnails are preserved. Continue?')) return;
     cancelPackRef.current = false;
     setAiBusy(true); setPackStatus('Preparing ' + slides.length + ' Etsy listing designs...');
     const failures: string[] = [];
@@ -923,7 +923,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
             </button>
             {aiBusy && <button type="button" className="outline-btn" onClick={() => { cancelPackRef.current = true; setPackStatus('Stopping after current request...'); }}>Stop after current image</button>}
             {packStatus && <small role="status">{packStatus}</small>}
-            <small>AI plans original clipart placement, then creates artistic background, typography and badges as one layer. Original collection PNGs remain exact and editable. AI-rendered text may contain errors; verify before publishing. API charges apply.</small>
+            <small>AI plans clipart positions only. Background generation is prohibited from drawing any collection objects; automated visual review rejects detected illustration objects. PaletteIQ inserts the exact original PNGs. Background, typography and badges form one AI layer. 1024 × 1024 px. AI text can contain spelling errors; API charges apply.</small>
             <small>Only original collection clipart is placed on top. Upscaled assets are not used.</small>
           </div>
           <small>Optional references inspire layout. Automatically generated designs keep typography areas clear of collection clipart.</small>
