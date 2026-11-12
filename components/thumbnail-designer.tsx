@@ -108,6 +108,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const [busy, setBusy] = useState(false);
   const [backgroundUploading, setBackgroundUploading] = useState(false);
   const [backgroundGenerating, setBackgroundGenerating] = useState(false);
+  const [backgroundLoadError, setBackgroundLoadError] = useState('');
   const [typographyPreset, setTypographyPreset] = useState<'editorial' | 'romantic' | 'playful' | 'minimal' | 'vintage'>('editorial');
   const [history, setHistory] = useState<ThumbnailDesign[]>([]);
   const [future, setFuture] = useState<ThumbnailDesign[]>([]);
@@ -392,8 +393,20 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
       });
       const result = await response.json() as { error?: string; imageUrl?: string };
       if (!response.ok || !result.imageUrl) throw Error(result.error || 'Background generation failed');
+      // API success alone does not guarantee the stored background is reachable.
+      // Check the authenticated image endpoint and decoding before modifying the design.
+      const imageResponse = await fetch(result.imageUrl, { credentials: 'same-origin', cache: 'no-store' });
+      if (!imageResponse.ok || !(imageResponse.headers.get('content-type') || '').startsWith('image/')) {
+        throw Error('Generated background is not accessible (HTTP ' + imageResponse.status + '). Check image storage and authentication.');
+      }
+      const imageBytes = await imageResponse.blob();
+      if (!imageBytes.size) throw Error('Generated background is empty.');
+      const previewUrl = URL.createObjectURL(imageBytes);
+      try { await loadForExport(previewUrl); }
+      finally { URL.revokeObjectURL(previewUrl); }
+      setBackgroundLoadError('');
       commit({ ...design, backgroundImageUrl: result.imageUrl });
-      setMessage('Decorative background generated. Original clipart and editable typography remain separate layers.');
+      setMessage('Decorative background loaded and applied to the canvas. Original clipart and editable typography remain separate layers.');
     } catch (error) { setMessage('Background generation failed: ' + (error instanceof Error ? error.message : String(error))); }
     finally { setBackgroundGenerating(false); }
   };
@@ -827,7 +840,16 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         </div>
         <div ref={canvasViewportRef} onPointerDown={startPan} onPointerMove={movePan} onPointerUp={stopPan} onPointerCancel={stopPan} aria-label="Thumbnail canvas viewport" style={{ overflow: previewZoom > 1 ? 'auto' : 'hidden', height: 'min(66vh, 780px)', minHeight: 240, boxSizing: 'border-box', background: '#e8e8e8', padding: 16, borderRadius: 8, cursor: previewZoom > 1 ? 'grab' : 'default', touchAction: 'none' }}>
           <div style={{ width: fittedWidth * previewZoom, margin: '0 auto', marginTop: Math.max(0, (viewportSize.height - fittedHeight * previewZoom) / 2) }}>
-            <div ref={stageRef} onPointerDown={() => setSelectedId('')} style={{ width: '100%', aspectRatio: `${design.width}/${design.height}`, background: design.background, backgroundImage: (design.aiImageUrl || design.backgroundImageUrl) ? `url(${JSON.stringify(design.aiImageUrl || design.backgroundImageUrl)})` : undefined, backgroundPosition: 'center', backgroundSize: 'cover', position: 'relative', containerType: 'inline-size', overflow: 'hidden', boxShadow: '0 5px 25px #0002', touchAction: 'none' }}>
+            <div ref={stageRef} onPointerDown={() => setSelectedId('')} style={{ width: '100%', aspectRatio: `${design.width}/${design.height}`, backgroundColor: design.background, position: 'relative', containerType: 'inline-size', overflow: 'hidden', boxShadow: '0 5px 25px #0002', touchAction: 'none' }}>
+              {(design.backgroundImageUrl || design.aiImageUrl) && <img
+                key={design.backgroundImageUrl || design.aiImageUrl}
+                src={design.backgroundImageUrl || design.aiImageUrl}
+                alt="Thumbnail background"
+                onLoad={() => setBackgroundLoadError('')}
+                onError={() => setBackgroundLoadError('Background image cannot be displayed. Check the generated image URL or your image storage.')}
+                draggable={false}
+                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none', userSelect: 'none' }}
+              />}
               {design.elements.map(e => {
                 const isSelected = e.id === selectedId;
                 return <div key={e.id} data-thumbnail-element="true" onPointerDown={event => startDrag(event,e,'move')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
@@ -869,7 +891,9 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         <label className="input-label">BACKGROUND IMAGE (LOCAL PNG/JPG)</label>
         <input type="file" accept="image/png,image/jpeg" disabled={backgroundUploading} onChange={e => void uploadBackground(e.target.files?.[0])}/>
         {backgroundUploading && <small>Uploading background…</small>}
-        {design.backgroundImageUrl && <button className="outline-btn" type="button" onClick={() => mutate({ backgroundImageUrl: undefined })}>Remove background image</button>}
+        {backgroundLoadError && <small role="alert" style={{ color: '#b91c1c' }}>{backgroundLoadError}</small>}
+        {design.backgroundImageUrl && <a href={design.backgroundImageUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>View current background image</a>}
+        {design.backgroundImageUrl && <button className="outline-btn" type="button" onClick={() => { setBackgroundLoadError(''); mutate({ backgroundImageUrl: undefined }); }}>Remove background image</button>
         <h3>Layers</h3>
         <div style={{ display: 'grid', gap: 5, maxHeight: 190, overflowY: 'auto' }}>
           {[...design.elements].reverse().map(e => <div key={e.id} style={{ display: 'flex', gap: 5, minWidth: 0 }}>
@@ -928,7 +952,8 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
               Select for upscale
             </label>
             <button type="button" onClick={() => { setActiveId(item.id); setSelectedId(''); }} style={{ border: 0, background: 'transparent', textAlign: 'left', padding: 0, width: '100%', cursor: 'pointer' }}>
-            <div style={{ width: '100%', aspectRatio: item.width + '/' + item.height, position: 'relative', overflow: 'hidden', borderRadius: 6, background: item.background, backgroundImage: item.aiImageUrl || item.backgroundImageUrl ? 'url(' + JSON.stringify(item.aiImageUrl || item.backgroundImageUrl) + ')' : undefined, backgroundSize: 'cover', backgroundPosition: 'center' }}>
+            <div style={{ width: '100%', aspectRatio: item.width + '/' + item.height, position: 'relative', overflow: 'hidden', borderRadius: 6, backgroundColor: item.background }}>
+              {(item.backgroundImageUrl || item.aiImageUrl) && <img src={item.backgroundImageUrl || item.aiImageUrl} alt="" draggable={false} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}/>}
               {!item.aiImageUrl && item.elements.map(element => element.type === 'image' ? <img key={element.id} src={imageUrl(element)} alt="" style={{ position: 'absolute', left: element.x + '%', top: element.y + '%', width: element.width + '%', height: element.height + '%', objectFit: 'contain', transform: 'rotate(' + element.rotation + 'deg)' }}/> : <span key={element.id} style={{ position: 'absolute', left: element.x + '%', top: element.y + '%', width: element.width + '%', color: element.color, fontFamily: element.fontFamily, fontSize: 9, overflow: 'hidden' }}>{element.text}</span>)}
             </div>
             <strong style={{ display: 'block', marginTop: 7, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</strong>
