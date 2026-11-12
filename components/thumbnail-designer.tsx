@@ -309,18 +309,35 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   // One-click Etsy listing pack. AI makes background + typography; original PNGs
   // remain separate movable layers and never come from upscaled image URLs.
   const generateReferenceBatch = async () => {
-    const available = characters.filter(c => c.imageUrl);
+    let available = characters.filter(c => c.imageUrl);
     if (!available.length) { setMessage('Generate original collection clipart images first.'); return; }
-    const slides = buildPack(packPreset, title, available);
+    let slides = buildPack(packPreset, title, available);
     if (!slides.length) { setMessage('No collection images available for this pack.'); return; }
-    const estimated = slides.length + (reference ? 1 : 0);
-    if (!window.confirm('Create ' + slides.length + ' Etsy listing thumbnails? This makes approximately ' + slides.length + ' paid OpenAI image requests' + (reference ? ' plus one reference analysis' : '') + '. Existing thumbnails are preserved. Continue?')) return;
+    const needsCategories = packPreset !== 'core-5' && !available.some(c => c.category || c.subtheme || c.group);
+    if (!window.confirm('Create ' + slides.length + ' Etsy listing thumbnails? This makes ' + slides.length + ' paid OpenAI image requests' + (reference ? ' plus one reference analysis' : '') + (needsCategories ? ' plus one category analysis' : '') + '. Existing thumbnails are preserved. Continue?')) return;
     cancelPackRef.current = false;
     setAiBusy(true); setPackStatus('Preparing ' + slides.length + ' Etsy listing designs...');
     const failures: string[] = [];
+    let completed = 0;
     try {
       let slots: Array<{ x: number; y: number; width: number; height: number }> = [];
       let color = '#f7f1e9';
+      if (needsCategories) {
+        setPackStatus('Finding meaningful artwork categories...');
+        try {
+          const response = await fetch('/api/thumbnail-categories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId }) });
+          const result = await response.json() as { groups?: Array<{ name: string; ids: string[] }>; error?: string };
+          if (!response.ok) throw Error(result.error || 'Category analysis failed');
+          const groupById = new Map<string, string>();
+          for (const group of result.groups || []) for (const key of group.ids) groupById.set(key, group.name);
+          if (new Set(groupById.values()).size > 1) {
+            available = available.map(c => ({ ...c, category: groupById.get(c.id) }));
+            slides = buildPack(packPreset, title, available);
+          }
+        } catch (error) {
+          setPackStatus('Category analysis unavailable; using neutral collection selections.');
+        }
+      }
       if (reference) {
         setPackStatus('Analyzing optional reference...');
         const response = await fetch('/api/thumbnail-layout', {
@@ -373,6 +390,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
           const next = latestDesignsRef.current.map(d => d.id === item.id ? { ...d, backgroundImageUrl: result.imageUrl, generationError: undefined } : d);
           latestDesignsRef.current = next;
           onChange(next);
+          completed += 1;
         } catch (error) {
           const reason = error instanceof Error ? error.message : String(error);
           failures.push(slide.name + ': ' + reason);
@@ -382,7 +400,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         }
       }
       setPackStatus(cancelPackRef.current ? 'Stopped. Generated images are retained.' : 'Pack generation finished.');
-      setMessage('Pack: ' + created.length + ' designs created; ' + (created.length - failures.length) + ' backgrounds generated' + (failures.length ? '. Failed: ' + failures.join(' | ').slice(0,450) : '. Review AI spelling before publishing.') + '.');
+      setMessage('Pack: ' + created.length + ' designs created; ' + completed + ' backgrounds and typography artwork generated' + (failures.length ? '. Failed: ' + failures.join(' | ').slice(0,450) : '. Review AI spelling before publishing.') + '.');
     } catch (error) {
       setMessage('Etsy listing pack failed: ' + (error instanceof Error ? error.message : String(error)));
     } finally { setAiBusy(false); }
