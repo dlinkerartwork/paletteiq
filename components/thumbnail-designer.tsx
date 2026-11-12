@@ -315,7 +315,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     const base = z.y + z.height * .12;
     const headline = slide.headline.trim();
     const splitAt = headline.length > 22 ? headline.lastIndexOf(' ', 22) : -1;
-    const displayTitle = splitAt > 8 ? headline.slice(0, splitAt) + '\\n' + headline.slice(splitAt + 1) : headline;
+    const displayTitle = splitAt > 8 ? headline.slice(0, splitAt) + '\n' + headline.slice(splitAt + 1) : headline;
     const titleY = base + (centerHero ? 8 : 2);
     const titleHeight = z.height * (centerHero ? .52 : .54);
     const titleFont = centerHero ? 100 : 90;
