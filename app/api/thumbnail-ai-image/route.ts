@@ -8,7 +8,7 @@ import { userCredential, userGeminiKeys } from '@/lib/credentials';
 import { nativeAssetBucket } from '@/lib/native-bridge';
 
 type LayoutItem = { type: 'image' | 'text'; x: number; y: number; width: number; height: number; text?: string };
-type RequestBody = { projectId?: string; provider?: string; model?: string; quality?: string; width?: number; height?: number; layout?: LayoutItem[]; includeTitle?: boolean };
+type RequestBody = { projectId?: string; provider?: string; model?: string; quality?: string; width?: number; height?: number; layout?: LayoutItem[]; includeTitle?: boolean; mode?: 'full-thumbnail' | 'background-only' };
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 const bucket = () => nativeAssetBucket() ?? env.BUCKET;
 
@@ -19,6 +19,9 @@ export async function POST(req: Request) {
   try { input = await req.json() as RequestBody; } catch { return bad('Invalid JSON'); }
   if (typeof input.projectId !== 'string' || !/^[\w-]{8,80}$/.test(input.projectId)) return bad('Invalid collection');
   if (input.includeTitle !== undefined && typeof input.includeTitle !== 'boolean') return bad('includeTitle must be a boolean');
+  const mode = input.mode || 'full-thumbnail';
+  if (!['full-thumbnail', 'background-only'].includes(mode)) return bad('Invalid image generation mode');
+  if (mode === 'background-only' && input.provider !== 'openai') return bad('Background-only generation uses OpenAI');
   const rows = await getDb().select().from(projects).where(and(eq(projects.id, input.projectId), eq(projects.owner, user.userId))).limit(1);
   if (!rows.length) return bad('Collection not found', 404);
   const provider = input.provider;
@@ -38,7 +41,17 @@ export async function POST(req: Request) {
     width: Math.max(1, Math.min(120, Number(item.width) || 10)), height: Math.max(1, Math.min(120, Number(item.height) || 10)),
     text: item.type === 'text' ? String(item.text || '').slice(0, 120) : undefined
   })) : [];
-  const prompt = thumbnailImagePrompt(collection, layout, width, height, input.includeTitle !== false);
+  const prompt = mode === 'background-only'
+    ? [
+        'Create ONLY a decorative BACKGROUND for an Etsy digital clipart product thumbnail.',
+        'The background must contain NO characters, animals, flowers as isolated clipart, portraits, objects resembling the collection subjects, product mockups, text, lettering, digits, logos, watermarks, badges or typography.',
+        'Design a subtle sophisticated material backdrop, atmospheric watercolor washes, delicate gradients, fine paper grain and soft ornamental texture with generous clear space.',
+        'IMPORTANT: The actual original clipart and editable typography will be composited on top by another system. Do not draw them or imitate them in any way.',
+        'Collection styling context:', JSON.stringify({ theme: collection.theme, subtheme: collection.subtheme, style: collection.style }).slice(0,900),
+        'Approximate regions reserved for later placement of original assets and typography (percent coordinates):', JSON.stringify(layout).slice(0,3500),
+        'Keep these reserved regions visually calm, maintain legibility and avoid strong distracting contrasts. Square image, no borders, no frames, no text.'
+      ].join('\n')
+    : thumbnailImagePrompt(collection, layout, width, height, input.includeTitle !== false);
   let imageBase64 = '';
   let imageMime = 'image/png';
   if (provider === 'openai') {
