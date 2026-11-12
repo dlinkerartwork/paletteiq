@@ -19,13 +19,14 @@ export type ThumbnailSaveControls = { save: () => Promise<void>; hasUnsaved: () 
 type Props = { registerSaveControls?: (controls: ThumbnailSaveControls | null) => void; title: string; aiDefaults: { provider: 'openai' | 'gemini'; openaiModel: string; geminiModel: string }; projectId: string; characters: Character[]; references: string[]; designs: ThumbnailDesign[]; onChange: (designs: ThumbnailDesign[]) => void; onSave: (designs: ThumbnailDesign[]) => Promise<void> };
 const id = () => crypto.randomUUID();
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
-const newDesign = (index: number): ThumbnailDesign => ({ id: id(), name: 'Thumbnail ' + index, width: 2000, height: 2000, background: '#f7f1e9', elements: [], updatedAt: Date.now() });
+const THUMBNAIL_SIZE = 1024;
+const newDesign = (index: number): ThumbnailDesign => ({ id: id(), name: 'Thumbnail ' + index, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, background: '#f7f1e9', elements: [], updatedAt: Date.now() });
 const newImage = (character: Character, index: number, preferredSource: 'auto' | 'original' | 'upscaled' = 'auto'): ThumbnailElement => ({
   id: id(), type: 'image', characterId: character.id, source: preferredSource === 'auto' ? (character.upscaledImageUrl ? 'upscaled' : 'original') : preferredSource,
   x: 10 + (index % 4) * 21, y: 17 + (Math.floor(index / 4) % 3) * 25, width: 22, height: 28, rotation: 0
 });
 const newText = (title = 'YOUR CLIPART COLLECTION'): ThumbnailElement => ({ id: id(), type: 'text', text: title, x: 9, y: 7, width: 82, height: 14, rotation: 0, fontSize: 90, curve: 0, fontFamily: 'Arial', color: '#644a35', fontWeight: 'bold' });
-const normalizeDesign = (d: ThumbnailDesign): ThumbnailDesign => ({ ...d, updatedAt: Date.now() });
+const normalizeDesign = (d: ThumbnailDesign): ThumbnailDesign => ({ ...d, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, updatedAt: Date.now() });
 
 function CurvedText({ element, designWidth }: { element: ThumbnailElement; designWidth: number }) {
   const curve = clamp(element.curve || 0, -100, 100);
@@ -443,7 +444,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
             body: JSON.stringify({
               projectId, provider: 'openai',
               model: imageModel.startsWith('gpt-image-') ? imageModel : 'gpt-image-1-mini',
-              quality: packQuality, width: 2000, height: 2000,
+              quality: packQuality, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE,
               mode: 'background-with-typography',
               backgroundStyle, backgroundIntensity,
               headline: slide.headline, subtitle: slide.subtitle,
@@ -565,18 +566,18 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
   };
   const renderDesignBlob = async (target: ThumbnailDesign, format: 'png' | 'jpeg' = 'png'): Promise<Blob> => {
-      const canvas = document.createElement('canvas'); canvas.width = target.width; canvas.height = target.height;
+      const canvas = document.createElement('canvas'); canvas.width = THUMBNAIL_SIZE; canvas.height = THUMBNAIL_SIZE;
       const ctx = canvas.getContext('2d'); if (!ctx) throw new Error('Canvas unavailable');
       ctx.fillStyle = target.background; ctx.fillRect(0, 0, canvas.width, canvas.height);
       if (target.aiImageUrl || target.backgroundImageUrl) {
         const background = await loadForExport(target.aiImageUrl || target.backgroundImageUrl!);
-        const scale = Math.max(target.width / background.naturalWidth, target.height / background.naturalHeight);
+        const scale = Math.max(THUMBNAIL_SIZE / background.naturalWidth, THUMBNAIL_SIZE / background.naturalHeight);
         const w = background.naturalWidth * scale, h = background.naturalHeight * scale;
-        ctx.drawImage(background, (target.width - w) / 2, (target.height - h) / 2, w, h);
+        ctx.drawImage(background, (THUMBNAIL_SIZE - w) / 2, (THUMBNAIL_SIZE - h) / 2, w, h);
       }
       for (const element of target.elements) {
-        const x = element.x / 100 * target.width, y = element.y / 100 * target.height;
-        const w = element.width / 100 * target.width, h = element.height / 100 * target.height;
+        const x = element.x / 100 * THUMBNAIL_SIZE, y = element.y / 100 * THUMBNAIL_SIZE;
+        const w = element.width / 100 * THUMBNAIL_SIZE, h = element.height / 100 * THUMBNAIL_SIZE;
         ctx.save(); ctx.globalAlpha = element.opacity ?? 1;
         ctx.translate(x + w/2, y + h/2); ctx.rotate(element.rotation * Math.PI/180);
         if (element.type === 'image') {
@@ -588,10 +589,10 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         } else {
           ctx.fillStyle = element.color || '#333333';
           await document.fonts.load(`${element.fontWeight || 'bold'} ${(element.fontSize || 80)}px ${element.fontFamily || 'Arial'}`).catch(() => []);
-          ctx.font = `${element.fontWeight || 'bold'} ${Math.round((element.fontSize || 80) * target.width / 2000)}px ${element.fontFamily || 'Arial'}`;
+          ctx.font = `${element.fontWeight || 'bold'} ${Math.round((element.fontSize || 80) * THUMBNAIL_SIZE / 2000)}px ${element.fontFamily || 'Arial'}`;
           ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
           const raw = (element.text || '').split('\n');
-          const lineHeight = (element.fontSize || 80) * target.width / 2000 * 1.2;
+          const lineHeight = (element.fontSize || 80) * THUMBNAIL_SIZE / 2000 * 1.2;
           raw.forEach((line,i) => {
             const available = Math.max(1, w - 8);
             const actual = ctx.measureText(line).width;
@@ -792,7 +793,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     setBusy(true); setMessage('');
     try {
       let blob: Blob;
-      let width = design.width, height = design.height;
+      let width = THUMBNAIL_SIZE, height = THUMBNAIL_SIZE;
       if (design.upscaledImageUrl) {
         const source = await loadForExport(design.upscaledImageUrl);
         width = source.naturalWidth; height = source.naturalHeight;
@@ -1005,10 +1006,9 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         <h3>Design properties</h3>
         <label className="input-label">DESIGN NAME</label>
         <input value={design.name} onChange={e => mutate({ name: e.target.value })}/>
-        <label className="input-label">CANVAS WIDTH (PX)</label>
-        <input type="number" min={256} max={8000} value={design.width} onChange={e => mutate({ width: clamp(Number(e.target.value) || 2000, 256, 8000) })}/>
-        <label className="input-label">CANVAS HEIGHT (PX)</label>
-        <input type="number" min={256} max={8000} value={design.height} onChange={e => mutate({ height: clamp(Number(e.target.value) || 2000, 256, 8000) })}/>
+        <label className="input-label">THUMBNAIL SIZE</label>
+        <input readOnly aria-label="Thumbnail size" value="1024 × 1024 px" />
+        <small>Fixed thumbnail creation and standard JPG/PNG export: 1024 × 1024 pixels. Remote upscale is a separate optional action.</small>
         <label className="input-label">BACKGROUND COLOR</label>
         <input type="color" value={design.background} onChange={e => mutate({ background: e.target.value })}/>
         <label className="input-label">AI DECORATIVE BACKGROUND (OPENAI)</label>
