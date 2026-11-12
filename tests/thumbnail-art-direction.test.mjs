@@ -26,7 +26,8 @@ test('One-click batch uses AI layout positions and background with AI lettering 
   assert.match(designer,/plan\.slots\.map\(position =>/);
   assert.match(designer,/layout: plannedElements\.map/);
   assert.match(generator,/INCLUDES artistic typography, tasteful ornamental badges/);
-  assert.match(generator,/DO NOT draw any clipart subjects/);
+  assert.match(generator,/STRICT SEPARATION: Draw NO collection-related objects whatsoever/);
+  assert.match(generator,/The AI must never invent, reconstruct, imitate, redraw/);
 });
 
 test('AI thumbnail backgrounds prohibit object illustrations and are screened before storage', () => {
