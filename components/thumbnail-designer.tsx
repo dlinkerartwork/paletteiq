@@ -54,6 +54,8 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const [reference, setReference] = useState('');
   const [uploadedReference, setUploadedReference] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
+  const [referenceBatchCount, setReferenceBatchCount] = useState<5 | 10 | 15>(10);
+  const [referenceStyle, setReferenceStyle] = useState<'creative' | 'similar' | 'palette'>('creative');
   const [imageBusy, setImageBusy] = useState(false);
   const [comparePreview, setComparePreview] = useState<{ name: string; originalUrl: string; upscaledUrl: string; temporary?: boolean } | null>(null);
   useEffect(() => () => { if (comparePreview?.temporary) URL.revokeObjectURL(comparePreview.originalUrl); }, [comparePreview]);
@@ -294,6 +296,65 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
     finally { setAiBusy(false); }
   };
+
+  // Reference-guided batch layouts remain editable and use real collection images,
+  // never AI-generated copies of clipart. One paid analysis can plan many variations.
+  const generateReferenceBatch = async () => {
+    if (!design || !reference) { setMessage('Select a reference image and create a thumbnail first.'); return; }
+    const available = characters.filter(c => c.imageUrl);
+    if (!available.length) { setMessage('Generate collection clipart images first.'); return; }
+    if (!window.confirm('Analyze this reference with ' + provider + ' (API charges may apply) and add ' + referenceBatchCount + ' editable thumbnails using your original collection clipart? Existing designs will be preserved.')) return;
+    setAiBusy(true); setMessage('');
+    try {
+      const response = await fetch('/api/thumbnail-layout', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId, imageUrl: reference, provider, model, count: Math.min(available.length, 24), referenceStyle })
+      });
+      const body = await response.json() as { error?: string; layout?: { slots?: Array<{ x: number; y: number; width: number; height: number; rotation?: number }>; texts?: Array<{ text: string; x: number; y: number; width: number; height: number; curve?: number }>; background?: string } };
+      if (!response.ok) throw Error(body.error || 'Reference analysis failed');
+      if (!body.layout?.slots?.length) throw Error('Reference analysis returned no image positions.');
+      const slots = body.layout.slots;
+      const texts = body.layout.texts || [];
+      const baseBackground = /^#[0-9a-f]{6}$/i.test(body.layout.background || '') ? body.layout.background! : '#f7f1e9';
+      const variants: ThumbnailDesign[] = Array.from({ length: referenceBatchCount }, (_, index) => {
+        const concept = index % 5;
+        const alternate = Math.floor(index / 5);
+        const imageElements: ThumbnailElement[] = slots.slice(0, available.length).map((slot, i) => {
+          const character = available[(i + concept * 3 + alternate) % available.length];
+          const shift = concept === 0 ? 0 : (concept % 2 ? 1 : -1) * (2 + alternate);
+          return {
+            ...newImage(character, i),
+            x: clamp(slot.x + shift, 0, Math.max(0, 100 - slot.width)),
+            y: clamp(slot.y + (i % 2 ? -shift : shift), 0, Math.max(0, 100 - slot.height)),
+            width: clamp(slot.width * (alternate % 2 ? 0.94 : 1), 3, 100),
+            height: clamp(slot.height * (alternate % 2 ? 0.94 : 1), 3, 100),
+            rotation: clamp((slot.rotation || 0) + (alternate % 2 ? 2 : 0), -90, 90)
+          };
+        });
+        const textElements: ThumbnailElement[] = texts.slice(0, 32).map(slot => ({
+          ...newText(), id: id(), text: slot.text || title,
+          x: clamp(slot.x, 0, 95), y: clamp(slot.y, 0, 95),
+          width: clamp(slot.width, 5, 100), height: clamp(slot.height, 3, 100),
+          curve: clamp(Number(slot.curve) || 0, -100, 100),
+          color: ['#644a35', '#594935', '#465749', '#674f60', '#594d73'][concept],
+          fontFamily: alternate % 2 ? 'Georgia' : 'Arial'
+        }));
+        return {
+          ...newDesign(designs.length + index + 1),
+          name: 'Reference concept ' + (concept + 1) + ' · Variation ' + (alternate + 1),
+          background: baseBackground,
+          referenceUrl: reference.startsWith('https://') ? reference : undefined,
+          elements: [...imageElements, ...textElements]
+        };
+      });
+      onChange([...designs, ...variants]);
+      setActiveId(variants[0].id);
+      setSideTab('reference');
+      setMessage(variants.length + ' editable designs created from one reference analysis. Review text and composition, then Save designs. Original clipart is preserved.');
+    } catch (error) { setMessage('Reference batch failed: ' + (error instanceof Error ? error.message : String(error))); }
+    finally { setAiBusy(false); }
+  };
+
   const onReferenceUpload = async (file?: File) => {
     if (!file) return;
     if (!['image/png','image/jpeg','image/webp'].includes(file.type) || file.size > 4_000_000) { setMessage('Use PNG/JPG/WebP up to 4 MB for AI reference.'); return; }
@@ -669,7 +730,22 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
           </select>
           <input aria-label="Upload reference" type="file" accept="image/png,image/jpeg,image/webp" onChange={e => void onReferenceUpload(e.target.files?.[0])}/>
           {reference && <img src={reference} alt="Layout reference" style={{ maxWidth: '100%', maxHeight: 140, objectFit: 'contain' }}/>}
+          <label className="input-label">REFERENCE INTERPRETATION</label>
+          <select aria-label="Reference interpretation" value={referenceStyle} onChange={e => setReferenceStyle(e.target.value as 'creative' | 'similar' | 'palette')}>
+            <option value="creative">Creative adaptation</option><option value="similar">Similar composition</option><option value="palette">Color and style inspiration</option>
+          </select>
           <button className="primary-btn" disabled={!reference || aiBusy} onClick={() => void analyze()}><WandSparkles size={15}/> {aiBusy ? 'Analyzing...' : 'Analyze & apply layout'}</button>
+          <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 12, display: 'grid', gap: 8 }}>
+            <strong>AI Reference Thumbnail Studio</strong>
+            <small>Create five distinct editable concepts with original collection artwork. No clipart redraw.</small>
+            <label className="input-label">NUMBER OF NEW THUMBNAILS</label>
+            <select aria-label="Reference thumbnail count" value={referenceBatchCount} onChange={e => setReferenceBatchCount(Number(e.target.value) as 5 | 10 | 15)}>
+              <option value={5}>5 · one per concept</option><option value={10}>10 · two per concept</option><option value={15}>15 · three per concept</option>
+            </select>
+            <button className="primary-btn" type="button" disabled={!reference || aiBusy || !characters.some(c => c.imageUrl)} onClick={() => void generateReferenceBatch()}>
+              <WandSparkles size={15}/> {aiBusy ? 'Planning thumbnails...' : 'Create editable reference batch'}
+            </button>
+          </div>
           <small>Reference composition is inspiration only. The artwork and copy should be original.</small>
         </>}
         <h3>Characters</h3>
