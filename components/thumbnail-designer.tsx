@@ -314,7 +314,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     const boutique = slide.layout === 'boutique';
     const headline = slide.headline.trim();
     const cut = headline.length > 20 ? headline.lastIndexOf(' ', 20) : -1;
-    const exactTitle = cut > 7 ? headline.slice(0, cut) + '\\n' + headline.slice(cut + 1) : headline;
+    const exactTitle = cut > 7 ? headline.slice(0, cut) + '\n' + headline.slice(cut + 1) : headline;
     const x = z.x + 3, width = z.width - 6;
     const ink = '#244c40';
     const eyebrowY = z.y + z.height * (boutique ? .17 : .08);
@@ -341,8 +341,8 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     return [eyebrow,main,caption];
   };
 
-  // One-click Etsy listing pack. AI makes background + typography; original PNGs
-  // remain separate movable layers and never come from upscaled image URLs.
+  // One-click Etsy listing pack. AI makes the editorial backdrop; accurate text
+  // and original PNGs are separate movable layers, never upscaled files.
   const generateReferenceBatch = async () => {
     let available = filterThemeCharacters(title, characters);
     if (!available.length) { setMessage('No original collection images match this specific theme (' + title + '). Generate theme-matching clipart first; unrelated artwork will not be added.'); return; }
