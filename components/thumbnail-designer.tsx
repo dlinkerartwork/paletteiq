@@ -893,7 +893,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         {backgroundUploading && <small>Uploading background…</small>}
         {backgroundLoadError && <small role="alert" style={{ color: '#b91c1c' }}>{backgroundLoadError}</small>}
         {design.backgroundImageUrl && <a href={design.backgroundImageUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>View current background image</a>}
-        {design.backgroundImageUrl && <button className="outline-btn" type="button" onClick={() => { setBackgroundLoadError(''); mutate({ backgroundImageUrl: undefined }); }}>Remove background image</button>
+        {design.backgroundImageUrl && <button className="outline-btn" type="button" onClick={() => { setBackgroundLoadError(''); mutate({ backgroundImageUrl: undefined }); }}>Remove background image</button>}
         <h3>Layers</h3>
         <div style={{ display: 'grid', gap: 5, maxHeight: 190, overflowY: 'auto' }}>
           {[...design.elements].reverse().map(e => <div key={e.id} style={{ display: 'flex', gap: 5, minWidth: 0 }}>
