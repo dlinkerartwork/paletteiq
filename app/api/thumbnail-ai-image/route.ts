@@ -69,7 +69,7 @@ export async function POST(req: Request) {
         'Collection visual context:', JSON.stringify({ theme: collection.theme, subtheme: collection.subtheme, style: collection.style }).slice(0,900),
         'Reserved overlay areas (percentage boxes):', JSON.stringify(layout).slice(0,3500),
         'Absolutely no text, no watermarks, no frames or hard borders. Professional commercial design background, edge-to-edge square composition.'
-      ].join('\\n')
+      ].join('\n')
     : thumbnailImagePrompt(collection, layout, width, height, input.includeTitle !== false);
   let imageBase64 = '';
   let imageMime = 'image/png';
