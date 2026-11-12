@@ -310,31 +310,35 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   // hallucinate random words, and can be edited after generation.
   const typographyForSlide = (slide: PackSlide): ThumbnailElement[] => {
     const z = slide.textZone;
-    const centerHero = slide.layout === 'hero';
-    const inset = centerHero ? 2 : 3;
-    const base = z.y + z.height * .12;
+    const hero = slide.layout === 'hero';
+    const boutique = slide.layout === 'boutique';
     const headline = slide.headline.trim();
-    const splitAt = headline.length > 22 ? headline.lastIndexOf(' ', 22) : -1;
-    const displayTitle = splitAt > 8 ? headline.slice(0, splitAt) + '\n' + headline.slice(splitAt + 1) : headline;
-    const titleY = base + (centerHero ? 8 : 2);
-    const titleHeight = z.height * (centerHero ? .52 : .54);
-    const titleFont = centerHero ? 100 : 90;
+    const cut = headline.length > 20 ? headline.lastIndexOf(' ', 20) : -1;
+    const exactTitle = cut > 7 ? headline.slice(0, cut) + '\\n' + headline.slice(cut + 1) : headline;
+    const x = z.x + 3, width = z.width - 6;
     const ink = '#244c40';
+    const eyebrowY = z.y + z.height * (boutique ? .17 : .08);
+    const titleY = z.y + z.height * (boutique ? .29 : hero ? .25 : .27);
+    const titleHeight = z.height * (boutique ? .32 : hero ? .46 : .45);
+    const captionY = z.y + z.height * (boutique ? .70 : hero ? .78 : .78);
+    const eyebrow: ThumbnailElement = {
+      ...newText(slide.layout === 'hero' ? 'THE ARTWORK COLLECTION' : 'A CURATED CLIPART COLLECTION'),
+      x, y: eyebrowY, width, height: Math.max(3,z.height*.10),
+      fontSize: 25, fontFamily: 'Montserrat', fontWeight: 'normal',
+      color: '#926a4f', rotation: 0
+    };
     const main: ThumbnailElement = {
-      ...newText(displayTitle),
-      x: z.x + inset, y: titleY,
-      width: z.width - inset * 2, height: titleHeight,
-      fontSize: titleFont, fontFamily: 'Playfair Display', fontWeight: 'bold',
-      color: ink, rotation: 0
+      ...newText(exactTitle), x, y: titleY, width, height: titleHeight,
+      fontSize: hero ? 108 : boutique ? 104 : 90,
+      fontFamily: 'Playfair Display', fontWeight: 'bold', color: ink, rotation: 0
     };
     const caption: ThumbnailElement = {
       ...newText(slide.subtitle),
-      x: z.x + inset + 2, y: Math.min(z.y + z.height - 8, titleY + titleHeight + 2),
-      width: z.width - inset * 2 - 4, height: 6,
-      fontSize: 34, fontFamily: 'Montserrat', fontWeight: 'normal',
+      x:x+1,y:captionY,width:width-2,height:Math.max(4,z.height*.10),
+      fontSize: 31, fontFamily: 'Montserrat', fontWeight: 'normal',
       color: '#8a624a', rotation: 0
     };
-    return [main, caption];
+    return [eyebrow,main,caption];
   };
 
   // One-click Etsy listing pack. AI makes background + typography; original PNGs
