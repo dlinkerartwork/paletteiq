@@ -219,14 +219,15 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
 
   const commit = (next: ThumbnailDesign, record = true) => {
     if (record && design) { setHistory(old => [...old.slice(-29), design]); setFuture([]); }
-    onChange(designs.map(d => d.id === next.id ? normalizeDesign(next) : d));
+    const safeNext = next.originalAssetsOnly ? { ...next, elements: next.elements.map(e => e.type === 'image' ? { ...e, source: 'original' as const } : e) } : next;
+    onChange(designs.map(d => d.id === next.id ? normalizeDesign(safeNext) : d));
   };
   const mutate = (changes: Partial<ThumbnailDesign>) => { if (design) commit({ ...design, ...changes }); };
   const updateElement = (changes: Partial<ThumbnailElement>, record = true) => {
     if (!design || !selection) return;
     commit({ ...design, elements: design.elements.map(e => e.id === selection.id ? { ...e, ...changes } : e) }, record);
   };
-  const add = (element: ThumbnailElement) => { if (design) { commit({ ...design, elements: [...design.elements, element] }); setSelectedId(element.id); } };
+  const add = (element: ThumbnailElement) => { if (design) { const safe = design.originalAssetsOnly && element.type === 'image' ? { ...element, source: 'original' as const } : element; commit({ ...design, elements: [...design.elements, safe] }); setSelectedId(element.id); } };
   const remove = () => { if (design && selection) { commit({ ...design, elements: design.elements.filter(e => e.id !== selection.id) }); setSelectedId(''); } };
   useEffect(() => {
     const keyDown = (event: KeyboardEvent) => {
@@ -294,7 +295,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
       const texts = (body.layout?.texts || []).slice(0, 32).map((slot): ThumbnailElement => ({
         ...newText(), id: id(), text: slot.text || 'CUSTOMIZE TITLE', curve: clamp(Number(slot.curve) || 0, -100, 100), x: clamp(slot.x, 0, 100), y: clamp(slot.y, 0, 100), width: clamp(slot.width, 5, 100), height: clamp(slot.height, 3, 100)
       }));
-      commit({ ...design, elements: [...design.elements, ...images, ...texts], background: /^#[0-9a-f]{6}$/i.test(body.layout?.background || '') ? body.layout!.background! : design.background, referenceUrl: reference.startsWith('https://') ? reference : undefined, originalAssetsOnly: true });
+      commit({ ...design, elements: [...design.elements.map(e => e.type === 'image' ? { ...e, source: 'original' as const } : e), ...images, ...texts], background: /^#[0-9a-f]{6}$/i.test(body.layout?.background || '') ? body.layout!.background! : design.background, referenceUrl: reference.startsWith('https://') ? reference : undefined, originalAssetsOnly: true });
       setMessage('Layout applied. Review the arrangement and customize all elements.');
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
     finally { setAiBusy(false); }
