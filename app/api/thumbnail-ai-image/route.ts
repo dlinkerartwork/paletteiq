@@ -36,7 +36,8 @@ export async function POST(req: Request) {
   if (provider === 'gemini' && !/^gemini-[a-z0-9.-]{1,80}$/.test(model)) return bad('Invalid Gemini image model');
   if (provider === 'gemini' && !model.includes('image')) return bad('Select a Gemini image-generation model');
   if (!['low', 'medium', 'high'].includes(String(input.quality))) return bad('Invalid image quality');
-  const width = Number(input.width || 2000), height = Number(input.height || 2000);
+  const width = Number(input.width || 1024), height = Number(input.height || 1024);
+  if (mode !== 'full-thumbnail' && (width !== 1024 || height !== 1024)) return bad('Thumbnail design backgrounds must be 1024 × 1024 pixels');
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 256 || height < 256 || width > 4096 || height > 4096) return bad('Canvas dimensions must be 256–4096 pixels');
   const storage = bucket();
   if (!storage) return bad('Image storage is unavailable', 503);
@@ -66,7 +67,8 @@ export async function POST(req: Request) {
     : 'Premium independent boutique editorial design, restrained sophisticated palette appropriate to the collection theme, carefully balanced subtle paper texture, delicate ornament and tasteful negative space. No loud abstract paint blobs.';
   const combinedPrompt = [
     'Generate one premium, professionally art-directed SQUARE ETSY CLIPART BUNDLE BACKGROUND that INCLUDES artistic typography, tasteful ornamental badges and beautiful decorative framing.',
-    'This is ONLY the typography-and-background layer, not the full thumbnail. DO NOT draw any clipart subjects, food dishes, animals, flowers as standalone collection illustrations, or recreate any supplied product artwork.',
+    'STRICT SEPARATION: Draw NO collection-related objects whatsoever. NO illustrated dishes, foods, drinks, tea sets, sushi, flowers, plants, animals, characters, product assets, miniature illustrations, silhouettes, collage cutouts, or stock clipart. Avoid even objects that merely resemble collection images. The only figurative content permitted is typography and abstract badge/frame ornament.',
+    'The AI must never invent, reconstruct, imitate, redraw, or depict any asset or visual object from the collection. All real objects are added later exclusively by PaletteIQ from original files.',
     'The compositor will place EXACT original collection PNG assets in the specified outer image slots after this background is generated.',
     'EXACT MAIN TITLE. Spell every letter carefully; do not paraphrase or add invented words:', JSON.stringify(safeText(input.headline || '')),
     'EXACT SUBTITLE:', JSON.stringify(safeText(input.subtitle || '')),
@@ -74,10 +76,10 @@ export async function POST(req: Request) {
     'All space occupied by lettering or badges MUST be inside that zone. Do not put stray text, pseudo-lettering or extra claims anywhere else.',
     'Professional graphic treatment: large expressive artistic title with strong hierarchy, smaller supporting line, thin gold frame, elegant editorial medallion or label, finely rendered decorative flourishes, beautifully spaced high-contrast typography.',
     'Avoid any unverified DPI, commercial-use or resolution claims. Add no count unless it appears in the exact provided subtitle.',
-    'Make the rest of the canvas restrained, visually coherent and suitable for overlaying actual transparent artwork on top. Do not paint imaginary objects or silhouettes where the original PNGs will be positioned.',
+    'Everywhere outside the typography zone must remain decorative-only: paper texture, flat abstract color accents, thin graphic patterns and nonfigurative frames. No pictorial illustrations or recognizable objects anywhere.',
     'ART DIRECTOR COMPOSITION NOTES:', String(input.artDirection || '').replace(/[<>\r\n]/g, ' ').slice(0,650),
     'Theme-aware design direction:', designDirection,
-    'User material:', backgroundStyle === 'watercolor' ? 'subtle warm watercolor paper only, not dramatic color splashes' : styleGuidance[backgroundStyle],
+    'User material (non-figurative textures only):', backgroundStyle === 'watercolor' ? 'subtle warm watercolor paper only, not dramatic color splashes' : styleGuidance[backgroundStyle],
     'Decorative intensity:', intensityGuidance[backgroundIntensity],
     'Collection theme:', JSON.stringify({theme:collection.theme,subtheme:collection.subtheme}).slice(0,500),
     'Reserved original clipart positions. Do not draw any characters or lettering inside these outside-title regions:', JSON.stringify(layout).slice(0,3000),
@@ -141,6 +143,32 @@ export async function POST(req: Request) {
   if (!(isPng || isJpg) || (imageMime === 'image/png' && !isPng) || (imageMime === 'image/jpeg' && !isJpg)) return bad('Provider did not return a valid image', 502);
   const format = isPng ? 'png' : 'jpg';
   if (bytes.length > 20_000_000) return bad('Generated image is too large', 413);
+  if (mode === 'background-with-typography') {
+    // Fail closed: do not accept an AI image containing character-like artwork.
+    // Validation does not compare pixel identity and remains a best-effort visual check.
+    const key = await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
+    if (!key) return bad('OpenAI is required for background illustration validation', 503);
+    let review: Response;
+    try {
+      review = await fetch('https://api.openai.com/v1/responses', {
+        method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gpt-4.1-mini',
+          input: [{role:'user',content:[
+            {type:'input_text',text:'Review this Etsy THUMBNAIL BACKGROUND ONLY. Reply with JSON {"containsObjects":true|false}. Mark true if you see ANY recognizable illustrated food, dish, plant, animal, person, standalone product, character or clipart-like object, even decorative miniatures or silhouettes. Ignore abstract frames, patterns, text, emblems and empty badge shapes. Be strict about food and collection artwork. Do not assess typography accuracy.'},
+            {type:'input_image',image_url:'data:' + (isPng ? 'image/png' : 'image/jpeg') + ';base64,' + imageBase64}
+          ]}],text:{format:{type:'json_object'}}
+        }), signal: AbortSignal.timeout(60000)
+      });
+    } catch { return bad('Could not verify background is free of generated clipart; image rejected', 502); }
+    if (!review.ok) return bad('Background object validation failed (HTTP ' + review.status + '); image rejected', 502);
+    try {
+      const validation = await review.json() as {output?:Array<{content?:Array<{text?:string}>}>};
+      const raw = validation.output?.flatMap(x=>x.content||[]).map(x=>x.text||'').join('') || '{}';
+      const decision = JSON.parse(raw) as {containsObjects?:boolean};
+      if (decision.containsObjects !== false) return bad('AI background contains or may contain generated clipart-like objects. Image rejected; retry generation.', 422);
+    } catch { return bad('Background validation returned an unreadable response; image rejected', 502); }
+  }
   const assetId = crypto.randomUUID();
   await storage.put('generated/' + user.userId + '/' + assetId + '.' + format, bytes);
   return Response.json({ imageUrl: '/api/thumbnail-background?projectId=' + encodeURIComponent(input.projectId) + '&assetId=' + assetId + '&format=' + format, prompt });
