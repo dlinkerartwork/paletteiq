@@ -59,7 +59,7 @@ export async function POST(req: Request) {
     vibrant: 'Expressive colorful decorative backdrop with stronger saturation, layered visual depth and lively abstract detailing. Keep a quiet central text zone despite the energetic edges.'
   };
   const titleZone = input.textZone && [input.textZone.x, input.textZone.y, input.textZone.width, input.textZone.height].every(n => Number.isFinite(n) && n >= 0 && n <= 100) ? input.textZone : { x: 8, y: 5, width: 84, height: 23 };
-  const safeText = (text: string) => text.replace(/[<>\\r\\n]/g, ' ').trim().slice(0, 140);
+  const safeText = (text: string) => text.replace(/[<>\r\n]/g, ' ').trim().slice(0, 140);
   const combinedPrompt = [
     'Create an ORIGINAL, FINISHED, PREMIUM SQUARE ETSY LISTING BACKGROUND WITH ARTISTIC TYPOGRAPHY as one coherent graphic.',
     'The typography is the hero. Render the exact supplied headline with artistic letterforms, premium editorial hierarchy, elegant spacing, strong readability at small thumbnail size. Ensure every word is spelled exactly.',
@@ -73,7 +73,7 @@ export async function POST(req: Request) {
     'Decoration intensity:', intensityGuidance[backgroundIntensity],
     'Collection context:', JSON.stringify({ theme: collection.theme, subtheme: collection.subtheme, style: collection.style }).slice(0,900),
     'Concept:', safeText(input.slideName || ''), 'Canvas square. Compose the typography and decorative background as a SINGLE FLATTENED artwork layer.'
-  ].join('\\n');
+  ].join('\n');
   const prompt = mode === 'background-with-typography' ? combinedPrompt : mode === 'background-only'
     ? [
         'Create a VISIBLY DECORATED, PREMIUM, ORIGINAL SQUARE BACKGROUND ARTWORK for an Etsy digital clipart bundle listing.',
