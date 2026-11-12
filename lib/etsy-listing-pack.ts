@@ -60,6 +60,14 @@ const relevant = (slide: PackSlide, character: PackCharacter) => {
   if (/\\b(ramen|noodles?)\\b/.test(title)) return /\\b(ramen|noodle|udon|soba)\\b/i.test(name);
   return true;
 };
+export function filterThemeCharacters(title: string, characters: PackCharacter[]): PackCharacter[] {
+  const term = title.toLowerCase();
+  if (/\\b(sushi|sashimi)\\b/.test(term))
+    return characters.filter(c => c.imageUrl && foodTerms.test(c.name) && !notSushi.test(c.name));
+  if (/\\b(ramen|noodles?)\\b/.test(term))
+    return characters.filter(c => c.imageUrl && /\\b(ramen|noodle|udon|soba)\\b/i.test(c.name));
+  return characters.filter(c => c.imageUrl);
+}
 export function selectPackCharacters(slide: PackSlide, characters: PackCharacter[]) {
   return characters.filter(c => c.imageUrl && relevant(slide,c)).slice(0,slide.limit);
 }
