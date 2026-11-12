@@ -75,7 +75,7 @@ export async function POST(req: Request) {
     'Professional graphic treatment: large expressive artistic title with strong hierarchy, smaller supporting line, thin gold frame, elegant editorial medallion or label, finely rendered decorative flourishes, beautifully spaced high-contrast typography.',
     'Avoid any unverified DPI, commercial-use or resolution claims. Add no count unless it appears in the exact provided subtitle.',
     'Make the rest of the canvas restrained, visually coherent and suitable for overlaying actual transparent artwork on top. Do not paint imaginary objects or silhouettes where the original PNGs will be positioned.',
-    'ART DIRECTOR COMPOSITION NOTES:', safeText(input.artDirection || '').slice(0,650),
+    'ART DIRECTOR COMPOSITION NOTES:', String(input.artDirection || '').replace(/[<>\\r\\n]/g, ' ').slice(0,650),
     'Theme-aware design direction:', designDirection,
     'User material:', backgroundStyle === 'watercolor' ? 'subtle warm watercolor paper only, not dramatic color splashes' : styleGuidance[backgroundStyle],
     'Decorative intensity:', intensityGuidance[backgroundIntensity],
