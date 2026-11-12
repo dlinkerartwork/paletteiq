@@ -107,11 +107,11 @@ export function placeOriginals(slide: PackSlide, characters: PackCharacter[], re
     const height=Math.min(cellH*.70,slide.layout==='closeup'?32:28);
     const col=i%columns,row=Math.floor(i/columns);
     const heroPositions = [
-      [7, 12], [76, 13], [3, 41], [79, 44], [11, 73], [72, 75], [42, 6], [41, 77]
+      [4, 9], [84, 9], [4, 40], [84, 40], [4, 75], [84, 75], [35, 6], [35, 77]
     ];
     const [hx,hy]=heroPositions[i % heroPositions.length];
     const grid:Zone=slide.layout==='hero'
-      ? {x:hx,y:hy,width:Math.min(width,20),height:Math.min(height,20)}
+      ? {x:hx,y:hy,width:Math.min(width,13),height:Math.min(height,18)}
       : {x:area.x+col*cellW+(cellW-width)/2,y:area.y+row*cellH+(cellH-height)/2,width,height};
     const angle=slide.layout==='grid'||slide.layout==='showcase'?0:(i%3-1)*3;
     const candidates:Zone[]=[];
