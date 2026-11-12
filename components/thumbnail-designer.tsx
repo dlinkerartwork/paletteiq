@@ -114,7 +114,6 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const [backgroundStyle, setBackgroundStyle] = useState<'watercolor' | 'paper' | 'gradient' | 'botanical' | 'vintage'>('watercolor');
   const [backgroundIntensity, setBackgroundIntensity] = useState<'soft' | 'balanced' | 'vibrant'>('balanced');
   const [backgroundLoadError, setBackgroundLoadError] = useState('');
-  const [typographyPreset, setTypographyPreset] = useState<'editorial' | 'romantic' | 'playful' | 'minimal' | 'vintage'>('editorial');
   const [history, setHistory] = useState<ThumbnailDesign[]>([]);
   const [future, setFuture] = useState<ThumbnailDesign[]>([]);
   const saveRendersRef = useRef<(snapshot: ThumbnailDesign[]) => Promise<void>>(onSave);
@@ -396,20 +395,6 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     setUploadedReference(data); setReference(data); setMessage('Reference loaded for this editing session. The uploaded reference is not embedded in the saved collection.');
   };
 
-  const applyArtisticTypography = () => {
-    if (!design) return;
-    const presets = {
-      editorial: { fontFamily: 'Playfair Display', fontWeight: 'bold', color: '#614334', curve: 0 },
-      romantic: { fontFamily: 'Great Vibes', fontWeight: 'normal', color: '#855763', curve: 12 },
-      playful: { fontFamily: 'Chewy', fontWeight: 'normal', color: '#80613c', curve: 8 },
-      minimal: { fontFamily: 'Montserrat', fontWeight: 'bold', color: '#364f4c', curve: 0 },
-      vintage: { fontFamily: 'Cinzel', fontWeight: 'bold', color: '#68513c', curve: 0 }
-    }[typographyPreset];
-    const existing = design.elements.filter(e => e.type === 'text');
-    const elements = existing.length ? design.elements.map(e => e.type === 'text' ? { ...e, ...presets } : e) : [...design.elements, { ...newText(title), ...presets }];
-    commit({ ...design, elements });
-    setMessage('Editable artistic typography applied. Text remains editable and original clipart is unchanged.');
-  };
   const generateReferenceBackground = async () => {
     if (!design || backgroundGenerating) return;
     if (!window.confirm('Generate a decorative background using OpenAI? This may incur API charges. Original collection clipart and text will remain separate editable layers.')) return;
@@ -801,7 +786,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
             {models[provider].map(m => <option key={m.id} value={m.id}>{m.name} ({m.id})</option>)}
           </select>
           {modelError && <small>{modelError}</small>}
-          <label className="input-label">REFERENCE IMAGE</label>
+          <label className="input-label">REFERENCE IMAGE (OPTIONAL)</label>
           <select style={control} value={reference.startsWith('data:') ? 'upload' : reference} onChange={e => setReference(e.target.value === 'upload' ? uploadedReference : e.target.value)}>
             <option value="">Choose listing reference</option>{references.map((r,i)=><option key={r} value={r}>Listing image {i+1}</option>)}{uploadedReference && <option value="upload">Uploaded image</option>}
           </select>
@@ -813,18 +798,31 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
           </select>
           <button className="primary-btn" disabled={!reference || aiBusy} onClick={() => void analyze()}><WandSparkles size={15}/> {aiBusy ? 'Analyzing...' : 'Analyze & apply layout'}</button>
           <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 12, display: 'grid', gap: 8 }}>
-            <strong>AI Reference Thumbnail Studio</strong>
-            <small>Create five distinct editable concepts with original collection artwork. No clipart redraw.</small>
-            <label className="input-label">NUMBER OF NEW THUMBNAILS</label>
-            <select aria-label="Reference thumbnail count" value={referenceBatchCount} onChange={e => setReferenceBatchCount(Number(e.target.value) as 5 | 10 | 15)}>
-              <option value={5}>5 · one per concept</option><option value={10}>10 · two per concept</option><option value={15}>15 · three per concept</option>
+            <strong>Generate Etsy Listing Pack</strong>
+            <small>Reference image is optional. AI creates decorative background and artistic lettering together; original clipart stays as separate movable layers.</small>
+            <label className="input-label">ETSY PACK PRESET</label>
+            <select aria-label="Etsy listing pack" value={packPreset} disabled={aiBusy} onChange={e => setPackPreset(e.target.value as PackPreset)}>
+              <option value="complete-10">Complete Etsy Listing Pack — 10 thumbnails</option>
+              <option value="core-5">Core Etsy Pack — 5 thumbnails</option>
+              <option value="category-showcase">Category Showcase Pack — based on collection groups</option>
             </select>
-            <button className="primary-btn" type="button" disabled={!reference || aiBusy || !characters.some(c => c.imageUrl)} onClick={() => void generateReferenceBatch()}>
-              <WandSparkles size={15}/> {aiBusy ? 'Planning thumbnails...' : 'Create editable reference batch'}
+            <label className="input-label">BACKGROUND + TYPOGRAPHY STYLE</label>
+            <select aria-label="Etsy pack background style" value={backgroundStyle} disabled={aiBusy} onChange={e => setBackgroundStyle(e.target.value as typeof backgroundStyle)}>
+              <option value="watercolor">Watercolor</option><option value="paper">Luxury paper</option><option value="gradient">Color gradient</option><option value="botanical">Botanical accents</option><option value="vintage">Vintage</option>
+            </select>
+            <label className="input-label">DECORATION INTENSITY</label>
+            <select aria-label="Etsy pack intensity" value={backgroundIntensity} disabled={aiBusy} onChange={e => setBackgroundIntensity(e.target.value as typeof backgroundIntensity)}>
+              <option value="soft">Soft</option><option value="balanced">Balanced</option><option value="vibrant">Vibrant</option>
+            </select>
+            <button className="primary-btn" type="button" disabled={aiBusy || !characters.some(c => c.imageUrl)} onClick={() => void generateReferenceBatch()}>
+              <WandSparkles size={15}/> {aiBusy ? 'Generating listing pack...' : 'Generate Etsy Listing Pack'}
             </button>
-            <small>Original collection images only. Upscaled assets are ignored for reference batches.</small>
+            {aiBusy && <button type="button" className="outline-btn" onClick={() => { cancelPackRef.current = true; setPackStatus('Stopping after current request...'); }}>Stop after current image</button>}
+            {packStatus && <small role="status">{packStatus}</small>}
+            <small>One AI image request per thumbnail (plus one optional reference analysis). Charges may apply. Titles are embedded in background artwork, not editable text layers. Verify all text before publishing.</small>
+            <small>Only original collection clipart is placed on top. Upscaled assets are not used.</small>
           </div>
-          <small>Reference composition is inspiration only. Designs created here use exact original collection clipart, never upscaled versions.</small>
+          <small>Optional references inspire layout. Automatically generated designs keep typography areas clear of collection clipart.</small>
         </>}
         <h3>Characters</h3>
         <div style={{ maxHeight: 400, overflowY: 'auto', display: 'grid', gap: 8 }}>
@@ -917,9 +915,6 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         <select aria-label="Background decoration intensity" value={backgroundIntensity} disabled={backgroundGenerating} onChange={event => setBackgroundIntensity(event.target.value as typeof backgroundIntensity)}><option value="soft">Soft — visible pastel details</option><option value="balanced">Balanced — recommended</option><option value="vibrant">Vibrant — stronger colors</option></select>
         <button className="outline-btn" type="button" disabled={backgroundGenerating || imageBusy} onClick={() => void generateReferenceBackground()}><WandSparkles size={15}/> {backgroundGenerating ? 'Generating background...' : 'Generate background (no clipart or text)'}</button>
         <small>Generate visible decorative textures and color variations. Original clipart and typography stay on top as independent layers. Generating again may incur API charges.</small>
-        <label className="input-label">ARTISTIC TYPOGRAPHY (EDITABLE)</label>
-        <select aria-label="Artistic typography preset" value={typographyPreset} onChange={e => setTypographyPreset(e.target.value as typeof typographyPreset)}><option value="editorial">Premium editorial</option><option value="romantic">Romantic calligraphy</option><option value="playful">Playful hand lettering</option><option value="minimal">Modern minimal</option><option value="vintage">Classic vintage</option></select>
-        <button className="outline-btn" type="button" onClick={applyArtisticTypography}>Apply typography preset</button>
         <label className="input-label">BACKGROUND IMAGE (LOCAL PNG/JPG)</label>
         <input type="file" accept="image/png,image/jpeg" disabled={backgroundUploading} onChange={e => void uploadBackground(e.target.files?.[0])}/>
         {backgroundUploading && <small>Uploading background…</small>}
@@ -989,6 +984,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
               {!item.aiImageUrl && item.elements.map(element => element.type === 'image' ? <img key={element.id} src={imageUrl(element)} alt="" style={{ position: 'absolute', left: element.x + '%', top: element.y + '%', width: element.width + '%', height: element.height + '%', objectFit: 'contain', transform: 'rotate(' + element.rotation + 'deg)' }}/> : <span key={element.id} style={{ position: 'absolute', left: element.x + '%', top: element.y + '%', width: element.width + '%', color: element.color, fontFamily: element.fontFamily, fontSize: 9, overflow: 'hidden' }}>{element.text}</span>)}
             </div>
             <strong style={{ display: 'block', marginTop: 7, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</strong>
+            {item.generationError && <small style={{ color: '#b91c1c' }} title={item.generationError}>AI background failed — retry by creating a new pack</small>}
             <small>{item.aiImageUrl ? 'AI image' : 'Editable design'} · {item.width}×{item.height}</small>
             </button>
             <small style={{ display: 'block', marginTop: 5 }}>{item.upscaleJob ? (upscaleRemaining[item.id] != null ? 'Est. remaining: ' + Math.ceil(upscaleRemaining[item.id]! / 60) + ' min' : 'Time remaining: waiting for GPU / estimating…') : item.upscaledImageUrl ? '✓ Upscale completed' : 'Not upscaled'}</small>
