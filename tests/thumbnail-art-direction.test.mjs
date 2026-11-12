@@ -28,3 +28,17 @@ test('One-click batch uses AI layout positions and background with AI lettering 
   assert.match(generator,/INCLUDES artistic typography, tasteful ornamental badges/);
   assert.match(generator,/DO NOT draw any clipart subjects/);
 });
+
+test('AI thumbnail backgrounds prohibit object illustrations and are screened before storage', () => {
+  assert.match(generator, /Draw NO collection-related objects whatsoever/);
+  assert.match(generator, /The AI must never invent, reconstruct, imitate, redraw/);
+  assert.match(generator, /decision\.containsObjects !== false/);
+  assert.ok(generator.indexOf('decision.containsObjects !== false') < generator.indexOf("await storage.put("));
+});
+
+test('Etsy thumbnails are fixed at 1024 square including rendered export', () => {
+  assert.match(designer, /const THUMBNAIL_SIZE = 1024/);
+  assert.match(designer, /canvas\.width = THUMBNAIL_SIZE; canvas\.height = THUMBNAIL_SIZE/);
+  assert.match(designer, /quality: packQuality, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE/);
+  assert.match(generator, /width !== 1024 \|\| height !== 1024/);
+});
