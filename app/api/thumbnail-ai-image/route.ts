@@ -8,7 +8,7 @@ import { userCredential, userGeminiKeys } from '@/lib/credentials';
 import { nativeAssetBucket } from '@/lib/native-bridge';
 
 type LayoutItem = { type: 'image' | 'text'; x: number; y: number; width: number; height: number; text?: string };
-type RequestBody = { projectId?: string; provider?: string; model?: string; quality?: string; width?: number; height?: number; layout?: LayoutItem[]; includeTitle?: boolean; mode?: 'full-thumbnail' | 'background-only'; backgroundStyle?: 'watercolor' | 'paper' | 'gradient' | 'botanical' | 'vintage'; backgroundIntensity?: 'soft' | 'balanced' | 'vibrant' };
+type RequestBody = { projectId?: string; provider?: string; model?: string; quality?: string; width?: number; height?: number; layout?: LayoutItem[]; includeTitle?: boolean; mode?: 'full-thumbnail' | 'background-only' | 'background-with-typography'; headline?: string; subtitle?: string; slideName?: string; textZone?: { x: number; y: number; width: number; height: number }; backgroundStyle?: 'watercolor' | 'paper' | 'gradient' | 'botanical' | 'vintage'; backgroundIntensity?: 'soft' | 'balanced' | 'vibrant' };
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 const bucket = () => nativeAssetBucket() ?? env.BUCKET;
 
@@ -20,8 +20,9 @@ export async function POST(req: Request) {
   if (typeof input.projectId !== 'string' || !/^[\w-]{8,80}$/.test(input.projectId)) return bad('Invalid collection');
   if (input.includeTitle !== undefined && typeof input.includeTitle !== 'boolean') return bad('includeTitle must be a boolean');
   const mode = input.mode || 'full-thumbnail';
-  if (!['full-thumbnail', 'background-only'].includes(mode)) return bad('Invalid image generation mode');
-  if (mode === 'background-only' && input.provider !== 'openai') return bad('Background-only generation uses OpenAI');
+  if (!['full-thumbnail', 'background-only', 'background-with-typography'].includes(mode)) return bad('Invalid image generation mode');
+  if (mode !== 'full-thumbnail' && input.provider !== 'openai') return bad('Background generation uses OpenAI');
+  if (mode === 'background-with-typography' && (!input.headline || input.headline.length > 100 || (input.subtitle || '').length > 140)) return bad('Invalid typography text');
   const backgroundStyle = input.backgroundStyle || 'watercolor';
   const backgroundIntensity = input.backgroundIntensity || 'balanced';
   if (!['watercolor', 'paper', 'gradient', 'botanical', 'vintage'].includes(backgroundStyle)) return bad('Invalid background style');
@@ -57,7 +58,23 @@ export async function POST(req: Request) {
     balanced: 'Clearly visible decorative design with medium contrast, multiple complementary colored areas and varied textures. Decoration should be recognizable at small Etsy search thumbnail size.',
     vibrant: 'Expressive colorful decorative backdrop with stronger saturation, layered visual depth and lively abstract detailing. Keep a quiet central text zone despite the energetic edges.'
   };
-  const prompt = mode === 'background-only'
+  const titleZone = input.textZone && [input.textZone.x, input.textZone.y, input.textZone.width, input.textZone.height].every(n => Number.isFinite(n) && n >= 0 && n <= 100) ? input.textZone : { x: 8, y: 5, width: 84, height: 23 };
+  const safeText = (text: string) => text.replace(/[<>\\r\\n]/g, ' ').trim().slice(0, 140);
+  const combinedPrompt = [
+    'Create an ORIGINAL, FINISHED, PREMIUM SQUARE ETSY LISTING BACKGROUND WITH ARTISTIC TYPOGRAPHY as one coherent graphic.',
+    'The typography is the hero. Render the exact supplied headline with artistic letterforms, premium editorial hierarchy, elegant spacing, strong readability at small thumbnail size. Ensure every word is spelled exactly.',
+    'EXACT HEADLINE TEXT (do not paraphrase):', JSON.stringify(safeText(input.headline || '')),
+    'EXACT SMALL SUBTITLE (do not paraphrase):', JSON.stringify(safeText(input.subtitle || '')),
+    'The headline and subtitle MUST be inside this reserved typography rectangle in percentage coordinates:', JSON.stringify(titleZone),
+    'Keep all letters wholly inside the reserved rectangle, with extra inner padding. Use typography scale that fits. Do not add any other invented product claims, counts, DPI, format promises, logos, watermarks or shop names.',
+    'The areas outside the text rectangle will receive genuine original transparent clipart overlaid after generation. Keep the title area clear of visual clutter and do not reproduce any of those characters.',
+    'Do NOT draw animals, foods, flowers, objects, people, standalone clipart, pictures of collection contents or any illustrations that compete with the original clipart. Generate only tasteful decoration and premium text artwork.',
+    'Make the backdrop visually rich, never plain white or uniform ivory. Apply art direction:', styleGuidance[backgroundStyle],
+    'Decoration intensity:', intensityGuidance[backgroundIntensity],
+    'Collection context:', JSON.stringify({ theme: collection.theme, subtheme: collection.subtheme, style: collection.style }).slice(0,900),
+    'Concept:', safeText(input.slideName || ''), 'Canvas square. Compose the typography and decorative background as a SINGLE FLATTENED artwork layer.'
+  ].join('\\n');
+  const prompt = mode === 'background-with-typography' ? combinedPrompt : mode === 'background-only'
     ? [
         'Create a VISIBLY DECORATED, PREMIUM, ORIGINAL SQUARE BACKGROUND ARTWORK for an Etsy digital clipart bundle listing.',
         'CRITICAL: The entire canvas must have obvious visual design. A plain white, flat ivory, uniform near-white, blank or empty background is NOT acceptable.',
