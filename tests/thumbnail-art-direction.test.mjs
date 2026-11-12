@@ -43,3 +43,17 @@ test('Etsy thumbnails are fixed at 1024 square including rendered export', () =>
   assert.match(designer, /quality: packQuality, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE/);
   assert.match(generator, /width !== 1024 \|\| height !== 1024/);
 });
+
+test('Etsy pack defaults to independently editable typography and exact original assets', () => {
+  assert.match(designer, /useState<'editable' \| 'ai-artwork'>\('editable'\)/);
+  assert.match(designer, /packTypography === 'editable' \? \[\.\.\.plannedElements, \.\.\.typographyForSlide\(slide\)\]/);
+  assert.match(designer, /mode: packTypography === 'editable' \? 'background-only' : 'background-with-typography'/);
+  assert.match(designer, /originalAssetsOnly: true/);
+});
+
+test('Both background modes reject illustrated substitutes, and editable mode rejects AI lettering', () => {
+  assert.match(generator, /mode === 'background-with-typography' \|\| mode === 'background-only'/);
+  assert.match(generator, /decision\.containsObjects !== false/);
+  assert.match(generator, /mode === 'background-only' && decision\.containsText !== false/);
+  assert.match(generator, /Art-director notes:/);
+});
