@@ -56,6 +56,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const [uploadedReference, setUploadedReference] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
   const [packPreset, setPackPreset] = useState<PackPreset>('complete-10');
+  const [packQuality, setPackQuality] = useState<'low' | 'medium' | 'high'>('medium');
   const [packStatus, setPackStatus] = useState('');
   const cancelPackRef = useRef(false);
   const [referenceStyle, setReferenceStyle] = useState<'creative' | 'similar' | 'palette'>('creative');
@@ -414,7 +415,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
             body: JSON.stringify({
               projectId, provider: 'openai',
               model: imageModel.startsWith('gpt-image-') ? imageModel : 'gpt-image-1-mini',
-              quality: imageQuality, width: 2000, height: 2000,
+              quality: packQuality, width: 2000, height: 2000,
               mode: 'background-with-typography',
               backgroundStyle, backgroundIntensity,
               headline: slide.headline, subtitle: slide.subtitle,
@@ -878,6 +879,8 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
               <option value="core-5">Core Etsy Pack — 5 thumbnails</option>
               <option value="category-showcase">Category Showcase Pack — based on collection groups</option>
             </select>
+            <label className="input-label">BACKGROUND QUALITY</label>
+            <select aria-label="Etsy pack background quality" disabled={aiBusy} value={packQuality} onChange={e => setPackQuality(e.target.value as typeof packQuality)}><option value="low">Low · economical</option><option value="medium">Medium · recommended</option><option value="high">High · premium cost</option></select>
             <label className="input-label">BACKGROUND + TYPOGRAPHY STYLE</label>
             <select aria-label="Etsy pack background style" value={backgroundStyle} disabled={aiBusy} onChange={e => setBackgroundStyle(e.target.value as typeof backgroundStyle)}>
               <option value="watercolor">Watercolor</option><option value="paper">Luxury paper</option><option value="gradient">Color gradient</option><option value="botanical">Botanical accents</option><option value="vintage">Vintage</option>
