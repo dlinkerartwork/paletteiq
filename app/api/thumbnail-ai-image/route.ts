@@ -60,20 +60,22 @@ export async function POST(req: Request) {
   };
   const titleZone = input.textZone && [input.textZone.x, input.textZone.y, input.textZone.width, input.textZone.height].every(n => Number.isFinite(n) && n >= 0 && n <= 100) ? input.textZone : { x: 8, y: 5, width: 84, height: 23 };
   const safeText = (text: string) => text.replace(/[<>\r\n]/g, ' ').trim().slice(0, 140);
+  const isFoodTheme = /food|sushi|sashimi|japanese|chinese|asian|korean|ramen|cuisine|dish|dessert|bakery|meal|culinary/i.test([collection.name,collection.theme,collection.subtheme,input.headline].join(' '));
+  const designDirection = isFoodTheme
+    ? 'Premium gourmet cookbook editorial design: warm ivory and natural cream paper, minimal refined fine gold or muted terracotta hairline rules, delicate circular medallion or centered elegant editorial panel, very subtle ink wash or handmade paper texture. Colors muted sage, deep forest green and warm clay. Absolutely avoid high-saturation abstract blotches, bright rainbow gradients or noisy decorative splashes.'
+    : 'Premium independent boutique editorial design, restrained sophisticated palette appropriate to the collection theme, carefully balanced subtle paper texture, delicate ornament and tasteful negative space. No loud abstract paint blobs.';
   const combinedPrompt = [
-    'Create an ORIGINAL, FINISHED, PREMIUM SQUARE ETSY LISTING BACKGROUND WITH ARTISTIC TYPOGRAPHY as one coherent graphic.',
-    'The typography is the hero. Render the exact supplied headline with artistic letterforms, premium editorial hierarchy, elegant spacing, strong readability at small thumbnail size. Ensure every word is spelled exactly.',
-    'EXACT HEADLINE TEXT (do not paraphrase):', JSON.stringify(safeText(input.headline || '')),
-    'EXACT SMALL SUBTITLE (do not paraphrase):', JSON.stringify(safeText(input.subtitle || '')),
-    'The headline and subtitle MUST be inside this reserved typography rectangle in percentage coordinates:', JSON.stringify(titleZone),
-    'Keep all letters wholly inside the reserved rectangle, with extra inner padding. Use typography scale that fits. Do not add any other invented product claims, counts, DPI, format promises, logos, watermarks or shop names.',
-    'The areas outside the text rectangle will receive genuine original transparent clipart overlaid after generation. Keep the title area clear of visual clutter and do not reproduce any of those characters.',
-    'Do NOT draw animals, foods, flowers, objects, people, standalone clipart, pictures of collection contents or any illustrations that compete with the original clipart. Generate only tasteful decoration and premium text artwork.',
-    'Make the backdrop visually rich, never plain white or uniform ivory. Apply art direction:', styleGuidance[backgroundStyle],
-    'Decoration intensity:', intensityGuidance[backgroundIntensity],
-    'Collection context:', JSON.stringify({ theme: collection.theme, subtheme: collection.subtheme, style: collection.style }).slice(0,900),
-    'Concept:', safeText(input.slideName || ''), 'Canvas square. Compose the typography and decorative background as a SINGLE FLATTENED artwork layer.'
-  ].join('\n');
+    'Create a premium SQUARE ETSY DIGITAL CLIPART PRODUCT BACKGROUND, ONLY A BACKGROUND LAYER. The finished listing will be assembled by a deterministic compositor.',
+    'CRITICAL: NO TEXT, NO TYPOGRAPHY, NO LETTERS, NO NUMBERS, NO PSEUDO-TEXT, NO LABELS OR LOGOS anywhere. Do not attempt to generate titles or badges. Separate exact typography will be placed above by the compositor.',
+    'NO product illustrations, no food dishes, no animals, no standalone clipart, no character drawings. The real ORIGINAL artwork will be placed over this background later.',
+    'Art direction:', designDirection,
+    'Preserve a visibly light neutral typography-safe-panel inside this rectangle (percentage from upper-left):',JSON.stringify(titleZone),
+    'The typography panel should be clean, low contrast and visually legible. Add subtle thin framing or ornamental dividers around it but nothing inside.',
+    'The areas outside text panel should remain tasteful and almost unadorned because original clipart will be placed there. Do not create fake objects to fill those areas.',
+    'Avoid high saturation, noisy scattered watercolor textures, busy gradients, irregular splotches, starbursts or ornamental overload.',
+    'Reference theme information:',JSON.stringify({theme:collection.theme,subtheme:collection.subtheme,style:collection.style}).slice(0,900),
+    'Layout concept:',safeText(input.slideName || ''),'Elegant neutral edge-to-edge square artwork, refined paper surface, commercially polished high-end stationery.'
+  ].join('\\n');
   const prompt = mode === 'background-with-typography' ? combinedPrompt : mode === 'background-only'
     ? [
         'Create a VISIBLY DECORATED, PREMIUM, ORIGINAL SQUARE BACKGROUND ARTWORK for an Etsy digital clipart bundle listing.',
