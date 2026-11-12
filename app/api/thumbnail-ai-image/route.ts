@@ -87,16 +87,19 @@ export async function POST(req: Request) {
   ].join('\n');
   const prompt = mode === 'background-with-typography' ? combinedPrompt : mode === 'background-only'
     ? [
-        'Create a VISIBLY DECORATED, PREMIUM, ORIGINAL SQUARE BACKGROUND ARTWORK for an Etsy digital clipart bundle listing.',
-        'CRITICAL: The entire canvas must have obvious visual design. A plain white, flat ivory, uniform near-white, blank or empty background is NOT acceptable.',
+        'Create a PREMIUM EDITORIAL BACKGROUND ARTWORK for an Etsy digital clipart bundle listing. The output must be ONLY the decorative background, no captions or typography.',
+        'Use a harmonious boutique aesthetic: sophisticated ivory or tinted-paper base with restrained, visibly intentional watercolor washes, elegant fine rules or nonfigurative abstract flourishes. Maintain the designated type zone for readable editable text.',
         'Mandatory decorative direction:', styleGuidance[backgroundStyle],
         'Required color/contrast:', intensityGuidance[backgroundIntensity],
-        'Use a theme-appropriate harmonized palette with clear colored washes and textures across the canvas. Keep central areas readable without becoming plain white. Make the result attractive even when viewed without any foreground content.',
+        'Choose a cohesive muted palette that matches the collection and art direction. Keep the title area calm, the illustration areas unobstructed, and visual ornaments subtle enough not to compete with real clipart.',
         'Do NOT depict characters, animals, people, isolated clipart, logos, lettering, numbers, product mockups or any standalone subject from the collection. This is a decorative background layer only.',
-        'The actual original collection clipart and editable typography will be composited above this image, so leave deliberate calm areas for them. Do not create their substitutes.',
+        'The actual original collection PNG assets and accurate editable typography will be composited above this background by PaletteIQ. Never generate substitutes, food shapes, decorative illustrations, or pseudo-text.',
+        'Reserved typography safe zone (0–100 percent):', JSON.stringify(titleZone),
+        'Art-director notes:', String(input.artDirection || '').replace(/[<>\r\n]/g, ' ').slice(0,650),
+        'Requested slide:', String(input.slideName || '').replace(/[<>\r\n]/g, ' ').slice(0,100),
         'Collection visual context:', JSON.stringify({ theme: collection.theme, subtheme: collection.subtheme, style: collection.style }).slice(0,900),
         'Reserved overlay areas (percentage boxes):', JSON.stringify(layout).slice(0,3500),
-        'Absolutely no text, no watermarks, no frames or hard borders. Professional commercial design background, edge-to-edge square composition.'
+        'Absolutely no lettering, words, numbers, badges with text, logos, watermarks, illustrations, or hard bounding boxes. Editorial decorative background only; edge-to-edge square composition.'
       ].join('\n')
     : thumbnailImagePrompt(collection, layout, width, height, input.includeTitle !== false);
   let imageBase64 = '';
