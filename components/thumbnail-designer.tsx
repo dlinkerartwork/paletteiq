@@ -777,7 +777,23 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
       <button className="primary-btn" disabled={!design || busy} type="button" onClick={() => void save()}>Save designs</button>
     </div>
     {message && <p className="notice">{message}</p>}
-    {!design ? <div className="panel empty-state"><h2>No thumbnails yet</h2><p>Create a design for this listing.</p><button className="primary-btn" onClick={create}>Create first thumbnail</button></div> :
+    {!design ? <div className="panel empty-state" style={{ display: 'grid', gap: 12, maxWidth: 520, margin: '20px auto', padding: 24 }}>
+      <h2>Generate Etsy Listing Pack</h2>
+      <p>Start directly from original collection clipart. A reference is optional, and AI will generate the background with artistic lettering.</p>
+      <label className="input-label">PACK PRESET</label>
+      <select aria-label="Etsy listing pack" value={packPreset} onChange={event => setPackPreset(event.target.value as PackPreset)}>
+        <option value="complete-10">Complete Etsy Listing Pack — 10 thumbnails</option>
+        <option value="core-5">Core Etsy Pack — 5 thumbnails</option>
+        <option value="category-showcase">Category Showcase Pack</option>
+      </select>
+      <label className="input-label">OPTIONAL REFERENCE IMAGE</label>
+      <input aria-label="Upload optional reference" type="file" accept="image/png,image/jpeg,image/webp" onChange={event => void onReferenceUpload(event.target.files?.[0])}/>
+      {reference && <img src={reference} alt="Optional reference" style={{ maxHeight: 130, maxWidth: '100%', objectFit: 'contain' }}/>}
+      <button className="primary-btn" disabled={aiBusy || !characters.some(c => c.imageUrl)} onClick={() => void generateReferenceBatch()}>{aiBusy ? 'Generating Etsy pack...' : 'Generate Etsy Listing Pack'}</button>
+      {aiBusy && <button className="outline-btn" onClick={() => { cancelPackRef.current = true; }}>Stop after current image</button>}
+      {packStatus && <small role="status">{packStatus}</small>}
+      <button className="outline-btn" onClick={create}>Or start with a blank design</button>
+    </div> :
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(190px, 245px) minmax(0, 1fr) minmax(245px, 290px)', gap: 12, alignItems: 'start' }}>
       <div className="panel" style={{ padding: 14, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0, gap: 12, alignContent: 'start', overflowX: 'hidden', maxHeight: 'min(82vh, 950px)', overflowY: 'auto', overscrollBehavior: 'contain' }}>
         <div role="tablist" aria-label="Thumbnail tools" style={{ display: 'flex', gap: 4 }} onKeyDown={event => {
