@@ -108,6 +108,8 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const [busy, setBusy] = useState(false);
   const [backgroundUploading, setBackgroundUploading] = useState(false);
   const [backgroundGenerating, setBackgroundGenerating] = useState(false);
+  const [backgroundStyle, setBackgroundStyle] = useState<'watercolor' | 'paper' | 'gradient' | 'botanical' | 'vintage'>('watercolor');
+  const [backgroundIntensity, setBackgroundIntensity] = useState<'soft' | 'balanced' | 'vibrant'>('balanced');
   const [backgroundLoadError, setBackgroundLoadError] = useState('');
   const [typographyPreset, setTypographyPreset] = useState<'editorial' | 'romantic' | 'playful' | 'minimal' | 'vintage'>('editorial');
   const [history, setHistory] = useState<ThumbnailDesign[]>([]);
@@ -389,7 +391,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     try {
       const response = await fetch('/api/thumbnail-ai-image', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId, provider: 'openai', model: imageModel.startsWith('gpt-image-') ? imageModel : 'gpt-image-1-mini', quality: imageQuality, width: design.width, height: design.height, mode: 'background-only', layout: design.elements.map(e => ({ type: e.type, x: e.x, y: e.y, width: e.width, height: e.height })) })
+        body: JSON.stringify({ projectId, provider: 'openai', model: imageModel.startsWith('gpt-image-') ? imageModel : 'gpt-image-1-mini', quality: imageQuality, width: design.width, height: design.height, mode: 'background-only', backgroundStyle, backgroundIntensity, layout: design.elements.map(e => ({ type: e.type, x: e.x, y: e.y, width: e.width, height: e.height })) })
       });
       const result = await response.json() as { error?: string; imageUrl?: string };
       if (!response.ok || !result.imageUrl) throw Error(result.error || 'Background generation failed');
@@ -883,8 +885,12 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         <label className="input-label">BACKGROUND COLOR</label>
         <input type="color" value={design.background} onChange={e => mutate({ background: e.target.value })}/>
         <label className="input-label">AI DECORATIVE BACKGROUND (OPENAI)</label>
+        <label className="input-label">BACKGROUND STYLE</label>
+        <select aria-label="Background style" value={backgroundStyle} disabled={backgroundGenerating} onChange={event => setBackgroundStyle(event.target.value as typeof backgroundStyle)}><option value="watercolor">Artistic watercolor washes</option><option value="paper">Luxury textured paper</option><option value="gradient">Premium colorful gradient</option><option value="botanical">Abstract botanical motifs</option><option value="vintage">Vintage decorative texture</option></select>
+        <label className="input-label">DECORATION INTENSITY</label>
+        <select aria-label="Background decoration intensity" value={backgroundIntensity} disabled={backgroundGenerating} onChange={event => setBackgroundIntensity(event.target.value as typeof backgroundIntensity)}><option value="soft">Soft — visible pastel details</option><option value="balanced">Balanced — recommended</option><option value="vibrant">Vibrant — stronger colors</option></select>
         <button className="outline-btn" type="button" disabled={backgroundGenerating || imageBusy} onClick={() => void generateReferenceBackground()}><WandSparkles size={15}/> {backgroundGenerating ? 'Generating background...' : 'Generate background (no clipart or text)'}</button>
-        <small>AI generates only the background. Original clipart and typography stay on top as independent layers.</small>
+        <small>Generate visible decorative textures and color variations. Original clipart and typography stay on top as independent layers. Generating again may incur API charges.</small>
         <label className="input-label">ARTISTIC TYPOGRAPHY (EDITABLE)</label>
         <select aria-label="Artistic typography preset" value={typographyPreset} onChange={e => setTypographyPreset(e.target.value as typeof typographyPreset)}><option value="editorial">Premium editorial</option><option value="romantic">Romantic calligraphy</option><option value="playful">Playful hand lettering</option><option value="minimal">Modern minimal</option><option value="vintage">Classic vintage</option></select>
         <button className="outline-btn" type="button" onClick={applyArtisticTypography}>Apply typography preset</button>
