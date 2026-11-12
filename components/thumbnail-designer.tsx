@@ -342,15 +342,15 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     return [eyebrow,main,caption];
   };
 
-  // One-click Etsy listing pack. AI makes the editorial backdrop; accurate text
-  // and original PNGs are separate movable layers, never upscaled files.
+  // AI plans character placements and renders typography/badges/background;
+  // PaletteIQ composites exact original PNGs over that single AI background layer.
   const generateReferenceBatch = async () => {
     let available = filterThemeCharacters(title, characters);
     if (!available.length) { setMessage('No original collection images match this specific theme (' + title + '). Generate theme-matching clipart first; unrelated artwork will not be added.'); return; }
     let slides = buildPack(packPreset, title, available);
     if (!slides.length) { setMessage('No collection images available for this pack.'); return; }
     const needsCategories = packPreset !== 'core-5' && !available.some(c => c.category || c.subtheme || c.group);
-    if (!window.confirm('Create ' + slides.length + ' Etsy listing thumbnails? This makes ' + slides.length + ' paid OpenAI image requests' + (reference ? ' plus one reference analysis' : '') + (needsCategories ? ' plus one category analysis' : '') + '. Existing thumbnails are preserved. Continue?')) return;
+    if (!window.confirm('Create ' + slides.length + ' Etsy listing thumbnails? This makes ' + slides.length + ' paid OpenAI image requests plus ' + slides.length + ' AI layout planning requests' + (reference ? ' plus one reference analysis' : '') + (needsCategories ? ' plus one category analysis' : '') + '. Existing thumbnails are preserved. Continue?')) return;
     cancelPackRef.current = false;
     setAiBusy(true); setPackStatus('Preparing ' + slides.length + ' Etsy listing designs...');
     const failures: string[] = [];
@@ -408,8 +408,35 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         if (cancelPackRef.current) { setPackStatus('Generation stopped. Completed thumbnails were kept.'); break; }
         const slide = slides[i];
         const item = created[i];
-        setPackStatus('Generating professional background ' + (i + 1) + '/' + created.length + ': ' + slide.name);
+        setPackStatus('AI arranging original clipart ' + (i + 1) + '/' + created.length + ': ' + slide.name);
         try {
+          const originalChoices = item.elements.filter(e => e.type === 'image').map(e => {
+            const c = available.find(c => c.id === e.characterId);
+            return c ? { id: c.id, name: c.name } : null;
+          }).filter((c): c is {id: string; name: string} => c !== null);
+          const planResponse = await fetch('/api/thumbnail-art-direction', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              projectId, slideKey: slide.key, slideName: slide.name,
+              headline: slide.headline, subtitle: slide.subtitle, textZone: slide.textZone,
+              characters: originalChoices
+            })
+          });
+          const plan = await planResponse.json() as {
+            error?: string; artDirection?: string;
+            slots?: Array<{ characterId: string; x: number; y: number; width: number; height: number; rotation: number }>
+          };
+          if (!planResponse.ok || !plan.slots?.length) throw Error(plan.error || 'AI could not arrange safe character positions');
+          const plannedElements: ThumbnailElement[] = plan.slots.map(position => ({
+            ...newImage(available.find(c => c.id === position.characterId)!, i, 'original'),
+            ...position, source: 'original'
+          }));
+          // AI typography and badges are baked into the background; no local text overlay.
+          const plannedDesign = { ...item, elements: plannedElements };
+          let updated = latestDesignsRef.current.map(d => d.id === item.id ? plannedDesign : d);
+          latestDesignsRef.current = updated;
+          onChange(updated);
+          setPackStatus('AI designing typography, badges and background ' + (i + 1) + '/' + created.length + ': ' + slide.name);
           const response = await fetch('/api/thumbnail-ai-image', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -419,8 +446,8 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
               mode: 'background-with-typography',
               backgroundStyle, backgroundIntensity,
               headline: slide.headline, subtitle: slide.subtitle,
-              slideName: slide.name, textZone: slide.textZone,
-              layout: item.elements.map(e => ({ type: 'image', x: e.x, y: e.y, width: e.width, height: e.height }))
+              slideName: slide.name, artDirection: plan.artDirection, textZone: slide.textZone,
+              layout: plannedElements.map(e => ({ type: 'image', x: e.x, y: e.y, width: e.width, height: e.height }))
             })
           });
           const result = await response.json() as { imageUrl?: string; error?: string };
@@ -818,7 +845,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     {message && <p className="notice">{message}</p>}
     {!design ? <div className="panel empty-state" style={{ display: 'grid', gap: 12, maxWidth: 520, margin: '20px auto', padding: 24 }}>
       <h2>Generate Etsy Listing Pack</h2>
-      <p>Start directly from original collection clipart. A reference is optional, and AI generates the theme-matched editorial background while PaletteIQ composes precise, readable artistic typography.</p>
+      <p>Start with original collection clipart. A reference is optional. AI directs layout, background, artistic typography and badges; PaletteIQ places exact original PNGs in the approved positions.</p>
       <label className="input-label">PACK PRESET</label>
       <select aria-label="Etsy listing pack" value={packPreset} onChange={event => setPackPreset(event.target.value as PackPreset)}>
         <option value="complete-10">Complete Etsy Listing Pack — 10 thumbnails</option>
@@ -872,7 +899,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
           <button className="primary-btn" disabled={!reference || aiBusy} onClick={() => void analyze()}><WandSparkles size={15}/> {aiBusy ? 'Analyzing...' : 'Analyze & apply layout'}</button>
           <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 12, display: 'grid', gap: 8 }}>
             <strong>Generate Etsy Listing Pack</strong>
-            <small>Reference image is optional. AI creates a theme-matched editorial background. PaletteIQ adds accurate artistic typography and original clipart as separate editable layers, then combines everything in the exported JPG.</small>
+            <small>Reference optional. AI designs the background, artistic typography, badges and original-asset positions. PaletteIQ composites unmodified original PNGs over the AI artwork.</small>
             <label className="input-label">ETSY PACK PRESET</label>
             <select aria-label="Etsy listing pack" value={packPreset} disabled={aiBusy} onChange={e => setPackPreset(e.target.value as PackPreset)}>
               <option value="complete-10">Complete Etsy Listing Pack — 10 thumbnails</option>
@@ -894,7 +921,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
             </button>
             {aiBusy && <button type="button" className="outline-btn" onClick={() => { cancelPackRef.current = true; setPackStatus('Stopping after current request...'); }}>Stop after current image</button>}
             {packStatus && <small role="status">{packStatus}</small>}
-            <small>One AI background request per thumbnail. Titles are rendered as precise premium editorial text in the final JPG (editable separately), avoiding misspelled AI lettering. Charges may apply.</small>
+            <small>AI plans original clipart placement, then creates artistic background, typography and badges as one layer. Original collection PNGs remain exact and editable. AI-rendered text may contain errors; verify before publishing. API charges apply.</small>
             <small>Only original collection clipart is placed on top. Upscaled assets are not used.</small>
           </div>
           <small>Optional references inspire layout. Automatically generated designs keep typography areas clear of collection clipart.</small>
