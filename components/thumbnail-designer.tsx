@@ -58,6 +58,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const [aiBusy, setAiBusy] = useState(false);
   const [packPreset, setPackPreset] = useState<PackPreset>('complete-10');
   const [packQuality, setPackQuality] = useState<'low' | 'medium' | 'high'>('medium');
+  const [packTypography, setPackTypography] = useState<'editable' | 'ai-artwork'>('editable');
   const [packStatus, setPackStatus] = useState('');
   const cancelPackRef = useRef(false);
   const [referenceStyle, setReferenceStyle] = useState<'creative' | 'similar' | 'palette'>('creative');
@@ -433,8 +434,9 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
             ...newImage(available.find(c => c.id === position.characterId)!, i, 'original'),
             ...position, source: 'original'
           }));
-          // AI typography and badges are baked into the background; no local text overlay.
-          const plannedDesign = { ...item, elements: plannedElements };
+          // Editable mode keeps verified product wording as independent text layers.
+          // AI-artwork mode puts lettering only in the generated background.
+          const plannedDesign = { ...item, elements: packTypography === 'editable' ? [...plannedElements, ...typographyForSlide(slide)] : plannedElements };
           let updated = latestDesignsRef.current.map(d => d.id === item.id ? plannedDesign : d);
           latestDesignsRef.current = updated;
           onChange(updated);
@@ -445,7 +447,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
               projectId, provider: 'openai',
               model: imageModel.startsWith('gpt-image-') ? imageModel : 'gpt-image-1-mini',
               quality: packQuality, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE,
-              mode: 'background-with-typography',
+              mode: packTypography === 'editable' ? 'background-only' : 'background-with-typography',
               backgroundStyle, backgroundIntensity,
               headline: slide.headline, subtitle: slide.subtitle,
               slideName: slide.name, artDirection: plan.artDirection, textZone: slide.textZone,
@@ -468,7 +470,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         }
       }
       setPackStatus(cancelPackRef.current ? 'Stopped. Generated images are retained.' : 'Pack generation finished.');
-      setMessage('Pack: ' + created.length + ' designs created with exact editable text; ' + completed + ' editorial backgrounds generated' + (failures.length ? '. Failed: ' + failures.join(' | ').slice(0,450) : '. Review AI spelling before publishing.') + '.');
+      setMessage('Pack: ' + created.length + ' designs with exact original collection PNGs; ' + completed + ' editorial backgrounds generated. ' + (packTypography === 'editable' ? 'Text remains independently editable and was not AI-rasterized.' : 'Check AI-generated lettering for spelling and factual accuracy.') + (failures.length ? ' Failed: ' + failures.join(' | ').slice(0,450) : ''));
     } catch (error) {
       setMessage('Etsy listing pack failed: ' + (error instanceof Error ? error.message : String(error)));
     } finally { setAiBusy(false); }
@@ -847,12 +849,17 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     {message && <p className="notice">{message}</p>}
     {!design ? <div className="panel empty-state" style={{ display: 'grid', gap: 12, maxWidth: 520, margin: '20px auto', padding: 24 }}>
       <h2>Generate Etsy Listing Pack</h2>
-      <p>Start with original collection clipart. A reference is optional. AI directs layout, background, artistic typography and badges; PaletteIQ places exact original PNGs in the approved positions.</p>
+      <p>Use original collection clipart directly, without ZIP export. Reference images are optional. AI directs the layout and background; PaletteIQ places exact original PNGs and editable lettering.</p>
       <label className="input-label">PACK PRESET</label>
       <select aria-label="Etsy listing pack" value={packPreset} onChange={event => setPackPreset(event.target.value as PackPreset)}>
         <option value="complete-10">Complete Etsy Listing Pack — 10 thumbnails</option>
         <option value="core-5">Core Etsy Pack — 5 thumbnails</option>
         <option value="category-showcase">Category Showcase Pack</option>
+      </select>
+      <label className="input-label">TYPOGRAPHY MODE</label>
+      <select aria-label="Etsy pack typography mode" disabled={aiBusy} value={packTypography} onChange={event => setPackTypography(event.target.value as typeof packTypography)}>
+        <option value="editable">Editable artistic fonts (recommended · accurate text)</option>
+        <option value="ai-artwork">AI-generated lettering artwork (review spelling)</option>
       </select>
       <label className="input-label">OPTIONAL REFERENCE IMAGE</label>
       <input aria-label="Upload optional reference" type="file" accept="image/png,image/jpeg,image/webp" onChange={event => void onReferenceUpload(event.target.files?.[0])}/>
@@ -901,12 +908,17 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
           <button className="primary-btn" disabled={!reference || aiBusy} onClick={() => void analyze()}><WandSparkles size={15}/> {aiBusy ? 'Analyzing...' : 'Analyze & apply layout'}</button>
           <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 12, display: 'grid', gap: 8 }}>
             <strong>Generate Etsy Listing Pack</strong>
-            <small>Reference optional. AI designs the background, artistic typography, badges and original-asset positions. PaletteIQ composites unmodified original PNGs over the AI artwork.</small>
+            <small>Reference optional. AI designs the layout and decorative background; PaletteIQ composites unmodified collection PNGs. Choose accurate editable lettering or experimental AI typography artwork.</small>
             <label className="input-label">ETSY PACK PRESET</label>
             <select aria-label="Etsy listing pack" value={packPreset} disabled={aiBusy} onChange={e => setPackPreset(e.target.value as PackPreset)}>
               <option value="complete-10">Complete Etsy Listing Pack — 10 thumbnails</option>
               <option value="core-5">Core Etsy Pack — 5 thumbnails</option>
               <option value="category-showcase">Category Showcase Pack — based on collection groups</option>
+            </select>
+            <label className="input-label">TYPOGRAPHY MODE</label>
+            <select aria-label="Etsy pack typography mode" value={packTypography} disabled={aiBusy} onChange={e => setPackTypography(e.target.value as typeof packTypography)}>
+              <option value="editable">Editable artistic fonts · recommended</option>
+              <option value="ai-artwork">AI lettering artwork · review spelling</option>
             </select>
             <label className="input-label">BACKGROUND QUALITY</label>
             <select aria-label="Etsy pack background quality" disabled={aiBusy} value={packQuality} onChange={e => setPackQuality(e.target.value as typeof packQuality)}><option value="low">Low · economical</option><option value="medium">Medium · recommended</option><option value="high">High · premium cost</option></select>
@@ -923,7 +935,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
             </button>
             {aiBusy && <button type="button" className="outline-btn" onClick={() => { cancelPackRef.current = true; setPackStatus('Stopping after current request...'); }}>Stop after current image</button>}
             {packStatus && <small role="status">{packStatus}</small>}
-            <small>AI plans clipart positions only. Background generation is prohibited from drawing any collection objects; automated visual review rejects detected illustration objects. PaletteIQ inserts the exact original PNGs. Background, typography and badges form one AI layer. 1024 × 1024 px. AI text can contain spelling errors; API charges apply.</small>
+            <small>All characters are existing collection PNG files, never reconstructed by AI. Editable mode adds distinct typographic layers over a no-text AI background. AI lettering mode combines text and decoration in one image and checks for generated objects; verify its spelling. Native editor canvas: 1024 × 1024 px. API charges apply.</small>
             <small>Only original collection clipart is placed on top. Upscaled assets are not used.</small>
           </div>
           <small>Optional references inspire layout. Automatically generated designs keep typography areas clear of collection clipart.</small>

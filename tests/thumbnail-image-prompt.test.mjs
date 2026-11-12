@@ -7,7 +7,8 @@ test('title is included by default for existing clients', () => {
   const prompt = thumbnailImagePrompt(collection, layout, 2000, 2000);
   assert.match(prompt, /PRIVATE TITLE/);
   assert.match(prompt, /REFERENCE HEADING/);
-  assert.match(prompt, /exact count 1 PNG Clipart/);
+  assert.match(prompt, /never invent DPI, licensing, dimensions/);
+  assert.doesNotMatch(prompt, /300 DPI|exact count 1 PNG Clipart/);
 });
 test('disabled title removes reference lettering and all positive typography instructions', () => {
   const prompt = thumbnailImagePrompt(collection, layout, 2000, 2000, false);

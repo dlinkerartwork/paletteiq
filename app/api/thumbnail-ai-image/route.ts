@@ -87,16 +87,19 @@ export async function POST(req: Request) {
   ].join('\n');
   const prompt = mode === 'background-with-typography' ? combinedPrompt : mode === 'background-only'
     ? [
-        'Create a VISIBLY DECORATED, PREMIUM, ORIGINAL SQUARE BACKGROUND ARTWORK for an Etsy digital clipart bundle listing.',
-        'CRITICAL: The entire canvas must have obvious visual design. A plain white, flat ivory, uniform near-white, blank or empty background is NOT acceptable.',
+        'Create a PREMIUM EDITORIAL BACKGROUND ARTWORK for an Etsy digital clipart bundle listing. The output must be ONLY the decorative background, no captions or typography.',
+        'Use a harmonious boutique aesthetic: sophisticated ivory or tinted-paper base with restrained, visibly intentional watercolor washes, elegant fine rules or nonfigurative abstract flourishes. Maintain the designated type zone for readable editable text.',
         'Mandatory decorative direction:', styleGuidance[backgroundStyle],
         'Required color/contrast:', intensityGuidance[backgroundIntensity],
-        'Use a theme-appropriate harmonized palette with clear colored washes and textures across the canvas. Keep central areas readable without becoming plain white. Make the result attractive even when viewed without any foreground content.',
+        'Choose a cohesive muted palette that matches the collection and art direction. Keep the title area calm, the illustration areas unobstructed, and visual ornaments subtle enough not to compete with real clipart.',
         'Do NOT depict characters, animals, people, isolated clipart, logos, lettering, numbers, product mockups or any standalone subject from the collection. This is a decorative background layer only.',
-        'The actual original collection clipart and editable typography will be composited above this image, so leave deliberate calm areas for them. Do not create their substitutes.',
+        'The actual original collection PNG assets and accurate editable typography will be composited above this background by PaletteIQ. Never generate substitutes, food shapes, decorative illustrations, or pseudo-text.',
+        'Reserved typography safe zone (0–100 percent):', JSON.stringify(titleZone),
+        'Art-director notes:', String(input.artDirection || '').replace(/[<>\r\n]/g, ' ').slice(0,650),
+        'Requested slide:', String(input.slideName || '').replace(/[<>\r\n]/g, ' ').slice(0,100),
         'Collection visual context:', JSON.stringify({ theme: collection.theme, subtheme: collection.subtheme, style: collection.style }).slice(0,900),
         'Reserved overlay areas (percentage boxes):', JSON.stringify(layout).slice(0,3500),
-        'Absolutely no text, no watermarks, no frames or hard borders. Professional commercial design background, edge-to-edge square composition.'
+        'Absolutely no lettering, words, numbers, badges with text, logos, watermarks, illustrations, or hard bounding boxes. Editorial decorative background only; edge-to-edge square composition.'
       ].join('\n')
     : thumbnailImagePrompt(collection, layout, width, height, input.includeTitle !== false);
   let imageBase64 = '';
@@ -143,8 +146,8 @@ export async function POST(req: Request) {
   if (!(isPng || isJpg) || (imageMime === 'image/png' && !isPng) || (imageMime === 'image/jpeg' && !isJpg)) return bad('Provider did not return a valid image', 502);
   const format = isPng ? 'png' : 'jpg';
   if (bytes.length > 20_000_000) return bad('Generated image is too large', 413);
-  if (mode === 'background-with-typography') {
-    // Fail closed: do not accept an AI image containing character-like artwork.
+  if (mode === 'background-with-typography' || mode === 'background-only') {
+    // Fail closed: neither decorative background mode may introduce generated clipart or objects.
     // Validation does not compare pixel identity and remains a best-effort visual check.
     const key = await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
     if (!key) return bad('OpenAI is required for background illustration validation', 503);
@@ -155,7 +158,7 @@ export async function POST(req: Request) {
         body: JSON.stringify({
           model: 'gpt-4.1-mini',
           input: [{role:'user',content:[
-            {type:'input_text',text:'Review this Etsy THUMBNAIL BACKGROUND ONLY. Reply with JSON {"containsObjects":true|false}. Mark true if you see ANY recognizable illustrated food, dish, plant, animal, person, standalone product, character or clipart-like object, even decorative miniatures or silhouettes. Ignore abstract frames, patterns, text, emblems and empty badge shapes. Be strict about food and collection artwork. Do not assess typography accuracy.'},
+            {type:'input_text',text:'Review an Etsy decorative thumbnail background. Return JSON {"containsObjects":true|false,"containsText":true|false}. containsObjects=true if ANY recognizable standalone illustration, food, drink, dish, floral item, animal, person, product, stock art or clipart-like object appears, including tiny icons or silhouettes; abstract washes, paper grain and lines are not standalone objects. containsText=true if you see readable text, letters, numbers or pseudo-lettering. This background mode is ' + JSON.stringify(mode) + '. In background-only mode, both fields MUST be false; in background-with-typography mode, text is allowed but objects are forbidden.'},
             {type:'input_image',image_url:'data:' + (isPng ? 'image/png' : 'image/jpeg') + ';base64,' + imageBase64}
           ]}],text:{format:{type:'json_object'}}
         }), signal: AbortSignal.timeout(60000)
@@ -165,8 +168,9 @@ export async function POST(req: Request) {
     try {
       const validation = await review.json() as {output?:Array<{content?:Array<{text?:string}>}>};
       const raw = validation.output?.flatMap(x=>x.content||[]).map(x=>x.text||'').join('') || '{}';
-      const decision = JSON.parse(raw) as {containsObjects?:boolean};
+      const decision = JSON.parse(raw) as {containsObjects?:boolean; containsText?:boolean};
       if (decision.containsObjects !== false) return bad('AI background contains or may contain generated clipart-like objects. Image rejected; retry generation.', 422);
+      if (mode === 'background-only' && decision.containsText !== false) return bad('Decorative background contains unexpected text. Image rejected; retry generation.', 422);
     } catch { return bad('Background validation returned an unreadable response; image rejected', 502); }
   }
   const assetId = crypto.randomUUID();
