@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import UpscaleCompare from '@/components/upscale-compare';
-import { buildPack, placeOriginals, type PackPreset } from '@/lib/etsy-listing-pack';
+import { buildPack, filterThemeCharacters, placeOriginals, type PackPreset, type PackSlide } from '@/lib/etsy-listing-pack';
 import { Download, Plus, Trash2, Copy, Undo2, Redo2, WandSparkles, RotateCcw } from 'lucide-react';
 
 export type ThumbnailElement = {
@@ -306,11 +306,42 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     finally { setAiBusy(false); }
   };
 
+  // Exact human-readable typography. Unlike AI-rendered lettering, this cannot
+  // hallucinate random words, and can be edited after generation.
+  const typographyForSlide = (slide: PackSlide): ThumbnailElement[] => {
+    const z = slide.textZone;
+    const centerHero = slide.layout === 'hero';
+    const inset = centerHero ? 2 : 3;
+    const base = z.y + z.height * .12;
+    const headline = slide.headline.trim();
+    const splitAt = headline.length > 22 ? headline.lastIndexOf(' ', 22) : -1;
+    const displayTitle = splitAt > 8 ? headline.slice(0, splitAt) + '\\n' + headline.slice(splitAt + 1) : headline;
+    const titleY = base + (centerHero ? 8 : 2);
+    const titleHeight = z.height * (centerHero ? .52 : .54);
+    const titleFont = centerHero ? 100 : 90;
+    const ink = '#244c40';
+    const main: ThumbnailElement = {
+      ...newText(displayTitle),
+      x: z.x + inset, y: titleY,
+      width: z.width - inset * 2, height: titleHeight,
+      fontSize: titleFont, fontFamily: 'Playfair Display', fontWeight: 'bold',
+      color: ink, rotation: 0
+    };
+    const caption: ThumbnailElement = {
+      ...newText(slide.subtitle),
+      x: z.x + inset + 2, y: Math.min(z.y + z.height - 8, titleY + titleHeight + 2),
+      width: z.width - inset * 2 - 4, height: 6,
+      fontSize: 34, fontFamily: 'Montserrat', fontWeight: 'normal',
+      color: '#8a624a', rotation: 0
+    };
+    return [main, caption];
+  };
+
   // One-click Etsy listing pack. AI makes background + typography; original PNGs
   // remain separate movable layers and never come from upscaled image URLs.
   const generateReferenceBatch = async () => {
-    let available = characters.filter(c => c.imageUrl);
-    if (!available.length) { setMessage('Generate original collection clipart images first.'); return; }
+    let available = filterThemeCharacters(title, characters);
+    if (!available.length) { setMessage('No original collection images match this specific theme (' + title + '). Generate theme-matching clipart first; unrelated artwork will not be added.'); return; }
     let slides = buildPack(packPreset, title, available);
     if (!slides.length) { setMessage('No collection images available for this pack.'); return; }
     const needsCategories = packPreset !== 'core-5' && !available.some(c => c.category || c.subtheme || c.group);
@@ -356,10 +387,13 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         originalAssetsOnly: true,
         background: color,
         referenceUrl: reference.startsWith('https://') ? reference : undefined,
-        elements: placeOriginals(slide, available, slots).map(position => ({
-          ...newImage(available.find(c => c.id === position.characterId)!, index, 'original'),
-          ...position, source: 'original' as const
-        }))
+        elements: [
+          ...placeOriginals(slide, available, slots).map(position => ({
+            ...newImage(available.find(c => c.id === position.characterId)!, index, 'original'),
+            ...position, source: 'original' as const
+          })),
+          ...typographyForSlide(slide)
+        ]
       }));
       const original = [...latestDesignsRef.current, ...created];
       latestDesignsRef.current = original;
@@ -400,7 +434,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         }
       }
       setPackStatus(cancelPackRef.current ? 'Stopped. Generated images are retained.' : 'Pack generation finished.');
-      setMessage('Pack: ' + created.length + ' designs created; ' + completed + ' backgrounds and typography artwork generated' + (failures.length ? '. Failed: ' + failures.join(' | ').slice(0,450) : '. Review AI spelling before publishing.') + '.');
+      setMessage('Pack: ' + created.length + ' designs created with exact editable text; ' + completed + ' editorial backgrounds generated' + (failures.length ? '. Failed: ' + failures.join(' | ').slice(0,450) : '. Review AI spelling before publishing.') + '.');
     } catch (error) {
       setMessage('Etsy listing pack failed: ' + (error instanceof Error ? error.message : String(error)));
     } finally { setAiBusy(false); }
@@ -853,7 +887,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
             </button>
             {aiBusy && <button type="button" className="outline-btn" onClick={() => { cancelPackRef.current = true; setPackStatus('Stopping after current request...'); }}>Stop after current image</button>}
             {packStatus && <small role="status">{packStatus}</small>}
-            <small>One AI image request per thumbnail (plus one optional reference analysis). Charges may apply. Titles are embedded in background artwork, not editable text layers. Verify all text before publishing.</small>
+            <small>One AI background request per thumbnail. Titles are rendered as precise premium editorial text in the final JPG (editable separately), avoiding misspelled AI lettering. Charges may apply.</small>
             <small>Only original collection clipart is placed on top. Upscaled assets are not used.</small>
           </div>
           <small>Optional references inspire layout. Automatically generated designs keep typography areas clear of collection clipart.</small>
