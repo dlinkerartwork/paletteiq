@@ -75,7 +75,7 @@ export async function POST(req: Request) {
     'Avoid high saturation, noisy scattered watercolor textures, busy gradients, irregular splotches, starbursts or ornamental overload.',
     'Reference theme information:',JSON.stringify({theme:collection.theme,subtheme:collection.subtheme,style:collection.style}).slice(0,900),
     'Layout concept:',safeText(input.slideName || ''),'Elegant neutral edge-to-edge square artwork, refined paper surface, commercially polished high-end stationery.'
-  ].join('\\n');
+  ].join('\n');
   const prompt = mode === 'background-with-typography' ? combinedPrompt : mode === 'background-only'
     ? [
         'Create a VISIBLY DECORATED, PREMIUM, ORIGINAL SQUARE BACKGROUND ARTWORK for an Etsy digital clipart bundle listing.',
