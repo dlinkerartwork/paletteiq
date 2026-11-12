@@ -47,24 +47,74 @@ export function buildPack(preset: PackPreset, title: string, characters: PackCha
     make('boutique', 'Modern Boutique', name, 'Creative artwork collection', 'boutique', 5, { x: 5, y: 7, width: 41, height: 83 }),
     preview, category(0), category(1), closeup, bundle];
 }
-const overlap = (a: Zone, b: Zone, pad = 2) => a.x < b.x + b.width + pad && a.x + a.width + pad > b.x && a.y < b.y + b.height + pad && a.y + a.height + pad > b.y;
+
+const foodTerms = /\\b(sushi|sashimi|nigiri|maki|temaki|uramaki|hosomaki|futomaki|gunkan|chirashi|onigiri|inari|toro|salmon|tuna|ebi|ikura|uni)\\b/i;
+const notSushi = /\\b(ramen|udon|soba|noodle|pho|bibimbap|kimchi|dumpling|bao|dim sum|soup|curry|pad thai|takoyaki|tempura|bento|mochi|tea|coffee|hot pot|satay|spring roll)\\b/i;
+const relevant = (slide: PackSlide, character: PackCharacter) => {
+  if (slide.ids) return slide.ids.includes(character.id);
+  const title = slide.headline.toLowerCase(), name = character.name.toLowerCase();
+  // A narrow product title must never borrow visually unrelated illustrations.
+  if (/\\b(sushi|sashimi)\\b/.test(title)) return foodTerms.test(name) && !notSushi.test(name);
+  const category = character.category || character.subtheme || character.group || '';
+  if (category && title.toLowerCase().includes(category.toLowerCase())) return true;
+  if (/\\b(ramen|noodles?)\\b/.test(title)) return /\\b(ramen|noodle|udon|soba)\\b/i.test(name);
+  return true;
+};
+export function selectPackCharacters(slide: PackSlide, characters: PackCharacter[]) {
+  return characters.filter(c => c.imageUrl && relevant(slide,c)).slice(0,slide.limit);
+}
+const overlap = (a: Zone, b: Zone, pad = 2) =>
+  a.x < b.x + b.width + pad && a.x + a.width + pad > b.x &&
+  a.y < b.y + b.height + pad && a.y + a.height + pad > b.y;
+const rotatedBounds = (box: Zone, angle: number): Zone => {
+  const r = Math.abs(angle)*Math.PI/180;
+  const w = box.width*Math.cos(r)+box.height*Math.sin(r);
+  const h = box.width*Math.sin(r)+box.height*Math.cos(r);
+  return { x:box.x+(box.width-w)/2, y:box.y+(box.height-h)/2, width:w, height:h };
+};
 export function placeOriginals(slide: PackSlide, characters: PackCharacter[], referenceSlots: Zone[] = []) {
-  const options = characters.filter(c => c.imageUrl && (!slide.ids || slide.ids.includes(c.id)));
-  const count = Math.min(slide.limit, options.length);
-  const region: Zone = slide.layout === 'boutique' ? { x: 51, y: 7, width: 44, height: 86 } : { x: 5, y: 32, width: 90, height: 63 };
-  const cols = slide.layout === 'grid' ? (count > 24 ? 7 : count > 9 ? 4 : 3) : slide.layout === 'closeup' || slide.layout === 'boutique' ? 2 : count > 9 ? 4 : 3;
-  const rows = Math.ceil(count / cols);
-  const cw = region.width / cols, ch = region.height / Math.max(1, rows);
-  const used: Zone[] = [];
-  return options.slice(0, count).flatMap((c, i) => {
-    const w = Math.min(cw * .78, 32), h = Math.min(ch * .78, 35);
-    const suggested = referenceSlots[i];
-    const grid: Zone = { x: region.x + i % cols * cw + (cw-w)/2, y: region.y + Math.floor(i/cols)*ch + (ch-h)/2, width:w, height:h };
-    const ref: Zone = suggested ? {x:Math.max(2,Math.min(98-w,suggested.x)),y:Math.max(2,Math.min(98-h,suggested.y)),width:w,height:h} : grid;
-    const valid = (z: Zone) => !overlap(z, slide.textZone, 4) && used.every(other => !overlap(z, other, 1));
-    const zone = slide.layout !== 'grid' && valid(ref) ? ref : grid;
-    if (!valid(zone)) return [];
-    used.push(zone);
-    return [{ characterId: c.id, ...zone, rotation: slide.layout === 'grid' || slide.layout === 'showcase' ? 0 : (i % 3 - 1) * 5 }];
-  });
+  const options = selectPackCharacters(slide,characters);
+  if (!options.length) return [];
+  const count = options.length;
+  // Editorial templates: radial hero, clean grid, split boutique, gallery and detail.
+  const area: Zone = slide.layout==='boutique'
+    ? {x:53,y:9,width:41,height:82}
+    : slide.layout==='showcase'
+      ? {x:5,y:28,width:90,height:67}
+      : {x:6,y:32,width:88,height:62};
+  const columns = slide.layout==='grid' ? (count>24?7:count>10?4:3)
+    : slide.layout==='closeup'||slide.layout==='boutique'?2
+    : count>9?4:3;
+  const rows = Math.ceil(count/columns);
+  const cellW=area.width/columns,cellH=area.height/rows;
+  const used:Zone[]=[];
+  const result:Array<{characterId:string;x:number;y:number;width:number;height:number;rotation:number}>=[];
+  const safe = (z:Zone,rotation:number) => {
+    const bound=rotatedBounds(z,rotation);
+    return bound.x>=2&&bound.y>=2&&bound.x+bound.width<=98&&bound.y+bound.height<=98
+      &&!overlap(bound,slide.textZone,5)&&used.every(other=>!overlap(bound,other,2));
+  };
+  for(let i=0;i<count;i++){
+    const width=Math.min(cellW*.72,slide.layout==='closeup'?33:27);
+    const height=Math.min(cellH*.70,slide.layout==='closeup'?32:28);
+    const col=i%columns,row=Math.floor(i/columns);
+    const grid:Zone={x:area.x+col*cellW+(cellW-width)/2,y:area.y+row*cellH+(cellH-height)/2,width,height};
+    const angle=slide.layout==='grid'||slide.layout==='showcase'?0:(i%3-1)*3;
+    const candidates:Zone[]=[];
+    // Reference slot positions are only hints; never override typography exclusion.
+    if(referenceSlots[i]&&slide.layout!=='grid'){
+      const ref=referenceSlots[i];
+      candidates.push({x:Math.max(3,Math.min(97-width,ref.x)),y:Math.max(3,Math.min(97-height,ref.y)),width,height});
+    }
+    candidates.push(grid);
+    for(let j=0;j<25;j++){
+      const step=j+1;
+      candidates.push({x:Math.max(3,Math.min(97-width,grid.x+((step%5)-2)*cellW*.18)),y:Math.max(3,Math.min(97-height,grid.y+Math.floor(step/5)*cellH*.13)),width,height});
+    }
+    const chosen=candidates.find(c=>safe(c,angle));
+    if(!chosen)continue;
+    used.push(rotatedBounds(chosen,angle));
+    result.push({characterId:options[i].id,...chosen,rotation:angle});
+  }
+  return result;
 }
