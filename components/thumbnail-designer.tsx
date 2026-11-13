@@ -499,6 +499,47 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     } finally { setAiBusy(false); }
   };
 
+  const retryBackground = async (target: ThumbnailDesign) => {
+    if (aiBusy || backgroundRetryId || !target.originalAssetsOnly) return;
+    setBackgroundRetryId(target.id);
+    setMessage('Requesting OpenAI background for ' + target.name + '...');
+    try {
+      const artistic = target.packTypography === 'ai-artwork' || (target.packTypography == null && !target.elements.some(e => e.type === 'text'));
+      const imageLayers = target.elements.filter(e => e.type === 'image');
+      const response = await fetch('/api/thumbnail-ai-image', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId, provider: 'openai',
+          model: imageModel.startsWith('gpt-image-') ? imageModel : 'gpt-image-1-mini',
+          quality: packQuality, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE,
+          mode: artistic ? 'background-with-typography' : 'background-only',
+          backgroundStyle, backgroundIntensity,
+          headline: target.packHeadline || title,
+          subtitle: target.packSubtitle || 'Digital Clipart Collection',
+          slideName: target.name,
+          textZone: target.packTextZone || { x: 22, y: 31, width: 56, height: 38 },
+          layout: imageLayers.map(e => ({ type: 'image', x: e.x, y: e.y, width: e.width, height: e.height }))
+        })
+      });
+      const result = await response.json() as { imageUrl?: string; error?: string };
+      if (!response.ok || !result.imageUrl) throw Error(result.error || 'No background returned');
+      await loadForExport(result.imageUrl);
+      const next = latestDesignsRef.current.map(d => d.id === target.id
+        ? { ...d, backgroundImageUrl: result.imageUrl, generationError: undefined, updatedAt: Date.now() } : d);
+      latestDesignsRef.current = next;
+      onChange(next);
+      setMessage('AI background generated for ' + target.name + '. Save designs to persist it.');
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      const next = latestDesignsRef.current.map(d => d.id === target.id ? { ...d, generationError: reason } : d);
+      latestDesignsRef.current = next;
+      onChange(next);
+      setMessage('AI background failed: ' + reason);
+    } finally {
+      setBackgroundRetryId('');
+    }
+  };
+
   const onReferenceUpload = async (file?: File) => {
     if (!file) return;
     if (!['image/png','image/jpeg','image/webp'].includes(file.type) || file.size > 4_000_000) { setMessage('Use PNG/JPG/WebP up to 4 MB for AI reference.'); return; }
@@ -1122,12 +1163,20 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
               {!item.aiImageUrl && item.elements.map(element => element.type === 'image' ? <img key={element.id} src={imageUrl(element)} alt="" style={{ position: 'absolute', left: element.x + '%', top: element.y + '%', width: element.width + '%', height: element.height + '%', objectFit: 'contain', transform: 'rotate(' + element.rotation + 'deg)' }}/> : <span key={element.id} style={{ position: 'absolute', left: element.x + '%', top: element.y + '%', width: element.width + '%', color: element.color, fontFamily: element.fontFamily, fontSize: 9, overflow: 'hidden' }}>{element.text}</span>)}
             </div>
             <strong style={{ display: 'block', marginTop: 7, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</strong>
-            {item.generationError && <small style={{ color: '#b91c1c' }} title={item.generationError}>AI background failed — retry by creating a new pack</small>}
+            {item.generationError && <small style={{ color: '#b91c1c', display: 'block' }} title={item.generationError}>AI background failed: {item.generationError.slice(0, 75)}</small>}
             <small>{item.aiImageUrl ? 'AI image' : 'Editable design'} · {item.width}×{item.height}</small>
             </button>
             <small style={{ display: 'block', marginTop: 5 }}>{item.upscaleJob ? (upscaleRemaining[item.id] != null ? 'Est. remaining: ' + Math.ceil(upscaleRemaining[item.id]! / 60) + ' min' : 'Time remaining: waiting for GPU / estimating…') : item.upscaledImageUrl ? '✓ Upscale completed' : 'Not upscaled'}</small>
             {item.upscaledImageUrl ? <button type="button" className="outline-btn" style={{ fontSize: 12, marginTop: 6 }} onClick={() => void compareThumbnail(item)}>Compare images</button>
               : item.aiImageUrl && <a href={item.aiImageUrl} download style={{ display: 'block', fontSize: 12 }}>View AI image</a>}
+            <div style={{ display: 'flex', gap: 5, marginTop: 8, flexWrap: 'wrap' }}>
+              {item.originalAssetsOnly && <button type="button" className="outline-btn" style={{ fontSize: 11, padding: '5px 7px', flex: 1 }} disabled={aiBusy || Boolean(backgroundRetryId)} onClick={() => void retryBackground(item)}>
+                <WandSparkles size={12}/> {backgroundRetryId === item.id ? 'Generating...' : item.backgroundImageUrl ? 'Regenerate AI' : 'Generate AI Background'}
+              </button>}
+              <button type="button" className="outline-btn" aria-label={'Delete thumbnail ' + item.name} title="Delete this thumbnail only" style={{ color: '#b91c1c', fontSize: 11, padding: '5px 7px' }} disabled={aiBusy || Boolean(item.upscaleJob)} onClick={() => deleteThumbnail(item.id)}>
+                <Trash2 size={13}/> Hapus
+              </button>
+            </div>
           </div>
         ))}
         </div>
