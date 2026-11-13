@@ -53,3 +53,10 @@ test('Background API consumes controlled design-brief settings without receiving
   assert.match(generator, /collectionPalette: \(collection as/);
   assert.match(page, /collectionVisualSettings=\{\{ style: project\.style, palette: project\.palette, texture: project\.texture \}\}/);
 });
+
+test('Generated exact-asset thumbnails retain the provider prompt for audit without generating product objects', () => {
+  assert.match(designer, /aiImagePrompt: result\.prompt/);
+  assert.match(designer, /mode: packTypography === 'editable' \? 'background-only' : 'background-with-typography'/);
+  assert.doesNotMatch(designer, /mode: 'full-thumbnail'/);
+  assert.match(generator, /THIS IS NOT AN ILLUSTRATION JOB/);
+});
