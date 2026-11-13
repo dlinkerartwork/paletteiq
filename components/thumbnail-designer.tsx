@@ -402,7 +402,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
           const element = originals.get(slot.characterId);
           return element ? { ...element, ...slot, source: 'original' as const } : null;
         })
-        .filter((element): element is ThumbnailElement => element !== null);
+        .filter(element => element !== null) as ThumbnailElement[];
       if (selected.length < expectedMin) throw Error('Vision returned insufficient valid original PNGs');
       return { elements: selected, usedFallback: false };
     } catch {
