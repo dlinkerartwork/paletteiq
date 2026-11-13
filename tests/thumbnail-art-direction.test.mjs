@@ -15,24 +15,25 @@ test('AI positioning is restricted to saved original collection images, not inve
   assert.match(designer,/source: 'original'/);
 });
 
-test('AI planner checks text collision, rotated bounds and intersections with other clipart', () => {
+test('AI planner protects text and restricts excess overlap while allowing layered originals', () => {
   assert.match(planner,/const box = bounds\(slot\)/);
   assert.match(planner,/collides\(box,titleArea,5\)/);
-  assert.match(planner,/placed\.some\(p => collides\(box,bounds\(p\),2\)\)/);
+  assert.match(planner,/isCatalogue && placed\.some\(p => collides\(box,bounds\(p\),2\)\)/);
+  assert.match(planner, /\(iw \* ih\) \/ smaller > \.30/);
 });
 
 test('One-click batch uses AI layout positions and background with AI lettering and badges', () => {
   assert.match(designer,/fetch\('\/api\/thumbnail-art-direction'/);
   assert.match(designer,/plan\.slots\.map\(position =>/);
   assert.match(designer,/layout: plannedElements\.map/);
-  assert.match(generator,/INCLUDES artistic typography, tasteful ornamental badges/);
-  assert.match(generator,/STRICT SEPARATION: Do not draw recognizable standalone product\/collection illustrations/);
-  assert.match(generator,/The AI must never invent, reconstruct, imitate, redraw/);
+  assert.match(generator, /TYPOGRAPHY ONLY: Render these exact strings/);
+  assert.match(generator, /THIS IS NOT AN ILLUSTRATION JOB/);
+  assert.match(generator, /placed later from exact stored PNGs/);
 });
 
 test('AI thumbnail backgrounds prohibit object illustrations and are screened before storage', () => {
-  assert.match(generator, /Do not draw recognizable standalone product\/collection illustrations/);
-  assert.match(generator, /The AI must never invent, reconstruct, imitate, redraw/);
+  assert.match(generator, /No pictorial symbols or decorative themed icons/);
+  assert.match(generator, /Never create even tiny pictorial decorations/);
   assert.match(generator, /decision\.containsObjects !== false/);
   assert.ok(generator.indexOf('decision.containsObjects !== false') < generator.indexOf("await storage.put("));
 });
@@ -55,7 +56,7 @@ test('Both background modes reject illustrated substitutes, and editable mode re
   assert.match(generator, /mode === 'background-with-typography' \|\| mode === 'background-only'/);
   assert.match(generator, /decision\.containsObjects !== false/);
   assert.match(generator, /mode === 'background-only' && decision\.containsText !== false/);
-  assert.match(generator, /Art-director notes:/);
+  assert.match(generator, /Premium design mood:/);
 });
 
 test('Batch requests the AI background even if art direction fails', () => {
@@ -105,4 +106,12 @@ test('Thumbnail card preview button closes before review links and approval acti
   assert.ok(previewStart >= 0 && previewEnd > previewStart && reviewStart > previewEnd,
     'Review controls must be siblings of the preview button, not nested inside it');
   assert.ok(gallery.indexOf('Approve after visual inspection') > reviewStart);
+});
+
+test('Image generator receives ONLY abstract graphics and lettering instructions, never character names or project theme', () => {
+  assert.match(generator, /Never feed it the collection.s objects, character names/);
+  assert.match(generator, /Do not visualize the collection, its subject, its category/);
+  assert.doesNotMatch(generator, /Collection visual context:|Authorized ORIGINAL assets:|Collection theme:/);
+  assert.match(generator, /Do not draw a visual depiction of the title words/);
+  assert.match(generator, /Reserved areas where original PNG assets will later be composited/);
 });
