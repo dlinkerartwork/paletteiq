@@ -80,6 +80,22 @@ export async function POST(req: Request) {
   };
   const designDirection = [directions[coverStyle], energy[designBoldness],
     isFoodTheme ? 'Gourmet food design palette inspired by varied Asian cuisine: deep evergreen, sophisticated vermilion, sage and warm cream; do not introduce any illustrated food shapes.' : 'Adapt colors and typography to the actual collection theme; do not use food-specific visual language.'].join(' ');
+  const slideLabel = String(input.slideName || '').toLowerCase();
+  const slideDirection = slideLabel.includes('hero')
+    ? 'HERO COVER: one bold typographic statement, visually large collection assets will surround it. Prefer lively asymmetric ink-wash ring or shape, no repetitive border.'
+    : slideLabel.includes('showcase')
+      ? 'COLLECTION SHOWCASE: elegant curated gallery heading, restrained supporting labels and deliberate structure; the original item grid must remain easy to scan.'
+      : slideLabel.includes('artistic')
+        ? 'ARTISTIC TYPOGRAPHY: make expressive custom brush/serif lettering the star, with dynamic negative space and minimal abstract supporting decoration.'
+        : slideLabel.includes('storybook')
+          ? 'STORYBOOK GALLERY: layered torn paper, light page framing and bookish lettering; preserve quiet separate spaces for original clipart.'
+          : slideLabel.includes('boutique')
+            ? 'MODERN BOUTIQUE: bold asymmetric editorial split, a tall independent typographic panel and a distinct artwork display zone.'
+            : slideLabel.includes('preview')
+              ? 'FULL COLLECTION PREVIEW: elegant compact editorial header over a neutral uncluttered gallery background for many original products.'
+              : slideLabel.includes('closeup')
+                ? 'ARTWORK CLOSEUPS: minimal magazine-like framing and generous negative space for a few large cropped-free original art details.'
+                : 'CURATED COLLECTION: design a fresh, collection-specific elegant graphic identity with good headline hierarchy and room for exact original assets.';
   const combinedPrompt = [
     'Generate one premium, professionally art-directed SQUARE ETSY CLIPART BUNDLE BACKGROUND that INCLUDES artistic typography, tasteful ornamental badges and beautiful decorative framing.',
     'STRICT SEPARATION: Draw NO collection-related objects whatsoever. NO illustrated dishes, foods, drinks, tea sets, sushi, flowers, plants, animals, characters, product assets, miniature illustrations, silhouettes, collage cutouts, or stock clipart. Avoid even objects that merely resemble collection images. The only figurative content permitted is typography and abstract badge/frame ornament.',
@@ -92,6 +108,7 @@ export async function POST(req: Request) {
     'ART DIRECTION: Make the title the visual hook with a handcrafted typographic contrast (expressive brush script or display face plus refined serif), interesting scale changes, editorial spacing, purposeful graphic ribbon or abstract badge, and a composition that stands out at 200-pixel search-preview size. Use fresh asymmetric layered panels, visual depth and elegant rhythm. NEVER use a centered vintage certificate with tiny corner objects, symmetrical flourishes or uniform border as the default.',
     'Avoid any unverified DPI, commercial-use or resolution claims. Add no count unless it appears in the exact provided subtitle.',
     'Everywhere outside the typography zone must remain decorative-only: rich but abstract paper collage, painterly washes, refined blocks of color, textured shapes and graphic flourishes. Do not put text there or invent product/collection objects.',
+    'Slide-specific art direction:', slideDirection,
     'ART DIRECTOR COMPOSITION NOTES:', String(input.artDirection || '').replace(/[<>\r\n]/g, ' ').slice(0,650),
     'Theme-aware design direction:', designDirection,
     'User material (non-figurative textures only):', styleGuidance[backgroundStyle],
@@ -112,6 +129,7 @@ export async function POST(req: Request) {
         'Reserved typography safe zone (0–100 percent):', JSON.stringify(titleZone),
         'Art-director notes:', String(input.artDirection || '').replace(/[<>\r\n]/g, ' ').slice(0,650),
         'Cover art style and energy:', designDirection,
+        'Slide-specific art direction:', slideDirection,
         'Requested slide:', String(input.slideName || '').replace(/[<>\r\n]/g, ' ').slice(0,100),
         'Collection visual context:', JSON.stringify({ theme: collection.theme, subtheme: collection.subtheme, style: collection.style }).slice(0,900),
         'Reserved overlay areas (percentage boxes):', JSON.stringify(layout).slice(0,3500),
