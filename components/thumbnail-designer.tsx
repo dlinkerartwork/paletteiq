@@ -1461,16 +1461,19 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         </div>
         <div ref={canvasViewportRef} onPointerDown={startPan} onPointerMove={movePan} onPointerUp={stopPan} onPointerCancel={stopPan} aria-label="Thumbnail canvas viewport" style={{ overflow: previewZoom > 1 ? 'auto' : 'hidden', height: 'min(66vh, 780px)', minHeight: 240, boxSizing: 'border-box', background: '#e8e8e8', padding: 16, borderRadius: 8, cursor: previewZoom > 1 ? 'grab' : 'default', touchAction: 'none' }}>
           <div style={{ width: fittedWidth * previewZoom, margin: '0 auto', marginTop: Math.max(0, (viewportSize.height - fittedHeight * previewZoom) / 2) }}>
-            <div ref={stageRef} onPointerDown={() => setSelectedId('')} style={{ width: '100%', aspectRatio: `${design.width}/${design.height}`, backgroundColor: design.background, position: 'relative', containerType: 'inline-size', overflow: 'hidden', boxShadow: '0 5px 25px #0002', touchAction: 'none' }}>
-              {(design.backgroundImageUrl || design.aiImageUrl) && <img
-                key={design.backgroundImageUrl || design.aiImageUrl}
-                src={design.backgroundImageUrl || design.aiImageUrl}
-                alt="Thumbnail background"
-                onLoad={() => setBackgroundLoadError('')}
-                onError={() => setBackgroundLoadError('Background image cannot be displayed. Check the generated image URL or your image storage.')}
-                draggable={false}
-                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none', userSelect: 'none' }}
-              />}
+            <div ref={stageRef} onPointerDown={() => setSelectedId('')} style={{ width: '100%', aspectRatio: `${design.width}/${design.height}`, backgroundColor: '#fff', position: 'relative', containerType: 'inline-size', overflow: 'hidden', boxShadow: '0 5px 25px #0002', touchAction: 'none' }}>
+              <div data-thumbnail-background="true" style={{ position: 'absolute', inset: 0, opacity: backgroundAlpha(design), pointerEvents: 'none' }}>
+                <div style={{ position: 'absolute', inset: 0, backgroundColor: design.background }}/>
+                {(design.backgroundImageUrl || design.aiImageUrl) && <img
+                  key={design.backgroundImageUrl || design.aiImageUrl}
+                  src={design.backgroundImageUrl || design.aiImageUrl}
+                  alt="Thumbnail background"
+                  onLoad={() => setBackgroundLoadError('')}
+                  onError={() => setBackgroundLoadError('Background image cannot be displayed. Check the generated image URL or your image storage.')}
+                  draggable={false}
+                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none', userSelect: 'none' }}
+                />}
+              </div>
               {showTypographyGuide && typographyEnabled && <div aria-label="Reserved AI typography zone" style={{
                 position: 'absolute',
                 left: (design.packTextZone || { x: 22, y: 30, width: 56, height: 34 }).x + '%',
@@ -1518,7 +1521,12 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         <input readOnly aria-label="Thumbnail size" value="1024 × 1024 px" />
         <small>Fixed thumbnail creation and standard JPG/PNG export: 1024 × 1024 pixels. Remote upscale is a separate optional action.</small>
         <label className="input-label">BACKGROUND COLOR</label>
-        <input type="color" value={design.background} onChange={e => mutate({ background: e.target.value })}/>
+        <input type="color" value={design.background} onChange={e => mutate({ background: e.target.value, renderedImageUrl: undefined, upscaledImageUrl: undefined })}/>
+        <label className="input-label" htmlFor="thumbnail-background-opacity">BACKGROUND OPACITY — {Math.round(backgroundAlpha(design) * 100)}%</label>
+        <input id="thumbnail-background-opacity" aria-label="Background opacity" type="range" min="0" max="100" step="1"
+          value={Math.round(backgroundAlpha(design) * 100)}
+          onChange={e => mutate({ backgroundOpacity: Number(e.target.value) / 100, renderedImageUrl: undefined, upscaledImageUrl: undefined })}/>
+        <small>0% = latar putih, 100% = warna/background asli. Hanya lapisan background yang berubah; PNG clipart dan editable text tetap terlihat penuh. Hasil Save, PNG, dan JPG menggunakan opacity yang sama.</small>
         <label className="input-label">AI DECORATIVE BACKGROUND (OPENAI)</label>
         <label className="input-label">BACKGROUND STYLE</label>
         <select aria-label="Background style" value={backgroundStyle} disabled={backgroundGenerating} onChange={event => setBackgroundStyle(event.target.value as typeof backgroundStyle)}><option value="watercolor">Artistic watercolor washes</option><option value="paper">Luxury textured paper</option><option value="gradient">Premium colorful gradient</option><option value="botanical">Abstract botanical motifs</option><option value="vintage">Vintage decorative texture</option></select>
@@ -1590,8 +1598,11 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
               Select for upscale
             </label>
             <button type="button" onClick={() => { setActiveId(item.id); setSelectedId(''); }} style={{ border: 0, background: 'transparent', textAlign: 'left', padding: 0, width: '100%', cursor: 'pointer' }}>
-            <div style={{ width: '100%', aspectRatio: item.width + '/' + item.height, position: 'relative', overflow: 'hidden', borderRadius: 6, backgroundColor: item.background }}>
-              {(item.backgroundImageUrl || item.aiImageUrl) && <img src={item.backgroundImageUrl || item.aiImageUrl} alt="" draggable={false} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}/>}
+            <div style={{ width: '100%', aspectRatio: item.width + '/' + item.height, position: 'relative', overflow: 'hidden', borderRadius: 6, backgroundColor: '#fff' }}>
+              <div data-thumbnail-gallery-background="true" style={{ position: 'absolute', inset: 0, opacity: backgroundAlpha(item), pointerEvents: 'none' }}>
+                <div style={{ position: 'absolute', inset: 0, backgroundColor: item.background }}/>
+                {(item.backgroundImageUrl || item.aiImageUrl) && <img src={item.backgroundImageUrl || item.aiImageUrl} alt="" draggable={false} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}/>}
+              </div>
               {!item.aiImageUrl && item.elements.map(element => element.type === 'image' ? <img key={element.id} src={imageUrl(element)} alt="" style={{ position: 'absolute', left: element.x + '%', top: element.y + '%', width: element.width + '%', height: element.height + '%', objectFit: 'contain', transform: 'rotate(' + element.rotation + 'deg)' }}/> : <span key={element.id} style={{ position: 'absolute', left: element.x + '%', top: element.y + '%', width: element.width + '%', color: element.color, fontFamily: element.fontFamily, fontSize: 9, overflow: 'hidden' }}>{element.text}</span>)}
             </div>
             <strong style={{ display: 'block', marginTop: 7, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</strong>
