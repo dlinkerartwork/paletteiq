@@ -1212,56 +1212,9 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     </div>
     {message && <p className="notice">{message}</p>}
     {!design ? <div className="panel empty-state" style={{ display: 'grid', gap: 12, maxWidth: 520, margin: '20px auto', padding: 24 }}>
-      <h2>Generate Etsy Listing Pack</h2>
-      <p>Use original collection clipart directly, without ZIP export. Reference images are optional. AI directs the layout and background; PaletteIQ places exact original PNGs and editable lettering.</p>
-      <label className="input-label">GENERATION SCOPE</label>
-      <select aria-label="Etsy generation scope" disabled={aiBusy} value={generationScope} onChange={event => setGenerationScope(event.target.value as typeof generationScope)}>
-        <option value="single">1 Thumbnail · low-cost trial (default)</option>
-        <option value="core-5">5 Thumbnails · core pack</option>
-        <option value="complete-10">10 Thumbnails · complete pack</option>
-        <option value="category-showcase">Category Showcase Pack</option>
-      </select>
-      {generationScope === 'single' && <>
-        <label className="input-label">THUMBNAIL TYPE</label>
-        <select aria-label="Single thumbnail type" disabled={aiBusy} value={singleSlideKey} onChange={event => setSingleSlideKey(event.target.value)}>
-          {buildPack('complete-10', title, characters).map((slide,index) => <option key={slide.key} value={slide.key}>{String(index+1).padStart(2,'0')} · {slide.name}</option>)}
-        </select>
-      </>}
-      <label className="input-label">CUSTOM MAIN TITLE (OPTIONAL)</label>
-      <input aria-label="Etsy custom cover headline" value={coverHeadline} disabled={aiBusy} maxLength={75} placeholder={title} onChange={event => setCoverHeadline(event.target.value)} />
-      <label className="input-label">TYPOGRAPHY MODE</label>
-      <select aria-label="Etsy pack typography mode" disabled={aiBusy} value={packTypography} onChange={event => setPackTypography(event.target.value as typeof packTypography)}>
-        <option value="editable">Editable artistic fonts · accurate text</option>
-        <option value="ai-artwork">AI background + artistic title + badges · recommended</option>
-      </select>
-      <label className="input-label">COVER STYLE</label>
-      <select aria-label="Etsy pack cover style" value={packCoverStyle} disabled={aiBusy} onChange={event => setPackCoverStyle(event.target.value as typeof packCoverStyle)}>
-        <option value="editorial">Premium editorial</option><option value="boutique">Modern boutique</option><option value="storybook">Storybook gallery</option><option value="modern">Modern Etsy</option><option value="watercolor">Artistic watercolor</option>
-      </select>
-      <label className="input-label">CLIPART HIERARCHY</label>
-      <select aria-label="Etsy pack clipart hierarchy" value={packHierarchy} disabled={aiBusy} onChange={event => setPackHierarchy(event.target.value as ClipartHierarchy)}>
-        <option value="dramatic">Dramatic · larger focal image</option><option value="medium">Medium</option><option value="soft">Soft</option>
-      </select>
-      <label className="input-label">DESIGN BOLDNESS</label>
-      <select aria-label="Etsy pack design boldness" value={packBoldness} disabled={aiBusy} onChange={event => setPackBoldness(event.target.value as typeof packBoldness)}>
-        <option value="bold">Bold</option><option value="balanced">Balanced</option><option value="soft">Soft</option>
-      </select>
-      <label className="input-label">OPTIONAL REFERENCE IMAGE</label>
-      <input aria-label="Upload optional reference" type="file" accept="image/png,image/jpeg,image/webp" onChange={event => void onReferenceUpload(event.target.files?.[0])}/>
-      {reference && <img src={reference} alt="Optional reference" style={{ maxHeight: 130, maxWidth: '100%', objectFit: 'contain' }}/>}
-      <label className="input-label">REFERENCE INTERPRETATION</label>
-      <select aria-label="Etsy reference interpretation" value={referenceStyle} disabled={aiBusy} onChange={event => setReferenceStyle(event.target.value as typeof referenceStyle)}>
-        <option value="similar">Similar composition · recommended</option><option value="creative">Creative adaptation</option><option value="palette">Palette only</option>
-      </select>
-      <small>For a reference-like watercolor ring and hand-lettered title, upload the reference image before generating. PaletteIQ extracts only graphic style tokens; it never sends reference product artwork to the image generator.</small>
-      <label className="input-label">THUMBNAIL DESIGN PROMPT PREVIEW</label>
-      <textarea aria-label="Thumbnail design prompt preview" readOnly rows={7} value={currentBriefPreview} style={{ width: '100%', fontSize: 11, lineHeight: 1.35 }} />
-      <button type="button" className="outline-btn" onClick={() => void navigator.clipboard.writeText(currentBriefPreview)}>Copy thumbnail prompt</button>
-      <button className="primary-btn" disabled={aiBusy || !characters.some(c => c.imageUrl)} onClick={() => void generateReferenceBatch()}>{aiBusy ? 'Generating ' + (generationScope === 'single' ? '1 thumbnail' : 'Etsy pack') + '...' : generationScope === 'single' ? 'Generate 1 Thumbnail' : generationScope === 'core-5' ? 'Generate 5 Thumbnails' : generationScope === 'complete-10' ? 'Generate 10 Thumbnails' : 'Generate Category Showcase'}</button>
-      {aiBusy && <button className="outline-btn" onClick={() => { cancelPackRef.current = true; }}>Stop after current image</button>}
-      {packStatus && <small role="status">{packStatus}</small>}
-      {onStartListingStudio && <button type="button" className="primary-btn" disabled={aiBusy || !characters.some(c=>c.imageUrl)} onClick={() => void startListingStudio()}><WandSparkles size={15}/> Start 15 Listing Images from Reference & Assets</button>}
-      <button className="outline-btn" onClick={create}>Or start with a blank design</button>
+      <h2>Start with your own canvas</h2>
+      <p>Create a blank 1024 × 1024 canvas, add exact original collection clipart from Reference &amp; Assets, then arrange and resize it yourself. Choose a reference template, enter a title, subtitle and optional badge, and let AI generate only the background and artistic lettering.</p>
+      <button type="button" className="primary-btn" onClick={create}><Plus size={15}/> Create blank canvas</button>
     </div> :
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(190px, 245px) minmax(0, 1fr) minmax(245px, 290px)', gap: 12, alignItems: 'start' }}>
       <div className="panel" style={{ padding: 14, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0, gap: 12, alignContent: 'start', overflowX: 'hidden', maxHeight: 'min(82vh, 950px)', overflowY: 'auto', overscrollBehavior: 'contain' }}>
@@ -1278,89 +1231,88 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         <h3>Reference & assets</h3>
         <label className="input-label">LAYOUT MODE</label>
         <select value={layoutMode} onChange={e => setLayoutMode(e.target.value as 'ai' | 'manual')}><option value="ai">AI + manual</option><option value="manual">Manual only</option></select>
-        {layoutMode === 'ai' && <>
-          <label className="input-label">AI PROVIDER</label>
-          <select value={provider} onChange={e => { const next = e.target.value as 'openai' | 'gemini'; setProvider(next); setModel(next === 'openai' ? aiDefaults.openaiModel : aiDefaults.geminiModel); }}>
-            <option value="openai">OpenAI</option><option value="gemini">Google Gemini</option>
-          </select>
-          <label className="input-label">AI MODEL</label>
-          <select value={model} onChange={e => setModel(e.target.value)}>
-            {!models[provider].some(m => m.id === model) && <option value={model}>{model} (saved/default)</option>}
-            {models[provider].map(m => <option key={m.id} value={m.id}>{m.name} ({m.id})</option>)}
-          </select>
-          {modelError && <small>{modelError}</small>}
-          <label className="input-label">REFERENCE IMAGE (OPTIONAL)</label>
-          <select style={control} value={reference.startsWith('data:') ? 'upload' : reference} onChange={e => setReference(e.target.value === 'upload' ? uploadedReference : e.target.value)}>
-            <option value="">Choose listing reference</option>{references.map((r,i)=><option key={r} value={r}>Listing image {i+1}</option>)}{uploadedReference && <option value="upload">Uploaded image</option>}
-          </select>
-          <input aria-label="Upload reference" type="file" accept="image/png,image/jpeg,image/webp" onChange={e => void onReferenceUpload(e.target.files?.[0])}/>
-          {reference && <img src={reference} alt="Layout reference" style={{ maxWidth: '100%', maxHeight: 140, objectFit: 'contain' }}/>}
-          <label className="input-label">REFERENCE INTERPRETATION</label>
-          <select aria-label="Reference interpretation" value={referenceStyle} onChange={e => setReferenceStyle(e.target.value as 'creative' | 'similar' | 'palette')}>
-            <option value="creative">Creative adaptation</option><option value="similar">Similar composition</option><option value="palette">Color and style inspiration</option>
-          </select>
-          <small>Reference analysis runs automatically when generating a thumbnail. Existing collection PNGs are never regenerated.</small>
-          <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 12, display: 'grid', gap: 8 }}>
-            <small>Settings in this tab define the thumbnail design brief; no clipart image is sent for generation.</small>
-            <strong>Generate Etsy Listing Pack</strong>
-            <small>Reference optional. AI designs the layout and decorative background; PaletteIQ composites unmodified collection PNGs. Choose accurate editable lettering or experimental AI typography artwork.</small>
-            <label className="input-label">GENERATION SCOPE</label>
-            <select aria-label="Etsy generation scope" value={generationScope} disabled={aiBusy} onChange={e => setGenerationScope(e.target.value as typeof generationScope)}>
-              <option value="single">1 Thumbnail · low-cost trial (default)</option>
-              <option value="core-5">5 Thumbnails · core pack</option>
-              <option value="complete-10">10 Thumbnails · complete pack</option>
-              <option value="category-showcase">Category Showcase Pack · collection groups</option>
-            </select>
-            {generationScope === 'single' && <>
-              <label className="input-label">THUMBNAIL TYPE</label>
-              <select aria-label="Single thumbnail type" disabled={aiBusy} value={singleSlideKey} onChange={e => setSingleSlideKey(e.target.value)}>
-                {buildPack('complete-10', title, characters).map((slide,index) => <option key={slide.key} value={slide.key}>{String(index+1).padStart(2,'0')} · {slide.name}</option>)}
-              </select>
-            </>}
-            <label className="input-label">CUSTOM MAIN TITLE (OPTIONAL)</label>
-            <input aria-label="Etsy custom cover headline" value={coverHeadline} disabled={aiBusy} maxLength={75} placeholder={title} onChange={event => setCoverHeadline(event.target.value)} />
-            <label className="input-label">TYPOGRAPHY MODE</label>
-            <select aria-label="Etsy pack typography mode" value={packTypography} disabled={aiBusy} onChange={e => setPackTypography(e.target.value as typeof packTypography)}>
-              <option value="editable">Editable fonts · precise wording</option>
-              <option value="ai-artwork">AI background + artistic lettering + badges</option>
-            </select>
-            <label className="input-label">DESIGN BOLDNESS</label>
-            <select aria-label="Etsy pack design boldness" disabled={aiBusy} value={packBoldness} onChange={e => setPackBoldness(e.target.value as typeof packBoldness)}>
-              <option value="soft">Soft · restrained</option><option value="balanced">Balanced · premium</option><option value="bold">Bold · scroll-stopping</option>
-            </select>
-            <label className="input-label">CLIPART SIZE HIERARCHY</label>
-            <select aria-label="Etsy pack clipart hierarchy" disabled={aiBusy} value={packHierarchy} onChange={e => setPackHierarchy(e.target.value as ClipartHierarchy)}>
-              <option value="soft">Soft · subtle variation</option><option value="medium">Medium · clear hierarchy</option><option value="dramatic">Dramatic · large hero artwork</option>
-            </select>
-            <label className="input-label">COVER ART STYLE</label>
-            <select aria-label="Etsy pack cover style" disabled={aiBusy} value={packCoverStyle} onChange={e => setPackCoverStyle(e.target.value as typeof packCoverStyle)}>
-              <option value="editorial">Premium editorial</option><option value="boutique">Modern boutique</option><option value="storybook">Storybook gallery</option><option value="modern">Modern Etsy</option><option value="watercolor">Artistic watercolor</option>
-            </select>
-            <label className="input-label">BACKGROUND QUALITY</label>
-            <select aria-label="Etsy pack background quality" disabled={aiBusy} value={packQuality} onChange={e => setPackQuality(e.target.value as typeof packQuality)}><option value="low">Low · economical</option><option value="medium">Medium · recommended</option><option value="high">High · premium cost</option></select>
-            <label className="input-label">BACKGROUND + TYPOGRAPHY STYLE</label>
-            <select aria-label="Etsy pack background style" value={backgroundStyle} disabled={aiBusy} onChange={e => setBackgroundStyle(e.target.value as typeof backgroundStyle)}>
-              <option value="watercolor">Watercolor</option><option value="paper">Luxury paper</option><option value="gradient">Color gradient</option><option value="botanical">Botanical accents</option><option value="vintage">Vintage</option>
-            </select>
-            <label className="input-label">DECORATION INTENSITY</label>
-            <select aria-label="Etsy pack intensity" value={backgroundIntensity} disabled={aiBusy} onChange={e => setBackgroundIntensity(e.target.value as typeof backgroundIntensity)}>
-              <option value="soft">Soft</option><option value="balanced">Balanced</option><option value="vibrant">Vibrant</option>
-            </select>
-            <label className="input-label">THUMBNAIL DESIGN PROMPT PREVIEW</label>
-            <textarea aria-label="Thumbnail design prompt preview" readOnly rows={7} value={currentBriefPreview} style={{ width: '100%', fontSize: 11, lineHeight: 1.35 }} />
-            <button type="button" className="outline-btn" disabled={aiBusy} onClick={() => void navigator.clipboard.writeText(currentBriefPreview)}>Copy thumbnail prompt</button>
-            <button className="primary-btn" type="button" disabled={aiBusy || !characters.some(c => c.imageUrl)} onClick={() => void generateReferenceBatch()}>
-              <WandSparkles size={15}/> {aiBusy ? 'Generating...' : generationScope === 'single' ? 'Generate 1 Thumbnail' : generationScope === 'core-5' ? 'Generate 5 Thumbnails' : generationScope === 'complete-10' ? 'Generate 10 Thumbnails' : 'Generate Category Showcase'}
-            </button>
-            {aiBusy && <button type="button" className="outline-btn" onClick={() => { cancelPackRef.current = true; setPackStatus('Stopping after current request...'); }}>Stop after current image</button>}
-            {packStatus && <small role="status">{packStatus}</small>}
-            {onStartListingStudio && <div style={{ borderTop:'1px solid #e5e7eb', paddingTop:12, display:'grid', gap:8 }}><strong>15-Image Etsy Listing Studio</strong><small>Start the 15-image review workflow using these Reference & Assets settings and only original collection clipart. Output: 3000 × 2250 JPG. AI lettering is enabled for the listing workflow.</small><button type="button" className="primary-btn" disabled={aiBusy || !characters.some(c => c.imageUrl)} onClick={() => void startListingStudio()}><WandSparkles size={15}/> Start 15 Listing Images</button></div>}
-            <small>All characters are existing collection PNG files, never reconstructed by AI. Editable mode adds distinct typographic layers over a no-text AI background. AI lettering mode combines text and decoration in one image and checks for generated objects; verify its spelling. Native editor canvas: 1024 × 1024 px. API charges apply.</small>
-            <small>Only original collection clipart is placed on top. Upscaled assets are not used.</small>
+        <small>Arrange original clipart on the canvas first. AI generates a background and elegant typography around YOUR placed artwork; PaletteIQ does not reposition or redraw the PNGs.</small>
+        <label className="input-label">REFERENCE ANALYSIS PROVIDER</label>
+        <select value={provider} disabled={aiBusy} onChange={e => { const next = e.target.value as 'openai' | 'gemini'; setProvider(next); setModel(next === 'openai' ? aiDefaults.openaiModel : aiDefaults.geminiModel); }}>
+          <option value="openai">OpenAI Vision</option><option value="gemini">Google Gemini Vision</option>
+        </select>
+        <label className="input-label">REFERENCE ANALYSIS MODEL</label>
+        <select value={model} disabled={aiBusy} onChange={e => setModel(e.target.value)}>
+          {!models[provider].some(m => m.id === model) && <option value={model}>{model} (saved/default)</option>}
+          {models[provider].map(m => <option key={m.id} value={m.id}>{m.name} ({m.id})</option>)}
+        </select>
+        {modelError && <small>{modelError}</small>}
+        <label className="input-label">DESIGN REFERENCE TEMPLATE (OPTIONAL)</label>
+        <select aria-label="Design reference template" style={control} value={reference.startsWith('data:') ? 'upload' : reference} onChange={e => setReference(e.target.value === 'upload' ? uploadedReference : e.target.value)}>
+          <option value="">Auto style — no reference</option>
+          {references.map((r,i)=><option key={r} value={r}>Listing reference {i+1}</option>)}
+          {uploadedReference && <option value="upload">Uploaded template</option>}
+        </select>
+        <input aria-label="Upload design reference template" type="file" accept="image/png,image/jpeg,image/webp" disabled={aiBusy} onChange={e => void onReferenceUpload(e.target.files?.[0])}/>
+        {reference && <img src={reference} alt="Chosen visual template" style={{ maxWidth: '100%', maxHeight: 140, objectFit: 'contain' }}/>}
+        <label className="input-label">REFERENCE INTERPRETATION</label>
+        <select aria-label="Reference interpretation" value={referenceStyle} disabled={aiBusy} onChange={e => setReferenceStyle(e.target.value as 'creative' | 'similar' | 'palette')}>
+          <option value="creative">Creative adaptation</option><option value="similar">Similar layout / aesthetic</option><option value="palette">Palette and mood only</option>
+        </select>
+        <small>AI Vision extracts only layout styling and typographic direction from the reference, not its product images, text, or brand. User-placed clipart positions stay fixed.</small>
+        <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 12, display: 'grid', gap: 9 }}>
+          <strong>Background &amp; AI Typography</strong>
+          <label className="input-label">MAIN TITLE</label>
+          <input aria-label="Canvas main title" maxLength={100} value={design.packHeadline ?? title} disabled={aiBusy} onChange={e => mutate({ packHeadline: e.target.value, renderedImageUrl: undefined })}/>
+          <label className="input-label">SUBTITLE</label>
+          <input aria-label="Canvas subtitle" maxLength={140} value={design.packSubtitle ?? 'Digital Clipart Collection'} disabled={aiBusy} onChange={e => mutate({ packSubtitle: e.target.value, renderedImageUrl: undefined })}/>
+          <label className="input-label">BADGE TEXT (OPTIONAL)</label>
+          <input aria-label="Canvas badge text" maxLength={60} placeholder="Leave empty for no badge" value={design.packBadge ?? ''} disabled={aiBusy} onChange={e => mutate({ packBadge: e.target.value, renderedImageUrl: undefined })}/>
+          <strong>Typography safe area</strong>
+          <small>The shaded preview on the canvas shows where AI can place title, subtitle and badge. Adjust this zone or move clipart so they do not overlap.</small>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 6 }}>
+            {(['x','y','width','height'] as const).map(field => <label key={field} style={{ minWidth: 0, display: 'grid', gap: 3 }}>
+              <span className="input-label">{field.toUpperCase()} (%)</span>
+              <input aria-label={'Typography zone ' + field} type="number" min={0} max={100} step={1} disabled={aiBusy}
+                value={(design.packTextZone || { x: 22, y: 30, width: 56, height: 34 })[field]}
+                onChange={e => mutate({ packTextZone: { ...(design.packTextZone || { x: 22, y: 30, width: 56, height: 34 }), [field]: Number(e.target.value) }, renderedImageUrl: undefined })}/>
+            </label>)}
           </div>
-          <small>Optional references inspire layout. Automatically generated designs keep typography areas clear of collection clipart.</small>
-        </>}
-        {layoutMode === 'manual' && onStartListingStudio && <button type="button" className="primary-btn" disabled={aiBusy || !characters.some(c=>c.imageUrl)} onClick={() => void startListingStudio()}>Start 15 Listing Images (manual placements)</button>}
+          <label className="input-label">IMAGE GENERATION PROVIDER</label>
+          <select aria-label="AI background and typography provider" value={imageProvider} disabled={aiBusy} onChange={e => setImageProvider(e.target.value as 'openai' | 'gemini')}>
+            <option value="openai">OpenAI Image</option><option value="gemini">Google Gemini Image</option>
+          </select>
+          <label className="input-label">IMAGE GENERATION MODEL</label>
+          {imageProvider === 'openai'
+            ? <select aria-label="AI background generation model" value={imageModel} disabled={aiBusy} onChange={e => setImageModel(e.target.value)}>
+                {!imageModels.some(m => m.id === imageModel) && <option value={imageModel}>{imageModel}</option>}
+                {imageModels.map(m => <option key={m.id} value={m.id}>{m.name} ({m.id})</option>)}
+              </select>
+            : <select aria-label="Gemini image generation model" value={geminiImageModel} disabled={aiBusy} onChange={e => setGeminiImageModel(e.target.value)}>
+                {!models.gemini.filter(m => m.id.includes('image')).some(m => m.id === geminiImageModel) && <option value={geminiImageModel}>{geminiImageModel} (default)</option>}
+                {models.gemini.filter(m => m.id.includes('image')).map(m => <option key={m.id} value={m.id}>{m.name} ({m.id})</option>)}
+              </select>}
+          <label className="input-label">AI BACKGROUND QUALITY</label>
+          <select aria-label="Custom canvas background quality" value={packQuality} disabled={aiBusy} onChange={e => setPackQuality(e.target.value as typeof packQuality)}>
+            <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
+          </select>
+          <label className="input-label">COVER ART STYLE</label>
+          <select aria-label="Custom canvas cover style" value={packCoverStyle} disabled={aiBusy} onChange={e => setPackCoverStyle(e.target.value as typeof packCoverStyle)}>
+            <option value="editorial">Premium editorial</option><option value="boutique">Modern boutique</option><option value="storybook">Storybook</option><option value="modern">Modern Etsy</option><option value="watercolor">Artistic watercolor</option>
+          </select>
+          <label className="input-label">TYPOGRAPHY BOLDNESS</label>
+          <select aria-label="Custom canvas typography boldness" value={packBoldness} disabled={aiBusy} onChange={e => setPackBoldness(e.target.value as typeof packBoldness)}>
+            <option value="soft">Soft</option><option value="balanced">Balanced</option><option value="bold">Bold</option>
+          </select>
+          <label className="input-label">BACKGROUND STYLE</label>
+          <select aria-label="Custom canvas background style" value={backgroundStyle} disabled={aiBusy} onChange={e => setBackgroundStyle(e.target.value as typeof backgroundStyle)}>
+            <option value="watercolor">Watercolor</option><option value="paper">Luxury paper</option><option value="gradient">Color gradient</option><option value="botanical">Abstract botanical accents</option><option value="vintage">Vintage</option>
+          </select>
+          <label className="input-label">BACKGROUND DECORATION</label>
+          <select aria-label="Custom canvas decoration intensity" value={backgroundIntensity} disabled={aiBusy} onChange={e => setBackgroundIntensity(e.target.value as typeof backgroundIntensity)}>
+            <option value="soft">Soft</option><option value="balanced">Balanced</option><option value="vibrant">Vibrant</option>
+          </select>
+          <button type="button" className="primary-btn" disabled={aiBusy || Boolean(backgroundRetryId) || !design.elements.some(e => e.type === 'image')} onClick={() => void generateCanvasArtwork()}>
+            <WandSparkles size={15}/> {aiBusy ? 'Generating AI artwork...' : 'Generate AI Background & Typography'}
+          </button>
+          {packStatus && <small role="status">{packStatus}</small>}
+          <small>AI generates only abstract background, exact artistic title, subtitle and optional typographic badge. PaletteIQ keeps your original PNG positions. OpenAI verification is currently required even when Gemini generates the artwork. Review lettering before use; API charges apply.</small>
+        </div>
         <h3>Characters</h3>
         <div style={{ maxHeight: 400, overflowY: 'auto', display: 'grid', gap: 8 }}>
           {characters.filter(c => c.imageUrl).map(c => <button type="button" key={c.id} onClick={() => add(newImage(c, design.elements.filter(e => e.type === 'image').length))} style={{ textAlign: 'left', display: 'flex', gap: 8, alignItems: 'center', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: 6 }}>
