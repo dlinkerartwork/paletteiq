@@ -536,13 +536,13 @@ export default function ThumbnailDesigner({ registerSaveControls, title, collect
               layout: initialElements.map(e => ({ type: 'image', x: e.x, y: e.y, width: e.width, height: e.height }))
             })
           });
-          const result = await response.json() as { imageUrl?: string; error?: string; qcRejected?: boolean; qcReason?: string };
+          const result = await response.json() as { imageUrl?: string; error?: string; prompt?: string; qcRejected?: boolean; qcReason?: string };
           if (!response.ok || !result.imageUrl) throw Error(result.error || 'Generation failed');
           await loadForExport(result.imageUrl);
           if (result.qcRejected) {
             const reason = result.qcReason || 'AI background requires manual inspection.';
             const next = latestDesignsRef.current.map(d => d.id === item.id ? {
-              ...d, rejectedBackgroundUrl: result.imageUrl, rejectedBackgroundReason: reason,
+              ...d, rejectedBackgroundUrl: result.imageUrl, rejectedBackgroundReason: reason, aiImagePrompt: result.prompt,
               generationError: 'AI QC review required: ' + reason
             } : d);
             latestDesignsRef.current = next;
@@ -561,7 +561,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, collect
             ? [...placement.elements, ...typographyForSlide(slide)]
             : placement.elements;
           const next = latestDesignsRef.current.map(d => d.id === item.id ? {
-            ...d, elements: finalElements, backgroundImageUrl: result.imageUrl,
+            ...d, elements: finalElements, backgroundImageUrl: result.imageUrl, aiImagePrompt: result.prompt,
             rejectedBackgroundUrl: undefined, rejectedBackgroundReason: undefined,
             generationError: placement.usedFallback ? 'Vision placement unavailable; original PNG fallback layout used.' : undefined
           } : d);
@@ -609,13 +609,13 @@ export default function ThumbnailDesigner({ registerSaveControls, title, collect
           layout: imageLayers.map(e => ({ type: 'image', x: e.x, y: e.y, width: e.width, height: e.height }))
         })
       });
-      const result = await response.json() as { imageUrl?: string; error?: string; qcRejected?: boolean; qcReason?: string };
+      const result = await response.json() as { imageUrl?: string; error?: string; prompt?: string; qcRejected?: boolean; qcReason?: string };
       if (!response.ok || !result.imageUrl) throw Error(result.error || 'No background returned');
       await loadForExport(result.imageUrl);
       if (result.qcRejected) {
         const reason = result.qcReason || 'The AI artwork needs manual inspection.';
         const pending = latestDesignsRef.current.map(d => d.id === target.id
-          ? { ...d, rejectedBackgroundUrl: result.imageUrl, rejectedBackgroundReason: reason,
+          ? { ...d, rejectedBackgroundUrl: result.imageUrl, rejectedBackgroundReason: reason, aiImagePrompt: result.prompt,
             generationError: 'AI QC review required: ' + reason, updatedAt: Date.now() } : d);
         latestDesignsRef.current = pending;
         onChange(pending);
@@ -640,7 +640,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, collect
         visionFallback = placement.usedFallback;
       }
       const next = latestDesignsRef.current.map(d => d.id === target.id
-        ? { ...d, backgroundImageUrl: result.imageUrl, elements: [
+        ? { ...d, backgroundImageUrl: result.imageUrl, aiImagePrompt: result.prompt, elements: [
             ...positioned, ...d.elements.filter(e => e.type === 'text')
           ], rejectedBackgroundUrl: undefined, rejectedBackgroundReason: undefined,
           generationError: visionFallback ? 'Vision placement unavailable; previous original PNG layout kept.' : undefined,
