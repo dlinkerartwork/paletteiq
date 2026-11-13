@@ -7,12 +7,10 @@ const page = readFileSync(new URL('../app/page.tsx', import.meta.url), 'utf8');
 const studio = readFileSync(new URL('../components/etsy-listing-image-studio.tsx', import.meta.url), 'utf8');
 const route = readFileSync(new URL('../app/api/listing-image-studio/route.ts', import.meta.url), 'utf8');
 
-test('Reference & Assets provides a working 15-image launch from collection originals', () => {
-  assert.match(thumbnail, /Start 15 Listing Images/);
+test('15-image listing workflow remains separate while the legacy launch panel is hidden', () => {
+  assert.doesNotMatch(thumbnail, />15-Image Etsy Listing Studio</);
+  assert.doesNotMatch(thumbnail, />Generate Etsy Listing Pack</);
   assert.match(thumbnail, /onStartListingStudio\?\.\(/);
-  assert.match(thumbnail, /hierarchy: packHierarchy/);
-  assert.match(thumbnail, /imageModel, quality: packQuality/);
-  assert.match(thumbnail, /referenceImage: reference \|\| undefined/);
   assert.match(page, /onStartListingStudio=\{startListingImageStudio\}/);
   assert.match(page, /setTab\('listing-images'\)/);
 });
