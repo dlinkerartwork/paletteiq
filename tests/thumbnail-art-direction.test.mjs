@@ -47,7 +47,7 @@ test('Etsy thumbnails are fixed at 1024 square including rendered export', () =>
 
 test('Etsy pack defaults to independently editable typography and exact original assets', () => {
   assert.match(designer, /useState<'editable' \| 'ai-artwork'>\('ai-artwork'\)/);
-  assert.match(designer, /packTypography === 'editable' \? \[\.\.\.plannedElements, \.\.\.typographyForSlide\(slide\)\]/);
+  assert.match(designer, /packTypography === 'editable'\s*\? \[\.\.\.placement\.elements, \.\.\.typographyForSlide\(slide\)\]/);
   assert.match(designer, /mode: packTypography === 'editable' \? 'background-only' : 'background-with-typography'/);
   assert.match(designer, /originalAssetsOnly: true/);
 });
@@ -159,4 +159,10 @@ test('Hero cover prompt includes the requested cream medallion, blush ring and e
   assert.match(generator, /blush watercolor circular brush ring/);
   assert.match(generator, /Do NOT create illustrations, icons, mini food drawings/);
   assert.match(generator, /isHeroCover \? \['HERO ART DIRECTION PRIORITY:'/);
+});
+
+test('Manual approval also runs background-first Vision before applying original layers', () => {
+  const part = designer.slice(designer.indexOf('const approveReviewedBackground'),designer.indexOf('const onReferenceUpload'));
+  assert.match(part, /await placeOriginalsOverBackground/);
+  assert.ok(part.indexOf('await placeOriginalsOverBackground') < part.indexOf('backgroundImageUrl: d.rejectedBackgroundUrl'));
 });
