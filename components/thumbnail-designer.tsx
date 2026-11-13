@@ -396,10 +396,9 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
       const expectedMin = Math.min(imageElements.length, slide.layout === 'grid' || slide.layout === 'showcase' ? 4 : 3);
       if (!response.ok || !result.slots || result.slots.length < expectedMin)
         throw Error(result.error || 'Vision returned too few original PNG positions');
-      const originals = new Map(imageElements.map(e => [e.characterId, e]));
       const selected = result.slots
         .map(slot => {
-          const element = originals.get(slot.characterId);
+          const element = imageElements.find(e => e.characterId === slot.characterId);
           return element ? { ...element, ...slot, source: 'original' as const } : null;
         })
         .filter(element => element !== null) as ThumbnailElement[];
