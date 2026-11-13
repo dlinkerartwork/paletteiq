@@ -136,17 +136,36 @@ export async function POST(req: Request) {
   ].filter(Boolean).join(' ');
   const graphicDirection = [
     // Reference style deliberately outranks generic cover style when available.
-    referenceGuide || abstractStyles[coverStyle],
-    energy[designBoldness],
+    mode === 'background-only'
+      ? 'Premium nonfigurative graphic composition: painterly movement, textless color fields, tactile paper and refined ornamental structure; no text, badges or writing.'
+      : referenceGuide || abstractStyles[coverStyle],
+    mode === 'background-only' ? 'Balance abstract colors and texture without visual words or title-like shapes.' : energy[designBoldness],
     styleGuidance[backgroundStyle],
     intensityGuidance[backgroundIntensity],
     'Use non-representational forms ONLY. Every shape must look like paint, paper, typography or graphic geometry, never an object, character, illustration, photograph, silhouette or miniature icon.',
     'No pictorial symbols or decorative themed icons. Absolutely no standalone illustrations anywhere on canvas.',
     'The real product artwork is NOT in this request and is placed later from exact stored PNGs by PaletteIQ.'
   ].join(' ');
+  const artisticStyles: Record<string, string> = {
+    auto: 'Choose the most compelling bespoke hand-lettered composition: graceful arched headline, varied-size expressive serif with natural brush-script flourishes, or tasteful layered lettering. Avoid rigid straight baseline and generic font-template appearance.',
+    arched: 'Compose the dominant headline on a readable curved or arched baseline, with custom expressive calligraphy and beautifully varied letter heights. Set smaller supporting words on complementary gentle curves.',
+    flowing: 'Use energetic flowing watercolor-ink brush calligraphy with organic strokes, expressive swashes and rhythmically alternating letter heights. Maintain crisp word legibility.',
+    stacked: 'Create a striking multi-line editorial hierarchy using asymmetric stacked words, customized high-contrast lettering, selective italic forms and distinctive but readable spacing.',
+    'hand-painted': 'Draw organic hand-painted lettering with subtle ink variation and bespoke curved strokes, mixed with restrained refined editorial text. Avoid a mechanical font look.'
+  };
   const typographyInstruction = mode === 'background-only'
-    ? 'ZERO LETTERING: Do not render words, letters, digits, pseudo-letters, logos or glyphs. Accurate editable lettering will be added separately by PaletteIQ.'
-    : 'TYPOGRAPHY ONLY: Render these exact strings as beautifully designed, readable, premium lettering. Main title: ' + JSON.stringify(safeText(input.headline || '')) + '. Subtitle: ' + JSON.stringify(safeText(input.subtitle || '')) + '. ' + (input.badge?.trim() ? 'Optional small typographic badge — print these exact words inside an elegant abstract geometric badge: ' + JSON.stringify(safeText(input.badge)) + '. ' : 'NO BADGE: do not invent a badge or extra label. ') + 'These are words to typeset, NOT objects to illustrate. Do not draw a visual depiction of the title words. Do not add any other words, quantity, DPI or marketing claims.';
+    ? 'ZERO LETTERING: NO title, NO subtitle, NO badge, NO watermark, NO numbers, NO letters, NO pseudo-letters or decorative words anywhere. Entire canvas must be free of all text and glyph-like marks.'
+    : [
+      'PREMIUM CUSTOM ARTISTIC LETTERING: letterforms should feel composed by an experienced editorial artist, not typed with a rigid stock font.',
+      artisticStyles[letteringStyle],
+      input.headline?.trim() ? 'EXACT MAIN TITLE: ' + JSON.stringify(safeText(input.headline)) + '.' : 'NO MAIN TITLE: leave title blank.',
+      input.subtitle?.trim() ? 'EXACT SUBTITLE: ' + JSON.stringify(safeText(input.subtitle)) + '.' : 'NO SUBTITLE: leave subtitle blank.',
+      input.badge?.trim() ? 'EXACT BADGE LETTERING: ' + JSON.stringify(safeText(input.badge)) + ' in a tasteful abstract ornamental badge.' : 'NO BADGE: do not invent a badge or extra label.',
+      'Arched, curved, flowing, gently waved, offset, or layered typography is welcome when suitable; the title can split across lines with visual rhythm. Use balanced size contrasts, beautiful shapes and premium watercolor/editorial styling.',
+      'Prioritize legibility on Etsy search thumbnails: keep the lettering within the designated text-safe area, retain correct wording, spelling and punctuation, avoid obscuring the original clipart slots.',
+      'Do not add ANY other words, quantity, DPI, fake watermark or marketing claims.',
+      'These are words to typeset, NOT objects to illustrate. Do not draw a visual depiction of the title words.'
+    ].join(' ');
   const heroReferenceStyle = [
     'Create a premium Etsy cover with a large soft cream central medallion panel.',
     'Use a blush watercolor circular brush ring around the central title area.',
@@ -165,6 +184,7 @@ export async function POST(req: Request) {
     headline: input.headline || brief.headline,
     subtitle: input.subtitle || brief.subtitle,
     typography: mode === 'background-only' ? 'editable' : 'ai-artwork',
+    textDisabled: mode === 'background-only' && brief.textDisabled === true,
     quality: String(input.quality || brief.quality),
     coverStyle, boldness: designBoldness,
     backgroundStyle, intensity: backgroundIntensity,
@@ -181,8 +201,8 @@ export async function POST(req: Request) {
       'ONLY authorized visual materials: abstract color fields, watercolor pigment strokes, soft gradients, paper collage textures, thin graphic rules, elegant geometric ornaments, abstract painted swashes, ribbons without pictorial motifs and type (when requested).',
       'Never create even tiny pictorial decorations or theme-related objects in corners, title panels, badges, circles or along the edges. The entire canvas is non-figurative.',
       typographyInstruction,
-      'Keep type inside the reserved safe area specified in 0-100 percent canvas coordinates:', JSON.stringify(titleZone),
-      'Reserved areas where original PNG assets will later be composited. Leave these shapes free of visually busy decoration; never fill them with substitutes:', JSON.stringify(layout.map(({x,y,width,height})=>({x,y,width,height}))),
+      ...(mode === 'background-only' ? [] : ['Keep all artistic lettering inside the reserved safe area (percent canvas coordinates):', JSON.stringify(titleZone)]),
+      'Visible areas where original PNG assets will later be composited. Some original images deliberately extend BEYOND the canvas: preserve their visible slots and allow natural crop at the final canvas edge. Leave these slots free of competing decoration; never fill them with substitutes:', JSON.stringify(visibleLayout),
       'A small degree of deliberate original-PNG overlap is permitted and handled by PaletteIQ, but DO NOT draw any items in that space.',
       'Premium design mood (follow reference graphic style when provided):', graphicDirection,
       ...(designBrief ? ['REFERENCE & ASSETS SETTINGS (graphic art direction ONLY; never synthesize objects):', designBrief] : []),
@@ -190,7 +210,8 @@ export async function POST(req: Request) {
       'If a blush brush-ring reference is provided, DO NOT substitute red-orange geometric blobs. Keep the watercolor ring delicate and the central typography visually expressive.',
       'Slide composition identifier:', slideLabel.replace(/[^a-z0-9 -]/g,'').slice(0,50),
       'Graphic layout direction:', slideDirection.replace(/collection assets|original products|original clipart/gi,'empty image areas'),
-      'Prioritize decorative graphic design, NOT themed illustration. No accidental images, illustration vignettes or iconography.'
+      'Prioritize decorative graphic design, NOT themed illustration. No accidental images, illustration vignettes or iconography.',
+      ...(mode === 'background-only' ? ['FINAL STRICT RULE: ABSOLUTELY NO TEXT, TITLES, SUBTITLES, BADGES, SYMBOLS RESEMBLING LETTERS OR NUMBERS.'] : [])
     ].join('\n');
   let imageBase64 = '';
   let imageMime = 'image/png';
