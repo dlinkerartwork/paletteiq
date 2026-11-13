@@ -80,3 +80,19 @@ test('Background QC accepts integrated abstract decoration but rejects standalon
   assert.match(generator, /decision\.containsObjects !== false/);
   assert.match(generator, /reason\.replace/);
 });
+
+test('QC-rejected paid backgrounds are stored for review, never auto-composited', () => {
+  assert.match(generator, /qcRejected: Boolean\(qcRejection\)/);
+  assert.match(generator, /await storage\.put/);
+  assert.ok(generator.indexOf('await storage.put') < generator.indexOf('qcRejected: Boolean(qcRejection)'));
+  assert.match(designer, /rejectedBackgroundUrl: result\.imageUrl/);
+  assert.match(designer, /if \(result\.qcRejected\)/);
+  assert.match(designer, /View rejected AI artwork/);
+  assert.match(designer, /Approve after visual inspection/);
+  assert.match(designer, /Confirm it contains NO AI-generated collection clipart/);
+});
+
+test('Batch stops repeated paid requests if QC flags two consecutive backgrounds', () => {
+  assert.match(designer, /if \(rejected >= 2\)/);
+  assert.match(designer, /Stopped after two QC rejections/);
+});
