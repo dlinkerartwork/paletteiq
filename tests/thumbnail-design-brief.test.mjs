@@ -41,7 +41,7 @@ test('Legacy analyze/apply layout and AI full-raster generation controls are gon
   assert.doesNotMatch(designer, /const analyze = async/);
   assert.doesNotMatch(designer, /generateAiThumbnail/);
   assert.doesNotMatch(designer, /Generate AI thumbnail/);
-  assert.match(designer, /Generate 1 Thumbnail from Prompt/);
+  assert.match(designer, /Generate AI Background & Typography from Canvas/);
   assert.match(designer, /Thumbnail design prompt preview/);
   assert.match(designer, /designBriefSettings: currentBriefSettings\(slide\)/);
 });
