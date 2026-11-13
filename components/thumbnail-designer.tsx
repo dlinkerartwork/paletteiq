@@ -1359,13 +1359,8 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           <label className="input-label">BADGE TEXT (OPTIONAL)</label>
           <input aria-label="Canvas badge text" maxLength={60} placeholder="Leave empty for no badge" value={design.packBadge ?? ''} disabled={aiBusy || !typographyEnabled} onChange={e => mutate({ packBadge: e.target.value, renderedImageUrl: undefined })}/>
           <label className="input-label">ARTISTIC LETTERING COMPOSITION</label>
-          <select aria-label="Artistic lettering composition" value={design.packLetteringStyle || 'auto'} disabled={aiBusy || !typographyEnabled} onChange={e => mutate({ packLetteringStyle: e.target.value as NonNullable<ThumbnailDesign['packLetteringStyle']>, renderedImageUrl: undefined })}>
-            <option value="auto">AI creative art direction</option>
-            <option value="arched">Arched &amp; curved lettering</option>
-            <option value="flowing">Flowing brush calligraphy</option>
-            <option value="stacked">Layered expressive typography</option>
-            <option value="hand-painted">Hand-painted lettering</option>
-          </select>
+          <ThumbnailStylePreviewSelect label="Artistic lettering composition" kind="lettering" value={design.packLetteringStyle || 'auto'} options={LETTERING_EXAMPLES}
+            disabled={aiBusy || !typographyEnabled} onChange={value => mutate({ packLetteringStyle: value as NonNullable<ThumbnailDesign['packLetteringStyle']>, renderedImageUrl: undefined })}/>
           <strong>Typography safe area</strong>
           <small>{typographyEnabled ? 'Typography guide is only a composition aid. Clipart may overlap text intentionally or extend beyond canvas edges. PNGs remain above AI lettering, so verify that important words stay legible.' : 'Typography is disabled; this area is ignored during background generation.'}</small>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 6 }}>
@@ -1395,21 +1390,17 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
             <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
           </select>
           <label className="input-label">COVER ART STYLE</label>
-          <select aria-label="Custom canvas cover style" value={packCoverStyle} disabled={aiBusy} onChange={e => setPackCoverStyle(e.target.value as typeof packCoverStyle)}>
-            <option value="editorial">Premium editorial</option><option value="boutique">Modern boutique</option><option value="storybook">Storybook</option><option value="modern">Modern Etsy</option><option value="watercolor">Artistic watercolor</option>
-          </select>
+          <ThumbnailStylePreviewSelect label="Custom canvas cover style" kind="cover" value={packCoverStyle} options={COVER_EXAMPLES}
+            disabled={aiBusy} onChange={value => setPackCoverStyle(value as typeof packCoverStyle)}/>
           <label className="input-label">TYPOGRAPHY BOLDNESS</label>
-          <select aria-label="Custom canvas typography boldness" value={packBoldness} disabled={aiBusy} onChange={e => setPackBoldness(e.target.value as typeof packBoldness)}>
-            <option value="soft">Soft</option><option value="balanced">Balanced</option><option value="bold">Bold</option>
-          </select>
+          <ThumbnailStylePreviewSelect label="Custom canvas typography boldness" kind="boldness" value={packBoldness} options={BOLDNESS_EXAMPLES}
+            disabled={aiBusy} onChange={value => setPackBoldness(value as typeof packBoldness)}/>
           <label className="input-label">BACKGROUND STYLE</label>
-          <select aria-label="Custom canvas background style" value={backgroundStyle} disabled={aiBusy} onChange={e => setBackgroundStyle(e.target.value as typeof backgroundStyle)}>
-            <option value="watercolor">Watercolor</option><option value="paper">Luxury paper</option><option value="gradient">Color gradient</option><option value="botanical">Abstract botanical accents</option><option value="vintage">Vintage</option>
-          </select>
+          <ThumbnailStylePreviewSelect label="Custom canvas background style" kind="background" value={backgroundStyle} options={BACKGROUND_EXAMPLES}
+            disabled={aiBusy} onChange={value => setBackgroundStyle(value as typeof backgroundStyle)}/>
           <label className="input-label">BACKGROUND DECORATION</label>
-          <select aria-label="Custom canvas decoration intensity" value={backgroundIntensity} disabled={aiBusy} onChange={e => setBackgroundIntensity(e.target.value as typeof backgroundIntensity)}>
-            <option value="soft">Soft</option><option value="balanced">Balanced</option><option value="vibrant">Vibrant</option>
-          </select>
+          <ThumbnailStylePreviewSelect label="Custom canvas decoration intensity" kind="decoration" value={backgroundIntensity} options={DECORATION_EXAMPLES}
+            disabled={aiBusy} onChange={value => setBackgroundIntensity(value as typeof backgroundIntensity)}/>
           <button type="button" className="primary-btn" disabled={aiBusy || Boolean(backgroundRetryId) || !design.elements.some(e => e.type === 'image')} onClick={() => void generateCanvasArtwork()}>
             <WandSparkles size={15}/> {aiBusy ? 'Generating AI artwork...' : 'Generate AI Background & Typography'}
           </button>
