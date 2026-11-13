@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import UpscaleCompare from '@/components/upscale-compare';
+import { readApiJson } from '@/lib/listing-image-upload';
 import type { ListingStudioConfig } from '@/lib/listing-studio-config';
 import { fitClipartAroundTypography, type ThumbnailBox } from '@/lib/thumbnail-fit';
 import { buildThumbnailDesignBrief, type ThumbnailBriefSettings } from '@/lib/thumbnail-design-brief';
@@ -17,7 +18,8 @@ export type ThumbnailDesign = {
   id: string; name: string; width: number; height: number; background: string; backgroundImageUrl?: string; aiImageUrl?: string; aiImagePrompt?: string; renderedImageUrl?: string; upscaledImageUrl?: string; upscaleJob?: { id: string; sourceUrl: string; factor: 2 | 4 | 6 | 8; submittedAt: number }; elements: ThumbnailElement[];
   referenceUrl?: string; originalAssetsOnly?: boolean; generationError?: string; updatedAt: number;
   rejectedBackgroundUrl?: string; rejectedBackgroundReason?: string;
-  packTypography?: 'editable' | 'ai-artwork'; packSlideKey?: string; packHeadline?: string; packSubtitle?: string; packTextZone?: { x: number; y: number; width: number; height: number };
+  packTypography?: 'editable' | 'ai-artwork'; packSlideKey?: string; packHeadline?: string; packSubtitle?: string; packBadge?: string; packTextZone?: { x: number; y: number; width: number; height: number };
+  packImageProvider?: 'openai' | 'gemini'; packImageModel?: string;
   packHierarchy?: ClipartHierarchy; packBoldness?: 'soft' | 'balanced' | 'bold'; packCoverStyle?: 'editorial' | 'boutique' | 'storybook' | 'modern' | 'watercolor';
   referenceDesign?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string };
 };
@@ -27,7 +29,7 @@ type Props = { onStartListingStudio?: (settings: ListingStudioConfig) => void | 
 const id = () => crypto.randomUUID();
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 const THUMBNAIL_SIZE = 1024;
-const newDesign = (index: number): ThumbnailDesign => ({ id: id(), name: 'Thumbnail ' + index, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, background: '#f7f1e9', elements: [], updatedAt: Date.now() });
+const newDesign = (index: number): ThumbnailDesign => ({ id: id(), name: 'Thumbnail ' + index, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, background: '#f7f1e9', elements: [], packSubtitle: 'Digital Clipart Collection', packTextZone: { x: 22, y: 30, width: 56, height: 34 }, updatedAt: Date.now() });
 const newImage = (character: Character, index: number, preferredSource: 'auto' | 'original' | 'upscaled' = 'auto'): ThumbnailElement => ({
   id: id(), type: 'image', characterId: character.id, source: preferredSource === 'auto' ? (character.upscaledImageUrl ? 'upscaled' : 'original') : preferredSource,
   x: 10 + (index % 4) * 21, y: 17 + (Math.floor(index / 4) % 3) * 25, width: 22, height: 28, rotation: 0
@@ -85,6 +87,8 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
   const [upscaleJobs, setUpscaleJobs] = useState<Record<string, { status: string; elapsed?: number; remaining?: number | null; error?: string }>>({});
   const [upscaleRemaining, setUpscaleRemaining] = useState<Record<string, number | null>>({});
   const [imageModel, setImageModel] = useState('gpt-image-1-mini');
+  const [imageProvider, setImageProvider] = useState<'openai' | 'gemini'>('openai');
+  const [geminiImageModel, setGeminiImageModel] = useState('gemini-2.5-flash-image');
   const [imageModels, setImageModels] = useState<Array<{ id: string; name: string }>>([]);
   const [layoutMode, setLayoutMode] = useState<'ai' | 'manual'>('ai');
   const startListingStudio = () => onStartListingStudio?.({
