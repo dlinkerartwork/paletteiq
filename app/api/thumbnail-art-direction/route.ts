@@ -5,6 +5,7 @@ import { projects } from '@/db/schema';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { userCredential } from '@/lib/credentials';
 import { nativeAssetBucket } from '@/lib/native-bridge';
+import { fitClipartAroundTypography } from '@/lib/thumbnail-fit';
 
 type Box = { x: number; y: number; width: number; height: number };
 type Slot = Box & { characterId: string; rotation: number };
@@ -124,7 +125,8 @@ export async function POST(request: Request) {
       };
       const box = bounds(slot);
       if (box.x < 2 || box.y < 2 || box.x + box.width > 98 || box.y + box.height > 98) continue;
-      if (forbiddenZones.some((zone,i) => collides(box,zone,i===2 ? 3 : 5))) continue;
+      // Keep candidates that intersect lettering: the deterministic geometry fitter
+      // will translate or resize them instead of deleting valuable collection assets.
       const isCatalogue = ['showcase','preview','storybook','category-0','category-1'].includes(String(body.slideKey || '')) || String(body.slideKey || '').startsWith('category-');
       if (isCatalogue && placed.some(p => collides(box,bounds(p),2))) continue;
       if (!isCatalogue && placed.some(p => {
@@ -136,14 +138,22 @@ export async function POST(request: Request) {
       })) continue;
       placed.push(slot); used.add(slot.characterId);
     }
-    if (!placed.length) return fail('AI did not return any safe original-asset positions', 422);
-    if (!['showcase','preview','storybook','category-0','category-1'].includes(String(body.slideKey || '')) && placed.length >= 3) {
-      const widths = placed.map(slot => slot.width);
+    const catalogue = ['showcase','preview','storybook','category-0','category-1'].includes(String(body.slideKey || '')) ||
+      String(body.slideKey || '').startsWith('category-');
+    const fitted = fitClipartAroundTypography(
+      placed, [titleArea, ...(detectedTitle ? [detectedTitle] : [])],
+      detectedSubtitle ? [detectedSubtitle] : [],
+      { grid:catalogue, titlePadding:5, subtitlePadding:3, maxArtworkOverlap:.3,
+        minScale:body.hierarchy === 'soft' ? .75 : body.hierarchy === 'medium' ? .65 : .55 }
+    );
+    if (!fitted.length) return fail('No safe clipart positions fit outside the visible typography. Use curated fallback.', 422);
+    if (!catalogue && fitted.length >= 3) {
+      const widths = fitted.map(slot => slot.width);
       if (Math.max(...widths) / Math.max(1, Math.min(...widths)) < (body.hierarchy === 'soft' ? 1.18 : body.hierarchy === 'medium' ? 1.38 : 1.65))
         return fail('AI composition has no clear hero/secondary/accent size hierarchy; use curated fallback layout', 422);
     }
     return Response.json({
-      slots:placed, textZone:titleArea, detectedTitleZone:detectedTitle, detectedSubtitleZone:detectedSubtitle,
+      slots:fitted, textZone:titleArea, detectedTitleZone:detectedTitle, detectedSubtitleZone:detectedSubtitle,
       artDirection:String(parsed.artDirection || '').replace(/[<>]/g,'').slice(0,650),
       assetSource:'original'
     });
