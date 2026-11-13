@@ -74,7 +74,6 @@ export default function ThumbnailDesigner({ registerSaveControls, title, collect
   const [backgroundRetryId, setBackgroundRetryId] = useState('');
   const cancelPackRef = useRef(false);
   const [referenceStyle, setReferenceStyle] = useState<'creative' | 'similar' | 'palette'>('similar');
-  const [imageBusy, setImageBusy] = useState(false);
   const [comparePreview, setComparePreview] = useState<{ name: string; originalUrl: string; upscaledUrl: string; temporary?: boolean } | null>(null);
   useEffect(() => () => { if (comparePreview?.temporary) URL.revokeObjectURL(comparePreview.originalUrl); }, [comparePreview]);
   const [upscaleBusy, setUpscaleBusy] = useState(false);
@@ -84,10 +83,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, collect
   const [upscaleStatus, setUpscaleStatus] = useState('');
   const [upscaleJobs, setUpscaleJobs] = useState<Record<string, { status: string; elapsed?: number; remaining?: number | null; error?: string }>>({});
   const [upscaleRemaining, setUpscaleRemaining] = useState<Record<string, number | null>>({});
-  const [imageProvider, setImageProvider] = useState<'openai' | 'gemini'>('openai');
   const [imageModel, setImageModel] = useState('gpt-image-1-mini');
-  const [includeTitle, setIncludeTitle] = useState(true);
-  const [imageQuality, setImageQuality] = useState<'low' | 'medium' | 'high'>('low');
   const [imageModels, setImageModels] = useState<Array<{ id: string; name: string }>>([]);
   const [layoutMode, setLayoutMode] = useState<'ai' | 'manual'>('ai');
   const [provider, setProvider] = useState<'openai' | 'gemini'>(aiDefaults.provider);
@@ -775,37 +771,6 @@ export default function ThumbnailDesigner({ registerSaveControls, title, collect
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
     finally { setBackgroundUploading(false); }
   };
-  const generateAiThumbnail = async () => {
-    if (!design || imageBusy) return;
-    if (!window.confirm('Generate a new AI thumbnail with ' + imageProvider + '? This uses the configured provider API key and may incur charges.')) return;
-    setImageBusy(true); setMessage('');
-    try {
-      let layout = design.elements.map(e => ({ type: e.type, x: e.x, y: e.y, width: e.width, height: e.height, text: e.type === 'text' ? e.text : undefined }));
-      if (reference && layoutMode === 'ai') {
-        const analysisResponse = await fetch('/api/thumbnail-layout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, imageUrl: reference, provider, model, count: Math.min(characters.filter(c => c.imageUrl).length, 24) }) });
-        const analysis = await analysisResponse.json() as { error?: string; layout?: { slots?: Array<{ x: number; y: number; width: number; height: number }>; texts?: Array<{ text: string; x: number; y: number; width: number; height: number }> } };
-        if (!analysisResponse.ok) throw Error(analysis.error || 'Could not analyze reference before image generation');
-        layout = [...(analysis.layout?.slots || []).map(e => ({ ...e, type: 'image' as const, text: undefined })), ...(analysis.layout?.texts || []).map(e => ({ ...e, type: 'text' as const }))];
-      }
-      const response = await fetch('/api/thumbnail-ai-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, provider: imageProvider, model: imageModel, quality: imageQuality, includeTitle, layout: includeTitle ? layout : layout.filter(item => item.type !== 'text') }) });
-      const result = await response.json() as { error?: string; imageUrl?: string; prompt?: string };
-      if (!response.ok || !result.imageUrl) throw Error(result.error || 'AI image generation failed');
-      const sourceImage = await loadForExport(result.imageUrl);
-      const generated: ThumbnailDesign = {
-        ...newDesign(designs.length + 1),
-        name: design.name + ' · AI ' + (designs.length + 1),
-        width: sourceImage.naturalWidth, height: sourceImage.naturalHeight,
-        background: design.background, elements: [],
-        aiImageUrl: result.imageUrl, aiImagePrompt: result.prompt,
-        referenceUrl: reference || design.referenceUrl
-      };
-      const nextDesigns = [...designs, generated];
-      onChange(nextDesigns);
-      setActiveId(generated.id);
-      setMessage('AI thumbnail added to the thumbnail gallery. It is a single image, sized ' + sourceImage.naturalWidth + '×' + sourceImage.naturalHeight + ', and will be saved automatically.');
-    } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
-    finally { setImageBusy(false); }
-  };
   const downloadAiThumbnail = async () => {
     const sourceUrl = design?.upscaledImageUrl || design?.aiImageUrl;
     if (!design || !sourceUrl) return;
@@ -1158,7 +1123,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, collect
           setSideTab(next); document.getElementById('thumbnail-' + next + '-tab')?.focus();
         }}>
           <button id="thumbnail-reference-tab" role="tab" type="button" aria-selected={sideTab === 'reference'} aria-controls="thumbnail-reference-panel" tabIndex={sideTab === 'reference' ? 0 : -1} className={sideTab === 'reference' ? 'primary-btn' : 'outline-btn'} style={{ flex: 1, minWidth: 0, whiteSpace: 'normal', justifyContent: 'center', fontSize: 12, padding: '8px 6px' }} onClick={() => setSideTab('reference')}>Reference &amp; Assets</button>
-          <button id="thumbnail-generation-tab" role="tab" type="button" aria-selected={sideTab === 'generation'} aria-controls="thumbnail-generation-panel" tabIndex={sideTab === 'generation' ? 0 : -1} className={sideTab === 'generation' ? 'primary-btn' : 'outline-btn'} style={{ flex: 1, minWidth: 0, whiteSpace: 'normal', justifyContent: 'center', fontSize: 12, padding: '8px 6px' }} onClick={() => setSideTab('generation')}>AI Image Generation</button>
+          <button id="thumbnail-generation-tab" role="tab" type="button" aria-selected={sideTab === 'generation'} aria-controls="thumbnail-generation-panel" tabIndex={sideTab === 'generation' ? 0 : -1} className={sideTab === 'generation' ? 'primary-btn' : 'outline-btn'} style={{ flex: 1, minWidth: 0, whiteSpace: 'normal', justifyContent: 'center', fontSize: 12, padding: '8px 6px' }} onClick={() => setSideTab('generation')}>Thumbnail Prompt</button>
         </div>
         {sideTab === 'reference' && <div id="thumbnail-reference-panel" role="tabpanel" aria-labelledby="thumbnail-reference-tab" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0, gap: 12 }}>
         <h3>Reference & assets</h3>
@@ -1256,20 +1221,20 @@ export default function ThumbnailDesigner({ registerSaveControls, title, collect
         <button className="outline-btn" onClick={() => add(newText(title))}>+ Add text</button>
         </div>}
         {sideTab === 'generation' && <div id="thumbnail-generation-panel" role="tabpanel" aria-labelledby="thumbnail-generation-tab" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0, gap: 12 }}>
-        <h3>AI Image Generation</h3>
-        <small>Generate a complete thumbnail using OpenAI or Gemini. Reference composition and character names guide the image; output is a single raster and may differ from your existing character artwork.</small>
-        <label className="input-label">IMAGE PROVIDER</label>
-        <select value={imageProvider} onChange={e => { const next = e.target.value as 'openai' | 'gemini'; setImageProvider(next); setImageModel(next === 'gemini' ? 'gemini-2.5-flash-image' : (imageModels[0]?.id || 'gpt-image-1-mini')); }}><option value="openai">OpenAI</option><option value="gemini">Gemini</option></select>
-        <label className="input-label">IMAGE MODEL</label>
-        <select value={imageModel} onChange={e => setImageModel(e.target.value)}>
-          {imageProvider === 'openai' ? <>{!imageModels.some(m => m.id === imageModel) && <option value={imageModel}>{imageModel} (default)</option>}{imageModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</> : <><option value="gemini-2.5-flash-image">Gemini 2.5 Flash Image</option><option value="gemini-3-pro-image-preview">Gemini 3 Pro Image (preview)</option></>}
+        <h3>Thumbnail Prompt</h3>
+        <small>Generated from your Reference & Assets settings. OpenAI creates only the abstract background and optional artistic lettering; PaletteIQ overlays the exact original collection PNGs. No clipart is redrawn.</small>
+        <label className="input-label">OPENAI BACKGROUND MODEL</label>
+        <select aria-label="OpenAI thumbnail background model" disabled={aiBusy} value={imageModel} onChange={e => setImageModel(e.target.value)}>
+          {!imageModels.some(m => m.id === imageModel) && <option value={imageModel}>{imageModel} (saved/default)</option>}
+          {imageModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
         </select>
-        {imageProvider === 'openai' && <><label className="input-label">IMAGE QUALITY</label>
-        <select value={imageQuality} onChange={e => setImageQuality(e.target.value as 'low' | 'medium' | 'high')}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></>}
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '12px 0' }}><input type="checkbox" checked={includeTitle} disabled={imageBusy} onChange={event => setIncludeTitle(event.target.checked)}/> Include title / theme text</label>
-        {!includeTitle && <small>The AI thumbnail will be requested without text or lettering.</small>}
-        <button className="primary-btn" disabled={imageBusy || !imageModel} type="button" onClick={() => void generateAiThumbnail()}><WandSparkles size={15}/> {imageBusy ? 'Generating AI thumbnail...' : 'Generate AI thumbnail'}</button>
-
+        <label className="input-label">PROMPT FROM REFERENCE & ASSETS</label>
+        <textarea aria-label="Thumbnail design prompt preview" readOnly rows={15} value={currentBriefPreview} style={{ width: '100%', fontSize: 11, lineHeight: 1.35 }} />
+        <button className="outline-btn" type="button" onClick={() => void navigator.clipboard.writeText(currentBriefPreview)}>Copy thumbnail prompt</button>
+        <button className="primary-btn" type="button" disabled={aiBusy || !characters.some(c => c.imageUrl)} onClick={() => void generateReferenceBatch()}>
+          <WandSparkles size={15}/> {aiBusy ? 'Generating...' : generationScope === 'single' ? 'Generate 1 Thumbnail from Prompt' : 'Generate Exact-Asset Pack from Prompt'}
+        </button>
+        <small>AI image generation uses your chosen background quality in Reference & Assets. AI Vision then fits existing collection assets around the actual lettering. API charges apply.</small>
         </div>}
       </div>
       <div style={{ minWidth: 0, position: 'sticky', top: 12, alignSelf: 'start' }}>
