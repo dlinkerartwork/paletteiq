@@ -30,7 +30,7 @@ const id = () => crypto.randomUUID();
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 const THUMBNAIL_SIZE = 1024;
 const newDesign = (index: number): ThumbnailDesign => ({ id: id(), name: 'Thumbnail ' + index, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, background: '#f7f1e9', elements: [], packSubtitle: 'Digital Clipart Collection', packTextZone: { x: 22, y: 30, width: 56, height: 34 }, updatedAt: Date.now() });
-const newImage = (character: Character, index: number, preferredSource: 'auto' | 'original' | 'upscaled' = 'auto'): ThumbnailElement => ({
+const newImage = (character: Character, index: number, preferredSource: 'auto' | 'original' | 'upscaled' = 'original'): ThumbnailElement => ({
   id: id(), type: 'image', characterId: character.id, source: preferredSource === 'auto' ? (character.upscaledImageUrl ? 'upscaled' : 'original') : preferredSource,
   x: 10 + (index % 4) * 21, y: 17 + (Math.floor(index / 4) % 3) * 25, width: 22, height: 28, rotation: 0
 });
@@ -1343,7 +1343,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
             <WandSparkles size={15}/> {aiBusy ? 'Generating AI artwork...' : 'Generate AI Background & Typography'}
           </button>
           {packStatus && <small role="status">{packStatus}</small>}
-          <small>AI generates only abstract background, exact artistic title, subtitle and optional typographic badge. PaletteIQ keeps your original PNG positions. OpenAI verification is currently required even when Gemini generates the artwork. Review lettering before use; API charges apply.</small>
+          <small>AI generates only abstract background, exact artistic title, subtitle and optional typographic badge. PaletteIQ keeps your original PNG positions. Changing any text requires generating new AI lettering. OpenAI verification is currently required even when Gemini generates the artwork. Review spelling before use; API charges apply.</small>
         </div>
         <h3>Characters</h3>
         <div style={{ maxHeight: 400, overflowY: 'auto', display: 'grid', gap: 8 }}>
