@@ -96,3 +96,13 @@ test('Batch stops repeated paid requests if QC flags two consecutive backgrounds
   assert.match(designer, /if \(rejected >= 2\)/);
   assert.match(designer, /Stopped after two QC rejections/);
 });
+
+test('Thumbnail card preview button closes before review links and approval actions', () => {
+  const gallery = designer.slice(designer.indexOf('All collection thumbnails ('));
+  const previewStart = gallery.indexOf('<button type="button" onClick={() => { setActiveId(item.id);');
+  const previewEnd = gallery.indexOf('</button>', previewStart);
+  const reviewStart = gallery.indexOf('{item.rejectedBackgroundUrl && <div', previewStart);
+  assert.ok(previewStart >= 0 && previewEnd > previewStart && reviewStart > previewEnd,
+    'Review controls must be siblings of the preview button, not nested inside it');
+  assert.ok(gallery.indexOf('Approve after visual inspection') > reviewStart);
+});
