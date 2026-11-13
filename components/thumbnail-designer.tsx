@@ -71,7 +71,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const [packStatus, setPackStatus] = useState('');
   const [backgroundRetryId, setBackgroundRetryId] = useState('');
   const cancelPackRef = useRef(false);
-  const [referenceStyle, setReferenceStyle] = useState<'creative' | 'similar' | 'palette'>('creative');
+  const [referenceStyle, setReferenceStyle] = useState<'creative' | 'similar' | 'palette'>('similar');
   const [imageBusy, setImageBusy] = useState(false);
   const [comparePreview, setComparePreview] = useState<{ name: string; originalUrl: string; upscaledUrl: string; temporary?: boolean } | null>(null);
   useEffect(() => () => { if (comparePreview?.temporary) URL.revokeObjectURL(comparePreview.originalUrl); }, [comparePreview]);
@@ -1021,6 +1021,11 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
       <label className="input-label">OPTIONAL REFERENCE IMAGE</label>
       <input aria-label="Upload optional reference" type="file" accept="image/png,image/jpeg,image/webp" onChange={event => void onReferenceUpload(event.target.files?.[0])}/>
       {reference && <img src={reference} alt="Optional reference" style={{ maxHeight: 130, maxWidth: '100%', objectFit: 'contain' }}/>}
+      <label className="input-label">REFERENCE INTERPRETATION</label>
+      <select aria-label="Etsy reference interpretation" value={referenceStyle} disabled={aiBusy} onChange={event => setReferenceStyle(event.target.value as typeof referenceStyle)}>
+        <option value="similar">Similar composition · recommended</option><option value="creative">Creative adaptation</option><option value="palette">Palette only</option>
+      </select>
+      <small>For a reference-like watercolor ring and hand-lettered title, upload the reference image before generating. PaletteIQ extracts only graphic style tokens; it never sends reference product artwork to the image generator.</small>
       <button className="primary-btn" disabled={aiBusy || !characters.some(c => c.imageUrl)} onClick={() => void generateReferenceBatch()}>{aiBusy ? 'Generating ' + (generationScope === 'single' ? '1 thumbnail' : 'Etsy pack') + '...' : generationScope === 'single' ? 'Generate 1 Thumbnail' : generationScope === 'core-5' ? 'Generate 5 Thumbnails' : generationScope === 'complete-10' ? 'Generate 10 Thumbnails' : 'Generate Category Showcase'}</button>
       {aiBusy && <button className="outline-btn" onClick={() => { cancelPackRef.current = true; }}>Stop after current image</button>}
       {packStatus && <small role="status">{packStatus}</small>}
