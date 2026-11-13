@@ -635,16 +635,33 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     }
   };
 
-  const approveReviewedBackground = (target: ThumbnailDesign) => {
-    if (!target.rejectedBackgroundUrl) return;
+  const approveReviewedBackground = async (target: ThumbnailDesign) => {
+    if (!target.rejectedBackgroundUrl || aiBusy || backgroundRetryId) return;
     if (!window.confirm('Have you OPENED and inspected this AI artwork at full size? Confirm it contains NO AI-generated collection clipart, foods, animals, product illustrations or imitations of your collection assets. Decorative shapes and lettering are allowed. Only approve if all artwork is background/typography.')) return;
-    const next = latestDesignsRef.current.map(d => d.id === target.id ? {
-      ...d, backgroundImageUrl: d.rejectedBackgroundUrl, rejectedBackgroundUrl: undefined,
-      rejectedBackgroundReason: undefined, generationError: undefined, updatedAt: Date.now()
-    } : d);
-    latestDesignsRef.current = next;
-    onChange(next);
-    setMessage('Reviewed background applied. Save designs to retain it. Original collection PNG layers are unchanged.');
+    setBackgroundRetryId(target.id);
+    try {
+      setMessage('AI Vision analyzing approved background before overlaying original collection PNGs...');
+      const available = filterThemeCharacters(title, characters);
+      const candidates = buildPack('complete-10', title, available);
+      const slide = candidates.find(item => target.name.toLowerCase().includes(item.name.toLowerCase())) || candidates[0];
+      const imageLayers = target.elements.filter(e => e.type === 'image');
+      const placement = slide
+        ? await placeOriginalsOverBackground(slide, target.rejectedBackgroundUrl, imageLayers, available,
+            target.packHierarchy || packHierarchy, target.packCoverStyle || packCoverStyle)
+        : { elements: imageLayers, usedFallback: true };
+      const next = latestDesignsRef.current.map(d => d.id === target.id ? {
+        ...d, backgroundImageUrl: d.rejectedBackgroundUrl,
+        elements: [...placement.elements, ...d.elements.filter(e => e.type === 'text')],
+        rejectedBackgroundUrl: undefined, rejectedBackgroundReason: undefined,
+        generationError: placement.usedFallback ? 'Vision layout unavailable; original PNG positions retained.' : undefined,
+        updatedAt: Date.now()
+      } : d);
+      latestDesignsRef.current = next;
+      onChange(next);
+      setMessage('Reviewed background applied with original PNG layout. Save designs to retain it.');
+    } finally {
+      setBackgroundRetryId('');
+    }
   };
 
   const onReferenceUpload = async (file?: File) => {
@@ -1322,7 +1339,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
             </button>
             {item.rejectedBackgroundUrl && <div style={{ display: 'grid', gap: 5, marginTop: 6 }}>
               <a href={item.rejectedBackgroundUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, textDecoration: 'underline' }}>View rejected AI artwork</a>
-              <button type="button" className="outline-btn" style={{ fontSize: 11, padding: '5px 7px' }} disabled={aiBusy || Boolean(backgroundRetryId)} onClick={() => approveReviewedBackground(item)}>Approve after visual inspection</button>
+              <button type="button" className="outline-btn" style={{ fontSize: 11, padding: '5px 7px' }} disabled={aiBusy || Boolean(backgroundRetryId)} onClick={() => void approveReviewedBackground(item)}>Approve after visual inspection</button>
               <small>QC flagged a possible product illustration. Not used in the thumbnail until approved.</small>
             </div>}
             <small style={{ display: 'block', marginTop: 5 }}>{item.upscaleJob ? (upscaleRemaining[item.id] != null ? 'Est. remaining: ' + Math.ceil(upscaleRemaining[item.id]! / 60) + ' min' : 'Time remaining: waiting for GPU / estimating…') : item.upscaledImageUrl ? '✓ Upscale completed' : 'Not upscaled'}</small>
