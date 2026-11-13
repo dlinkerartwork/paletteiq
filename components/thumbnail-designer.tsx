@@ -1227,6 +1227,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           </div>
           <small>Optional references inspire layout. Automatically generated designs keep typography areas clear of collection clipart.</small>
         </>}
+        {layoutMode === 'manual' && onStartListingStudio && <button type="button" className="primary-btn" disabled={aiBusy || !characters.some(c=>c.imageUrl)} onClick={() => void startListingStudio()}>Start 15 Listing Images (manual placements)</button>}
         <h3>Characters</h3>
         <div style={{ maxHeight: 400, overflowY: 'auto', display: 'grid', gap: 8 }}>
           {characters.filter(c => c.imageUrl).map(c => <button type="button" key={c.id} onClick={() => add(newImage(c, design.elements.filter(e => e.type === 'image').length))} style={{ textAlign: 'left', display: 'flex', gap: 8, alignItems: 'center', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: 6 }}>
