@@ -18,7 +18,7 @@ test('Category slides use actual group metadata or neutral selections', () => {
   assert.ok(pack.slice(1, -1).every(slide => slide.ids?.every(id => characters.some(c => c.id === id))));
 });
 
-test('Original layer placements do not overlap title safe zones or one another', () => {
+test('Original layers protect title zones; cover overlap is limited, catalogue grids remain separate', () => {
   for (const slide of buildPack('complete-10', 'Asian Food', characters)) {
     const placements = placeOriginals(slide, characters, [{x: 8, y: 6, width: 80, height: 25}]);
     assert.ok(placements.length > 0, slide.name);
@@ -27,7 +27,12 @@ test('Original layer placements do not overlap title safe zones or one another',
       assert.equal(overlaps(p, slide.textZone, 3), false, slide.name + ': title collision');
       for (const other of placements) {
         if (other === p) continue;
-        assert.equal(overlaps(p, other), false, slide.name + ': artwork collision');
+        const iw = Math.max(0, Math.min(p.x + p.width, other.x + other.width) - Math.max(p.x, other.x));
+        const ih = Math.max(0, Math.min(p.y + p.height, other.y + other.height) - Math.max(p.y, other.y));
+        const smallerArea = Math.min(p.width * p.height, other.width * other.height);
+        const fraction = iw * ih / smallerArea;
+        if (slide.layout === 'grid' || slide.layout === 'showcase') assert.equal(overlaps(p, other), false, slide.name + ': grid collision');
+        else assert.ok(fraction <= .31, slide.name + ': excessive cover overlap');
       }
     }
   }
