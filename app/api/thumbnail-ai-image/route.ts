@@ -65,21 +65,11 @@ export async function POST(req: Request) {
   };
   const titleZone = input.textZone && [input.textZone.x, input.textZone.y, input.textZone.width, input.textZone.height].every(n => Number.isFinite(n) && n >= 0 && n <= 100) ? input.textZone : { x: 8, y: 5, width: 84, height: 23 };
   const safeText = (text: string) => text.replace(/[<>\r\n]/g, ' ').trim().slice(0, 140);
-  const isFoodTheme = /food|sushi|sashimi|japanese|chinese|asian|korean|ramen|cuisine|dish|dessert|bakery|meal|culinary/i.test([collection.name,collection.theme,collection.subtheme,input.headline].join(' '));
-  const directions: Record<string, string> = {
-    editorial: 'High-end Etsy cookbook editorial with expressive oversized lettering, confident color-blocking, artful off-center headline framing, layered deckled paper and generous but deliberate whitespace. No old-fashioned ornamental certificate frame.',
-    boutique: 'Contemporary art-gallery boutique cover: asymmetric split-color panel, editorial serif plus expressive brush script, offset badge/ribbon, crisp layout and understated luxury.',
-    storybook: 'Handmade illustrated-book art direction with abstract painted paper collage, soft layered corners, playful oversized title and a fresh asymmetrical editorial composition.',
-    modern: 'High-converting modern Etsy cover: punchy large legible title, bold contrasting shape system, refined asymmetrical magazine composition and instantly recognizable visual hierarchy.',
-    watercolor: 'Artistic painterly design with sweeping translucent washes, textured torn-paper layering, expressive hand-lettered title and warm organic movement; avoid empty beige parchment.'
-  };
   const energy: Record<string, string> = {
     soft: 'Refined and airy, understated but not blank. One meaningful design motif, layered depth and clear headline.',
     balanced: 'Striking yet tasteful, strong title treatment, layered palette, balanced contrast and visible depth.',
     bold: 'Scroll-stopping and instantly readable: expressive oversized artistic title with mixed type styles, impactful contrasting sections, layered brushstrokes and a creative badge shape. Avoid template-like symmetry or thin ornate borders.'
   };
-  const designDirection = [directions[coverStyle], energy[designBoldness],
-    isFoodTheme ? 'Gourmet food design palette inspired by varied Asian cuisine: deep evergreen, sophisticated vermilion, sage and warm cream; do not introduce any illustrated food shapes.' : 'Adapt colors and typography to the actual collection theme; do not use food-specific visual language.'].join(' ');
   const slideLabel = String(input.slideName || '').toLowerCase();
   const slideDirection = slideLabel.includes('hero')
     ? 'HERO COVER: one bold typographic statement, visually large collection assets will surround it. Prefer lively asymmetric ink-wash ring or shape, no repetitive border.'
