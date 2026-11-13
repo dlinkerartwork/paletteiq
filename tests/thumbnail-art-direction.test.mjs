@@ -115,3 +115,14 @@ test('Image generator receives ONLY abstract graphics and lettering instructions
   assert.match(generator, /Do not draw a visual depiction of the title words/);
   assert.match(generator, /Reserved areas where original PNG assets will later be composited/);
 });
+
+test('Single thumbnail is the default and respects selected slide key and one-image request count', () => {
+  assert.match(designer, /useState<'single' \| PackPreset>\('single'\)/);
+  assert.match(designer, /useState\('hero'\)/);
+  assert.match(designer, /generationScope === 'single' \? all\.filter\(slide => slide\.key === singleSlideKey\)\.slice\(0, 1\) : all/);
+  assert.match(designer, /const created: ThumbnailDesign\[\] = slides\.map/);
+  assert.match(designer, /for \(let i = 0; i < created\.length; i\+\+\)/);
+  assert.match(designer, /generationScope === 'single' \? 'Generate 1 Thumbnail'/);
+  assert.match(designer, /aria-label="Single thumbnail type"/);
+  assert.match(designer, /generationScope === 'single' && singleSlideKey\.startsWith\('category-'\)/);
+});
