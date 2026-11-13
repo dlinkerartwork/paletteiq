@@ -204,7 +204,7 @@ export async function POST(req: Request) {
       typographyInstruction,
       ...(mode === 'background-only' ? [] : ['Keep all artistic lettering inside the reserved safe area (percent canvas coordinates):', JSON.stringify(titleZone)]),
       'Visible areas where original PNG assets will later be composited. Some original images deliberately extend BEYOND the canvas: preserve their visible slots and allow natural crop at the final canvas edge. Leave these slots free of competing decoration; never fill them with substitutes:', JSON.stringify(visibleLayout),
-      'A small degree of deliberate original-PNG overlap is permitted and handled by PaletteIQ, but DO NOT draw any items in that space.',
+      'Exact original PNGs may intentionally OVERLAP the lettering after compositing, including over the headline or subtitle. The user owns the positions. Do not relocate text or block generation merely because a foreground PNG intersects the typography area; allow artistic layering and keep the remaining exposed letters legible. NEVER draw substitute objects.',
       'Premium design mood (follow reference graphic style when provided):', graphicDirection,
       ...(designBrief ? ['REFERENCE & ASSETS SETTINGS (graphic art direction ONLY; never synthesize objects):', designBrief] : []),
       ...(isHeroCover ? ['HERO ART DIRECTION PRIORITY:', heroReferenceStyle] : []),
