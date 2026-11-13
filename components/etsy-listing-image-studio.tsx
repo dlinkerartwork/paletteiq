@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Check, Download, Image as ImageIcon, LoaderCircle, RotateCcw, Sparkles } from 'lucide-react';
+import { readApiJson, uploadListingJpg } from '@/lib/listing-image-upload';
 import type { ListingStudioConfig } from '@/lib/listing-studio-config';
 import {
   LISTING_IMAGE_SPECS, LISTING_WIDTH, LISTING_HEIGHT, originalAssets,
@@ -25,9 +26,7 @@ const smoothName = (name: string) => name.replace(/\s+/g, ' ').trim().slice(0, 7
 
 async function request(url: string, options?: RequestInit): Promise<ListResponse> {
   const response = await fetch(url, options);
-  const data = await response.json() as ListResponse;
-  if (!response.ok) throw Error(data.error || 'Request failed (HTTP ' + response.status + ')');
-  return data;
+  return readApiJson<ListResponse>(response, 'Listing Image Studio request');
 }
 const send = (body: object) => request(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 async function imageFromUrl(url: string): Promise<HTMLImageElement> {
@@ -95,13 +94,8 @@ async function compose(backgroundUrl: string, placements: ListingPlacement[], as
   return await new Promise<Blob>((resolve, reject) =>
     canvas.toBlob(blob => blob ? resolve(blob) : reject(Error('Could not render JPG image.')), 'image/jpeg', 0.92));
 }
-async function upload(projectId: string, number: number, blob: Blob): Promise<string> {
-  const form = new FormData();
-  form.set('projectId', projectId);
-  form.set('file', new File([blob], fileName(number), { type: 'image/jpeg' }));
-  const result = await request('/api/thumbnail-background', { method: 'POST', body: form }) as ListResponse & { url?: string };
-  if (!result.url) throw Error('Could not save composed image');
-  return result.url;
+async function upload(projectId: string, number: number, blob: Blob, onProgress?: (done: number, total: number) => void): Promise<string> {
+  return uploadListingJpg(projectId, fileName(number), blob, fetch, onProgress);
 }
 
 export default function EtsyListingImageStudio({ config, projectId, name, theme, subtheme, characters, onSaved }: Props) {
@@ -181,8 +175,8 @@ export default function EtsyListingImageStudio({ config, projectId, name, theme,
   const renderAndSave = async (background: string, layout: ListingPlacement[], info: string) => {
     setWorking('render'); setMessage('Compositing ' + layout.length + ' exact original clipart images at 3000 × 2250 px...');
     const file = await compose(background, layout, assets);
-    setMessage('Saving JPG preview to the collection...');
-    const renderedImageUrl = await upload(projectId, step, file);
+    setMessage('Saving JPG preview to the collection in safe upload chunks...');
+    const renderedImageUrl = await upload(projectId, step, file, (done, total) => setMessage('Uploading original-asset JPG: ' + done + '/' + total + ' parts...'));
     const image: ListingImageRecord = {
       number: step, status: 'draft', backgroundUrl: background, renderedImageUrl, placements: layout,
       notes: info, updatedAt: Date.now()
@@ -247,6 +241,13 @@ export default function EtsyListingImageStudio({ config, projectId, name, theme,
           layoutWarning = vision.fallback || '';
         } catch { layoutWarning = 'Vision placement unavailable; original image placements retained.'; }
       }
+      // Save the paid AI background before transferring the large composed JPG.
+      // If upload fails, "Apply layout & save JPG" retries without another AI bill.
+      await saveRecord({
+        number: step, status: 'draft', backgroundUrl: response.backgroundUrl,
+        renderedImageUrl: '', placements: suggested,
+        notes: notes[step] || current?.notes || '', updatedAt: Date.now()
+      });
       await renderAndSave(response.backgroundUrl, suggested, notes[step] || current?.notes || '');
       if (layoutWarning) setMessage('Image saved as draft. ' + layoutWarning);
     } catch (error) { setMessage('Generation failed: ' + (error instanceof Error ? error.message : String(error))); }
@@ -359,7 +360,7 @@ export default function EtsyListingImageStudio({ config, projectId, name, theme,
                 <input type="number" min={0} max={100} step={0.5} value={Number(selected[field]).toFixed(1)} disabled={!!working} onChange={e => move(field, e.target.value)}/>
               </label>)}
             </div>
-            <button type="button" className="outline-btn" disabled={!!working || !current?.backgroundUrl} onClick={() => void rerender()}><RotateCcw size={15}/> Apply layout & save JPG (no AI cost)</button>
+            <button type="button" className="outline-btn" disabled={!!working || !current?.backgroundUrl} onClick={() => void rerender()}><RotateCcw size={15}/> {current?.renderedImageUrl ? 'Apply layout & save JPG (no AI cost)' : 'Retry save JPG (no AI cost)'}</button>
           </>}
           <label className="input-label">REVISION NOTES</label>
           <textarea rows={3} maxLength={800} value={notes[step] ?? current?.notes ?? ''} onChange={e => setNotes(old => ({ ...old, [step]: e.target.value }))} placeholder="What would you change in this image?"/>
