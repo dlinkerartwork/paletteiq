@@ -123,7 +123,7 @@ export function placeOriginals(slide: PackSlide, characters: PackCharacter[], re
       const factor = hierarchy === 'soft' ? .83 : hierarchy === 'medium' ? .94 : 1;
       const desired = i === 0 ? 1 : i <= 2 ? .91 : i <= 4 ? .77 : .67;
       const scale = factor * desired;
-      const original = fallback;
+      const original = { ...fallback };
       fallback.width = original.width * scale;
       fallback.height = original.height * scale;
       fallback.x = original.x + (original.width - fallback.width) / 2;
