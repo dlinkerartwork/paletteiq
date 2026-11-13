@@ -26,7 +26,7 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null) as {
     projectId?: string; slideKey?: string; slideName?: string; headline?: string;
     subtitle?: string; textZone?: Box; characters?: Array<{ id: string; name: string }>; suggestedSlots?: Array<{ characterId: string; x: number; y: number; width: number; height: number }>;
-    referenceStyle?: string;
+    referenceStyle?: string; hierarchy?: 'soft' | 'medium' | 'dramatic'; coverStyle?: string;
   } | null;
   if (!body?.projectId || !/^[\w-]{8,80}$/.test(body.projectId)) return fail('Invalid collection');
   if (!Array.isArray(body.characters) || !body.characters.length || body.characters.length > 36) return fail('Select 1–36 collection clipart assets');
@@ -45,13 +45,15 @@ export async function POST(request: Request) {
   if (!key) return fail('Configure OpenAI key in Settings', 503);
   const prompt = [
     'You are an expert premium Etsy listing art director. Return ONLY JSON; do not generate an image.',
-    'Plan an elegant curated square product thumbnail comparable to luxury editorial clipart listings: a coherent central title medallion or sophisticated title panel, beautiful hierarchy, and visually balanced artwork around it.',
+    'Design a visually compelling premium Etsy product cover, not a generic vintage certificate. Choose asymmetry, bold visual rhythm, layered depth, expressive yet legible type space and a dominant illustration focal point. Adapt composition specifically to the slide intent; avoid excessive borders, tiny equal-sized clipart and bland symmetry.',
     'You must place ONLY provided ORIGINAL CLIPART ASSET IDs. The thumbnail compositor will use exact original PNG files. Never create, rename or invent characters.',
     'Return JSON: {"artDirection":"short coherent descriptive direction","slots":[{"characterId":"EXACT_ID","x":0,"y":0,"width":15,"height":18,"rotation":0}]}',
     'All coordinates are 0–100 percentages of the full square canvas, top-left origin. Width and height describe the clipart bounding box.',
     'Keep every character fully within 2% to 98% of the canvas, considering rotation. Avoid overlap with any other character and the title rectangle, including 5% clearance. Rotation -10 through +10 degrees.',
-    'Use a well-balanced composition with purposeful large and small accents, rather than a monotonous grid, except on Collection Preview slides where a clean grid is appropriate.',
-    'Do not place anything inside the reserved typography zone; AI background generation will draw title and decorative badges there.',
+    'NON-GRID HERO / BOUTIQUE / CLOSEUP: pick one large focal original object around 22–32% canvas width, two secondary originals around 15–22%, smaller accents around 8–14%. Make largest at least 1.7x the smallest in width. Do not shrink every asset to the margins; balance large pieces around the title-safe zone. Catalogue grid slides may use consistent small sizes.',
+    'Clipart hierarchy preference:', body.hierarchy || 'dramatic',
+    'Cover design style:', String(body.coverStyle || 'editorial').slice(0,50),
+    'Do not place any collection asset inside the reserved typography zone; the typography/artwork layer occupies it. Treat this as a compositional anchor rather than an excuse to make the clipart microscopic.',
     'The design direction should specify polished background, premium lettering and restrained decorative badges; use the collection theme, not generic saturated abstract art.',
     'Be faithful to the slide headline and selected collection objects. If the headline is narrow, never choose thematically unrelated items.',
     'Slide:',JSON.stringify({key:body.slideKey,name:body.slideName,headline:body.headline,subtitle:body.subtitle}),
@@ -87,6 +89,11 @@ export async function POST(request: Request) {
       placed.push(slot); used.add(slot.characterId);
     }
     if (!placed.length) return fail('AI did not return any safe original-asset positions', 422);
+    if (!['showcase','preview','storybook','category-0','category-1'].includes(String(body.slideKey || '')) && placed.length >= 3) {
+      const widths = placed.map(slot => slot.width);
+      if (Math.max(...widths) / Math.max(1, Math.min(...widths)) < (body.hierarchy === 'soft' ? 1.18 : body.hierarchy === 'medium' ? 1.38 : 1.65))
+        return fail('AI composition has no clear hero/secondary/accent size hierarchy; use curated fallback layout', 422);
+    }
     return Response.json({
       slots:placed, textZone:titleArea,
       artDirection:String(parsed.artDirection || '').replace(/[<>]/g,'').slice(0,650),
