@@ -15,7 +15,7 @@ type Props = {
   characters: ListingAsset[];
   onSaved?: (images: ListingImageRecord[]) => void;
 };
-type ListResponse = { images?: ListingImageRecord[]; backgroundUrl?: string; error?: string };
+type ListResponse = { images?: ListingImageRecord[]; backgroundUrl?: string; placements?: ListingPlacement[]; fallback?: string; error?: string };
 const apiUrl = '/api/listing-image-studio';
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Number.isFinite(n) ? n : lo));
 const fileName = (number: number) => listingFilename(number);
@@ -184,7 +184,18 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     try {
       const response = await send({ action: 'generate', projectId, number: step, model, quality });
       if (!response.backgroundUrl) throw Error('OpenAI did not return the background');
-      await renderAndSave(response.backgroundUrl, positions, notes[step] || current?.notes || '');
+      let suggested = positions;
+      let layoutWarning = '';
+      if (positions.length <= 24) {
+        setMessage('AI Vision is finding typography-safe original artwork slots on the actual generated background...');
+        try {
+          const vision = await send({ action: 'layout', projectId, number: step, backgroundUrl: response.backgroundUrl, placements: positions });
+          if (vision.placements?.length === positions.length) suggested = vision.placements;
+          layoutWarning = vision.fallback || '';
+        } catch { layoutWarning = 'Vision placement unavailable; original image placements retained.'; }
+      }
+      await renderAndSave(response.backgroundUrl, suggested, notes[step] || current?.notes || '');
+      if (layoutWarning) setMessage('Image saved as draft. ' + layoutWarning);
     } catch (error) { setMessage('Generation failed: ' + (error instanceof Error ? error.message : String(error))); }
     finally { setWorking(''); }
   };
