@@ -68,7 +68,7 @@ test('partially off-canvas PNGs are permitted and only visible rectangles are se
   assert.match(endpoint,/x: Math\.max\(-100, Math\.min\(200/);
   assert.match(endpoint,/const visibleLayout = layout\.filter/);
   assert.match(endpoint,/JSON\.stringify\(visibleLayout\)/);
-  assert.match(designer,/Clipart may bleed beyond the frame/);
+  assert.match(designer,/Clipart may overlap text intentionally or extend beyond canvas edges/);
 });
 test('AI lettering is artistically directed, optionally curved or hand-painted, without changing exact source assets', () => {
   assert.match(designer,/Artistic lettering composition/);
