@@ -35,7 +35,7 @@ const api = async (body: object): Promise<StudioApiResponse> => {
   if (!r.ok) throw new Error(json.error ?? 'Request failed (HTTP ' + r.status + ')');
   return json;
 };
-const steps = [{ id: 'analysis', label: 'Research & analysis' }, { id: 'characters', label: 'Character library' }, { id: 'prompts', label: 'OpenAI prompts' }, { id: 'production', label: 'Image production' }, { id: 'listing-images', label: 'Etsy Listing Image Studio' }, { id: 'listing', label: 'Etsy listing draft' }];
+const steps = [{ id: 'analysis', label: 'Research & analysis' }, { id: 'characters', label: 'Character library' }, { id: 'prompts', label: 'OpenAI prompts' }, { id: 'production', label: 'Image production' }, { id: 'thumbnails', label: 'Thumbnail designer' }, { id: 'listing-images', label: 'Etsy Listing Image Studio' }, { id: 'listing', label: 'Etsy listing draft' }];
 const nextIncomplete = (p: Project) => !p.theme && !p.title ? 'analysis' : !p.characters.length ? 'characters' : p.characters.some(c => !c.prompt) ? 'prompts' : p.characters.some(c => c.status !== 'done') ? 'production' : !p.listing?.title ? 'listing' : 'listing';
 
 export default function Home() {
@@ -106,8 +106,7 @@ export default function Home() {
     const selectedProject = list.find(p => p.id === restored.id) || list[0];
     if (selectedProject) { setProject(selectedProject); setSourceUrl(selectedProject.url); }
     const validTabs = ['overview', 'collections', 'multi-production', 'settings', ...steps.map(s => s.id)];
-    if (restored.tab === 'thumbnails') setTab('listing-images');
-    else if (restored.tab && validTabs.includes(restored.tab)) setTab(restored.tab);
+    if (restored.tab && validTabs.includes(restored.tab)) setTab(restored.tab);
   }).catch(() => {}).finally(() => setLoadDone(true)); }, []);
   useEffect(() => { if (!loadDone) return; try { localStorage.setItem('paletteiq-last-workspace', JSON.stringify({ id: project.id, tab })); } catch { /* Storage is optional. */ } }, [loadDone, project.id, tab]);
   useEffect(() => {
@@ -238,9 +237,7 @@ export default function Home() {
     setProjects(prev => [updated, ...prev.filter(item => item.id !== updated.id)]);
     setListingStudioSessionSettings(settings);
   };
-  const navigateTab = (requested: string) => {
-    // Legacy Thumbnail Designer is hidden while retaining its code and designs.
-    const next = requested === 'thumbnails' ? 'listing-images' : requested;
+  const navigateTab = (next: string) => {
     if (next === tab) return;
     if (tab === 'thumbnails' && thumbnailSaveControlsRef.current?.hasUnsaved()) {
       if (!window.confirm('Thumbnail designs have unsaved changes. Leave without saving?')) return;
