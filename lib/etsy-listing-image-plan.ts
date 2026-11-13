@@ -114,7 +114,7 @@ export function planListingPlacements(number: number, source: ListingAsset[]): L
         y0 + Math.floor(local / cols) * cellH + 0.2, cellW - 0.6, cellH - 0.4);
     });
   }
-  if (spec.kind === 'all' || spec.kind === 'all-grouped') {
+  if (spec.kind === 'all') {
     const cols = selected.length > 70 ? 10 : selected.length > 40 ? 8 : selected.length > 20 ? 6 : 5;
     const rows = Math.ceil(selected.length / cols);
     const cellW = 90 / cols;
