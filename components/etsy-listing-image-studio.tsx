@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Check, Download, Image as ImageIcon, LoaderCircle, RotateCcw, Sparkles } from 'lucide-react';
 import { readApiJson, uploadListingJpg } from '@/lib/listing-image-upload';
-import type { ListingStudioConfig } from '@/lib/listing-studio-config';
+import { DEFAULT_LISTING_STUDIO_CONFIG, type ListingStudioConfig } from '@/lib/listing-studio-config';
 import {
   LISTING_IMAGE_SPECS, LISTING_WIDTH, LISTING_HEIGHT, originalAssets,
   planListingPlacements, listingFilename, type ListingAsset, type ListingImageRecord, type ListingPlacement
@@ -12,6 +12,8 @@ import {
 type Props = {
   projectId: string;
   config?: ListingStudioConfig;
+  references: string[];
+  onConfigSave: (config: ListingStudioConfig) => Promise<void>;
   name: string;
   theme: string;
   subtheme: string;
@@ -98,21 +100,62 @@ async function upload(projectId: string, number: number, blob: Blob, onProgress?
   return uploadListingJpg(projectId, fileName(number), blob, fetch, onProgress);
 }
 
-export default function EtsyListingImageStudio({ config, projectId, name, theme, subtheme, characters, onSaved }: Props) {
+export default function EtsyListingImageStudio({ config: initialConfig, references, onConfigSave, projectId, name, theme, subtheme, characters, onSaved }: Props) {
   const assets = useMemo(() => originalAssets(characters), [characters]);
   const [records, setRecords] = useState<ListingImageRecord[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [step, setStep] = useState(1);
   const [working, setWorking] = useState('');
   const [message, setMessage] = useState('');
-  const [quality, setQuality] = useState<'low' | 'medium' | 'high'>(config?.quality || 'medium');
-  const [model, setModel] = useState(config?.imageModel || 'gpt-image-1-mini');
+  const [config, setConfig] = useState<ListingStudioConfig>(() => ({ ...DEFAULT_LISTING_STUDIO_CONFIG, ...initialConfig }));
+  const [settingsDirty, setSettingsDirty] = useState(false);
+  const [settingsBusy, setSettingsBusy] = useState(false);
+  const [visionModels, setVisionModels] = useState<Record<'openai' | 'gemini', Array<{id: string; name: string}>>>({ openai: [], gemini: [] });
+  const [quality, setQuality] = useState<'low' | 'medium' | 'high'>(initialConfig?.quality || 'medium');
+  const [model, setModel] = useState(initialConfig?.imageModel || 'gpt-image-1-mini');
   const [referenceDesign, setReferenceDesign] = useState<ListResponse['layout']>();
   const [availableModels, setAvailableModels] = useState<Array<{id: string; name: string}>>([]);
   const [changes, setChanges] = useState<Record<number, ListingPlacement[]>>({});
   const [notes, setNotes] = useState<Record<number, string>>({});
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [categories, setCategories] = useState<Record<string,string>>({});
+  function changeConfig<K extends keyof ListingStudioConfig>(key: K, value: ListingStudioConfig[K]) {
+    setConfig(current => ({ ...current, [key]: value }));
+    setSettingsDirty(true);
+  }
+  const persistConfig = async () => {
+    if (settingsBusy) return;
+    setSettingsBusy(true);
+    try {
+      await onConfigSave(config);
+      setSettingsDirty(false);
+      setMessage('Reference & Assets settings saved for this collection. Ready to generate the next listing image.');
+    } catch (error) {
+      setMessage('Could not save listing design settings: ' + (error instanceof Error ? error.message : String(error)));
+    } finally { setSettingsBusy(false); }
+  };
+  const uploadReference = async (file?: File) => {
+    if (!file) return;
+    if (!['image/png','image/jpeg','image/webp'].includes(file.type) || file.size > 15_000_000) {
+      setMessage('Select a PNG, JPG, or WebP reference smaller than 15 MB.');
+      return;
+    }
+    try {
+      const bitmap = await createImageBitmap(file);
+      const scale = Math.min(1, 720 / Math.max(bitmap.width, bitmap.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      const context = canvas.getContext('2d');
+      if (!context) throw Error('Canvas unavailable');
+      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      bitmap.close();
+      changeConfig('referenceImage', canvas.toDataURL('image/jpeg', 0.76));
+      setMessage('Reference loaded for style analysis. Uploaded pixels stay in this browser session; use a collection reference for persistent selection.');
+    } catch (error) {
+      setMessage('Could not load reference: ' + (error instanceof Error ? error.message : String(error)));
+    }
+  };
 
   const categorizedAssets = useMemo(() => assets.map(a => ({ ...a, category: categories[a.id] || a.category })), [assets, categories]);
   const initialPlacements = useCallback((number: number) => {
