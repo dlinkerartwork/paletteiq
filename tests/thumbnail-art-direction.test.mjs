@@ -168,7 +168,7 @@ test('Hero cover prompt includes the requested cream medallion, blush ring and e
 test('Manual approval also runs background-first Vision before applying original layers', () => {
   const part = designer.slice(designer.indexOf('const approveReviewedBackground'),designer.indexOf('const onReferenceUpload'));
   assert.match(part, /if \(target\.packSlideKey === 'custom-canvas'\)/);
-  assert.match(part, /manual/i);
+  assert.match(part, /hand-arranged slots with AI Vision coordinates/);
   const legacy = part.slice(part.indexOf("setMessage('AI Vision analyzing approved background"));
   assert.match(legacy, /await placeOriginalsOverBackground/);
   assert.ok(legacy.indexOf('await placeOriginalsOverBackground') < legacy.indexOf('backgroundImageUrl: d.rejectedBackgroundUrl'));
