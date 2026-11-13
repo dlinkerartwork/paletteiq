@@ -45,7 +45,7 @@ test('Etsy thumbnails are fixed at 1024 square including rendered export', () =>
 });
 
 test('Etsy pack defaults to independently editable typography and exact original assets', () => {
-  assert.match(designer, /useState<'editable' \| 'ai-artwork'>\('editable'\)/);
+  assert.match(designer, /useState<'editable' \| 'ai-artwork'>\('ai-artwork'\)/);
   assert.match(designer, /packTypography === 'editable' \? \[\.\.\.plannedElements, \.\.\.typographyForSlide\(slide\)\]/);
   assert.match(designer, /mode: packTypography === 'editable' \? 'background-only' : 'background-with-typography'/);
   assert.match(designer, /originalAssetsOnly: true/);
@@ -56,4 +56,19 @@ test('Both background modes reject illustrated substitutes, and editable mode re
   assert.match(generator, /decision\.containsObjects !== false/);
   assert.match(generator, /mode === 'background-only' && decision\.containsText !== false/);
   assert.match(generator, /Art-director notes:/);
+});
+
+test('Batch requests the AI background even if art direction fails', () => {
+  assert.match(designer, /let plannedElements: ThumbnailElement\[\] = item\.elements\.filter/);
+  assert.match(designer, /catch \{\s*setPackStatus\('Using safe collection layout/);
+  assert.match(designer, /fetch\('\/api\/thumbnail-ai-image'/);
+  assert.match(designer, /packTypography === 'ai-artwork'/);
+});
+
+test('Every collection thumbnail offers safe deletion and a background retry', () => {
+  assert.match(designer, /const deleteThumbnail = \(thumbnailId: string\)/);
+  assert.match(designer, /Original clipart assets will not be deleted/);
+  assert.match(designer, /onClick=\{\(\) => deleteThumbnail\(item\.id\)\}/);
+  assert.match(designer, /onClick=\{\(\) => void retryBackground\(item\)\}/);
+  assert.match(designer, /backgroundRetryId === item\.id/);
 });
