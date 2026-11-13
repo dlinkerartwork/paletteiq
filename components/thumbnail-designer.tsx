@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import UpscaleCompare from '@/components/upscale-compare';
 import { readApiJson } from '@/lib/listing-image-upload';
+import { thumbnailSeoDefaults, type ThumbnailSeoSource } from '@/lib/thumbnail-seo-defaults';
 import type { ListingStudioConfig } from '@/lib/listing-studio-config';
 import { fitClipartAroundTypography, type ThumbnailBox } from '@/lib/thumbnail-fit';
 import { buildThumbnailDesignBrief, type ThumbnailBriefSettings } from '@/lib/thumbnail-design-brief';
@@ -20,16 +21,17 @@ export type ThumbnailDesign = {
   rejectedBackgroundUrl?: string; rejectedBackgroundReason?: string;
   packTypography?: 'editable' | 'ai-artwork'; packSlideKey?: string; packHeadline?: string; packSubtitle?: string; packBadge?: string; packTextZone?: { x: number; y: number; width: number; height: number };
   packImageProvider?: 'openai' | 'gemini'; packImageModel?: string;
+  packAiTypographyEnabled?: boolean; packLetteringStyle?: 'auto' | 'arched' | 'flowing' | 'stacked' | 'hand-painted';
   packHierarchy?: ClipartHierarchy; packBoldness?: 'soft' | 'balanced' | 'bold'; packCoverStyle?: 'editorial' | 'boutique' | 'storybook' | 'modern' | 'watercolor';
   referenceDesign?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string };
 };
 type Character = { id: string; name: string; imageUrl?: string; upscaledImageUrl?: string; category?: string; subtheme?: string; group?: string };
 export type ThumbnailSaveControls = { save: () => Promise<void>; hasUnsaved: () => boolean };
-type Props = { onStartListingStudio?: (settings: ListingStudioConfig) => void | Promise<void>; registerSaveControls?: (controls: ThumbnailSaveControls | null) => void; title: string; collectionVisualSettings?: {style?: string; palette?: string; texture?: string}; aiDefaults: { provider: 'openai' | 'gemini'; openaiModel: string; geminiModel: string }; projectId: string; characters: Character[]; references: string[]; designs: ThumbnailDesign[]; onChange: (designs: ThumbnailDesign[]) => void; onSave: (designs: ThumbnailDesign[]) => Promise<void> };
+type Props = { onStartListingStudio?: (settings: ListingStudioConfig) => void | Promise<void>; registerSaveControls?: (controls: ThumbnailSaveControls | null) => void; title: string; seoListing?: ThumbnailSeoSource; collectionVisualSettings?: {style?: string; palette?: string; texture?: string}; aiDefaults: { provider: 'openai' | 'gemini'; openaiModel: string; geminiModel: string }; projectId: string; characters: Character[]; references: string[]; designs: ThumbnailDesign[]; onChange: (designs: ThumbnailDesign[]) => void; onSave: (designs: ThumbnailDesign[]) => Promise<void> };
 const id = () => crypto.randomUUID();
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 const THUMBNAIL_SIZE = 1024;
-const newDesign = (index: number): ThumbnailDesign => ({ id: id(), name: 'Thumbnail ' + index, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, background: '#f7f1e9', elements: [], packSubtitle: 'Digital Clipart Collection', packTextZone: { x: 22, y: 30, width: 56, height: 34 }, updatedAt: Date.now() });
+const newDesign = (index: number, seo: { title: string; subtitle: string } = { title: '', subtitle: 'Digital Clipart Collection' }): ThumbnailDesign => ({ id: id(), name: 'Thumbnail ' + index, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, background: '#f7f1e9', elements: [], packHeadline: seo.title, packSubtitle: seo.subtitle, packAiTypographyEnabled: true, packLetteringStyle: 'auto', packTextZone: { x: 22, y: 30, width: 56, height: 34 }, updatedAt: Date.now() });
 const newImage = (character: Character, index: number, preferredSource: 'auto' | 'original' | 'upscaled' = 'original'): ThumbnailElement => ({
   id: id(), type: 'image', characterId: character.id, source: preferredSource === 'auto' ? (character.upscaledImageUrl ? 'upscaled' : 'original') : preferredSource,
   x: 10 + (index % 4) * 21, y: 17 + (Math.floor(index / 4) % 3) * 25, width: 22, height: 28, rotation: 0
@@ -56,7 +58,8 @@ async function loadForExport(url: string): Promise<HTMLImageElement> {
   await image.decode();
   return image;
 }
-export default function ThumbnailDesigner({ onStartListingStudio, registerSaveControls, title, collectionVisualSettings, aiDefaults, projectId, characters, references, designs, onChange, onSave }: Props) {
+export default function ThumbnailDesigner({ onStartListingStudio, registerSaveControls, title, seoListing, collectionVisualSettings, aiDefaults, projectId, characters, references, designs, onChange, onSave }: Props) {
+  const seoDefaults = thumbnailSeoDefaults(seoListing, title);
   const [activeId, setActiveId] = useState(designs[0]?.id || '');
   const [selectedId, setSelectedId] = useState('');
   const [previewZoom, setPreviewZoom] = useState(1);
@@ -273,7 +276,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     return () => window.removeEventListener('keydown', keyDown);
   }, [selectedId, design, designs, onChange]);
 
-  const create = () => { const next = newDesign(designs.length + 1); onChange([...designs, next]); setActiveId(next.id); };
+  const create = () => { const next = newDesign(designs.length + 1, seoDefaults); onChange([...designs, next]); setActiveId(next.id); };
   const duplicate = () => { if (!design) return; const copy = { ...design, id: id(), name: design.name + ' copy', elements: design.elements.map(e => ({ ...e, id: id() })), updatedAt: Date.now() }; onChange([...designs, copy]); setActiveId(copy.id); };
   const deleteThumbnail = (thumbnailId: string) => {
     const target = latestDesignsRef.current.find(d => d.id === thumbnailId);
@@ -436,20 +439,32 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     }))
   ).join('\n\n--- NEXT THUMBNAIL ---\n\n');
 
+  const typographyEnabled = design?.packAiTypographyEnabled !== false;
+  const previewHeading = design?.packHeadline ?? seoDefaults.title;
+  const previewSubtitle = design?.packSubtitle ?? seoDefaults.subtitle;
+  const previewBadge = design?.packBadge ?? '';
+  const previewHasText = typographyEnabled && Boolean(previewHeading.trim() || previewSubtitle.trim() || previewBadge.trim());
   const manualCanvasPromptPreview = [
-    'ETSY MANUAL CANVAS — AI GRAPHIC BACKGROUND + ARTISTIC LETTERING (1024 × 1024)',
-    'Generate nonfigurative design and exact typography only. DO NOT draw clipart, characters, food, products, or references.',
-    'Main title: ' + JSON.stringify(design?.packHeadline ?? title),
-    'Subtitle: ' + JSON.stringify(design?.packSubtitle ?? 'Digital Clipart Collection'),
-    'Badge (omit entirely when blank): ' + JSON.stringify(design?.packBadge ?? ''),
-    'Typography safe zone: ' + JSON.stringify(design?.packTextZone || { x: 22, y: 30, width: 56, height: 34 }),
+    'ETSY MANUAL CANVAS — AI GRAPHIC BACKGROUND' + (previewHasText ? ' + CUSTOM ARTISTIC LETTERING' : ' WITHOUT ANY TEXT') + ' (1024 × 1024)',
+    'Generate nonfigurative design only. DO NOT redraw clipart, characters, food, products, or reference illustrations.',
+    ...(previewHasText ? [
+      'Main title (omit when blank): ' + JSON.stringify(previewHeading),
+      'Subtitle (omit when blank): ' + JSON.stringify(previewSubtitle),
+      'Badge (omit when blank): ' + JSON.stringify(previewBadge),
+      'Artistic lettering direction: ' + (design?.packLetteringStyle || 'auto') + '. Use fluid hand-drawn expressive lettering; arched, curved, flowing or layered title layouts are welcome when readable.'
+    ] : ['ZERO TYPOGRAPHY: no titles, subtitles, badges, symbols resembling letters, or decorative words.']),
+    ...(previewHasText ? ['Typography safe zone: ' + JSON.stringify(design?.packTextZone || { x: 22, y: 30, width: 56, height: 34 })] : []),
     'Image provider/model: ' + imageProvider + ' / ' + (imageProvider === 'gemini' ? geminiImageModel : imageModel),
     'Style: ' + packCoverStyle + ', ' + backgroundStyle + ', ' + backgroundIntensity + ', boldness ' + packBoldness,
     'Reference template: ' + (reference ? 'selected (style cues only)' : 'none') + ', interpretation ' + referenceStyle,
-    'The following rectangles are RESERVED for the exact PNGs placed manually in the editor. Their pixels and identities are NEVER sent to the provider:',
+    'Original assets may deliberately extend beyond the canvas and will be CROPPED by the final canvas edge.',
+    'Only the VISIBLE portions of these manually positioned PNG rectangles are reserved on canvas; their pixels and identities are NEVER sent to the image provider:',
     JSON.stringify((design?.elements || []).filter(e => e.type === 'image')
-      .map(e => ({ x:e.x, y:e.y, width:e.width, height:e.height })), null, 2),
-    'Composite original PNGs without changing their user-authored coordinates.'
+      .map(e => ({ x: Math.max(0,e.x), y: Math.max(0,e.y),
+        width: Math.max(0,Math.min(100,e.x+e.width)-Math.max(0,e.x)),
+        height: Math.max(0,Math.min(100,e.y+e.height)-Math.max(0,e.y)) }))
+      .filter(e=>e.width>0&&e.height>0), null, 2),
+    'PaletteIQ composites exact original collection PNGs with the user-authored coordinates; crop at canvas borders.'
   ].join('\n\n');
 
   // User-directed workflow: layout is authored ON the current canvas. The AI
@@ -464,28 +479,32 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
       setMessage('An image layer has no original collection PNG. Replace it before generating.'); return;
     }
     const zone = source.packTextZone || { x: 22, y: 30, width: 56, height: 34 };
-    if ([zone.x, zone.y, zone.width, zone.height].some(n => !Number.isFinite(n)) ||
+    // Deliberate bleed beyond the canvas is allowed. Only the visible area is
+    // composited and reserved; the full source PNG is never resized or redrawn.
+    const hasVisibleAsset = imageLayers.some(e =>
+      e.x < 100 && e.y < 100 && e.x + e.width > 0 && e.y + e.height > 0);
+    if (!hasVisibleAsset) { setMessage('At least one original clipart must remain partially visible on the canvas.'); return; }
+    const enabled = source.packAiTypographyEnabled !== false;
+    const heading = (source.packHeadline ?? seoDefaults.title).trim();
+    const subtitle = (source.packSubtitle ?? seoDefaults.subtitle).trim();
+    const badge = (source.packBadge ?? '').trim();
+    const hasLettering = enabled && Boolean(heading || subtitle || badge);
+    if (hasLettering && ([zone.x, zone.y, zone.width, zone.height].some(n => !Number.isFinite(n)) ||
       zone.x < 0 || zone.y < 0 || zone.width < 10 || zone.height < 10 ||
-      zone.x + zone.width > 100 || zone.y + zone.height > 100) {
+      zone.x + zone.width > 100 || zone.y + zone.height > 100)) {
       setMessage('Set a valid typography safe zone inside the canvas.'); return;
     }
-    if (imageLayers.some(e => e.x < 0 || e.y < 0 || e.x + e.width > 100 || e.y + e.height > 100)) {
-      setMessage('All original clipart layers must fit fully within the canvas before generating.'); return;
-    }
-    const overlapsType = imageLayers.some(e =>
+    const overlapsType = hasLettering && imageLayers.some(e =>
       e.x < zone.x + zone.width && e.x + e.width > zone.x &&
       e.y < zone.y + zone.height && e.y + e.height > zone.y
     );
-    if (overlapsType) { setMessage('One or more clipart layers overlap the typography zone. Move or resize them on the canvas, or adjust the typography zone first.'); return; }
-    const heading = (source.packHeadline ?? title).trim();
-    const subtitle = (source.packSubtitle ?? 'Digital Clipart Collection').trim();
-    const badge = (source.packBadge ?? '').trim();
-    if (!heading || heading.length > 100 || subtitle.length > 140 || badge.length > 60) {
-      setMessage('Main title (1–100 characters), subtitle (max 140), or badge (max 60) is invalid.'); return;
+    if (overlapsType) { setMessage('Clipart overlaps the selected lettering area. Move it or change the typography zone; bleed outside the canvas is allowed.'); return; }
+    if (hasLettering && (heading.length > 100 || subtitle.length > 140 || badge.length > 60)) {
+      setMessage('Title (max 100), subtitle (max 140), or badge (max 60) is too long.'); return;
     }
     if (source.elements.some(e => e.type === 'text') &&
       !window.confirm('AI lettering is rendered into the background. Existing editable text layers on this canvas will be removed to avoid duplicate words. Continue?')) return;
-    if (!window.confirm('Generate a paid AI background and exact artistic typography for this manually arranged canvas? No collection clipart will be sent to or regenerated by the image provider.')) return;
+    if (!window.confirm('Generate a paid AI ' + (hasLettering ? 'background with artistic lettering' : 'background WITHOUT any text') + ' for this manually arranged canvas? Original clipart will never be regenerated.')) return;
     setAiBusy(true);
     setPackStatus('Analyzing the selected graphic reference and preserving manual artwork placement...');
     try {
@@ -511,13 +530,14 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
             (error instanceof Error ? error.message.slice(0, 100) : ''));
         }
       }
-      setPackStatus('Creating background and lettering. Original collection PNGs remain on your canvas...');
+      setPackStatus('Creating AI ' + (hasLettering ? 'background and artistic lettering' : 'background with no typography') + '. Original collection PNGs stay in place...');
       const imageModelChoice = imageProvider === 'gemini' ? geminiImageModel : imageModel;
       const requestBody = {
         projectId, provider: imageProvider, model: imageModelChoice, quality: packQuality,
-        mode: 'background-with-typography' as const,
+        mode: hasLettering ? 'background-with-typography' as const : 'background-only' as const,
         width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE,
-        headline: heading, subtitle, badge,
+        headline: hasLettering ? heading : '', subtitle: hasLettering ? subtitle : '', badge: hasLettering ? badge : '',
+        letteringStyle: source.packLetteringStyle || 'auto',
         slideName: 'Custom Canvas Artwork',
         backgroundStyle, backgroundIntensity, designBoldness: packBoldness,
         coverStyle: packCoverStyle, referenceDesign,
@@ -528,7 +548,10 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           x: e.x, y: e.y, width: e.width, height: e.height })),
         designBriefSettings: {
           ...currentBriefSettings(), scope: 'single' as const, slide: 'Custom Canvas Artwork',
-          headline: heading, subtitle, typography: 'ai-artwork' as const,
+          headline: hasLettering ? heading : '', subtitle: hasLettering ? subtitle : '',
+          badge: hasLettering ? badge : '',
+          typography: hasLettering ? 'ai-artwork' as const : 'editable' as const,
+          textDisabled: !hasLettering,
           imageModel: imageModelChoice
         }
       };
@@ -546,8 +569,9 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         .map(e => ({ ...e, source: 'original' as const }));
       const common: Partial<ThumbnailDesign> = {
         originalAssetsOnly: true, packSlideKey: 'custom-canvas',
-        packTypography: 'ai-artwork', packHeadline: heading, packSubtitle: subtitle,
-        packBadge: badge, packTextZone: zone,
+        packTypography: hasLettering ? 'ai-artwork' : 'editable', packHeadline: heading, packSubtitle: subtitle,
+        packBadge: badge, packTextZone: zone, packAiTypographyEnabled: enabled,
+        packLetteringStyle: source.packLetteringStyle || 'auto',
         packImageProvider: imageProvider, packImageModel: imageModelChoice,
         packBoldness, packHierarchy, packCoverStyle, referenceDesign,
         referenceUrl: reference.startsWith('https://') ? reference : undefined,
@@ -571,7 +595,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
       if (!result.qcRejected) setShowTypographyGuide(false);
       setMessage(result.qcRejected
         ? 'New AI background was flagged for review. Inspect it and explicitly approve it before composition; original clipart positions are preserved.'
-        : 'AI background, exact title, subtitle and optional badge applied. Manual clipart positions are unchanged. Save the design to persist the result.');
+        : (hasLettering ? 'Artistic title, subtitle and optional badge applied.' : 'Text-free background applied.') + ' Manual clipart positions (including cropped edges) are unchanged. Save the design to persist.');
       setPackStatus('');
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -1289,18 +1313,33 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         <small>AI Vision extracts only layout styling and typographic direction from the reference, not its product images, text, or brand. User-placed clipart positions stay fixed.</small>
         <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 12, display: 'grid', gap: 9 }}>
           <strong>Background &amp; AI Typography</strong>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, fontWeight: 600 }}>
+            <input aria-label="Enable AI typography" type="checkbox" checked={typographyEnabled} disabled={aiBusy} onChange={e => mutate({ packAiTypographyEnabled: e.target.checked, renderedImageUrl: undefined })}/>
+            Enable AI Typography (title, subtitle &amp; badge)
+          </label>
+          <small>{typographyEnabled ? 'AI creates hand-crafted artistic lettering in the background. Each field may be left blank.' : 'No text, badge, letters or pseudo-writing will be requested from the AI. Only a decorative background will be generated.'} Changes to this checkbox or wording take effect after the next Generate AI Background &amp; Typography; the previous background is kept until then.</small>
+          <button type="button" className="outline-btn" disabled={aiBusy || !typographyEnabled} onClick={() => mutate({ packHeadline: seoDefaults.title, packSubtitle: seoDefaults.subtitle, renderedImageUrl: undefined })}>Use SEO defaults from Etsy Listing Draft</button>
+          <small>{seoDefaults.hasSeoTitle ? 'Main title is derived from Etsy SEO title' : 'No SEO title saved; collection title is used'} · {seoDefaults.hasSeoSubtitle ? 'subtitle uses SEO keyword/category' : 'subtitle falls back to Digital Clipart Collection'}. Existing manual edits remain until you reset them.</small>
           <label className="input-label">MAIN TITLE</label>
-          <input aria-label="Canvas main title" maxLength={100} value={design.packHeadline ?? title} disabled={aiBusy} onChange={e => mutate({ packHeadline: e.target.value, renderedImageUrl: undefined })}/>
+          <input aria-label="Canvas main title" maxLength={100} value={design.packHeadline ?? seoDefaults.title} disabled={aiBusy || !typographyEnabled} onChange={e => mutate({ packHeadline: e.target.value, renderedImageUrl: undefined })}/>
           <label className="input-label">SUBTITLE</label>
-          <input aria-label="Canvas subtitle" maxLength={140} value={design.packSubtitle ?? 'Digital Clipart Collection'} disabled={aiBusy} onChange={e => mutate({ packSubtitle: e.target.value, renderedImageUrl: undefined })}/>
+          <input aria-label="Canvas subtitle" maxLength={140} value={design.packSubtitle ?? seoDefaults.subtitle} disabled={aiBusy || !typographyEnabled} onChange={e => mutate({ packSubtitle: e.target.value, renderedImageUrl: undefined })}/>
           <label className="input-label">BADGE TEXT (OPTIONAL)</label>
-          <input aria-label="Canvas badge text" maxLength={60} placeholder="Leave empty for no badge" value={design.packBadge ?? ''} disabled={aiBusy} onChange={e => mutate({ packBadge: e.target.value, renderedImageUrl: undefined })}/>
+          <input aria-label="Canvas badge text" maxLength={60} placeholder="Leave empty for no badge" value={design.packBadge ?? ''} disabled={aiBusy || !typographyEnabled} onChange={e => mutate({ packBadge: e.target.value, renderedImageUrl: undefined })}/>
+          <label className="input-label">ARTISTIC LETTERING COMPOSITION</label>
+          <select aria-label="Artistic lettering composition" value={design.packLetteringStyle || 'auto'} disabled={aiBusy || !typographyEnabled} onChange={e => mutate({ packLetteringStyle: e.target.value as NonNullable<ThumbnailDesign['packLetteringStyle']>, renderedImageUrl: undefined })}>
+            <option value="auto">AI creative art direction</option>
+            <option value="arched">Arched &amp; curved lettering</option>
+            <option value="flowing">Flowing brush calligraphy</option>
+            <option value="stacked">Layered expressive typography</option>
+            <option value="hand-painted">Hand-painted lettering</option>
+          </select>
           <strong>Typography safe area</strong>
-          <small>The shaded preview on the canvas shows where AI can place title, subtitle and badge. Adjust this zone or move clipart so they do not overlap.</small>
+          <small>{typographyEnabled ? 'The optional canvas guide marks the lettering region. Clipart may bleed beyond the frame, but should avoid this region.' : 'Typography is disabled; this area is ignored during background generation.'}</small>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 6 }}>
             {(['x','y','width','height'] as const).map(field => <label key={field} style={{ minWidth: 0, display: 'grid', gap: 3 }}>
               <span className="input-label">{field.toUpperCase()} (%)</span>
-              <input aria-label={'Typography zone ' + field} type="number" min={0} max={100} step={1} disabled={aiBusy}
+              <input aria-label={'Typography zone ' + field} type="number" min={0} max={100} step={1} disabled={aiBusy || !typographyEnabled}
                 value={(design.packTextZone || { x: 22, y: 30, width: 56, height: 34 })[field]}
                 onChange={e => mutate({ packTextZone: { ...(design.packTextZone || { x: 22, y: 30, width: 56, height: 34 }), [field]: Number(e.target.value) }, renderedImageUrl: undefined })}/>
             </label>)}
@@ -1343,7 +1382,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
             <WandSparkles size={15}/> {aiBusy ? 'Generating AI artwork...' : 'Generate AI Background & Typography'}
           </button>
           {packStatus && <small role="status">{packStatus}</small>}
-          <small>AI generates only abstract background, exact artistic title, subtitle and optional typographic badge. PaletteIQ keeps your original PNG positions. Changing any text requires generating new AI lettering. OpenAI verification is currently required even when Gemini generates the artwork. Review spelling before use; API charges apply.</small>
+          <small>Artistic lettering can be curved, arched, flowing, or hand-painted rather than rigid font typesetting. Disable the checkbox for a background with no text. Clipart is clipped naturally at the canvas edge. Changing lettering requires another AI generation; verify spelling before use. API charges apply.</small>
         </div>
         <h3>Characters</h3>
         <div style={{ maxHeight: 400, overflowY: 'auto', display: 'grid', gap: 8 }}>
@@ -1398,7 +1437,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
                 draggable={false}
                 style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none', userSelect: 'none' }}
               />}
-              {showTypographyGuide && <div aria-label="Reserved AI typography zone" style={{
+              {showTypographyGuide && typographyEnabled && <div aria-label="Reserved AI typography zone" style={{
                 position: 'absolute',
                 left: (design.packTextZone || { x: 22, y: 30, width: 56, height: 34 }).x + '%',
                 top: (design.packTextZone || { x: 22, y: 30, width: 56, height: 34 }).y + '%',
@@ -1410,8 +1449,8 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
                 gap: '4%', padding: '2%', textAlign: 'center', zIndex: 2
               }}>
                 {!design.backgroundImageUrl && !design.aiImageUrl && <>
-                  <strong style={{ fontSize: 'clamp(7px, 4cqw, 48px)', lineHeight: 1.08, overflowWrap: 'anywhere' }}>{design.packHeadline ?? title}</strong>
-                  <span style={{ fontSize: 'clamp(6px, 1.7cqw, 23px)', lineHeight: 1.2 }}>{design.packSubtitle ?? 'Digital Clipart Collection'}</span>
+                  <strong style={{ fontSize: 'clamp(7px, 4cqw, 48px)', lineHeight: 1.08, overflowWrap: 'anywhere' }}>{design.packHeadline ?? seoDefaults.title}</strong>
+                  <span style={{ fontSize: 'clamp(6px, 1.7cqw, 23px)', lineHeight: 1.2 }}>{design.packSubtitle ?? seoDefaults.subtitle}</span>
                   {Boolean(design.packBadge?.trim()) && <span style={{ fontSize: 'clamp(6px, 1.4cqw, 20px)', background: '#fff4de', border: '1px solid #d7b28f', borderRadius: 20, padding: '1% 4%' }}>{design.packBadge}</span>}
                 </>}
               </div>}
