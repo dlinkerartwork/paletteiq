@@ -64,7 +64,7 @@ test('Both background modes reject illustrated substitutes, and editable mode re
 test('Batch requests the image before Vision layout and preserves safe fallback', () => {
   const batch = designer.slice(designer.indexOf('const generateReferenceBatch ='), designer.indexOf('const retryBackground ='));
   assert.ok(batch.indexOf("fetch('/api/thumbnail-ai-image'") < batch.indexOf('await placeOriginalsOverBackground('));
-  assert.match(designer, /return \{ elements: imageElements, usedFallback: true \}/);
+  assert.match(designer, /return \{ elements: safeFallback, usedFallback: true \}/);
   assert.match(designer, /backgroundImageUrl: result\.imageUrl/);
 });
 
@@ -142,7 +142,7 @@ test('Reference styles influence only abstract graphic and lettering prompts, no
 test('Background-first Vision cannot collapse a multi-asset cover to one original clipart', () => {
   assert.match(designer, /const expectedMin = Math\.min\(imageElements\.length/);
   assert.match(designer, /result\.slots\.length < expectedMin/);
-  assert.match(designer, /return \{ elements: imageElements, usedFallback: true \}/);
+  assert.match(designer, /return \{ elements: safeFallback, usedFallback: true \}/);
 });
 
 test('Vision analyzes the exact persisted background, not a generic pre-generation prompt', () => {
