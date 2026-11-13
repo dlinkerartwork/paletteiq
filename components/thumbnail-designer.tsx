@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import UpscaleCompare from '@/components/upscale-compare';
 import { fitClipartAroundTypography, type ThumbnailBox } from '@/lib/thumbnail-fit';
+import { buildThumbnailDesignBrief, type ThumbnailBriefSettings } from '@/lib/thumbnail-design-brief';
 import { buildPack, filterThemeCharacters, placeOriginals, type PackPreset, type PackSlide, type ClipartHierarchy } from '@/lib/etsy-listing-pack';
 import { Download, Plus, Trash2, Copy, Undo2, Redo2, WandSparkles, RotateCcw } from 'lucide-react';
 
@@ -21,7 +22,7 @@ export type ThumbnailDesign = {
 };
 type Character = { id: string; name: string; imageUrl?: string; upscaledImageUrl?: string; category?: string; subtheme?: string; group?: string };
 export type ThumbnailSaveControls = { save: () => Promise<void>; hasUnsaved: () => boolean };
-type Props = { registerSaveControls?: (controls: ThumbnailSaveControls | null) => void; title: string; aiDefaults: { provider: 'openai' | 'gemini'; openaiModel: string; geminiModel: string }; projectId: string; characters: Character[]; references: string[]; designs: ThumbnailDesign[]; onChange: (designs: ThumbnailDesign[]) => void; onSave: (designs: ThumbnailDesign[]) => Promise<void> };
+type Props = { registerSaveControls?: (controls: ThumbnailSaveControls | null) => void; title: string; collectionVisualSettings?: {style?: string; palette?: string; texture?: string}; aiDefaults: { provider: 'openai' | 'gemini'; openaiModel: string; geminiModel: string }; projectId: string; characters: Character[]; references: string[]; designs: ThumbnailDesign[]; onChange: (designs: ThumbnailDesign[]) => void; onSave: (designs: ThumbnailDesign[]) => Promise<void> };
 const id = () => crypto.randomUUID();
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 const THUMBNAIL_SIZE = 1024;
@@ -52,7 +53,7 @@ async function loadForExport(url: string): Promise<HTMLImageElement> {
   await image.decode();
   return image;
 }
-export default function ThumbnailDesigner({ registerSaveControls, title, aiDefaults, projectId, characters, references, designs, onChange, onSave }: Props) {
+export default function ThumbnailDesigner({ registerSaveControls, title, collectionVisualSettings, aiDefaults, projectId, characters, references, designs, onChange, onSave }: Props) {
   const [activeId, setActiveId] = useState(designs[0]?.id || '');
   const [selectedId, setSelectedId] = useState('');
   const [previewZoom, setPreviewZoom] = useState(1);
@@ -309,28 +310,6 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     commit({ ...design, elements: design.elements.map(e => e.id === drag.id ? { ...e, ...next } : e) }, false);
   };
   const endDrag = () => { dragRef.current = null; };
-  const analyze = async () => {
-    if (!design || !reference) { setMessage('Choose or upload a reference image first.'); return; }
-    setAiBusy(true); setMessage('');
-    try {
-      const response = await fetch('/api/thumbnail-layout', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId, imageUrl: reference, provider, model, count: Math.min(characters.filter(c => c.imageUrl).length, 24) }) });
-      const body = await response.json() as { error?: string; layout?: { slots?: Array<{ x: number; y: number; width: number; height: number; rotation?: number }>; texts?: Array<{ text: string; x: number; y: number; width: number; height: number; curve?: number }> ; background?: string } };
-      if (!response.ok) throw new Error(body.error || 'AI layout analysis failed');
-      const available = characters.filter(c => c.imageUrl);
-      const slots = (body.layout?.slots || []).slice(0, available.length);
-      const images = slots.map((slot, i): ThumbnailElement => ({
-        ...newImage(available[i], i, 'original'), x: clamp(slot.x, 0, 100), y: clamp(slot.y, 0, 100), width: clamp(slot.width, 1, 100), height: clamp(slot.height, 1, 100), rotation: clamp(slot.rotation || 0, -180, 180)
-      }));
-      const texts = (body.layout?.texts || []).slice(0, 32).map((slot): ThumbnailElement => ({
-        ...newText(), id: id(), text: slot.text || 'CUSTOMIZE TITLE', curve: clamp(Number(slot.curve) || 0, -100, 100), x: clamp(slot.x, 0, 100), y: clamp(slot.y, 0, 100), width: clamp(slot.width, 5, 100), height: clamp(slot.height, 3, 100)
-      }));
-      commit({ ...design, elements: [...design.elements.map(e => e.type === 'image' ? { ...e, source: 'original' as const } : e), ...images, ...texts], background: /^#[0-9a-f]{6}$/i.test(body.layout?.background || '') ? body.layout!.background! : design.background, referenceUrl: reference.startsWith('https://') ? reference : undefined, originalAssetsOnly: true });
-      setMessage('Layout applied. Review the arrangement and customize all elements.');
-    } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
-    finally { setAiBusy(false); }
-  };
-
   // Exact human-readable typography. Unlike AI-rendered lettering, this cannot
   // hallucinate random words, and can be edited after generation.
   const typographyForSlide = (slide: PackSlide): ThumbnailElement[] => {
@@ -423,6 +402,25 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
       return { elements: safeFallback, usedFallback: true };
     }
   };
+
+  const currentBriefSettings = (slide?: PackSlide): ThumbnailBriefSettings => ({
+    scope: generationScope, slide: slide?.name || singleSlideKey,
+    headline: slide?.headline || coverHeadline.trim() || title,
+    subtitle: slide?.subtitle || 'CLIPART COLLECTION',
+    typography: packTypography, boldness: packBoldness, hierarchy: packHierarchy,
+    coverStyle: packCoverStyle, quality: packQuality,
+    backgroundStyle, intensity: backgroundIntensity,
+    referenceInterpretation: referenceStyle, hasReference: Boolean(reference),
+    analysisProvider: provider, analysisModel: model, imageModel,
+    collectionStyle: collectionVisualSettings?.style,
+    collectionPalette: collectionVisualSettings?.palette,
+    collectionTexture: collectionVisualSettings?.texture
+  });
+  const briefPreviewSlide = buildPack('complete-10', title, characters)
+    .find(slide => slide.key === singleSlideKey);
+  const currentBriefPreview = buildThumbnailDesignBrief(currentBriefSettings(
+    briefPreviewSlide ? { ...briefPreviewSlide, headline: coverHeadline.trim() || briefPreviewSlide.headline } : undefined
+  ));
 
   // Create the background and artistic lettering FIRST, inspect the real pixels
   // with Vision, then composite exact original PNGs according to its coordinates.
@@ -538,7 +536,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
               headline: slide.headline, subtitle: slide.subtitle,
               slideName: slide.name, textZone: slide.textZone,
               designBoldness: packBoldness, coverStyle: packCoverStyle,
-              referenceDesign,
+              referenceDesign, designBriefSettings: currentBriefSettings(slide),
               layout: initialElements.map(e => ({ type: 'image', x: e.x, y: e.y, width: e.width, height: e.height }))
             })
           });
@@ -610,6 +608,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
           slideName: target.name,
           designBoldness: target.packBoldness || packBoldness, coverStyle: target.packCoverStyle || packCoverStyle,
           referenceDesign: target.referenceDesign,
+          designBriefSettings: { ...currentBriefSettings(), headline: target.packHeadline || title, subtitle: target.packSubtitle || 'CLIPART COLLECTION', slide: target.name },
           textZone: target.packTextZone || { x: 22, y: 31, width: 56, height: 38 },
           layout: imageLayers.map(e => ({ type: 'image', x: e.x, y: e.y, width: e.width, height: e.height }))
         })
@@ -1142,6 +1141,9 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         <option value="similar">Similar composition · recommended</option><option value="creative">Creative adaptation</option><option value="palette">Palette only</option>
       </select>
       <small>For a reference-like watercolor ring and hand-lettered title, upload the reference image before generating. PaletteIQ extracts only graphic style tokens; it never sends reference product artwork to the image generator.</small>
+      <label className="input-label">THUMBNAIL DESIGN PROMPT PREVIEW</label>
+      <textarea aria-label="Thumbnail design prompt preview" readOnly rows={7} value={currentBriefPreview} style={{ width: '100%', fontSize: 11, lineHeight: 1.35 }} />
+      <button type="button" className="outline-btn" onClick={() => void navigator.clipboard.writeText(currentBriefPreview)}>Copy thumbnail prompt</button>
       <button className="primary-btn" disabled={aiBusy || !characters.some(c => c.imageUrl)} onClick={() => void generateReferenceBatch()}>{aiBusy ? 'Generating ' + (generationScope === 'single' ? '1 thumbnail' : 'Etsy pack') + '...' : generationScope === 'single' ? 'Generate 1 Thumbnail' : generationScope === 'core-5' ? 'Generate 5 Thumbnails' : generationScope === 'complete-10' ? 'Generate 10 Thumbnails' : 'Generate Category Showcase'}</button>
       {aiBusy && <button className="outline-btn" onClick={() => { cancelPackRef.current = true; }}>Stop after current image</button>}
       {packStatus && <small role="status">{packStatus}</small>}
@@ -1183,8 +1185,9 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
           <select aria-label="Reference interpretation" value={referenceStyle} onChange={e => setReferenceStyle(e.target.value as 'creative' | 'similar' | 'palette')}>
             <option value="creative">Creative adaptation</option><option value="similar">Similar composition</option><option value="palette">Color and style inspiration</option>
           </select>
-          <button className="primary-btn" disabled={!reference || aiBusy} onClick={() => void analyze()}><WandSparkles size={15}/> {aiBusy ? 'Analyzing...' : 'Analyze & apply layout'}</button>
+          <small>Reference analysis runs automatically when generating a thumbnail. Existing collection PNGs are never regenerated.</small>
           <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 12, display: 'grid', gap: 8 }}>
+            <small>Settings in this tab define the thumbnail design brief; no clipart image is sent for generation.</small>
             <strong>Generate Etsy Listing Pack</strong>
             <small>Reference optional. AI designs the layout and decorative background; PaletteIQ composites unmodified collection PNGs. Choose accurate editable lettering or experimental AI typography artwork.</small>
             <label className="input-label">GENERATION SCOPE</label>
@@ -1229,6 +1232,9 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
             <select aria-label="Etsy pack intensity" value={backgroundIntensity} disabled={aiBusy} onChange={e => setBackgroundIntensity(e.target.value as typeof backgroundIntensity)}>
               <option value="soft">Soft</option><option value="balanced">Balanced</option><option value="vibrant">Vibrant</option>
             </select>
+            <label className="input-label">THUMBNAIL DESIGN PROMPT PREVIEW</label>
+            <textarea aria-label="Thumbnail design prompt preview" readOnly rows={7} value={currentBriefPreview} style={{ width: '100%', fontSize: 11, lineHeight: 1.35 }} />
+            <button type="button" className="outline-btn" disabled={aiBusy} onClick={() => void navigator.clipboard.writeText(currentBriefPreview)}>Copy thumbnail prompt</button>
             <button className="primary-btn" type="button" disabled={aiBusy || !characters.some(c => c.imageUrl)} onClick={() => void generateReferenceBatch()}>
               <WandSparkles size={15}/> {aiBusy ? 'Generating...' : generationScope === 'single' ? 'Generate 1 Thumbnail' : generationScope === 'core-5' ? 'Generate 5 Thumbnails' : generationScope === 'complete-10' ? 'Generate 10 Thumbnails' : 'Generate Category Showcase'}
             </button>
