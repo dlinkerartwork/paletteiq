@@ -35,7 +35,7 @@ const api = async (body: object): Promise<StudioApiResponse> => {
   if (!r.ok) throw new Error(json.error ?? 'Request failed (HTTP ' + r.status + ')');
   return json;
 };
-const steps = [{ id: 'analysis', label: 'Research & analysis' }, { id: 'characters', label: 'Character library' }, { id: 'prompts', label: 'OpenAI prompts' }, { id: 'production', label: 'Image production' }, { id: 'thumbnails', label: 'Thumbnail designer' }, { id: 'listing-images', label: 'Etsy Listing Image Studio' }, { id: 'listing', label: 'Etsy listing draft' }];
+const steps = [{ id: 'analysis', label: 'Research & analysis' }, { id: 'characters', label: 'Character library' }, { id: 'prompts', label: 'OpenAI prompts' }, { id: 'production', label: 'Image production' }, { id: 'listing', label: 'Etsy listing draft' }, { id: 'thumbnails', label: 'Thumbnail designer' }, { id: 'listing-images', label: 'Etsy Listing Image Studio' }];
 const nextIncomplete = (p: Project) => !p.theme && !p.title ? 'analysis' : !p.characters.length ? 'characters' : p.characters.some(c => !c.prompt) ? 'prompts' : p.characters.some(c => c.status !== 'done') ? 'production' : !p.listing?.title ? 'listing' : 'listing';
 
 export default function Home() {
