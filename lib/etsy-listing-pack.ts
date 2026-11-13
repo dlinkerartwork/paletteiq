@@ -1,4 +1,5 @@
 export type PackPreset = 'complete-10' | 'core-5' | 'category-showcase';
+export type ClipartHierarchy = 'soft' | 'medium' | 'dramatic';
 export type PackCharacter = { id: string; name: string; imageUrl?: string; category?: string; subtheme?: string; group?: string };
 export type Zone = { x: number; y: number; width: number; height: number };
 export type PackSlide = { key: string; name: string; headline: string; subtitle: string; layout: 'hero' | 'grid' | 'boutique' | 'closeup' | 'showcase'; limit: number; textZone: Zone; ids?: string[] };
@@ -27,7 +28,7 @@ export function buildPack(preset: PackPreset, title: string, characters: PackCha
   const name = (title || 'Clipart Collection').slice(0, 70);
   const total = characters.filter(c => c.imageUrl).length;
   const summary = total + ' illustrated assets';
-  const hero = make('hero', 'Hero Cover', name, 'Digital Clipart Collection', 'hero', 6, { x: 22, y: 31, width: 56, height: 38 });
+  const hero = make('hero', 'Hero Cover', name, 'Digital Clipart Collection', 'hero', 6, { x: 27, y: 32, width: 46, height: 35 });
   const showcase = make('showcase', 'Collection Showcase', name, summary, 'showcase', 12);
   const preview = make('preview', 'Collection Preview', 'Explore the Collection', summary, 'grid', 35);
   const closeup = make('closeup', 'Artwork Closeups', 'Beautiful Details', 'A closer look at the artwork', 'closeup', 4);
@@ -80,55 +81,68 @@ const rotatedBounds = (box: Zone, angle: number): Zone => {
   const h = box.width*Math.sin(r)+box.height*Math.cos(r);
   return { x:box.x+(box.width-w)/2, y:box.y+(box.height-h)/2, width:w, height:h };
 };
-export function placeOriginals(slide: PackSlide, characters: PackCharacter[], referenceSlots: Zone[] = []) {
-  const options = selectPackCharacters(slide,characters);
+export function placeOriginals(slide: PackSlide, characters: PackCharacter[], referenceSlots: Zone[] = [], hierarchy: ClipartHierarchy = 'dramatic') {
+  const options = selectPackCharacters(slide, characters);
   if (!options.length) return [];
-  const count = options.length;
-  // Editorial templates: radial hero, clean grid, split boutique, gallery and detail.
-  const area: Zone = slide.layout==='boutique'
-    ? {x:53,y:9,width:41,height:82}
-    : slide.layout==='showcase'
-      ? {x:5,y:28,width:90,height:67}
-      : {x:6,y:32,width:88,height:62};
-  const columns = slide.layout==='grid' ? (count>24?7:count>10?4:3)
-    : slide.layout==='closeup'||slide.layout==='boutique'?2
-    : count>9?4:3;
-  const rows = Math.ceil(count/columns);
-  const cellW=area.width/columns,cellH=area.height/rows;
-  const used:Zone[]=[];
-  const result:Array<{characterId:string;x:number;y:number;width:number;height:number;rotation:number}>=[];
-  const safe = (z:Zone,rotation:number) => {
-    const bound=rotatedBounds(z,rotation);
-    return bound.x>=2&&bound.y>=2&&bound.x+bound.width<=98&&bound.y+bound.height<=98
-      &&!overlap(bound,slide.textZone,5)&&used.every(other=>!overlap(bound,other,2));
+  type Placed = Zone & { characterId: string; rotation: number };
+  const placed: Placed[] = [];
+  const isGrid = slide.layout === 'grid' || slide.layout === 'showcase';
+  const hero = slide.layout === 'hero';
+  const boutique = slide.layout === 'boutique';
+  const closeup = slide.layout === 'closeup';
+  const safe = (zone: Zone, rotation: number, margin = 2) => {
+    const rect = rotatedBounds(zone, rotation);
+    return rect.x >= 2 && rect.y >= 2 && rect.x + rect.width <= 98 && rect.y + rect.height <= 98
+      && !overlap(rect, slide.textZone, hero ? 4 : 3)
+      && placed.every(other => !overlap(rect, rotatedBounds(other, other.rotation), margin));
   };
-  for(let i=0;i<count;i++){
-    const width=Math.min(cellW*.72,slide.layout==='closeup'?33:27);
-    const height=Math.min(cellH*.70,slide.layout==='closeup'?32:28);
-    const col=i%columns,row=Math.floor(i/columns);
-    const heroPositions = [
-      [3, 9], [84, 9], [3, 40], [84, 40], [3, 75], [84, 75], [35, 6], [35, 77]
-    ];
-    const [hx,hy]=heroPositions[i % heroPositions.length];
-    const grid:Zone=slide.layout==='hero'
-      ? {x:hx,y:hy,width:Math.min(width,12),height:Math.min(height,18)}
-      : {x:area.x+col*cellW+(cellW-width)/2,y:area.y+row*cellH+(cellH-height)/2,width,height};
-    const angle=slide.layout==='grid'||slide.layout==='showcase'?0:(i%3-1)*3;
-    const candidates:Zone[]=[];
-    // Reference slot positions are only hints; never override typography exclusion.
-    if(referenceSlots[i]&&slide.layout!=='grid'){
-      const ref=referenceSlots[i];
-      candidates.push({x:Math.max(3,Math.min(97-width,ref.x)),y:Math.max(3,Math.min(97-height,ref.y)),width,height});
+  // Artwork-first editorials: a large focal original, medium supporting originals,
+  // and small accents. Grids intentionally preserve their catalogue rhythm.
+  const focal: Zone[] = boutique
+    ? [{ x: 56, y: 12, width: 35, height: 35 }, { x: 58, y: 55, width: 32, height: 31 }]
+    : closeup
+      ? [{ x: 5, y: 35, width: 39, height: 38 }, { x: 54, y: 48, width: 37, height: 36 }]
+      : [{ x: 35, y: 74, width: 30, height: 23 }, { x: 72, y: 4, width: 24, height: 24 }, { x: 4, y: 4, width: 24, height: 24 },
+        { x: 3, y: 72, width: 24, height: 24 }, { x: 74, y: 73, width: 23, height: 23 },
+        { x: 3, y: 39, width: 18, height: 19 }, { x: 79, y: 39, width: 18, height: 19 }];
+  const columns = options.length > 24 ? 7 : options.length > 10 ? 4 : 3;
+  const rowCount = Math.ceil(options.length / columns);
+  const area = slide.layout === 'showcase' ? { x: 5, y: 29, width: 90, height: 66 } : { x: 6, y: 32, width: 88, height: 62 };
+  for (let i = 0; i < options.length; i++) {
+    const cellWidth = area.width / columns, cellHeight = area.height / rowCount;
+      const gridScale = hierarchy === 'dramatic' && slide.layout === 'showcase' ? (i % 4 === 0 ? 1 : .82) : .82;
+    const fallback: Zone = isGrid
+      ? {
+          x: area.x + (i % columns) * cellWidth + cellWidth * (1 - .84 * gridScale) / 2,
+          y: area.y + Math.floor(i / columns) * cellHeight + cellHeight * (1 - .82 * gridScale) / 2,
+          width: cellWidth * .84 * gridScale, height: cellHeight * .82 * gridScale
+        }
+      : { ...focal[i % focal.length] };
+    if (!isGrid) {
+      // Strong variation for hero compositions; do not flatten all objects to 12% slots.
+      const factor = hierarchy === 'soft' ? .83 : hierarchy === 'medium' ? .94 : 1;
+      const desired = i === 0 ? 1 : i <= 2 ? .91 : i <= 4 ? .77 : .67;
+      const scale = factor * desired;
+      const original = { ...fallback };
+      fallback.width = original.width * scale;
+      fallback.height = original.height * scale;
+      fallback.x = original.x + (original.width - fallback.width) / 2;
+      fallback.y = original.y + (original.height - fallback.height) / 2;
     }
-    candidates.push(grid);
-    for(let j=0;j<25;j++){
-      const step=j+1;
-      candidates.push({x:Math.max(3,Math.min(97-width,grid.x+((step%5)-2)*cellW*.18)),y:Math.max(3,Math.min(97-height,grid.y+Math.floor(step/5)*cellH*.13)),width,height});
+    const suggested = referenceSlots[i];
+    const candidates: Zone[] = [];
+    if (!isGrid && suggested) candidates.push({ x: suggested.x, y: suggested.y, width: fallback.width, height: fallback.height });
+    candidates.push(fallback);
+    // Search nearby while preserving designed size and title exclusion.
+    for (let j = 0; j < 48; j++) {
+      const dx = ((j % 7) - 3) * (isGrid ? cellWidth * .13 : 2.5);
+      const dy = (Math.floor(j / 7) - 3) * (isGrid ? cellHeight * .10 : 2.5);
+      candidates.push({ ...fallback, x: fallback.x + dx, y: fallback.y + dy });
     }
-    const chosen=candidates.find(c=>safe(c,angle));
-    if(!chosen)continue;
-    used.push(rotatedBounds(chosen,angle));
-    result.push({characterId:options[i].id,...chosen,rotation:angle});
+    const rotation = isGrid ? 0 : i % 2 ? 3 : -2;
+    const selected = candidates.find(candidate => safe(candidate, rotation, isGrid ? 1 : 1.4));
+    if (!selected) continue;
+    placed.push({ characterId: options[i].id, ...selected, rotation });
   }
-  return result;
+  return placed;
 }

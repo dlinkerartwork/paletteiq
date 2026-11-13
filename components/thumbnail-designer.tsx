@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import UpscaleCompare from '@/components/upscale-compare';
-import { buildPack, filterThemeCharacters, placeOriginals, type PackPreset, type PackSlide } from '@/lib/etsy-listing-pack';
+import { buildPack, filterThemeCharacters, placeOriginals, type PackPreset, type PackSlide, type ClipartHierarchy } from '@/lib/etsy-listing-pack';
 import { Download, Plus, Trash2, Copy, Undo2, Redo2, WandSparkles, RotateCcw } from 'lucide-react';
 
 export type ThumbnailElement = {
@@ -14,6 +14,7 @@ export type ThumbnailDesign = {
   id: string; name: string; width: number; height: number; background: string; backgroundImageUrl?: string; aiImageUrl?: string; aiImagePrompt?: string; renderedImageUrl?: string; upscaledImageUrl?: string; upscaleJob?: { id: string; sourceUrl: string; factor: 2 | 4 | 6 | 8; submittedAt: number }; elements: ThumbnailElement[];
   referenceUrl?: string; originalAssetsOnly?: boolean; generationError?: string; updatedAt: number;
   packTypography?: 'editable' | 'ai-artwork'; packHeadline?: string; packSubtitle?: string; packTextZone?: { x: number; y: number; width: number; height: number };
+  packHierarchy?: ClipartHierarchy; packBoldness?: 'soft' | 'balanced' | 'bold'; packCoverStyle?: 'editorial' | 'boutique' | 'storybook' | 'modern' | 'watercolor';
 };
 type Character = { id: string; name: string; imageUrl?: string; upscaledImageUrl?: string; category?: string; subtheme?: string; group?: string };
 export type ThumbnailSaveControls = { save: () => Promise<void>; hasUnsaved: () => boolean };
@@ -60,6 +61,9 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const [packPreset, setPackPreset] = useState<PackPreset>('complete-10');
   const [packQuality, setPackQuality] = useState<'low' | 'medium' | 'high'>('medium');
   const [packTypography, setPackTypography] = useState<'editable' | 'ai-artwork'>('ai-artwork');
+  const [packHierarchy, setPackHierarchy] = useState<ClipartHierarchy>('dramatic');
+  const [packBoldness, setPackBoldness] = useState<'soft' | 'balanced' | 'bold'>('bold');
+  const [packCoverStyle, setPackCoverStyle] = useState<'editorial' | 'boutique' | 'storybook' | 'modern' | 'watercolor'>('editorial');
   const [packStatus, setPackStatus] = useState('');
   const [backgroundRetryId, setBackgroundRetryId] = useState('');
   const cancelPackRef = useRef(false);
@@ -406,10 +410,11 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         name: String(index + 1).padStart(2, '0') + ' · ' + slide.name,
         originalAssetsOnly: true,
         packTypography, packHeadline: slide.headline, packSubtitle: slide.subtitle, packTextZone: slide.textZone,
+        packHierarchy, packBoldness, packCoverStyle,
         background: color,
         referenceUrl: reference.startsWith('https://') ? reference : undefined,
         elements: [
-          ...placeOriginals(slide, available, slots).map(position => ({
+          ...placeOriginals(slide, available, slots, packHierarchy).map(position => ({
             ...newImage(available.find(c => c.id === position.characterId)!, index, 'original'),
             ...position, source: 'original' as const
           })),
@@ -440,7 +445,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
               body: JSON.stringify({
                 projectId, slideKey: slide.key, slideName: slide.name,
                 headline: slide.headline, subtitle: slide.subtitle, textZone: slide.textZone,
-                characters: originalChoices,
+                characters: originalChoices, hierarchy: packHierarchy, coverStyle: packCoverStyle,
                 suggestedSlots: plannedElements.map(e => ({ characterId: e.characterId, x: e.x, y: e.y, width: e.width, height: e.height }))
               })
             });
@@ -474,6 +479,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
               backgroundStyle, backgroundIntensity,
               headline: slide.headline, subtitle: slide.subtitle,
               slideName: slide.name, artDirection, textZone: slide.textZone,
+              designBoldness: packBoldness, coverStyle: packCoverStyle,
               layout: plannedElements.map(e => ({ type: 'image', x: e.x, y: e.y, width: e.width, height: e.height }))
             })
           });
@@ -517,6 +523,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
           headline: target.packHeadline || title,
           subtitle: target.packSubtitle || 'Digital Clipart Collection',
           slideName: target.name,
+          designBoldness: target.packBoldness || packBoldness, coverStyle: target.packCoverStyle || packCoverStyle,
           textZone: target.packTextZone || { x: 22, y: 31, width: 56, height: 38 },
           layout: imageLayers.map(e => ({ type: 'image', x: e.x, y: e.y, width: e.width, height: e.height }))
         })
@@ -925,6 +932,18 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         <option value="editable">Editable artistic fonts · accurate text</option>
         <option value="ai-artwork">AI background + artistic title + badges · recommended</option>
       </select>
+      <label className="input-label">COVER STYLE</label>
+      <select aria-label="Etsy pack cover style" value={packCoverStyle} disabled={aiBusy} onChange={event => setPackCoverStyle(event.target.value as typeof packCoverStyle)}>
+        <option value="editorial">Premium editorial</option><option value="boutique">Modern boutique</option><option value="storybook">Storybook gallery</option><option value="modern">Modern Etsy</option><option value="watercolor">Artistic watercolor</option>
+      </select>
+      <label className="input-label">CLIPART HIERARCHY</label>
+      <select aria-label="Etsy pack clipart hierarchy" value={packHierarchy} disabled={aiBusy} onChange={event => setPackHierarchy(event.target.value as ClipartHierarchy)}>
+        <option value="dramatic">Dramatic · larger focal image</option><option value="medium">Medium</option><option value="soft">Soft</option>
+      </select>
+      <label className="input-label">DESIGN BOLDNESS</label>
+      <select aria-label="Etsy pack design boldness" value={packBoldness} disabled={aiBusy} onChange={event => setPackBoldness(event.target.value as typeof packBoldness)}>
+        <option value="bold">Bold</option><option value="balanced">Balanced</option><option value="soft">Soft</option>
+      </select>
       <label className="input-label">OPTIONAL REFERENCE IMAGE</label>
       <input aria-label="Upload optional reference" type="file" accept="image/png,image/jpeg,image/webp" onChange={event => void onReferenceUpload(event.target.files?.[0])}/>
       {reference && <img src={reference} alt="Optional reference" style={{ maxHeight: 130, maxWidth: '100%', objectFit: 'contain' }}/>}
@@ -983,6 +1002,18 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
             <select aria-label="Etsy pack typography mode" value={packTypography} disabled={aiBusy} onChange={e => setPackTypography(e.target.value as typeof packTypography)}>
               <option value="editable">Editable fonts · precise wording</option>
               <option value="ai-artwork">AI background + artistic lettering + badges</option>
+            </select>
+            <label className="input-label">DESIGN BOLDNESS</label>
+            <select aria-label="Etsy pack design boldness" disabled={aiBusy} value={packBoldness} onChange={e => setPackBoldness(e.target.value as typeof packBoldness)}>
+              <option value="soft">Soft · restrained</option><option value="balanced">Balanced · premium</option><option value="bold">Bold · scroll-stopping</option>
+            </select>
+            <label className="input-label">CLIPART SIZE HIERARCHY</label>
+            <select aria-label="Etsy pack clipart hierarchy" disabled={aiBusy} value={packHierarchy} onChange={e => setPackHierarchy(e.target.value as ClipartHierarchy)}>
+              <option value="soft">Soft · subtle variation</option><option value="medium">Medium · clear hierarchy</option><option value="dramatic">Dramatic · large hero artwork</option>
+            </select>
+            <label className="input-label">COVER ART STYLE</label>
+            <select aria-label="Etsy pack cover style" disabled={aiBusy} value={packCoverStyle} onChange={e => setPackCoverStyle(e.target.value as typeof packCoverStyle)}>
+              <option value="editorial">Premium editorial</option><option value="boutique">Modern boutique</option><option value="storybook">Storybook gallery</option><option value="modern">Modern Etsy</option><option value="watercolor">Artistic watercolor</option>
             </select>
             <label className="input-label">BACKGROUND QUALITY</label>
             <select aria-label="Etsy pack background quality" disabled={aiBusy} value={packQuality} onChange={e => setPackQuality(e.target.value as typeof packQuality)}><option value="low">Low · economical</option><option value="medium">Medium · recommended</option><option value="high">High · premium cost</option></select>

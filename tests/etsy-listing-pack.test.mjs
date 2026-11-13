@@ -62,3 +62,24 @@ test('hero medallion keeps original assets away from centered title even after r
     assert.equal(overlaps(bounding,hero.textZone,4),false);
   }
 });
+
+test('Premium hero layout uses clearly different focal and accent sizes', () => {
+  const hero = buildPack('core-5', 'Asian Food', characters)[0];
+  const placements = placeOriginals(hero, characters, [], 'dramatic');
+  assert.ok(placements.length >= 4, 'Premium cover should include hero and supporting collection assets');
+  const widths = placements.map(p => p.width);
+  assert.ok(Math.max(...widths) >= 24, 'Hero asset should be visibly large');
+  assert.ok(Math.max(...widths) / Math.min(...widths) >= 1.6, 'Premium cover should have an unmistakable size hierarchy');
+  for (const item of placements) {
+    assert.equal(overlaps(item, hero.textZone, 3), false, 'Large original artwork must stay out of title zone');
+  }
+});
+
+test('Catalogue showcase and hero layouts are intentionally different', () => {
+  const pack = buildPack('complete-10', 'Asian Food', characters);
+  const hero = placeOriginals(pack[0], characters, [], 'dramatic');
+  const preview = placeOriginals(pack[5], characters, [], 'dramatic');
+  assert.ok(hero.length >= 4);
+  assert.ok(preview.length > hero.length);
+  assert.ok(Math.max(...hero.map(p => p.width)) > Math.max(...preview.map(p => p.width)));
+});
