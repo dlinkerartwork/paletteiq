@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import UpscaleCompare from '@/components/upscale-compare';
 import { readApiJson } from '@/lib/listing-image-upload';
+import ThumbnailStylePreviewSelect, { type ThumbnailStyleOption } from '@/components/thumbnail-style-preview-select';
 import { thumbnailSeoDefaults, type ThumbnailSeoSource } from '@/lib/thumbnail-seo-defaults';
 import type { ListingStudioConfig } from '@/lib/listing-studio-config';
 import { fitClipartAroundTypography, type ThumbnailBox } from '@/lib/thumbnail-fit';
@@ -21,6 +22,7 @@ export type ThumbnailDesign = {
   rejectedBackgroundUrl?: string; rejectedBackgroundReason?: string;
   packTypography?: 'editable' | 'ai-artwork'; packSlideKey?: string; packHeadline?: string; packSubtitle?: string; packBadge?: string; packTextZone?: { x: number; y: number; width: number; height: number };
   packImageProvider?: 'openai' | 'gemini'; packImageModel?: string;
+  backgroundOpacity?: number; // 0..1; applies to the full backdrop composite, never to original PNG layers.
   packAiTypographyEnabled?: boolean; packLetteringStyle?: 'auto' | 'arched' | 'flowing' | 'stacked' | 'hand-painted';
   packHierarchy?: ClipartHierarchy; packBoldness?: 'soft' | 'balanced' | 'bold'; packCoverStyle?: 'editorial' | 'boutique' | 'storybook' | 'modern' | 'watercolor';
   referenceDesign?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string };
@@ -31,6 +33,38 @@ type Props = { onStartListingStudio?: (settings: ListingStudioConfig) => void | 
 const id = () => crypto.randomUUID();
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 const THUMBNAIL_SIZE = 1024;
+const backgroundAlpha = (design: ThumbnailDesign) => clamp(design.backgroundOpacity ?? 1, 0, 1);
+const LETTERING_EXAMPLES: ThumbnailStyleOption[] = [
+  { value: 'auto', label: 'AI creative art direction', description: 'Ekspresif, kombinasi script & serif' },
+  { value: 'arched', label: 'Arched & curved lettering', description: 'Judul melengkung seperti lengkungan seni' },
+  { value: 'flowing', label: 'Flowing brush calligraphy', description: 'Aliran sapuan kuas organik' },
+  { value: 'stacked', label: 'Layered expressive typography', description: 'Hierarki kata artistik bertumpuk' },
+  { value: 'hand-painted', label: 'Hand-painted lettering', description: 'Huruf kuas handmade bertekstur' }
+];
+const COVER_EXAMPLES: ThumbnailStyleOption[] = [
+  { value: 'editorial', label: 'Premium editorial', description: 'Serif elegan, layout lapang' },
+  { value: 'boutique', label: 'Modern boutique', description: 'Pastel blush & aksen halus' },
+  { value: 'storybook', label: 'Storybook', description: 'Nuansa kertas buku cerita' },
+  { value: 'modern', label: 'Modern Etsy', description: 'Kontras grafis dan garis tegas' },
+  { value: 'watercolor', label: 'Artistic watercolor', description: 'Sapuan pigmen lembut & organik' }
+];
+const BOLDNESS_EXAMPLES: ThumbnailStyleOption[] = [
+  { value: 'soft', label: 'Soft', description: 'Tipis, tenang, banyak ruang kosong' },
+  { value: 'balanced', label: 'Balanced', description: 'Kontras dan keterbacaan seimbang' },
+  { value: 'bold', label: 'Bold', description: 'Huruf dominan, kontras tinggi' }
+];
+const BACKGROUND_EXAMPLES: ThumbnailStyleOption[] = [
+  { value: 'watercolor', label: 'Watercolor', description: 'Pigmen watercolor yang menyatu' },
+  { value: 'paper', label: 'Luxury paper', description: 'Serat dan lapisan kertas premium' },
+  { value: 'gradient', label: 'Color gradient', description: 'Gradasi warna lembut bertingkat' },
+  { value: 'botanical', label: 'Abstract botanical accents', description: 'Bayangan daun abstrak, tanpa clipart' },
+  { value: 'vintage', label: 'Vintage', description: 'Patina kertas dan ornamen klasik' }
+];
+const DECORATION_EXAMPLES: ThumbnailStyleOption[] = [
+  { value: 'soft', label: 'Soft', description: 'Aksen sangat ringan' },
+  { value: 'balanced', label: 'Balanced', description: 'Ornamen cukup terlihat' },
+  { value: 'vibrant', label: 'Vibrant', description: 'Warna dan dekorasi lebih kuat' }
+];
 const newDesign = (index: number, seo: { title: string; subtitle: string } = { title: '', subtitle: 'Digital Clipart Collection' }): ThumbnailDesign => ({ id: id(), name: 'Thumbnail ' + index, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, background: '#f7f1e9', elements: [], packHeadline: seo.title, packSubtitle: seo.subtitle, packAiTypographyEnabled: true, packLetteringStyle: 'auto', packTextZone: { x: 22, y: 30, width: 56, height: 34 }, updatedAt: Date.now() });
 const newImage = (character: Character, index: number, preferredSource: 'auto' | 'original' | 'upscaled' = 'original'): ThumbnailElement => ({
   id: id(), type: 'image', characterId: character.id, source: preferredSource === 'auto' ? (character.upscaledImageUrl ? 'upscaled' : 'original') : preferredSource,
