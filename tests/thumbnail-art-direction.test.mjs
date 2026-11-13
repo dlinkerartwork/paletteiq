@@ -166,3 +166,12 @@ test('Manual approval also runs background-first Vision before applying original
   assert.match(part, /await placeOriginalsOverBackground/);
   assert.ok(part.indexOf('await placeOriginalsOverBackground') < part.indexOf('backgroundImageUrl: d.rejectedBackgroundUrl'));
 });
+
+test('Saved thumbnail can be re-laid out by Vision without paying for a second image', () => {
+  const relayout = designer.slice(designer.indexOf('const reLayoutWithVision'), designer.indexOf('const approveReviewedBackground'));
+  assert.match(relayout, /await placeOriginalsOverBackground/);
+  assert.doesNotMatch(relayout, /thumbnail-ai-image/);
+  assert.match(designer, /Re-layout with AI Vision/);
+  assert.match(designer, /packSlideKey: slide\.key/);
+  assert.match(designer, /candidate\.key === target\.packSlideKey/);
+});
