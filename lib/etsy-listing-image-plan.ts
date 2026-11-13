@@ -96,6 +96,24 @@ export function planListingPlacements(number: number, source: ListingAsset[]): L
     const height = number === 8 ? 12 : 19;
     return selected.map((a, i) => box(a, originX + (i % cols) * (width + 1.5), originY + Math.floor(i / cols) * (height + 1.5), width, height));
   }
+  if (spec.kind === 'all-grouped') {
+    // Visually separate the complete collection into four curated groups,
+    // instead of duplicating the uniform all-assets grid of image 02.
+    const sections = Math.min(4, Math.max(1, Math.ceil(selected.length / 12)));
+    const perSection = Math.ceil(selected.length / sections);
+    return selected.map((asset, index) => {
+      const group = Math.min(sections - 1, Math.floor(index / perSection));
+      const local = index - group * perSection;
+      const size = Math.min(perSection, selected.length - group * perSection);
+      const cols = Math.max(1, Math.ceil(Math.sqrt(size * 42 / 28)));
+      const rows = Math.ceil(size / cols);
+      const x0 = group % 2 === 0 ? 5 : 53;
+      const y0 = group < 2 ? 31 : 65;
+      const cellW = 42 / cols, cellH = 27 / rows;
+      return box(asset, x0 + local % cols * cellW + 0.3,
+        y0 + Math.floor(local / cols) * cellH + 0.2, cellW - 0.6, cellH - 0.4);
+    });
+  }
   if (spec.kind === 'all' || spec.kind === 'all-grouped') {
     const cols = selected.length > 70 ? 10 : selected.length > 40 ? 8 : selected.length > 20 ? 6 : 5;
     const rows = Math.ceil(selected.length / cols);
