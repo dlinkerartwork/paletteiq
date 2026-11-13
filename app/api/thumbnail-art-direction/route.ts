@@ -5,6 +5,7 @@ import { projects } from '@/db/schema';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { userCredential } from '@/lib/credentials';
 import { nativeAssetBucket } from '@/lib/native-bridge';
+import { fitClipartAroundTypography } from '@/lib/thumbnail-fit';
 
 type Box = { x: number; y: number; width: number; height: number };
 type Slot = Box & { characterId: string; rotation: number };
@@ -74,7 +75,8 @@ export async function POST(request: Request) {
     backgroundDataUrl ? 'BACKGROUND-FIRST VISION: inspect the attached GENERATED BACKGROUND, locate actual title lettering and decorative shapes, and arrange original assets in visually quiet regions. Do not rely solely on the prior textZone: expand title protection if rendered lettering extends beyond it. The outer margins can have large hero artwork. Your positions must match the ACTUAL existing image.' : 'No background yet. Design an elegant initial layout.',
     'Design a visually compelling premium Etsy product cover, not a generic vintage certificate. Choose asymmetry, bold visual rhythm, layered depth, expressive yet legible type space and a dominant illustration focal point. Adapt composition specifically to the slide intent; avoid excessive borders, tiny equal-sized clipart and bland symmetry.',
     'You must place ONLY provided ORIGINAL CLIPART ASSET IDs. The thumbnail compositor will use exact original PNG files. Never create, rename or invent characters.',
-    'Return JSON: {"artDirection":"short coherent descriptive direction","detectedTitleZone":{"x":20,"y":29,"width":60,"height":40},"slots":[{"characterId":"EXACT_ID","x":0,"y":0,"width":15,"height":18,"rotation":0}]}',
+    'Return JSON: {"artDirection":"short coherent descriptive direction","detectedTitleZone":{"x":20,"y":29,"width":60,"height":25},"detectedSubtitleZone":{"x":25,"y":57,"width":50,"height":12},"slots":[{"characterId":"EXACT_ID","x":0,"y":0,"width":15,"height":18,"rotation":0}]}',
+    'Report separate tight bounding rectangles for ALL visible title and subtitle lettering; the client will apply extra collision padding and proportional resizing. Never treat decorative brush rings as lettering. Do not cover typography even partially.',
     'All coordinates are 0–100 percentages of the full square canvas, top-left origin. Width and height describe the clipart bounding box.',
     'Keep every character fully within 2% to 98% of canvas, considering rotation. NEVER overlap the title/lettering-safe zone (5% clearance). For cover/hero/editorial slides, overlap BETWEEN original clipart assets is intentionally allowed, up to about 30% of the smaller rotated bounding box for attractive layered depth. Catalogue grid slides remain non-overlapping. Rotation -10 through +10 degrees.',
     'NON-GRID HERO / BOUTIQUE / CLOSEUP: pick one large focal original object around 22–32% canvas width, two secondary originals around 15–22%, smaller accents around 8–14%. Make largest at least 1.7x the smallest in width. Do not shrink every asset to the margins; balance large pieces around the title-safe zone. Catalogue grid slides may use consistent small sizes.',
@@ -98,19 +100,17 @@ export async function POST(request: Request) {
     if (!response.ok) return fail('AI art direction unavailable (HTTP ' + response.status + ')', 502);
     const answer = await response.json() as { output?: Array<{ content?: Array<{text?:string}> }> };
     const raw = answer.output?.flatMap(x => x.content || []).map(x => x.text || '').join('') || '{}';
-    const parsed = JSON.parse(raw) as { artDirection?: string; slots?: Slot[]; detectedTitleZone?: Box };
-    // Union the AI-visible lettering zone with the user-specified title region.
-    // Do not trust arbitrary rectangles: restrict to meaningful on-canvas zones.
-    if (backgroundDataUrl && parsed.detectedTitleZone) {
-      const z = parsed.detectedTitleZone;
-      if ([z.x,z.y,z.width,z.height].every(v => typeof v === 'number' && Number.isFinite(v)) &&
-        z.x >= 0 && z.y >= 0 && z.width >= 10 && z.height >= 8 && z.x+z.width <= 100 && z.y+z.height <= 100) {
-        const left = Math.min(titleArea.x,z.x), top = Math.min(titleArea.y,z.y);
-        const right = Math.max(titleArea.x+titleArea.width,z.x+z.width);
-        const bottom = Math.max(titleArea.y+titleArea.height,z.y+z.height);
-        titleArea = { x:left,y:top,width:right-left,height:bottom-top };
-      }
-    }
+    const parsed = JSON.parse(raw) as { artDirection?: string; slots?: Slot[]; detectedTitleZone?: Box; detectedSubtitleZone?: Box };
+    // Keep title and subtitle as separate protected zones. A giant union could
+    // incorrectly block most perimeter artwork and shrink hero illustrations.
+    const visionZone = (zone: Box | undefined): Box | undefined => {
+      if (!zone || ![zone.x,zone.y,zone.width,zone.height].every(v => typeof v === 'number' && Number.isFinite(v))) return undefined;
+      if (zone.x < 0 || zone.y < 0 || zone.width < 5 || zone.height < 4 ||
+        zone.x+zone.width > 100 || zone.y+zone.height > 100) return undefined;
+      return zone;
+    };
+    const detectedTitle = backgroundDataUrl ? visionZone(parsed.detectedTitleZone) : undefined;
+    const detectedSubtitle = backgroundDataUrl ? visionZone(parsed.detectedSubtitleZone) : undefined;
     const allowed = new Set(selected.map(c => c.id));
     const placed: Slot[] = [];
     const used = new Set<string>();
@@ -124,7 +124,8 @@ export async function POST(request: Request) {
       };
       const box = bounds(slot);
       if (box.x < 2 || box.y < 2 || box.x + box.width > 98 || box.y + box.height > 98) continue;
-      if (collides(box,titleArea,5)) continue;
+      // Keep candidates that intersect lettering: the deterministic geometry fitter
+      // will translate or resize them instead of deleting valuable collection assets.
       const isCatalogue = ['showcase','preview','storybook','category-0','category-1'].includes(String(body.slideKey || '')) || String(body.slideKey || '').startsWith('category-');
       if (isCatalogue && placed.some(p => collides(box,bounds(p),2))) continue;
       if (!isCatalogue && placed.some(p => {
@@ -136,14 +137,22 @@ export async function POST(request: Request) {
       })) continue;
       placed.push(slot); used.add(slot.characterId);
     }
-    if (!placed.length) return fail('AI did not return any safe original-asset positions', 422);
-    if (!['showcase','preview','storybook','category-0','category-1'].includes(String(body.slideKey || '')) && placed.length >= 3) {
-      const widths = placed.map(slot => slot.width);
+    const catalogue = ['showcase','preview','storybook','category-0','category-1'].includes(String(body.slideKey || '')) ||
+      String(body.slideKey || '').startsWith('category-');
+    const fitted = fitClipartAroundTypography(
+      placed, [titleArea, ...(detectedTitle ? [detectedTitle] : [])],
+      detectedSubtitle ? [detectedSubtitle] : [],
+      { grid:catalogue, titlePadding:5, subtitlePadding:3, maxArtworkOverlap:.3,
+        minScale:body.hierarchy === 'soft' ? .75 : body.hierarchy === 'medium' ? .65 : .55 }
+    );
+    if (!fitted.length) return fail('No safe clipart positions fit outside the visible typography. Use curated fallback.', 422);
+    if (!catalogue && fitted.length >= 3) {
+      const widths = fitted.map(slot => slot.width);
       if (Math.max(...widths) / Math.max(1, Math.min(...widths)) < (body.hierarchy === 'soft' ? 1.18 : body.hierarchy === 'medium' ? 1.38 : 1.65))
         return fail('AI composition has no clear hero/secondary/accent size hierarchy; use curated fallback layout', 422);
     }
     return Response.json({
-      slots:placed, textZone:titleArea,
+      slots:fitted, textZone:titleArea, detectedTitleZone:detectedTitle, detectedSubtitleZone:detectedSubtitle,
       artDirection:String(parsed.artDirection || '').replace(/[<>]/g,'').slice(0,650),
       assetSource:'original'
     });
