@@ -28,7 +28,9 @@ test('One-click batch uses AI layout positions and background with AI lettering 
   assert.match(designer,/fetch\('\/api\/thumbnail-art-direction'/);
   assert.match(designer,/placeOriginalsOverBackground\(/);
   assert.match(designer,/layout: initialElements\.map/);
-  assert.match(generator, /TYPOGRAPHY ONLY: Render these exact strings/);
+  assert.match(generator, /PREMIUM CUSTOM ARTISTIC LETTERING/);
+  assert.match(generator, /EXACT MAIN TITLE:/);
+  assert.match(generator, /NO BADGE: do not invent a badge/);
   assert.match(generator, /THIS IS NOT AN ILLUSTRATION JOB/);
   assert.match(generator, /placed later from exact stored PNGs/);
 });
@@ -116,7 +118,8 @@ test('Image generator receives ONLY abstract graphics and lettering instructions
   assert.match(generator, /Do not visualize the collection, its subject, its category/);
   assert.doesNotMatch(generator, /Collection visual context:|Authorized ORIGINAL assets:|Collection theme:/);
   assert.match(generator, /Do not draw a visual depiction of the title words/);
-  assert.match(generator, /Reserved areas where original PNG assets will later be composited/);
+  assert.match(generator, /Visible areas where original PNG assets will later be composited/);
+  assert.match(generator, /JSON\.stringify\(visibleLayout\)/);
 });
 
 test('Single-thumbnail legacy implementation is retained but the visible editor generates from manual canvas', () => {
