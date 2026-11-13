@@ -98,7 +98,7 @@ export async function POST(req: Request) {
                 : 'CURATED COLLECTION: design a fresh, collection-specific elegant graphic identity with good headline hierarchy and room for exact original assets.';
   const combinedPrompt = [
     'Generate one premium, professionally art-directed SQUARE ETSY CLIPART BUNDLE BACKGROUND that INCLUDES artistic typography, tasteful ornamental badges and beautiful decorative framing.',
-    'STRICT SEPARATION: Draw NO collection-related objects whatsoever. NO illustrated dishes, foods, drinks, tea sets, sushi, flowers, plants, animals, characters, product assets, miniature illustrations, silhouettes, collage cutouts, or stock clipart. Avoid even objects that merely resemble collection images. The only figurative content permitted is typography and abstract badge/frame ornament.',
+    'STRICT SEPARATION: Do not draw recognizable standalone product/collection illustrations. No illustrated dishes, foods, drinks, tea sets, sushi, animals, characters, individual bouquets or stock clipart. Purely abstract geometric ornaments, delicate ornamental lines, decorative ink flourishes, watercolor gradients and paper texture are allowed, but must NOT resemble individual sellable clipart items.',
     'The AI must never invent, reconstruct, imitate, redraw, or depict any asset or visual object from the collection. All real objects are added later exclusively by PaletteIQ from original files.',
     'The compositor will place EXACT original collection PNG assets in the specified outer image slots after this background is generated.',
     'EXACT MAIN TITLE. Spell every letter carefully; do not paraphrase or add invented words:', JSON.stringify(safeText(input.headline || '')),
@@ -124,7 +124,7 @@ export async function POST(req: Request) {
         'Mandatory decorative direction:', styleGuidance[backgroundStyle],
         'Required color/contrast:', intensityGuidance[backgroundIntensity],
         'Choose cohesive theme-specific colors with intentional variation, and guide the eye through color and composition. The original collection PNG objects are large focal points, so keep their bounding boxes visually quiet and avoid borders around every slot.',
-        'Do NOT depict characters, animals, people, isolated clipart, logos, lettering, numbers, product mockups or any standalone subject from the collection. This is a decorative background layer only.',
+        'Do NOT depict characters, animals, people, food, drinks, dishes, isolated clipart, logos, lettering, numbers, product mockups or any standalone saleable illustration. Abstract brushstrokes, ornamental curves, nonfigurative botanical-inspired patterns and paper grain are permitted as background design ONLY.',
         'The actual original collection PNG assets and accurate editable typography will be composited above this background by PaletteIQ. Never generate substitutes, food shapes, decorative illustrations, or pseudo-text.',
         'Reserved typography safe zone (0–100 percent):', JSON.stringify(titleZone),
         'Art-director notes:', String(input.artDirection || '').replace(/[<>\r\n]/g, ' ').slice(0,650),
@@ -192,7 +192,7 @@ export async function POST(req: Request) {
         body: JSON.stringify({
           model: 'gpt-4.1-mini',
           input: [{role:'user',content:[
-            {type:'input_text',text:'Review an Etsy decorative thumbnail background. Return JSON {"containsObjects":true|false,"containsText":true|false}. containsObjects=true if ANY recognizable standalone illustration, food, drink, dish, floral item, animal, person, product, stock art or clipart-like object appears, including tiny icons or silhouettes; abstract washes, paper grain and lines are not standalone objects. containsText=true if you see readable text, letters, numbers or pseudo-lettering. This background mode is ' + JSON.stringify(mode) + '. In background-only mode, both fields MUST be false; in background-with-typography mode, text is allowed but objects are forbidden.'},
+            {type:'input_text',text:'You are reviewing a decorative background layer for a commercial clipart bundle, NOT the finished thumbnail. This layer will later receive exact original PNG clipart from a separate collection. Return ONLY JSON: {"containsObjects":boolean,"containsText":boolean,"reason":string}. Set containsObjects=true ONLY if the image visibly includes a discrete, recognizable, standalone illustrated subject that could be mistaken for a clipart asset offered in the bundle (for example an illustrated bowl of ramen, sushi, a teapot, animal character, identifiable flower bouquet, a tiny product illustration or a photo of a dish). Set containsObjects=false for decorative motifs that are NOT standalone product subjects: watercolor pigments, ink splashes, painterly swooshes, abstract botanical flourishes, leaf-like ornament integrated into borders, thin gold swirls, linework, ribbons, medallions, geometric shapes, paper texture, and abstract silhouettes. An ornamental pattern is NOT a product image just because its curves resemble leaves or petals. Classify based on actual visible content, not guesses about possible objects. Set containsText=true if any readable letters, numerals, words, or pseudo-lettering appear; decorative lines are not text. Background mode: ' + JSON.stringify(mode) + '. For background-only mode, neither product illustrations nor text should appear. For background-with-typography mode, real words and lettering are allowed but standalone illustrative products are not. Give a brief reason naming the specific prohibited illustrated subject when containsObjects is true; never claim an item exists unless visually apparent.'},
             {type:'input_image',image_url:'data:' + (isPng ? 'image/png' : 'image/jpeg') + ';base64,' + imageBase64}
           ]}],text:{format:{type:'json_object'}}
         }), signal: AbortSignal.timeout(60000)
@@ -202,8 +202,11 @@ export async function POST(req: Request) {
     try {
       const validation = await review.json() as {output?:Array<{content?:Array<{text?:string}>}>};
       const raw = validation.output?.flatMap(x=>x.content||[]).map(x=>x.text||'').join('') || '{}';
-      const decision = JSON.parse(raw) as {containsObjects?:boolean; containsText?:boolean};
-      if (decision.containsObjects !== false) return bad('AI background contains or may contain generated clipart-like objects. Image rejected; retry generation.', 422);
+      const decision = JSON.parse(raw) as {containsObjects?:boolean; containsText?:boolean; reason?:string};
+      if (decision.containsObjects !== false) {
+        const reason = typeof decision.reason === 'string' ? decision.reason.replace(/[<>\r\n]/g, ' ').slice(0,150) : '';
+        return bad('AI background contains a recognizable standalone clipart-like subject' + (reason ? ': ' + reason : '') + '. Image rejected; retry with a different design style.', 422);
+      }
       if (mode === 'background-only' && decision.containsText !== false) return bad('Decorative background contains unexpected text. Image rejected; retry generation.', 422);
     } catch { return bad('Background validation returned an unreadable response; image rejected', 502); }
   }
