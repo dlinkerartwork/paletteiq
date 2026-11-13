@@ -137,10 +137,10 @@ test('Reference styles influence only abstract graphic and lettering prompts, no
   assert.match(designer, /referenceDesign: target\.referenceDesign/);
   assert.match(designer, /aria-label="Etsy custom cover headline"/);
 });
-test('AI planner cannot collapse a multi-asset cover to one original clipart', () => {
-  assert.match(designer, /const expectedMin = Math\.min\(plannedElements\.length/);
-  assert.match(designer, /plan\.slots\.length < expectedMin/);
-  assert.match(designer, /Using safe collection layout/);
+test('Background-first Vision cannot collapse a multi-asset cover to one original clipart', () => {
+  assert.match(designer, /const expectedMin = Math\.min\(imageElements\.length/);
+  assert.match(designer, /result\.slots\.length < expectedMin/);
+  assert.match(designer, /return \{ elements: imageElements, usedFallback: true \}/);
 });
 
 test('Vision analyzes the exact persisted background, not a generic pre-generation prompt', () => {
