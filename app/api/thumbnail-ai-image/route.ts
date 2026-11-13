@@ -9,7 +9,7 @@ import { userCredential, userGeminiKeys } from '@/lib/credentials';
 import { nativeAssetBucket } from '@/lib/native-bridge';
 
 type LayoutItem = { type: 'image' | 'text'; x: number; y: number; width: number; height: number; text?: string };
-type RequestBody = { projectId?: string; provider?: string; model?: string; quality?: string; width?: number; height?: number; layout?: LayoutItem[]; includeTitle?: boolean; mode?: 'full-thumbnail' | 'background-only' | 'background-with-typography'; headline?: string; subtitle?: string; badge?: string; slideName?: string; artDirection?: string; textZone?: { x: number; y: number; width: number; height: number }; backgroundStyle?: 'watercolor' | 'paper' | 'gradient' | 'botanical' | 'vintage'; backgroundIntensity?: 'soft' | 'balanced' | 'vibrant'; designBoldness?: 'soft' | 'balanced' | 'bold'; coverStyle?: 'editorial' | 'boutique' | 'storybook' | 'modern' | 'watercolor'; referenceDesign?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string }; designBriefSettings?: ThumbnailBriefSettings };
+type RequestBody = { projectId?: string; provider?: string; model?: string; quality?: string; width?: number; height?: number; layout?: LayoutItem[]; includeTitle?: boolean; mode?: 'full-thumbnail' | 'background-only' | 'background-with-typography'; headline?: string; subtitle?: string; badge?: string; letteringStyle?: 'auto' | 'arched' | 'flowing' | 'stacked' | 'hand-painted'; slideName?: string; artDirection?: string; textZone?: { x: number; y: number; width: number; height: number }; backgroundStyle?: 'watercolor' | 'paper' | 'gradient' | 'botanical' | 'vintage'; backgroundIntensity?: 'soft' | 'balanced' | 'vibrant'; designBoldness?: 'soft' | 'balanced' | 'bold'; coverStyle?: 'editorial' | 'boutique' | 'storybook' | 'modern' | 'watercolor'; referenceDesign?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string }; designBriefSettings?: ThumbnailBriefSettings };
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 const bucket = () => nativeAssetBucket() ?? env.BUCKET;
 
@@ -22,7 +22,8 @@ export async function POST(req: Request) {
   if (input.includeTitle !== undefined && typeof input.includeTitle !== 'boolean') return bad('includeTitle must be a boolean');
   const mode = input.mode || 'full-thumbnail';
   if (!['full-thumbnail', 'background-only', 'background-with-typography'].includes(mode)) return bad('Invalid image generation mode');
-  if (mode === 'background-with-typography' && (!input.headline || input.headline.length > 100 || (input.subtitle || '').length > 140 || (input.badge || '').length > 60)) return bad('Invalid title, subtitle, or badge text');
+  if (mode === 'background-with-typography' && (!(input.headline?.trim() || input.subtitle?.trim() || input.badge?.trim()) || (input.headline || '').length > 100 || (input.subtitle || '').length > 140 || (input.badge || '').length > 60)) return bad('Specify at least one title, subtitle, or badge text (within length limits)');
+  const letteringStyle = ['auto', 'arched', 'flowing', 'stacked', 'hand-painted'].includes(input.letteringStyle || '') ? input.letteringStyle || 'auto' : 'auto';
   const backgroundStyle = input.backgroundStyle || 'watercolor';
   const backgroundIntensity = input.backgroundIntensity || 'balanced';
   const designBoldness = input.designBoldness || 'balanced';
@@ -47,10 +48,18 @@ export async function POST(req: Request) {
   if (!storage) return bad('Image storage is unavailable', 503);
   const collection = JSON.parse(rows[0].data) as { name?: string; theme?: string; subtheme?: string; style?: string; characters?: Array<{ name?: string }> };
   const layout = Array.isArray(input.layout) ? input.layout.slice(0, 48).filter(item => item && (item.type === 'image' || item.type === 'text')).map(item => ({
-    type: item.type, x: Math.max(-20, Math.min(120, Number(item.x) || 0)), y: Math.max(-20, Math.min(120, Number(item.y) || 0)),
-    width: Math.max(1, Math.min(120, Number(item.width) || 10)), height: Math.max(1, Math.min(120, Number(item.height) || 10)),
+    type: item.type, x: Math.max(-100, Math.min(200, Number(item.x) || 0)), y: Math.max(-100, Math.min(200, Number(item.y) || 0)),
+    width: Math.max(1, Math.min(200, Number(item.width) || 10)), height: Math.max(1, Math.min(200, Number(item.height) || 10)),
     text: item.type === 'text' ? String(item.text || '').slice(0, 120) : undefined
   })) : [];
+  // The source layout may deliberately bleed outside the frame. AI receives
+  // only the visible intersection of each rectangle with the 0-100 canvas.
+  // This is a prompt mask, NEVER a change to the user's composited PNG layers.
+  const visibleLayout = layout.filter(item => item.type === 'image').map(item => {
+    const x = Math.max(0, item.x), y = Math.max(0, item.y);
+    return { x, y, width: Math.max(0, Math.min(100, item.x + item.width) - x),
+      height: Math.max(0, Math.min(100, item.y + item.height) - y) };
+  }).filter(item => item.width > 0 && item.height > 0);
   const styleGuidance: Record<string, string> = {
     watercolor: 'Distinct layered watercolor pigment washes sweeping diagonally across the canvas, visible wet-on-wet edges, pigment blooms and delicate splatter-like granulation. The composition has artistic motion and meaningful color variation.',
     paper: 'Beautiful artisanal paper surface with clearly perceptible handmade fibers, subtle embossed textures, torn paper collage shapes and softly tinted overlapping paper layers.',
