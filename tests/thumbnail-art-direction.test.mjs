@@ -45,7 +45,7 @@ test('Etsy thumbnails are fixed at 1024 square including rendered export', () =>
 });
 
 test('Etsy pack defaults to independently editable typography and exact original assets', () => {
-  assert.match(designer, /useState<'editable' \| 'ai-artwork'>\('editable'\)/);
+  assert.match(designer, /useState<'editable' \| 'ai-artwork'>\('ai-artwork'\)/);
   assert.match(designer, /packTypography === 'editable' \? \[\.\.\.plannedElements, \.\.\.typographyForSlide\(slide\)\]/);
   assert.match(designer, /mode: packTypography === 'editable' \? 'background-only' : 'background-with-typography'/);
   assert.match(designer, /originalAssetsOnly: true/);
