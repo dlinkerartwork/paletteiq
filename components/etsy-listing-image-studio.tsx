@@ -154,7 +154,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       const map: Record<string,string> = {};
       for (const group of response.groups || []) for (const id of group.ids) map[id] = group.name;
       if (new Set(Object.values(map)).size < 2) throw Error('The collection does not have enough distinct verified categories.');
-      setCategories(map); setChanges(old => { const next = { ...old }; delete next[3]; delete next[5]; return next; });
+      setCategories(map); setChanges(old => ({ ...old, [step]: planListingPlacements(step, assets.map(a => ({ ...a, category: map[a.id] || a.category }))) }));
       setMessage('Meaningful categories identified. The existing original clipart files remain unchanged.');
     } catch (error) { setMessage('Category analysis unavailable: ' + String(error)); }
     finally { setWorking(''); }
@@ -184,15 +184,32 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     if (current?.status === 'approved' && !window.confirm('Regenerate an approved image? Its approval will be reset to Draft.')) return;
     setWorking('generate'); setMessage('Generating artistic background + exact typography with OpenAI (no clipart regeneration)...');
     try {
+      let effectivePositions = positions;
+      if ((step === 3 || step === 5) && !current?.placements && !changes[step] &&
+          !Object.keys(categories).length && !assets.some(a => a.category || a.subtheme || a.group)) {
+        setMessage('Organizing the collection into honest categories before designing...');
+        try {
+          const groupResult = await request('/api/thumbnail-categories', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId })
+          }) as ListResponse & { groups?: Array<{ name: string; ids: string[] }> };
+          const map: Record<string,string> = {};
+          for (const group of groupResult.groups || []) for (const id of group.ids) map[id] = group.name;
+          if (new Set(Object.values(map)).size >= 2) {
+            setCategories(map);
+            effectivePositions = planListingPlacements(step, assets.map(a => ({ ...a, category: map[a.id] || a.category })));
+          }
+        } catch { /* Continue with a neutral collection gallery rather than invent categories. */ }
+      }
+      setMessage('Generating the AI graphic background and artistic typography...');
       const response = await send({ action: 'generate', projectId, number: step, model, quality });
       if (!response.backgroundUrl) throw Error('OpenAI did not return the background');
-      let suggested = positions;
+      let suggested = effectivePositions;
       let layoutWarning = '';
-      if (positions.length <= 24) {
+      if (effectivePositions.length <= 24) {
         setMessage('AI Vision is finding typography-safe original artwork slots on the actual generated background...');
         try {
-          const vision = await send({ action: 'layout', projectId, number: step, backgroundUrl: response.backgroundUrl, placements: positions });
-          if (vision.placements?.length === positions.length) suggested = vision.placements;
+          const vision = await send({ action: 'layout', projectId, number: step, backgroundUrl: response.backgroundUrl, placements: effectivePositions });
+          if (vision.placements?.length === effectivePositions.length) suggested = vision.placements;
           layoutWarning = vision.fallback || '';
         } catch { layoutWarning = 'Vision placement unavailable; original image placements retained.'; }
       }
