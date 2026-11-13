@@ -48,8 +48,10 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
     Math.abs(p.rotation ?? 0) <= 30
   ) : previous?.placements || [];
   const status: ListingImageStatus = value.status === 'approved' || value.status === 'needs_revision' ? value.status : 'draft';
-  const renderedImageUrl = value.renderedImageUrl || previous?.renderedImageUrl;
-  const backgroundUrl = value.backgroundUrl || previous?.backgroundUrl;
+  // An explicitly empty renderedImageUrl invalidates an older render when a
+  // new paid background is generated. Do not silently re-approve stale pixels.
+  const renderedImageUrl = value.renderedImageUrl !== undefined ? value.renderedImageUrl : previous?.renderedImageUrl;
+  const backgroundUrl = value.backgroundUrl !== undefined ? value.backgroundUrl : previous?.backgroundUrl;
   if (renderedImageUrl && !savedAssetKey(renderedImageUrl, project.id, 'owner-placeholder')) throw Error('Invalid composed image reference');
   if (backgroundUrl && !savedAssetKey(backgroundUrl, project.id, 'owner-placeholder')) throw Error('Invalid AI background reference');
   if (status === 'approved' && (!renderedImageUrl || !placements.length)) throw Error('Render an image with original collection artwork before approval');
