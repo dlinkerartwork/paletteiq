@@ -7,13 +7,15 @@ const page = readFileSync(new URL('../app/page.tsx', import.meta.url), 'utf8');
 const listing = readFileSync(new URL('../components/etsy-listing-image-studio.tsx', import.meta.url), 'utf8');
 const config = readFileSync(new URL('../lib/listing-studio-config.ts', import.meta.url), 'utf8');
 
-test('legacy Thumbnail Designer is hidden from the user pipeline without removing its code or designs', () => {
+test('Thumbnail Designer and Etsy Listing Image Studio are both visible, separate pipeline steps', () => {
   const steps = page.match(/const steps = (\[[^\n]+\]);/)?.[1] || '';
+  assert.ok(steps.includes("'thumbnails'"));
   assert.ok(steps.includes("'listing-images'"));
-  assert.equal(steps.includes("'thumbnails'"), false);
+  assert.ok(steps.indexOf("'thumbnails'") < steps.indexOf("'listing-images'"));
   assert.match(page, /tab === 'thumbnails' && <ThumbnailDesigner/);
-  assert.match(page, /restored.tab === 'thumbnails'\) setTab\('listing-images'\)/);
-  assert.match(page, /requested === 'thumbnails' \? 'listing-images'/);
+  assert.match(page, /tab === 'listing-images' && <EtsyListingImageStudio/);
+  assert.match(page, /restored.tab && validTabs.includes\(restored.tab\)/);
+  assert.doesNotMatch(page, /requested === 'thumbnails' \? 'listing-images'/);
 });
 
 test('all Reference & Assets controls are accessible from Listing Image Studio', () => {
