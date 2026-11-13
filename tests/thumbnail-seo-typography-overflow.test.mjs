@@ -62,16 +62,17 @@ test('background-only brief contains absolutely no old SEO text when checkbox is
 test('partially off-canvas PNGs are permitted and only visible rectangles are sent to background AI', () => {
   assert.doesNotMatch(designer,/All original clipart layers must fit fully within the canvas/);
   assert.match(designer,/const hasVisibleAsset = imageLayers\.some/);
-  assert.match(designer,/const overlapsType = hasLettering && imageLayers\.some/);
+  assert.doesNotMatch(designer,/const overlapsType = hasLettering && imageLayers\.some/);
+  assert.match(designer,/Intentional image\/text overlap is supported/);
   assert.match(designer,/source: 'original' as const/);
   assert.match(endpoint,/x: Math\.max\(-100, Math\.min\(200/);
   assert.match(endpoint,/const visibleLayout = layout\.filter/);
   assert.match(endpoint,/JSON\.stringify\(visibleLayout\)/);
-  assert.match(designer,/Clipart may bleed beyond the frame/);
+  assert.match(designer,/Clipart may overlap text intentionally or extend beyond canvas edges/);
 });
 test('AI lettering is artistically directed, optionally curved or hand-painted, without changing exact source assets', () => {
   assert.match(designer,/Artistic lettering composition/);
-  assert.match(designer,/Arched &amp; curved lettering/);
+  assert.match(designer,/Arched & curved lettering/);
   assert.match(designer,/Flowing brush calligraphy/);
   assert.match(designer,/packLetteringStyle: source\.packLetteringStyle \|\| 'auto'/);
   assert.match(endpoint,/const artisticStyles: Record<string, string>/);

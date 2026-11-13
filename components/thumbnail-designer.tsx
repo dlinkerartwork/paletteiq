@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import UpscaleCompare from '@/components/upscale-compare';
 import { readApiJson } from '@/lib/listing-image-upload';
+import ThumbnailStylePreviewSelect, { type ThumbnailStyleOption } from '@/components/thumbnail-style-preview-select';
 import { thumbnailSeoDefaults, type ThumbnailSeoSource } from '@/lib/thumbnail-seo-defaults';
 import type { ListingStudioConfig } from '@/lib/listing-studio-config';
 import { fitClipartAroundTypography, type ThumbnailBox } from '@/lib/thumbnail-fit';
@@ -21,6 +22,7 @@ export type ThumbnailDesign = {
   rejectedBackgroundUrl?: string; rejectedBackgroundReason?: string;
   packTypography?: 'editable' | 'ai-artwork'; packSlideKey?: string; packHeadline?: string; packSubtitle?: string; packBadge?: string; packTextZone?: { x: number; y: number; width: number; height: number };
   packImageProvider?: 'openai' | 'gemini'; packImageModel?: string;
+  backgroundOpacity?: number; // 0..1; applies to the full backdrop composite, never to original PNG layers.
   packAiTypographyEnabled?: boolean; packLetteringStyle?: 'auto' | 'arched' | 'flowing' | 'stacked' | 'hand-painted';
   packHierarchy?: ClipartHierarchy; packBoldness?: 'soft' | 'balanced' | 'bold'; packCoverStyle?: 'editorial' | 'boutique' | 'storybook' | 'modern' | 'watercolor';
   referenceDesign?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string };
@@ -31,6 +33,38 @@ type Props = { onStartListingStudio?: (settings: ListingStudioConfig) => void | 
 const id = () => crypto.randomUUID();
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 const THUMBNAIL_SIZE = 1024;
+const backgroundAlpha = (design: ThumbnailDesign) => clamp(design.backgroundOpacity ?? 1, 0, 1);
+const LETTERING_EXAMPLES: ThumbnailStyleOption[] = [
+  { value: 'auto', label: 'AI creative art direction', description: 'Ekspresif, kombinasi script & serif' },
+  { value: 'arched', label: 'Arched & curved lettering', description: 'Judul melengkung seperti lengkungan seni' },
+  { value: 'flowing', label: 'Flowing brush calligraphy', description: 'Aliran sapuan kuas organik' },
+  { value: 'stacked', label: 'Layered expressive typography', description: 'Hierarki kata artistik bertumpuk' },
+  { value: 'hand-painted', label: 'Hand-painted lettering', description: 'Huruf kuas handmade bertekstur' }
+];
+const COVER_EXAMPLES: ThumbnailStyleOption[] = [
+  { value: 'editorial', label: 'Premium editorial', description: 'Serif elegan, layout lapang' },
+  { value: 'boutique', label: 'Modern boutique', description: 'Pastel blush & aksen halus' },
+  { value: 'storybook', label: 'Storybook', description: 'Nuansa kertas buku cerita' },
+  { value: 'modern', label: 'Modern Etsy', description: 'Kontras grafis dan garis tegas' },
+  { value: 'watercolor', label: 'Artistic watercolor', description: 'Sapuan pigmen lembut & organik' }
+];
+const BOLDNESS_EXAMPLES: ThumbnailStyleOption[] = [
+  { value: 'soft', label: 'Soft', description: 'Tipis, tenang, banyak ruang kosong' },
+  { value: 'balanced', label: 'Balanced', description: 'Kontras dan keterbacaan seimbang' },
+  { value: 'bold', label: 'Bold', description: 'Huruf dominan, kontras tinggi' }
+];
+const BACKGROUND_EXAMPLES: ThumbnailStyleOption[] = [
+  { value: 'watercolor', label: 'Watercolor', description: 'Pigmen watercolor yang menyatu' },
+  { value: 'paper', label: 'Luxury paper', description: 'Serat dan lapisan kertas premium' },
+  { value: 'gradient', label: 'Color gradient', description: 'Gradasi warna lembut bertingkat' },
+  { value: 'botanical', label: 'Abstract botanical accents', description: 'Bayangan daun abstrak, tanpa clipart' },
+  { value: 'vintage', label: 'Vintage', description: 'Patina kertas dan ornamen klasik' }
+];
+const DECORATION_EXAMPLES: ThumbnailStyleOption[] = [
+  { value: 'soft', label: 'Soft', description: 'Aksen sangat ringan' },
+  { value: 'balanced', label: 'Balanced', description: 'Ornamen cukup terlihat' },
+  { value: 'vibrant', label: 'Vibrant', description: 'Warna dan dekorasi lebih kuat' }
+];
 const newDesign = (index: number, seo: { title: string; subtitle: string } = { title: '', subtitle: 'Digital Clipart Collection' }): ThumbnailDesign => ({ id: id(), name: 'Thumbnail ' + index, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, background: '#f7f1e9', elements: [], packHeadline: seo.title, packSubtitle: seo.subtitle, packAiTypographyEnabled: true, packLetteringStyle: 'auto', packTextZone: { x: 22, y: 30, width: 56, height: 34 }, updatedAt: Date.now() });
 const newImage = (character: Character, index: number, preferredSource: 'auto' | 'original' | 'upscaled' = 'original'): ThumbnailElement => ({
   id: id(), type: 'image', characterId: character.id, source: preferredSource === 'auto' ? (character.upscaledImageUrl ? 'upscaled' : 'original') : preferredSource,
@@ -457,7 +491,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     'Image provider/model: ' + imageProvider + ' / ' + (imageProvider === 'gemini' ? geminiImageModel : imageModel),
     'Style: ' + packCoverStyle + ', ' + backgroundStyle + ', ' + backgroundIntensity + ', boldness ' + packBoldness,
     'Reference template: ' + (reference ? 'selected (style cues only)' : 'none') + ', interpretation ' + referenceStyle,
-    'Original assets may deliberately extend beyond the canvas and will be CROPPED by the final canvas edge.',
+    'Original assets may deliberately overlap the artistic text as foreground PNG layers or extend beyond the canvas and will be CROPPED by the final canvas edge.',
     'Only the VISIBLE portions of these manually positioned PNG rectangles are reserved on canvas; their pixels and identities are NEVER sent to the image provider:',
     JSON.stringify((design?.elements || []).filter(e => e.type === 'image')
       .map(e => ({ x: Math.max(0,e.x), y: Math.max(0,e.y),
@@ -494,11 +528,8 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
       zone.x + zone.width > 100 || zone.y + zone.height > 100)) {
       setMessage('Set a valid typography safe zone inside the canvas.'); return;
     }
-    const overlapsType = hasLettering && imageLayers.some(e =>
-      e.x < zone.x + zone.width && e.x + e.width > zone.x &&
-      e.y < zone.y + zone.height && e.y + e.height > zone.y
-    );
-    if (overlapsType) { setMessage('Clipart overlaps the selected lettering area. Move it or change the typography zone; bleed outside the canvas is allowed.'); return; }
+    // Intentional image/text overlap is supported. Original PNGs are composited
+    // above the image-generated lettering; they can obscure portions of it.
     if (hasLettering && (heading.length > 100 || subtitle.length > 140 || badge.length > 60)) {
       setMessage('Title (max 100), subtitle (max 140), or badge (max 60) is too long.'); return;
     }
@@ -542,6 +573,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         backgroundStyle, backgroundIntensity, designBoldness: packBoldness,
         coverStyle: packCoverStyle, referenceDesign,
         textZone: zone,
+        // Image rectangles may intersect the text zone intentionally.
         // Exact source files, their contents, character names, and reference
         // images are never part of the generation request.
         layout: imageLayers.map(e => ({ type: 'image' as const,
@@ -990,13 +1022,24 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
   const renderDesignBlob = async (target: ThumbnailDesign, format: 'png' | 'jpeg' = 'png'): Promise<Blob> => {
       const canvas = document.createElement('canvas'); canvas.width = THUMBNAIL_SIZE; canvas.height = THUMBNAIL_SIZE;
       const ctx = canvas.getContext('2d'); if (!ctx) throw new Error('Canvas unavailable');
-      ctx.fillStyle = target.background; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      // Apply opacity to the COMPLETE background composite (flat color + AI
+      // backdrop) over white. Foreground original PNGs always stay opaque.
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      const backdrop = document.createElement('canvas');
+      backdrop.width = THUMBNAIL_SIZE; backdrop.height = THUMBNAIL_SIZE;
+      const backdropContext = backdrop.getContext('2d'); if (!backdropContext) throw new Error('Background canvas unavailable');
+      backdropContext.fillStyle = target.background;
+      backdropContext.fillRect(0, 0, backdrop.width, backdrop.height);
       if (target.aiImageUrl || target.backgroundImageUrl) {
         const background = await loadForExport(target.aiImageUrl || target.backgroundImageUrl!);
         const scale = Math.max(THUMBNAIL_SIZE / background.naturalWidth, THUMBNAIL_SIZE / background.naturalHeight);
         const w = background.naturalWidth * scale, h = background.naturalHeight * scale;
-        ctx.drawImage(background, (THUMBNAIL_SIZE - w) / 2, (THUMBNAIL_SIZE - h) / 2, w, h);
+        backdropContext.drawImage(background, (THUMBNAIL_SIZE - w) / 2, (THUMBNAIL_SIZE - h) / 2, w, h);
       }
+      ctx.save();
+      ctx.globalAlpha = backgroundAlpha(target);
+      ctx.drawImage(backdrop, 0, 0);
+      ctx.restore();
       for (const element of target.elements) {
         const x = element.x / 100 * THUMBNAIL_SIZE, y = element.y / 100 * THUMBNAIL_SIZE;
         const w = element.width / 100 * THUMBNAIL_SIZE, h = element.height / 100 * THUMBNAIL_SIZE;
@@ -1175,7 +1218,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     const operation = saveQueueRef.current.catch(() => {}).then(async () => {
       const prepared: ThumbnailDesign[] = [];
       for (const item of snapshot) {
-        if (item.aiImageUrl) {
+        if (item.aiImageUrl && backgroundAlpha(item) === 1) {
           if (item.aiImageUrl.includes('format=jpg')) { prepared.push(item); continue; }
           // Preserve the AI artwork, but persist its collection thumbnail as JPEG.
           const original = await loadForExport(item.aiImageUrl);
@@ -1191,7 +1234,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           continue;
         }
         // Cached JPEG is reusable until the editable content changes.
-        const signature = JSON.stringify({ format: 'jpeg', width: item.width, height: item.height, background: item.background, backgroundImageUrl: item.backgroundImageUrl, elements: item.elements });
+        const signature = JSON.stringify({ format: 'jpeg', width: item.width, height: item.height, background: item.background, backgroundOpacity: backgroundAlpha(item), backgroundImageUrl: item.backgroundImageUrl, aiImageUrl: item.aiImageUrl, elements: item.elements });
         const cached = renderCacheRef.current.get(item.id);
         if (cached?.signature === signature) {
           prepared.push({ ...item, renderedImageUrl: cached.url });
@@ -1327,15 +1370,10 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           <label className="input-label">BADGE TEXT (OPTIONAL)</label>
           <input aria-label="Canvas badge text" maxLength={60} placeholder="Leave empty for no badge" value={design.packBadge ?? ''} disabled={aiBusy || !typographyEnabled} onChange={e => mutate({ packBadge: e.target.value, renderedImageUrl: undefined })}/>
           <label className="input-label">ARTISTIC LETTERING COMPOSITION</label>
-          <select aria-label="Artistic lettering composition" value={design.packLetteringStyle || 'auto'} disabled={aiBusy || !typographyEnabled} onChange={e => mutate({ packLetteringStyle: e.target.value as NonNullable<ThumbnailDesign['packLetteringStyle']>, renderedImageUrl: undefined })}>
-            <option value="auto">AI creative art direction</option>
-            <option value="arched">Arched &amp; curved lettering</option>
-            <option value="flowing">Flowing brush calligraphy</option>
-            <option value="stacked">Layered expressive typography</option>
-            <option value="hand-painted">Hand-painted lettering</option>
-          </select>
+          <ThumbnailStylePreviewSelect label="Artistic lettering composition" kind="lettering" value={design.packLetteringStyle || 'auto'} options={LETTERING_EXAMPLES}
+            disabled={aiBusy || !typographyEnabled} onChange={value => mutate({ packLetteringStyle: value as NonNullable<ThumbnailDesign['packLetteringStyle']>, renderedImageUrl: undefined })}/>
           <strong>Typography safe area</strong>
-          <small>{typographyEnabled ? 'The optional canvas guide marks the lettering region. Clipart may bleed beyond the frame, but should avoid this region.' : 'Typography is disabled; this area is ignored during background generation.'}</small>
+          <small>{typographyEnabled ? 'Typography guide is only a composition aid. Clipart may overlap text intentionally or extend beyond canvas edges. PNGs remain above AI lettering, so verify that important words stay legible.' : 'Typography is disabled; this area is ignored during background generation.'}</small>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 6 }}>
             {(['x','y','width','height'] as const).map(field => <label key={field} style={{ minWidth: 0, display: 'grid', gap: 3 }}>
               <span className="input-label">{field.toUpperCase()} (%)</span>
@@ -1363,21 +1401,17 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
             <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
           </select>
           <label className="input-label">COVER ART STYLE</label>
-          <select aria-label="Custom canvas cover style" value={packCoverStyle} disabled={aiBusy} onChange={e => setPackCoverStyle(e.target.value as typeof packCoverStyle)}>
-            <option value="editorial">Premium editorial</option><option value="boutique">Modern boutique</option><option value="storybook">Storybook</option><option value="modern">Modern Etsy</option><option value="watercolor">Artistic watercolor</option>
-          </select>
+          <ThumbnailStylePreviewSelect label="Custom canvas cover style" kind="cover" value={packCoverStyle} options={COVER_EXAMPLES}
+            disabled={aiBusy} onChange={value => setPackCoverStyle(value as typeof packCoverStyle)}/>
           <label className="input-label">TYPOGRAPHY BOLDNESS</label>
-          <select aria-label="Custom canvas typography boldness" value={packBoldness} disabled={aiBusy} onChange={e => setPackBoldness(e.target.value as typeof packBoldness)}>
-            <option value="soft">Soft</option><option value="balanced">Balanced</option><option value="bold">Bold</option>
-          </select>
+          <ThumbnailStylePreviewSelect label="Custom canvas typography boldness" kind="boldness" value={packBoldness} options={BOLDNESS_EXAMPLES}
+            disabled={aiBusy} onChange={value => setPackBoldness(value as typeof packBoldness)}/>
           <label className="input-label">BACKGROUND STYLE</label>
-          <select aria-label="Custom canvas background style" value={backgroundStyle} disabled={aiBusy} onChange={e => setBackgroundStyle(e.target.value as typeof backgroundStyle)}>
-            <option value="watercolor">Watercolor</option><option value="paper">Luxury paper</option><option value="gradient">Color gradient</option><option value="botanical">Abstract botanical accents</option><option value="vintage">Vintage</option>
-          </select>
+          <ThumbnailStylePreviewSelect label="Custom canvas background style" kind="background" value={backgroundStyle} options={BACKGROUND_EXAMPLES}
+            disabled={aiBusy} onChange={value => setBackgroundStyle(value as typeof backgroundStyle)}/>
           <label className="input-label">BACKGROUND DECORATION</label>
-          <select aria-label="Custom canvas decoration intensity" value={backgroundIntensity} disabled={aiBusy} onChange={e => setBackgroundIntensity(e.target.value as typeof backgroundIntensity)}>
-            <option value="soft">Soft</option><option value="balanced">Balanced</option><option value="vibrant">Vibrant</option>
-          </select>
+          <ThumbnailStylePreviewSelect label="Custom canvas decoration intensity" kind="decoration" value={backgroundIntensity} options={DECORATION_EXAMPLES}
+            disabled={aiBusy} onChange={value => setBackgroundIntensity(value as typeof backgroundIntensity)}/>
           <button type="button" className="primary-btn" disabled={aiBusy || Boolean(backgroundRetryId) || !design.elements.some(e => e.type === 'image')} onClick={() => void generateCanvasArtwork()}>
             <WandSparkles size={15}/> {aiBusy ? 'Generating AI artwork...' : 'Generate AI Background & Typography'}
           </button>
@@ -1427,16 +1461,19 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         </div>
         <div ref={canvasViewportRef} onPointerDown={startPan} onPointerMove={movePan} onPointerUp={stopPan} onPointerCancel={stopPan} aria-label="Thumbnail canvas viewport" style={{ overflow: previewZoom > 1 ? 'auto' : 'hidden', height: 'min(66vh, 780px)', minHeight: 240, boxSizing: 'border-box', background: '#e8e8e8', padding: 16, borderRadius: 8, cursor: previewZoom > 1 ? 'grab' : 'default', touchAction: 'none' }}>
           <div style={{ width: fittedWidth * previewZoom, margin: '0 auto', marginTop: Math.max(0, (viewportSize.height - fittedHeight * previewZoom) / 2) }}>
-            <div ref={stageRef} onPointerDown={() => setSelectedId('')} style={{ width: '100%', aspectRatio: `${design.width}/${design.height}`, backgroundColor: design.background, position: 'relative', containerType: 'inline-size', overflow: 'hidden', boxShadow: '0 5px 25px #0002', touchAction: 'none' }}>
-              {(design.backgroundImageUrl || design.aiImageUrl) && <img
-                key={design.backgroundImageUrl || design.aiImageUrl}
-                src={design.backgroundImageUrl || design.aiImageUrl}
-                alt="Thumbnail background"
-                onLoad={() => setBackgroundLoadError('')}
-                onError={() => setBackgroundLoadError('Background image cannot be displayed. Check the generated image URL or your image storage.')}
-                draggable={false}
-                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none', userSelect: 'none' }}
-              />}
+            <div ref={stageRef} onPointerDown={() => setSelectedId('')} style={{ width: '100%', aspectRatio: `${design.width}/${design.height}`, backgroundColor: '#fff', position: 'relative', containerType: 'inline-size', overflow: 'hidden', boxShadow: '0 5px 25px #0002', touchAction: 'none' }}>
+              <div data-thumbnail-background="true" style={{ position: 'absolute', inset: 0, opacity: backgroundAlpha(design), pointerEvents: 'none' }}>
+                <div style={{ position: 'absolute', inset: 0, backgroundColor: design.background }}/>
+                {(design.backgroundImageUrl || design.aiImageUrl) && <img
+                  key={design.backgroundImageUrl || design.aiImageUrl}
+                  src={design.backgroundImageUrl || design.aiImageUrl}
+                  alt="Thumbnail background"
+                  onLoad={() => setBackgroundLoadError('')}
+                  onError={() => setBackgroundLoadError('Background image cannot be displayed. Check the generated image URL or your image storage.')}
+                  draggable={false}
+                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none', userSelect: 'none' }}
+                />}
+              </div>
               {showTypographyGuide && typographyEnabled && <div aria-label="Reserved AI typography zone" style={{
                 position: 'absolute',
                 left: (design.packTextZone || { x: 22, y: 30, width: 56, height: 34 }).x + '%',
@@ -1446,7 +1483,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
                 border: '2px dashed #c76a31', boxSizing: 'border-box', borderRadius: 9,
                 background: 'rgba(255,244,223,0.28)', color: '#704129', pointerEvents: 'none',
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                gap: '4%', padding: '2%', textAlign: 'center', zIndex: 2
+                gap: '4%', padding: '2%', textAlign: 'center', zIndex: 1
               }}>
                 {!design.backgroundImageUrl && !design.aiImageUrl && <>
                   <strong style={{ fontSize: 'clamp(7px, 4cqw, 48px)', lineHeight: 1.08, overflowWrap: 'anywhere' }}>{design.packHeadline ?? seoDefaults.title}</strong>
@@ -1457,7 +1494,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
               {design.elements.map(e => {
                 const isSelected = e.id === selectedId;
                 return <div key={e.id} data-thumbnail-element="true" onPointerDown={event => startDrag(event,e,'move')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
-                  style={{ position: 'absolute', left: e.x+'%', top: e.y+'%', width: e.width+'%', height: e.height+'%', transform: `rotate(${e.rotation}deg)`, opacity: e.opacity ?? 1, border: isSelected ? '2px dashed #e36a1b' : '1px solid transparent', cursor: e.locked ? 'not-allowed' : 'move', boxSizing: 'border-box', touchAction: 'none', userSelect: 'none' }}>
+                  style={{ position: 'absolute', left: e.x+'%', top: e.y+'%', width: e.width+'%', height: e.height+'%', transform: `rotate(${e.rotation}deg)`, opacity: e.opacity ?? 1, zIndex: 2, border: isSelected ? '2px dashed #e36a1b' : '1px solid transparent', cursor: e.locked ? 'not-allowed' : 'move', boxSizing: 'border-box', touchAction: 'none', userSelect: 'none' }}>
                   {e.type === 'image' ? (imageUrl(e) ? <img src={imageUrl(e)} alt={assetMap.get(e.characterId || '')?.name || 'Character'} draggable={false} style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }}/> : <div style={{ color: '#d33' }}>Image unavailable</div>) :
                     (e.curve ? <CurvedText element={e} designWidth={design.width}/> : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', fontSize: `clamp(5px, ${(e.fontSize || 80) / design.width * 100}cqw, 250px)`, fontFamily: e.fontFamily || 'Arial', fontWeight: e.fontWeight || 'bold', color: e.color || '#333', whiteSpace: 'pre-line', overflow: 'hidden', pointerEvents: 'none' }}>{e.text}</div>)}
                   {isSelected && !e.locked && <div title="Drag to rotate" onPointerDown={event => startDrag(event,e,'rotate')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
@@ -1484,7 +1521,12 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         <input readOnly aria-label="Thumbnail size" value="1024 × 1024 px" />
         <small>Fixed thumbnail creation and standard JPG/PNG export: 1024 × 1024 pixels. Remote upscale is a separate optional action.</small>
         <label className="input-label">BACKGROUND COLOR</label>
-        <input type="color" value={design.background} onChange={e => mutate({ background: e.target.value })}/>
+        <input type="color" value={design.background} onChange={e => mutate({ background: e.target.value, renderedImageUrl: undefined, upscaledImageUrl: undefined })}/>
+        <label className="input-label" htmlFor="thumbnail-background-opacity">BACKGROUND OPACITY — {Math.round(backgroundAlpha(design) * 100)}%</label>
+        <input id="thumbnail-background-opacity" aria-label="Background opacity" type="range" min="0" max="100" step="1"
+          value={Math.round(backgroundAlpha(design) * 100)}
+          onChange={e => mutate({ backgroundOpacity: Number(e.target.value) / 100, renderedImageUrl: undefined, upscaledImageUrl: undefined })}/>
+        <small>0% = latar memudar putih, 100% = desain asli. PNG clipart dan teks editable tidak memudar. AI lettering yang menyatu dengan background ikut memudar karena masih satu gambar. Save, PNG, dan JPG memakai opacity yang sama.</small>
         <label className="input-label">AI DECORATIVE BACKGROUND (OPENAI)</label>
         <label className="input-label">BACKGROUND STYLE</label>
         <select aria-label="Background style" value={backgroundStyle} disabled={backgroundGenerating} onChange={event => setBackgroundStyle(event.target.value as typeof backgroundStyle)}><option value="watercolor">Artistic watercolor washes</option><option value="paper">Luxury textured paper</option><option value="gradient">Premium colorful gradient</option><option value="botanical">Abstract botanical motifs</option><option value="vintage">Vintage decorative texture</option></select>
@@ -1556,8 +1598,11 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
               Select for upscale
             </label>
             <button type="button" onClick={() => { setActiveId(item.id); setSelectedId(''); }} style={{ border: 0, background: 'transparent', textAlign: 'left', padding: 0, width: '100%', cursor: 'pointer' }}>
-            <div style={{ width: '100%', aspectRatio: item.width + '/' + item.height, position: 'relative', overflow: 'hidden', borderRadius: 6, backgroundColor: item.background }}>
-              {(item.backgroundImageUrl || item.aiImageUrl) && <img src={item.backgroundImageUrl || item.aiImageUrl} alt="" draggable={false} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}/>}
+            <div style={{ width: '100%', aspectRatio: item.width + '/' + item.height, position: 'relative', overflow: 'hidden', borderRadius: 6, backgroundColor: '#fff' }}>
+              <div data-thumbnail-gallery-background="true" style={{ position: 'absolute', inset: 0, opacity: backgroundAlpha(item), pointerEvents: 'none' }}>
+                <div style={{ position: 'absolute', inset: 0, backgroundColor: item.background }}/>
+                {(item.backgroundImageUrl || item.aiImageUrl) && <img src={item.backgroundImageUrl || item.aiImageUrl} alt="" draggable={false} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}/>}
+              </div>
               {!item.aiImageUrl && item.elements.map(element => element.type === 'image' ? <img key={element.id} src={imageUrl(element)} alt="" style={{ position: 'absolute', left: element.x + '%', top: element.y + '%', width: element.width + '%', height: element.height + '%', objectFit: 'contain', transform: 'rotate(' + element.rotation + 'deg)' }}/> : <span key={element.id} style={{ position: 'absolute', left: element.x + '%', top: element.y + '%', width: element.width + '%', color: element.color, fontFamily: element.fontFamily, fontSize: 9, overflow: 'hidden' }}>{element.text}</span>)}
             </div>
             <strong style={{ display: 'block', marginTop: 7, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</strong>
