@@ -65,21 +65,11 @@ export async function POST(req: Request) {
   };
   const titleZone = input.textZone && [input.textZone.x, input.textZone.y, input.textZone.width, input.textZone.height].every(n => Number.isFinite(n) && n >= 0 && n <= 100) ? input.textZone : { x: 8, y: 5, width: 84, height: 23 };
   const safeText = (text: string) => text.replace(/[<>\r\n]/g, ' ').trim().slice(0, 140);
-  const isFoodTheme = /food|sushi|sashimi|japanese|chinese|asian|korean|ramen|cuisine|dish|dessert|bakery|meal|culinary/i.test([collection.name,collection.theme,collection.subtheme,input.headline].join(' '));
-  const directions: Record<string, string> = {
-    editorial: 'High-end Etsy cookbook editorial with expressive oversized lettering, confident color-blocking, artful off-center headline framing, layered deckled paper and generous but deliberate whitespace. No old-fashioned ornamental certificate frame.',
-    boutique: 'Contemporary art-gallery boutique cover: asymmetric split-color panel, editorial serif plus expressive brush script, offset badge/ribbon, crisp layout and understated luxury.',
-    storybook: 'Handmade illustrated-book art direction with abstract painted paper collage, soft layered corners, playful oversized title and a fresh asymmetrical editorial composition.',
-    modern: 'High-converting modern Etsy cover: punchy large legible title, bold contrasting shape system, refined asymmetrical magazine composition and instantly recognizable visual hierarchy.',
-    watercolor: 'Artistic painterly design with sweeping translucent washes, textured torn-paper layering, expressive hand-lettered title and warm organic movement; avoid empty beige parchment.'
-  };
   const energy: Record<string, string> = {
     soft: 'Refined and airy, understated but not blank. One meaningful design motif, layered depth and clear headline.',
     balanced: 'Striking yet tasteful, strong title treatment, layered palette, balanced contrast and visible depth.',
     bold: 'Scroll-stopping and instantly readable: expressive oversized artistic title with mixed type styles, impactful contrasting sections, layered brushstrokes and a creative badge shape. Avoid template-like symmetry or thin ornate borders.'
   };
-  const designDirection = [directions[coverStyle], energy[designBoldness],
-    isFoodTheme ? 'Gourmet food design palette inspired by varied Asian cuisine: deep evergreen, sophisticated vermilion, sage and warm cream; do not introduce any illustrated food shapes.' : 'Adapt colors and typography to the actual collection theme; do not use food-specific visual language.'].join(' ');
   const slideLabel = String(input.slideName || '').toLowerCase();
   const slideDirection = slideLabel.includes('hero')
     ? 'HERO COVER: one bold typographic statement, visually large collection assets will surround it. Prefer lively asymmetric ink-wash ring or shape, no repetitive border.'
@@ -96,46 +86,45 @@ export async function POST(req: Request) {
               : slideLabel.includes('closeup')
                 ? 'ARTWORK CLOSEUPS: minimal magazine-like framing and generous negative space for a few large cropped-free original art details.'
                 : 'CURATED COLLECTION: design a fresh, collection-specific elegant graphic identity with good headline hierarchy and room for exact original assets.';
-  const combinedPrompt = [
-    'Generate one premium, professionally art-directed SQUARE ETSY CLIPART BUNDLE BACKGROUND that INCLUDES artistic typography, tasteful ornamental badges and beautiful decorative framing.',
-    'STRICT SEPARATION: Do not draw recognizable standalone product/collection illustrations. No illustrated dishes, foods, drinks, tea sets, sushi, animals, characters, individual bouquets or stock clipart. Purely abstract geometric ornaments, delicate ornamental lines, decorative ink flourishes, watercolor gradients and paper texture are allowed, but must NOT resemble individual sellable clipart items.',
-    'The AI must never invent, reconstruct, imitate, redraw, or depict any asset or visual object from the collection. All real objects are added later exclusively by PaletteIQ from original files.',
-    'The compositor will place EXACT original collection PNG assets in the specified outer image slots after this background is generated.',
-    'EXACT MAIN TITLE. Spell every letter carefully; do not paraphrase or add invented words:', JSON.stringify(safeText(input.headline || '')),
-    'EXACT SUBTITLE:', JSON.stringify(safeText(input.subtitle || '')),
-    'Place ALL lettering, title art and badges STRICTLY within the following typography safe zone in percentage coordinates:', JSON.stringify(titleZone),
-    'All space occupied by lettering or badges MUST be inside that zone. Do not put stray text, pseudo-lettering or extra claims anywhere else.',
-    'ART DIRECTION: Make the title the visual hook with a handcrafted typographic contrast (expressive brush script or display face plus refined serif), interesting scale changes, editorial spacing, purposeful graphic ribbon or abstract badge, and a composition that stands out at 200-pixel search-preview size. Use fresh asymmetric layered panels, visual depth and elegant rhythm. NEVER use a centered vintage certificate with tiny corner objects, symmetrical flourishes or uniform border as the default.',
-    'Avoid any unverified DPI, commercial-use or resolution claims. Add no count unless it appears in the exact provided subtitle.',
-    'Everywhere outside the typography zone must remain decorative-only: rich but abstract paper collage, painterly washes, refined blocks of color, textured shapes and graphic flourishes. Do not put text there or invent product/collection objects.',
-    'Slide-specific art direction:', slideDirection,
-    'ART DIRECTOR COMPOSITION NOTES:', String(input.artDirection || '').replace(/[<>\r\n]/g, ' ').slice(0,650),
-    'Theme-aware design direction:', designDirection,
-    'User material (non-figurative textures only):', styleGuidance[backgroundStyle],
-    'Decorative intensity:', intensityGuidance[backgroundIntensity],
-    'Collection theme:', JSON.stringify({theme:collection.theme,subtheme:collection.subtheme}).slice(0,500),
-    'Reserved original clipart positions. Do not draw any characters or lettering inside these outside-title regions:', JSON.stringify(layout).slice(0,3000),
-    'The final art should look like a premium Etsy listing COVER with the visual refinement of a professional editorial illustrator and brand designer.'
-  ].join('\n');
-  const prompt = mode === 'background-with-typography' ? combinedPrompt : mode === 'background-only'
-    ? [
-        'Create a PREMIUM EDITORIAL BACKGROUND ARTWORK for an Etsy digital clipart bundle listing. The output must be ONLY the decorative background, no captions or typography.',
-        'Create the rich abstract graphic design behind a best-selling Etsy cover: layered artisan paper collage, elegant contrasting color fields, bold yet tasteful painterly shapes, magazine-like asymmetry and strong contrast. Reserve the typography zone for accurate editable text. Avoid a flat beige rectangle or a certificate-like decorative border.',
-        'Mandatory decorative direction:', styleGuidance[backgroundStyle],
-        'Required color/contrast:', intensityGuidance[backgroundIntensity],
-        'Choose cohesive theme-specific colors with intentional variation, and guide the eye through color and composition. The original collection PNG objects are large focal points, so keep their bounding boxes visually quiet and avoid borders around every slot.',
-        'Do NOT depict characters, animals, people, food, drinks, dishes, isolated clipart, logos, lettering, numbers, product mockups or any standalone saleable illustration. Abstract brushstrokes, ornamental curves, nonfigurative botanical-inspired patterns and paper grain are permitted as background design ONLY.',
-        'The actual original collection PNG assets and accurate editable typography will be composited above this background by PaletteIQ. Never generate substitutes, food shapes, decorative illustrations, or pseudo-text.',
-        'Reserved typography safe zone (0–100 percent):', JSON.stringify(titleZone),
-        'Art-director notes:', String(input.artDirection || '').replace(/[<>\r\n]/g, ' ').slice(0,650),
-        'Cover art style and energy:', designDirection,
-        'Slide-specific art direction:', slideDirection,
-        'Requested slide:', String(input.slideName || '').replace(/[<>\r\n]/g, ' ').slice(0,100),
-        'Collection visual context:', JSON.stringify({ theme: collection.theme, subtheme: collection.subtheme, style: collection.style }).slice(0,900),
-        'Reserved overlay areas (percentage boxes):', JSON.stringify(layout).slice(0,3500),
-        'Absolutely no lettering, words, numbers, badges with text, logos, watermarks, illustrations, or hard bounding boxes. Editorial decorative background only; edge-to-edge square composition.'
-      ].join('\n')
-    : thumbnailImagePrompt(collection, layout, width, height, input.includeTitle !== false);
+  // IMPORTANT: the raster generator is a typography/background-only service.
+  // Never feed it the collection's objects, character names, reference listing or
+  // narrative artDirection: those are intended for the layout planner only and
+  // encourage the image model to generate counterfeit collection illustrations.
+  const abstractStyles: Record<string, string> = {
+    editorial: 'expressive editorial typesetting, spacious offset typography panels and confident flat shapes',
+    boutique: 'luxury modern boutique branding, asymmetric split panels and subtle paper layering',
+    storybook: 'artful book cover typography, irregular paper collage and gentle pigment textures',
+    modern: 'bold contemporary graphic design, oversized typography and geometric color blocks',
+    watercolor: 'free-flowing abstract watercolor pigments behind elegant hand-lettering'
+  };
+  const graphicDirection = [
+    abstractStyles[coverStyle],
+    energy[designBoldness],
+    styleGuidance[backgroundStyle],
+    intensityGuidance[backgroundIntensity],
+    'Use non-representational forms ONLY. Every shape must look like paint, paper, typography or graphic geometry, never an object, character, illustration, photograph, silhouette or miniature icon.',
+    'No pictorial symbols or decorative themed icons. Absolutely no standalone illustrations anywhere on canvas.',
+    'The real product artwork is NOT in this request and is placed later from exact stored PNGs by PaletteIQ.'
+  ].join(' ');
+  const typographyInstruction = mode === 'background-only'
+    ? 'ZERO LETTERING: Do not render words, letters, digits, pseudo-letters, logos or glyphs. Accurate editable lettering will be added separately by PaletteIQ.'
+    : 'TYPOGRAPHY ONLY: Render these exact strings as beautifully designed, readable, premium lettering. Main title: ' + JSON.stringify(safeText(input.headline || '')) + '. Subtitle: ' + JSON.stringify(safeText(input.subtitle || '')) + '. They are words to typeset, NOT objects to illustrate. Do not draw a visual depiction of the title words. Do not add any other words, quantity, DPI or marketing claims.';
+  const prompt = mode === 'full-thumbnail'
+    ? thumbnailImagePrompt(collection, layout, width, height, input.includeTitle !== false)
+    : [
+      'Produce a 1:1 square GRAPHIC DESIGN BACKDROP for an Etsy listing. Deliver only abstract background shapes and' + (mode === 'background-only' ? ' NO text.' : ' artistic typography.'),
+      'THIS IS NOT AN ILLUSTRATION JOB. Output ZERO standalone objects, icons, illustrations, characters, food, products, photos, drawings or imitations of clipart. Do not visualize the collection, its subject, its category, the title meaning, or the asset slot contents.',
+      'ONLY authorized visual materials: abstract color fields, watercolor pigment strokes, soft gradients, paper collage textures, thin graphic rules, elegant geometric ornaments, abstract painted swashes, ribbons without pictorial motifs and type (when requested).',
+      'Never create even tiny pictorial decorations or theme-related objects in corners, title panels, badges, circles or along the edges. The entire canvas is non-figurative.',
+      typographyInstruction,
+      'Keep type inside the reserved safe area specified in 0-100 percent canvas coordinates:', JSON.stringify(titleZone),
+      'Reserved areas where original PNG assets will later be composited. Leave these shapes free of visually busy decoration; never fill them with substitutes:', JSON.stringify(layout.map(({x,y,width,height})=>({x,y,width,height}))),
+      'A small degree of deliberate original-PNG overlap is permitted and handled by PaletteIQ, but DO NOT draw any items in that space.',
+      'Premium design mood:', graphicDirection,
+      'Slide composition identifier:', slideLabel.replace(/[^a-z0-9 -]/g,'').slice(0,50),
+      'Graphic layout direction:', slideDirection.replace(/collection assets|original products|original clipart/gi,'empty image areas'),
+      'Prioritize decorative graphic design, NOT themed illustration. No accidental images, illustration vignettes or iconography.'
+    ].join('\n');
   let imageBase64 = '';
   let imageMime = 'image/png';
   if (provider === 'openai') {
