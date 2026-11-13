@@ -89,10 +89,10 @@ export function planListingPlacements(number: number, source: ListingAsset[]): L
     return selected.map(a => box(a, target[0], target[1], target[2], target[3]));
   }
   if (number === 8 || number === 12) {
-    const originX = number === 8 ? 36 : 35;
+    const originX = 37;
     const originY = number === 8 ? 40 : 44;
     const cols = number === 8 ? 3 : 3;
-    const width = number === 8 ? 11 : 12;
+    const width = number === 8 ? 9 : 10;
     const height = number === 8 ? 12 : 19;
     return selected.map((a, i) => box(a, originX + (i % cols) * (width + 1.5), originY + Math.floor(i / cols) * (height + 1.5), width, height));
   }
