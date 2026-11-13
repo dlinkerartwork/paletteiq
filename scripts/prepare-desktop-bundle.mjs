@@ -15,7 +15,17 @@ const verifiedPrerequisite = spawnSync('powershell.exe', [
   '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
   path.join(root, 'scripts', 'verify-windows-prerequisite.ps1')
 ], {
-  env: { ...process.env, PALETTEIQ_BUILD_VC_REDIST: vcRedist },
+  env: {
+    ...process.env,
+    // GitHub Actions invokes npm from pwsh. Its PSModulePath can hide
+    // Windows PowerShell 5.1's bundled Microsoft.PowerShell.Security module.
+    // Prepend the Windows module directory so Authenticode validation still runs.
+    PSModulePath: [
+      path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'Modules'),
+      process.env.PSModulePath || ''
+    ].filter(Boolean).join(path.delimiter),
+    PALETTEIQ_BUILD_VC_REDIST: vcRedist
+  },
   windowsHide: true, encoding: 'utf8'
 });
 if (verifiedPrerequisite.error || verifiedPrerequisite.status !== 0) {
