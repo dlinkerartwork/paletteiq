@@ -38,7 +38,8 @@ test('generation sends only original image coordinates, preserving manually crea
   assert.match(method, /source: 'original' as const/);
   assert.match(method, /const exactLayers = currentDesign\.elements\.filter/);
   assert.doesNotMatch(method, /placeOriginalsOverBackground/);
-  assert.match(method, /overlapsType/);
+  assert.doesNotMatch(method, /overlapsType/);
+  assert.match(method, /Intentional image\/text overlap is supported/);
   assert.match(method, /textZone: zone/);
   assert.match(method, /badge,/);
 });
