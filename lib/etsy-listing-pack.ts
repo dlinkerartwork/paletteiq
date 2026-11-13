@@ -93,7 +93,7 @@ export function placeOriginals(slide: PackSlide, characters: PackCharacter[], re
   const safe = (zone: Zone, rotation: number, margin = 2) => {
     const rect = rotatedBounds(zone, rotation);
     return rect.x >= 2 && rect.y >= 2 && rect.x + rect.width <= 98 && rect.y + rect.height <= 98
-      && !overlap(rect, slide.textZone, hero ? 2 : 3)
+      && !overlap(rect, slide.textZone, hero ? 4 : 3)
       && placed.every(other => !overlap(rect, rotatedBounds(other, other.rotation), margin));
   };
   // Artwork-first editorials: a large focal original, medium supporting originals,
