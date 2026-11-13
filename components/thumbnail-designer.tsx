@@ -14,7 +14,7 @@ export type ThumbnailDesign = {
   id: string; name: string; width: number; height: number; background: string; backgroundImageUrl?: string; aiImageUrl?: string; aiImagePrompt?: string; renderedImageUrl?: string; upscaledImageUrl?: string; upscaleJob?: { id: string; sourceUrl: string; factor: 2 | 4 | 6 | 8; submittedAt: number }; elements: ThumbnailElement[];
   referenceUrl?: string; originalAssetsOnly?: boolean; generationError?: string; updatedAt: number;
   rejectedBackgroundUrl?: string; rejectedBackgroundReason?: string;
-  packTypography?: 'editable' | 'ai-artwork'; packHeadline?: string; packSubtitle?: string; packTextZone?: { x: number; y: number; width: number; height: number };
+  packTypography?: 'editable' | 'ai-artwork'; packSlideKey?: string; packHeadline?: string; packSubtitle?: string; packTextZone?: { x: number; y: number; width: number; height: number };
   packHierarchy?: ClipartHierarchy; packBoldness?: 'soft' | 'balanced' | 'bold'; packCoverStyle?: 'editorial' | 'boutique' | 'storybook' | 'modern' | 'watercolor';
   referenceDesign?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string };
 };
@@ -471,7 +471,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         ...newDesign(latestDesignsRef.current.length + index + 1),
         name: String(index + 1).padStart(2, '0') + ' · ' + slide.name,
         originalAssetsOnly: true,
-        packTypography, packHeadline: slide.headline, packSubtitle: slide.subtitle, packTextZone: slide.textZone,
+        packTypography, packSlideKey: slide.key, packHeadline: slide.headline, packSubtitle: slide.subtitle, packTextZone: slide.textZone,
         packHierarchy, packBoldness, packCoverStyle, referenceDesign,
         background: color,
         referenceUrl: reference.startsWith('https://') ? reference : undefined,
@@ -601,9 +601,11 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         return;
       }
       const allAvailable = filterThemeCharacters(title, characters);
-      const slide = buildPack('complete-10', title, allAvailable).find(candidate =>
-        target.name.toLowerCase().includes(candidate.name.toLowerCase())) ||
-        buildPack('complete-10', title, allAvailable)[0];
+      const savedSlides = buildPack('complete-10', title, allAvailable);
+      const matchedSlide = savedSlides.find(candidate => candidate.key === target.packSlideKey ||
+        target.name.toLowerCase().includes(candidate.name.toLowerCase())) || savedSlides[0];
+      const slide = matchedSlide && { ...matchedSlide, headline: target.packHeadline || matchedSlide.headline,
+        subtitle: target.packSubtitle || matchedSlide.subtitle, textZone: target.packTextZone || matchedSlide.textZone };
       let positioned = imageLayers;
       let visionFallback = true;
       if (slide) {
@@ -641,7 +643,10 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     try {
       const available = filterThemeCharacters(title, characters);
       const slides = buildPack('complete-10', title, available);
-      const slide = slides.find(item => target.name.toLowerCase().includes(item.name.toLowerCase())) || slides[0];
+      const matchedSlide = slides.find(item => item.key === target.packSlideKey ||
+        target.name.toLowerCase().includes(item.name.toLowerCase())) || slides[0];
+      const slide = matchedSlide && { ...matchedSlide, headline: target.packHeadline || matchedSlide.headline,
+        subtitle: target.packSubtitle || matchedSlide.subtitle, textZone: target.packTextZone || matchedSlide.textZone };
       if (!slide) throw Error('No collection layout available');
       const originals = target.elements.filter(e => e.type === 'image');
       setMessage('AI Vision inspecting saved background and adjusting original PNG positions...');
@@ -672,7 +677,10 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
       setMessage('AI Vision analyzing approved background before overlaying original collection PNGs...');
       const available = filterThemeCharacters(title, characters);
       const candidates = buildPack('complete-10', title, available);
-      const slide = candidates.find(item => target.name.toLowerCase().includes(item.name.toLowerCase())) || candidates[0];
+      const matchedSlide = candidates.find(item => item.key === target.packSlideKey ||
+        target.name.toLowerCase().includes(item.name.toLowerCase())) || candidates[0];
+      const slide = matchedSlide && { ...matchedSlide, headline: target.packHeadline || matchedSlide.headline,
+        subtitle: target.packSubtitle || matchedSlide.subtitle, textZone: target.packTextZone || matchedSlide.textZone };
       const imageLayers = target.elements.filter(e => e.type === 'image');
       const placement = slide
         ? await placeOriginalsOverBackground(slide, target.rejectedBackgroundUrl, imageLayers, available,
