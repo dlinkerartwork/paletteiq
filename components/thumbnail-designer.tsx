@@ -412,11 +412,16 @@ export default function ThumbnailDesigner({ registerSaveControls, title, collect
     collectionPalette: collectionVisualSettings?.palette,
     collectionTexture: collectionVisualSettings?.texture
   });
-  const briefPreviewSlide = buildPack('complete-10', title, characters)
-    .find(slide => slide.key === singleSlideKey);
-  const currentBriefPreview = buildThumbnailDesignBrief(currentBriefSettings(
-    briefPreviewSlide ? { ...briefPreviewSlide, headline: coverHeadline.trim() || briefPreviewSlide.headline } : undefined
-  ));
+  const previewSlides = buildPack(generationScope === 'single' ? 'complete-10' : generationScope, title, characters);
+  const chosenPreviewSlides = generationScope === 'single'
+    ? previewSlides.filter(slide => slide.key === singleSlideKey).slice(0, 1)
+    : previewSlides;
+  const currentBriefPreview = chosenPreviewSlides.map(slide =>
+    buildThumbnailDesignBrief(currentBriefSettings({
+      ...slide, headline: generationScope === 'single' && coverHeadline.trim()
+        ? coverHeadline.trim() : slide.headline
+    }))
+  ).join('\n\n--- NEXT THUMBNAIL ---\n\n');
 
   // Create the background and artistic lettering FIRST, inspect the real pixels
   // with Vision, then composite exact original PNGs according to its coordinates.
