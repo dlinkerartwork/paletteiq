@@ -6,6 +6,8 @@ on:
       - feature/reference-assets-thumbnail-prompt
     paths:
       - .github/workflows/windows-no-license-test-installer.yml
+      - scripts/prepare-desktop-bundle.mjs
+      - scripts/verify-windows-prerequisite.ps1
   workflow_dispatch:
 
 permissions:
