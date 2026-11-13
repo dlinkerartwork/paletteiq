@@ -6,6 +6,7 @@ import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { userCredential } from '@/lib/credentials';
 import { nativeAssetBucket } from '@/lib/native-bridge';
 import { zipStream, type ZipEntry } from '@/lib/zip-stream';
+import type { ListingStudioConfig } from '@/lib/listing-studio-config';
 import {
   LISTING_IMAGE_SPECS, LISTING_HEIGHT, LISTING_WIDTH, listingFilename, listingTitle,
   originalAssets, type ListingImageRecord, type ListingPlacement, type ListingAsset, type ListingImageStatus
@@ -99,7 +100,8 @@ export async function GET(request: Request) {
 type Input = {
   action?: 'generate' | 'save' | 'layout'; projectId?: string; number?: number;
   image?: ListingImageRecord; model?: string; quality?: string;
-  backgroundUrl?: string; placements?: ListingPlacement[];
+  backgroundUrl?: string; placements?: ListingPlacement[]; settings?: Partial<ListingStudioConfig>;
+  referenceDesign?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string };
 };
 const blankScene: Record<number, string> = {
   8: 'Premium realistic overhead flat-lay photograph of ONE blank, white sticker sheet on an elegant desk. The sticker sheet should have a broad clean unprinted center occupying 36%-66% horizontally and 38%-86% vertically, with soft natural shadows. Absolutely no stickers, illustrations or printed designs on the sheet.',
@@ -108,14 +110,23 @@ const blankScene: Record<number, string> = {
   11: 'Premium realistic overhead photograph of ONE kraft cardboard gift box with a large blank white rectangular paper label, flat to camera, in the lower middle; center label from around 40%-61% horizontal and 46%-74% vertical. All surfaces unprinted and free of illustrations.',
   12: 'Premium realistic overhead flat-lay scrapbook spread on handmade paper with a large clean blank cream craft page in the lower middle. Leave 34%-69% horizontal and 42%-80% vertical clear for exact transparent artwork to be overlaid. No drawings, stickers, animals, flowers or printed pictures in the mockup.'
 };
-function artPrompt(number: number, project: StoredProject, count: number): string {
+function artPrompt(number: number, project: StoredProject, count: number, settings?: Partial<ListingStudioConfig>, referenceDesign?: Input['referenceDesign']): string {
   const spec = LISTING_IMAGE_SPECS[number - 1];
-  const title = listingTitle(number, project.subtheme || project.theme || project.name);
+  const title = number === 1 && settings?.headline ? sanitizedText(settings.headline, 75) : listingTitle(number, project.subtheme || project.theme || project.name);
   const subtitle = number === 6 || number === 13 ? count + ' original digital clipart illustrations'
     : number === 14 ? 'Digital product • No physical item included'
     : number === 2 || number === 3 || number === 5 ? count + ' original collection images'
     : number === 1 ? 'Digital Clipart Collection' : 'Creative ideas using original clipart';
   const palette = sanitizedText(project.palette || 'warm ivory, forest green, muted earthy accents', 180);
+  // Only allow known style tokens from the Reference & Assets UI. Never treat
+  // arbitrary uploaded reference pixels as clipart or additional product art.
+  const artStyle = ['editorial','boutique','storybook','modern','watercolor'].includes(settings?.coverStyle || '') ? settings?.coverStyle : 'editorial';
+  const backgroundStyle = ['watercolor','paper','gradient','botanical','vintage'].includes(settings?.backgroundStyle || '') ? settings?.backgroundStyle : 'watercolor';
+  const intensity = ['soft','balanced','vibrant'].includes(settings?.intensity || '') ? settings?.intensity : 'balanced';
+  const boldness = ['soft','balanced','bold'].includes(settings?.boldness || '') ? settings?.boldness : 'balanced';
+  const motif = ['blush-brush-ring','split-panel','paper-collage','soft-wash','minimal-lines'].includes(referenceDesign?.graphicMotif || '') ? referenceDesign?.graphicMotif : 'none';
+  const lettering = ['script-serif','editorial-serif','modern-display','hand-lettered'].includes(referenceDesign?.letteringStyle || '') ? referenceDesign?.letteringStyle : 'artistic brush script and editorial serif';
+  const mood = ['blush-sage','earthy-warm','forest-cream','pastel','vibrant'].includes(referenceDesign?.paletteMood || '') ? referenceDesign?.paletteMood : 'collection colors';
   const core = [
     'Create a premium conversion-focused Etsy digital clipart listing IMAGE BACKGROUND with exact ARTISTIC TYPOGRAPHY.',
     'Aspect: 3:2 landscape source, center-cropped to 4:3. All important lettering must be within the middle 82% of source width. Final composition is 3000 x 2250.',
@@ -125,7 +136,10 @@ function artPrompt(number: number, project: StoredProject, count: number): strin
     'Reserve the top 23% of the image for the headline and subtitle. Place all essential text ONLY in the top 23%, with ample edge-safe spacing.',
     'The actual digital clipart collection is NOT provided to you; original PNG assets will be composited later by PaletteIQ. Do not invent or paint any clipart artwork, characters, food, floral illustrations, miniature icons, badges depicting objects, or product substitutes.',
     'Do not claim asset dimensions, DPI, license terms, digital file formats or asset counts other than the exact verified subtitle supplied.',
-    'Consistent tasteful professional photography/graphic design, high-key natural lighting, spacious graphic hierarchy.'
+    'Consistent tasteful professional photography/graphic design, high-key natural lighting, spacious graphic hierarchy.',
+    'REFERENCE & ASSETS DESIGN SETTINGS (abstract art and typography only): cover=' + artStyle + ', background=' + backgroundStyle + ', intensity=' + intensity + ', lettering emphasis=' + boldness + '.',
+    'Verified reference analysis GRAPHIC STYLE ONLY (not product depiction): motif=' + motif + ', lettering=' + lettering + ', palette mood=' + mood + '.',
+    'The uploaded reference is only a guide to abstract aesthetic and spacing. Do not reproduce original reference artwork or distinctive composition verbatim.'
   ];
   if (spec.kind === 'mockup') {
     return [
@@ -186,7 +200,7 @@ export async function POST(request: Request) {
       const response = await fetch('https://api.openai.com/v1/responses', {
         method:'POST', headers:{Authorization:'Bearer '+keyOpenAi,'Content-Type':'application/json'},
         body:JSON.stringify({
-          model:'gpt-4.1-mini',
+          model: input.settings?.analysisProvider === 'openai' && /^gpt-[a-z0-9.-]{1,80}$/.test(input.settings?.analysisModel || '') ? input.settings!.analysisModel : 'gpt-4.1-mini',
           input:[{role:'user',content:[
             {type:'input_text',text:[
               'You are an expert graphic designer positioning EXISTING ORIGINAL PNG LAYERS on an AI-generated empty listing design. NEVER draw or regenerate clipart.',
@@ -234,7 +248,7 @@ export async function POST(request: Request) {
   if (!['low', 'medium', 'high'].includes(quality)) return bad('Invalid image quality');
   const key = await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
   if (!key) return bad('Configure OpenAI API key in Settings', 503);
-  const prompt = artPrompt(input.number, project, count);
+  const prompt = artPrompt(input.number, project, count, input.settings, input.referenceDesign);
   try {
     const response = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
