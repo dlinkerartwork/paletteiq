@@ -14,7 +14,7 @@ export type ThumbnailDesign = {
   id: string; name: string; width: number; height: number; background: string; backgroundImageUrl?: string; aiImageUrl?: string; aiImagePrompt?: string; renderedImageUrl?: string; upscaledImageUrl?: string; upscaleJob?: { id: string; sourceUrl: string; factor: 2 | 4 | 6 | 8; submittedAt: number }; elements: ThumbnailElement[];
   referenceUrl?: string; originalAssetsOnly?: boolean; generationError?: string; updatedAt: number;
   rejectedBackgroundUrl?: string; rejectedBackgroundReason?: string;
-  packTypography?: 'editable' | 'ai-artwork'; packHeadline?: string; packSubtitle?: string; packTextZone?: { x: number; y: number; width: number; height: number };
+  packTypography?: 'editable' | 'ai-artwork'; packSlideKey?: string; packHeadline?: string; packSubtitle?: string; packTextZone?: { x: number; y: number; width: number; height: number };
   packHierarchy?: ClipartHierarchy; packBoldness?: 'soft' | 'balanced' | 'bold'; packCoverStyle?: 'editorial' | 'boutique' | 'storybook' | 'modern' | 'watercolor';
   referenceDesign?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string };
 };
@@ -365,8 +365,54 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     return [eyebrow,main,caption];
   };
 
-  // AI plans character placements and renders typography/badges/background;
-  // PaletteIQ composites exact original PNGs over that single AI background layer.
+  // Vision planning always happens AFTER the AI background exists.
+  // Only the layout planner can see the finished artwork; the image generator
+  // never receives original PNGs and never draws their substitutes.
+  const placeOriginalsOverBackground = async (
+    slide: PackSlide, imageUrl: string, fallback: ThumbnailElement[],
+    available: Character[], hierarchy: ClipartHierarchy, coverStyle: typeof packCoverStyle
+  ): Promise<{ elements: ThumbnailElement[]; usedFallback: boolean }> => {
+    const imageElements = fallback.filter(e => e.type === 'image' && e.characterId);
+    if (!imageElements.length) return { elements: fallback, usedFallback: true };
+    try {
+      const response = await fetch('/api/thumbnail-art-direction', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId, backgroundImageUrl: imageUrl, slideKey: slide.key, slideName: slide.name,
+          headline: slide.headline, subtitle: slide.subtitle, textZone: slide.textZone,
+          characters: imageElements.map(e => {
+            const character = available.find(c => c.id === e.characterId);
+            return { id: e.characterId, name: character?.name || e.characterId };
+          }),
+          hierarchy, coverStyle,
+          suggestedSlots: imageElements.map(e => ({
+            characterId: e.characterId, x: e.x, y: e.y, width: e.width, height: e.height
+          }))
+        })
+      });
+      const result = await response.json() as {error?: string; slots?: Array<{
+        characterId: string; x: number; y: number; width: number; height: number; rotation: number
+      }>};
+      const expectedMin = Math.min(imageElements.length, slide.layout === 'grid' || slide.layout === 'showcase' ? 4 : 3);
+      if (!response.ok || !result.slots || result.slots.length < expectedMin)
+        throw Error(result.error || 'Vision returned too few original PNG positions');
+      const selected = result.slots
+        .map(slot => {
+          const element = imageElements.find(e => e.characterId === slot.characterId);
+          return element ? { ...element, ...slot, source: 'original' as const } : null;
+        })
+        .filter(element => element !== null) as ThumbnailElement[];
+      if (selected.length < expectedMin) throw Error('Vision returned insufficient valid original PNGs');
+      return { elements: selected, usedFallback: false };
+    } catch {
+      // Background generation is paid. Never discard it because vision layout failed.
+      // Preserve existing original-only positions as a readable editable fallback.
+      return { elements: imageElements, usedFallback: true };
+    }
+  };
+
+  // Create the background and artistic lettering FIRST, inspect the real pixels
+  // with Vision, then composite exact original PNGs according to its coordinates.
   const generateReferenceBatch = async () => {
     let available = filterThemeCharacters(title, characters);
     if (!available.length) { setMessage('No original collection images match this specific theme (' + title + '). Generate theme-matching clipart first; unrelated artwork will not be added.'); return; }
@@ -381,7 +427,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     const needsCategories = !available.some(c => c.category || c.subtheme || c.group) &&
       (generationScope === 'complete-10' || generationScope === 'category-showcase' ||
         (generationScope === 'single' && singleSlideKey.startsWith('category-')));
-    if (!window.confirm('Create ' + slides.length + ' Etsy listing thumbnails? This makes up to ' + slides.length + ' paid OpenAI image requests, ' + slides.length + ' layout planning requests, and ' + slides.length + ' visual checks' + (reference ? ' plus one reference analysis' : '') + (needsCategories ? ' plus one category analysis' : '') + '. Existing thumbnails are preserved. Continue?')) return;
+    if (!window.confirm('Create ' + slides.length + ' Etsy listing thumbnails? This makes up to ' + slides.length + ' paid OpenAI image requests, ' + slides.length + ' post-background Vision layout requests, and ' + slides.length + ' image QC checks' + (reference ? ' plus one reference analysis' : '') + (needsCategories ? ' plus one category analysis' : '') + '. Existing thumbnails are preserved. Continue?')) return;
     cancelPackRef.current = false;
     setAiBusy(true); setPackStatus('Preparing ' + slides.length + ' Etsy listing designs...');
     const failures: string[] = [];
@@ -425,7 +471,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         ...newDesign(latestDesignsRef.current.length + index + 1),
         name: String(index + 1).padStart(2, '0') + ' · ' + slide.name,
         originalAssetsOnly: true,
-        packTypography, packHeadline: slide.headline, packSubtitle: slide.subtitle, packTextZone: slide.textZone,
+        packTypography, packSlideKey: slide.key, packHeadline: slide.headline, packSubtitle: slide.subtitle, packTextZone: slide.textZone,
         packHierarchy, packBoldness, packCoverStyle, referenceDesign,
         background: color,
         referenceUrl: reference.startsWith('https://') ? reference : undefined,
@@ -445,49 +491,14 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         if (cancelPackRef.current) { setPackStatus('Generation stopped. Completed thumbnails were kept.'); break; }
         const slide = slides[i];
         const item = created[i];
-        setPackStatus('AI arranging original clipart ' + (i + 1) + '/' + created.length + ': ' + slide.name);
         try {
-          const originalChoices = item.elements.filter(e => e.type === 'image').map(e => {
-            const c = available.find(c => c.id === e.characterId);
-            return c ? { id: c.id, name: c.name } : null;
-          }).filter((c): c is {id: string; name: string} => c !== null);
-          // Planner failures must not skip the paid background/typography generation.
-          // Safe local placement is already available from placeOriginals().
-          let plannedElements: ThumbnailElement[] = item.elements.filter(e => e.type === 'image');
-          let artDirection = '';
-          try {
-            const planResponse = await fetch('/api/thumbnail-art-direction', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                projectId, slideKey: slide.key, slideName: slide.name,
-                headline: slide.headline, subtitle: slide.subtitle, textZone: slide.textZone,
-                characters: originalChoices, hierarchy: packHierarchy, coverStyle: packCoverStyle,
-                suggestedSlots: plannedElements.map(e => ({ characterId: e.characterId, x: e.x, y: e.y, width: e.width, height: e.height }))
-              })
-            });
-            const plan = await planResponse.json() as {
-              error?: string; artDirection?: string;
-              slots?: Array<{ characterId: string; x: number; y: number; width: number; height: number; rotation: number }>
-            };
-            // A one-object AI plan is NOT a viable cover when the collection provides several originals.
-            // Preserve the complete curated layout instead of silently losing artwork.
-            const expectedMin = Math.min(plannedElements.length, slide.layout === 'grid' || slide.layout === 'showcase' ? 4 : 3);
-            if (!planResponse.ok || !plan.slots?.length || plan.slots.length < expectedMin)
-              throw Error(plan.error || 'AI returned too few original collection placements');
-            plannedElements = plan.slots.map(position => ({
-              ...newImage(available.find(c => c.id === position.characterId)!, i, 'original'),
-              ...position, source: 'original'
-            }));
-            artDirection = plan.artDirection || '';
-          } catch {
-            setPackStatus('Using safe collection layout; continuing to AI background ' + (i + 1) + '/' + created.length);
-          }
-          // Editable mode keeps verified product wording as independent text layers.
-          // AI-artwork mode puts lettering only in the generated background.
-          const plannedDesign = { ...item, elements: packTypography === 'editable' ? [...plannedElements, ...typographyForSlide(slide)] : plannedElements };
-          let updated = latestDesignsRef.current.map(d => d.id === item.id ? plannedDesign : d);
-          latestDesignsRef.current = updated;
-          onChange(updated);
+          const initialElements = item.elements.filter(e => e.type === 'image');
+          const displayElements = packTypography === 'editable'
+            ? [...initialElements, ...typographyForSlide(slide)]
+            : initialElements;
+          const initialDesigns = latestDesignsRef.current.map(d => d.id === item.id ? { ...d, elements: displayElements } : d);
+          latestDesignsRef.current = initialDesigns;
+          onChange(initialDesigns);
           setPackStatus('Requesting OpenAI ' + (packTypography === 'ai-artwork' ? 'background, artistic title and badges' : 'decorative background') + ' ' + (i + 1) + '/' + created.length + ': ' + slide.name);
           const response = await fetch('/api/thumbnail-ai-image', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -498,10 +509,10 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
               mode: packTypography === 'editable' ? 'background-only' : 'background-with-typography',
               backgroundStyle, backgroundIntensity,
               headline: slide.headline, subtitle: slide.subtitle,
-              slideName: slide.name, artDirection, textZone: slide.textZone,
+              slideName: slide.name, textZone: slide.textZone,
               designBoldness: packBoldness, coverStyle: packCoverStyle,
               referenceDesign,
-              layout: plannedElements.map(e => ({ type: 'image', x: e.x, y: e.y, width: e.width, height: e.height }))
+              layout: initialElements.map(e => ({ type: 'image', x: e.x, y: e.y, width: e.width, height: e.height }))
             })
           });
           const result = await response.json() as { imageUrl?: string; error?: string; qcRejected?: boolean; qcReason?: string };
@@ -523,9 +534,15 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
             }
             continue;
           }
+          setPackStatus('AI Vision analyzing generated background and positioning original clipart ' + (i + 1) + '/' + created.length);
+          const placement = await placeOriginalsOverBackground(slide, result.imageUrl, initialElements, available, packHierarchy, packCoverStyle);
+          const finalElements = packTypography === 'editable'
+            ? [...placement.elements, ...typographyForSlide(slide)]
+            : placement.elements;
           const next = latestDesignsRef.current.map(d => d.id === item.id ? {
-            ...d, backgroundImageUrl: result.imageUrl, rejectedBackgroundUrl: undefined,
-            rejectedBackgroundReason: undefined, generationError: undefined
+            ...d, elements: finalElements, backgroundImageUrl: result.imageUrl,
+            rejectedBackgroundUrl: undefined, rejectedBackgroundReason: undefined,
+            generationError: placement.usedFallback ? 'Vision placement unavailable; original PNG fallback layout used.' : undefined
           } : d);
           latestDesignsRef.current = next;
           onChange(next);
@@ -583,9 +600,29 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         setMessage('Background saved for review, not applied. Inspect the image before accepting or regenerating.');
         return;
       }
+      const allAvailable = filterThemeCharacters(title, characters);
+      const savedSlides = buildPack('complete-10', title, allAvailable);
+      const matchedSlide = savedSlides.find(candidate => candidate.key === target.packSlideKey ||
+        target.name.toLowerCase().includes(candidate.name.toLowerCase())) || savedSlides[0];
+      const slide = matchedSlide && { ...matchedSlide, headline: target.packHeadline || matchedSlide.headline,
+        subtitle: target.packSubtitle || matchedSlide.subtitle, textZone: target.packTextZone || matchedSlide.textZone };
+      let positioned = imageLayers;
+      let visionFallback = true;
+      if (slide) {
+        setMessage('AI Vision inspecting the new background and repositioning original clipart...');
+        const placement = await placeOriginalsOverBackground(
+          slide, result.imageUrl, imageLayers, allAvailable, target.packHierarchy || packHierarchy,
+          target.packCoverStyle || packCoverStyle
+        );
+        positioned = placement.elements;
+        visionFallback = placement.usedFallback;
+      }
       const next = latestDesignsRef.current.map(d => d.id === target.id
-        ? { ...d, backgroundImageUrl: result.imageUrl, rejectedBackgroundUrl: undefined,
-          rejectedBackgroundReason: undefined, generationError: undefined, updatedAt: Date.now() } : d);
+        ? { ...d, backgroundImageUrl: result.imageUrl, elements: [
+            ...positioned, ...d.elements.filter(e => e.type === 'text')
+          ], rejectedBackgroundUrl: undefined, rejectedBackgroundReason: undefined,
+          generationError: visionFallback ? 'Vision placement unavailable; previous original PNG layout kept.' : undefined,
+          updatedAt: Date.now() } : d);
       latestDesignsRef.current = next;
       onChange(next);
       setMessage('AI background generated for ' + target.name + '. Save designs to persist it.');
@@ -600,16 +637,68 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     }
   };
 
-  const approveReviewedBackground = (target: ThumbnailDesign) => {
-    if (!target.rejectedBackgroundUrl) return;
+  const reLayoutWithVision = async (target: ThumbnailDesign) => {
+    if (!target.backgroundImageUrl || aiBusy || backgroundRetryId) return;
+    setBackgroundRetryId(target.id);
+    try {
+      const available = filterThemeCharacters(title, characters);
+      const slides = buildPack('complete-10', title, available);
+      const matchedSlide = slides.find(item => item.key === target.packSlideKey ||
+        target.name.toLowerCase().includes(item.name.toLowerCase())) || slides[0];
+      const slide = matchedSlide && { ...matchedSlide, headline: target.packHeadline || matchedSlide.headline,
+        subtitle: target.packSubtitle || matchedSlide.subtitle, textZone: target.packTextZone || matchedSlide.textZone };
+      if (!slide) throw Error('No collection layout available');
+      const originals = target.elements.filter(e => e.type === 'image');
+      setMessage('AI Vision inspecting saved background and adjusting original PNG positions...');
+      const result = await placeOriginalsOverBackground(
+        slide, target.backgroundImageUrl, originals, available,
+        target.packHierarchy || packHierarchy, target.packCoverStyle || packCoverStyle
+      );
+      const next = latestDesignsRef.current.map(d => d.id === target.id ? {
+        ...d, elements: [...result.elements, ...d.elements.filter(e => e.type === 'text')],
+        generationError: result.usedFallback ? 'AI Vision layout unavailable; original positions retained.' : undefined,
+        updatedAt: Date.now()
+      } : d);
+      latestDesignsRef.current = next;
+      onChange(next);
+      setMessage(result.usedFallback
+        ? 'Vision could not improve the layout; current original PNG positions remain unchanged.'
+        : 'AI Vision repositioned original PNGs without another paid image generation. Save designs to persist.');
+    } catch (error) {
+      setMessage('Vision re-layout failed: ' + (error instanceof Error ? error.message : String(error)));
+    } finally { setBackgroundRetryId(''); }
+  };
+
+  const approveReviewedBackground = async (target: ThumbnailDesign) => {
+    if (!target.rejectedBackgroundUrl || aiBusy || backgroundRetryId) return;
     if (!window.confirm('Have you OPENED and inspected this AI artwork at full size? Confirm it contains NO AI-generated collection clipart, foods, animals, product illustrations or imitations of your collection assets. Decorative shapes and lettering are allowed. Only approve if all artwork is background/typography.')) return;
-    const next = latestDesignsRef.current.map(d => d.id === target.id ? {
-      ...d, backgroundImageUrl: d.rejectedBackgroundUrl, rejectedBackgroundUrl: undefined,
-      rejectedBackgroundReason: undefined, generationError: undefined, updatedAt: Date.now()
-    } : d);
-    latestDesignsRef.current = next;
-    onChange(next);
-    setMessage('Reviewed background applied. Save designs to retain it. Original collection PNG layers are unchanged.');
+    setBackgroundRetryId(target.id);
+    try {
+      setMessage('AI Vision analyzing approved background before overlaying original collection PNGs...');
+      const available = filterThemeCharacters(title, characters);
+      const candidates = buildPack('complete-10', title, available);
+      const matchedSlide = candidates.find(item => item.key === target.packSlideKey ||
+        target.name.toLowerCase().includes(item.name.toLowerCase())) || candidates[0];
+      const slide = matchedSlide && { ...matchedSlide, headline: target.packHeadline || matchedSlide.headline,
+        subtitle: target.packSubtitle || matchedSlide.subtitle, textZone: target.packTextZone || matchedSlide.textZone };
+      const imageLayers = target.elements.filter(e => e.type === 'image');
+      const placement = slide
+        ? await placeOriginalsOverBackground(slide, target.rejectedBackgroundUrl, imageLayers, available,
+            target.packHierarchy || packHierarchy, target.packCoverStyle || packCoverStyle)
+        : { elements: imageLayers, usedFallback: true };
+      const next = latestDesignsRef.current.map(d => d.id === target.id ? {
+        ...d, backgroundImageUrl: d.rejectedBackgroundUrl,
+        elements: [...placement.elements, ...d.elements.filter(e => e.type === 'text')],
+        rejectedBackgroundUrl: undefined, rejectedBackgroundReason: undefined,
+        generationError: placement.usedFallback ? 'Vision layout unavailable; original PNG positions retained.' : undefined,
+        updatedAt: Date.now()
+      } : d);
+      latestDesignsRef.current = next;
+      onChange(next);
+      setMessage('Reviewed background applied with original PNG layout. Save designs to retain it.');
+    } finally {
+      setBackgroundRetryId('');
+    }
   };
 
   const onReferenceUpload = async (file?: File) => {
@@ -1287,13 +1376,16 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
             </button>
             {item.rejectedBackgroundUrl && <div style={{ display: 'grid', gap: 5, marginTop: 6 }}>
               <a href={item.rejectedBackgroundUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, textDecoration: 'underline' }}>View rejected AI artwork</a>
-              <button type="button" className="outline-btn" style={{ fontSize: 11, padding: '5px 7px' }} disabled={aiBusy || Boolean(backgroundRetryId)} onClick={() => approveReviewedBackground(item)}>Approve after visual inspection</button>
+              <button type="button" className="outline-btn" style={{ fontSize: 11, padding: '5px 7px' }} disabled={aiBusy || Boolean(backgroundRetryId)} onClick={() => void approveReviewedBackground(item)}>Approve after visual inspection</button>
               <small>QC flagged a possible product illustration. Not used in the thumbnail until approved.</small>
             </div>}
             <small style={{ display: 'block', marginTop: 5 }}>{item.upscaleJob ? (upscaleRemaining[item.id] != null ? 'Est. remaining: ' + Math.ceil(upscaleRemaining[item.id]! / 60) + ' min' : 'Time remaining: waiting for GPU / estimating…') : item.upscaledImageUrl ? '✓ Upscale completed' : 'Not upscaled'}</small>
             {item.upscaledImageUrl ? <button type="button" className="outline-btn" style={{ fontSize: 12, marginTop: 6 }} onClick={() => void compareThumbnail(item)}>Compare images</button>
               : item.aiImageUrl && <a href={item.aiImageUrl} download style={{ display: 'block', fontSize: 12 }}>View AI image</a>}
             <div style={{ display: 'flex', gap: 5, marginTop: 8, flexWrap: 'wrap' }}>
+              {item.originalAssetsOnly && item.backgroundImageUrl && <button type="button" className="outline-btn" style={{ fontSize: 11, padding: '5px 7px', flex: 1 }} disabled={aiBusy || Boolean(backgroundRetryId)} onClick={() => void reLayoutWithVision(item)}>
+                <WandSparkles size={12}/> {backgroundRetryId === item.id ? 'Analyzing...' : 'Re-layout with AI Vision'}
+              </button>}
               {item.originalAssetsOnly && <button type="button" className="outline-btn" style={{ fontSize: 11, padding: '5px 7px', flex: 1 }} disabled={aiBusy || Boolean(backgroundRetryId)} onClick={() => void retryBackground(item)}>
                 <WandSparkles size={12}/> {backgroundRetryId === item.id ? 'Generating...' : item.backgroundImageUrl ? 'Regenerate AI' : 'Generate AI Background'}
               </button>}

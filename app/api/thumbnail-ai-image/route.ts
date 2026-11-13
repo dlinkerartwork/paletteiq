@@ -138,6 +138,16 @@ export async function POST(req: Request) {
   const typographyInstruction = mode === 'background-only'
     ? 'ZERO LETTERING: Do not render words, letters, digits, pseudo-letters, logos or glyphs. Accurate editable lettering will be added separately by PaletteIQ.'
     : 'TYPOGRAPHY ONLY: Render these exact strings as beautifully designed, readable, premium lettering. Main title: ' + JSON.stringify(safeText(input.headline || '')) + '. Subtitle: ' + JSON.stringify(safeText(input.subtitle || '')) + '. They are words to typeset, NOT objects to illustrate. Do not draw a visual depiction of the title words. Do not add any other words, quantity, DPI or marketing claims.';
+  const heroReferenceStyle = [
+    'Create a premium Etsy cover with a large soft cream central medallion panel.',
+    'Use a blush watercolor circular brush ring around the central title area.',
+    'Typography is the visual hero: first keyword in expressive dark forest brush script, second keyword in elegant earthy-red serif.',
+    'Keep the background light, airy, and refined on warm ivory paper.',
+    'Do NOT use bold orange or teal abstract blobs dominating the canvas.',
+    'Do NOT create illustrations, icons, mini food drawings, or product substitutes.',
+    'Leave the outer perimeter visually suitable for exact original PNG clipart placements.'
+  ].join(' ');
+  const isHeroCover = /hero cover/i.test(String(input.slideName || ''));
   const prompt = mode === 'full-thumbnail'
     ? thumbnailImagePrompt(collection, layout, width, height, input.includeTitle !== false)
     : [
@@ -150,6 +160,7 @@ export async function POST(req: Request) {
       'Reserved areas where original PNG assets will later be composited. Leave these shapes free of visually busy decoration; never fill them with substitutes:', JSON.stringify(layout.map(({x,y,width,height})=>({x,y,width,height}))),
       'A small degree of deliberate original-PNG overlap is permitted and handled by PaletteIQ, but DO NOT draw any items in that space.',
       'Premium design mood (follow reference graphic style when provided):', graphicDirection,
+      ...(isHeroCover ? ['HERO ART DIRECTION PRIORITY:', heroReferenceStyle] : []),
       'If a blush brush-ring reference is provided, DO NOT substitute red-orange geometric blobs. Keep the watercolor ring delicate and the central typography visually expressive.',
       'Slide composition identifier:', slideLabel.replace(/[^a-z0-9 -]/g,'').slice(0,50),
       'Graphic layout direction:', slideDirection.replace(/collection assets|original products|original clipart/gi,'empty image areas'),

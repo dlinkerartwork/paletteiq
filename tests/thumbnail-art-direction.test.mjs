@@ -24,8 +24,8 @@ test('AI planner protects text and restricts excess overlap while allowing layer
 
 test('One-click batch uses AI layout positions and background with AI lettering and badges', () => {
   assert.match(designer,/fetch\('\/api\/thumbnail-art-direction'/);
-  assert.match(designer,/plan\.slots\.map\(position =>/);
-  assert.match(designer,/layout: plannedElements\.map/);
+  assert.match(designer,/placeOriginalsOverBackground\(/);
+  assert.match(designer,/layout: initialElements\.map/);
   assert.match(generator, /TYPOGRAPHY ONLY: Render these exact strings/);
   assert.match(generator, /THIS IS NOT AN ILLUSTRATION JOB/);
   assert.match(generator, /placed later from exact stored PNGs/);
@@ -47,7 +47,7 @@ test('Etsy thumbnails are fixed at 1024 square including rendered export', () =>
 
 test('Etsy pack defaults to independently editable typography and exact original assets', () => {
   assert.match(designer, /useState<'editable' \| 'ai-artwork'>\('ai-artwork'\)/);
-  assert.match(designer, /packTypography === 'editable' \? \[\.\.\.plannedElements, \.\.\.typographyForSlide\(slide\)\]/);
+  assert.match(designer, /packTypography === 'editable'\s*\? \[\.\.\.placement\.elements, \.\.\.typographyForSlide\(slide\)\]/);
   assert.match(designer, /mode: packTypography === 'editable' \? 'background-only' : 'background-with-typography'/);
   assert.match(designer, /originalAssetsOnly: true/);
 });
@@ -59,11 +59,11 @@ test('Both background modes reject illustrated substitutes, and editable mode re
   assert.match(generator, /Premium design mood/);
 });
 
-test('Batch requests the AI background even if art direction fails', () => {
-  assert.match(designer, /let plannedElements: ThumbnailElement\[\] = item\.elements\.filter/);
-  assert.match(designer, /catch \{\s*setPackStatus\('Using safe collection layout/);
-  assert.match(designer, /fetch\('\/api\/thumbnail-ai-image'/);
-  assert.match(designer, /packTypography === 'ai-artwork'/);
+test('Batch requests the image before Vision layout and preserves safe fallback', () => {
+  const batch = designer.slice(designer.indexOf('const generateReferenceBatch ='), designer.indexOf('const retryBackground ='));
+  assert.ok(batch.indexOf("fetch('/api/thumbnail-ai-image'") < batch.indexOf('await placeOriginalsOverBackground('));
+  assert.match(designer, /return \{ elements: imageElements, usedFallback: true \}/);
+  assert.match(designer, /backgroundImageUrl: result\.imageUrl/);
 });
 
 test('Every collection thumbnail offers safe deletion and a background retry', () => {
@@ -141,4 +141,37 @@ test('AI planner cannot collapse a multi-asset cover to one original clipart', (
   assert.match(designer, /const expectedMin = Math\.min\(plannedElements\.length/);
   assert.match(designer, /plan\.slots\.length < expectedMin/);
   assert.match(designer, /Using safe collection layout/);
+});
+
+test('Vision analyzes the exact persisted background, not a generic pre-generation prompt', () => {
+  assert.match(planner, /backgroundImageUrl\?: string/);
+  assert.match(planner, /nativeAssetBucket\(\) \?\? env\.BUCKET/);
+  assert.match(planner, /parsedUrl\.pathname !== '\/api\/thumbnail-background'/);
+  assert.match(planner, /parsedUrl\.searchParams\.get\('projectId'\) !== body\.projectId/);
+  assert.match(planner, /image_url:backgroundDataUrl/);
+  assert.match(planner, /detectedTitleZone\?: Box/);
+  assert.match(designer, /backgroundImageUrl: imageUrl/);
+  assert.match(designer, /AI Vision analyzing generated background and positioning original clipart/);
+});
+test('Hero cover prompt includes the requested cream medallion, blush ring and editorial lettering', () => {
+  assert.match(generator, /const heroReferenceStyle = \[/);
+  assert.match(generator, /large soft cream central medallion panel/);
+  assert.match(generator, /blush watercolor circular brush ring/);
+  assert.match(generator, /Do NOT create illustrations, icons, mini food drawings/);
+  assert.match(generator, /isHeroCover \? \['HERO ART DIRECTION PRIORITY:'/);
+});
+
+test('Manual approval also runs background-first Vision before applying original layers', () => {
+  const part = designer.slice(designer.indexOf('const approveReviewedBackground'),designer.indexOf('const onReferenceUpload'));
+  assert.match(part, /await placeOriginalsOverBackground/);
+  assert.ok(part.indexOf('await placeOriginalsOverBackground') < part.indexOf('backgroundImageUrl: d.rejectedBackgroundUrl'));
+});
+
+test('Saved thumbnail can be re-laid out by Vision without paying for a second image', () => {
+  const relayout = designer.slice(designer.indexOf('const reLayoutWithVision'), designer.indexOf('const approveReviewedBackground'));
+  assert.match(relayout, /await placeOriginalsOverBackground/);
+  assert.doesNotMatch(relayout, /thumbnail-ai-image/);
+  assert.match(designer, /Re-layout with AI Vision/);
+  assert.match(designer, /packSlideKey: slide\.key/);
+  assert.match(designer, /candidate\.key === target\.packSlideKey/);
 });
