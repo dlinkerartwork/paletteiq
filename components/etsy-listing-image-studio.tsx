@@ -122,6 +122,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   const positions = changes[step] || current?.placements || planListingPlacements(step, categorizedAssets);
   const selected = positions[selectedIndex] || positions[0];
   const approved = LISTING_IMAGE_SPECS.filter(s => records.some(r => r.number === s.number && r.status === 'approved')).length;
+  const precedingApproved = LISTING_IMAGE_SPECS.slice(0, step - 1).every(s => records.some(r => r.number === s.number && r.status === 'approved'));
 
   useEffect(() => {
     let live = true;
@@ -179,6 +180,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   const generate = async () => {
     if (working) return;
     if (!assets.length) return setMessage('Generate collection clipart in Image Production first.');
+    if (!precedingApproved) return setMessage('Approve all preceding listing images before generating this one.');
     if (current?.status === 'approved' && !window.confirm('Regenerate an approved image? Its approval will be reset to Draft.')) return;
     setWorking('generate'); setMessage('Generating artistic background + exact typography with OpenAI (no clipart regeneration)...');
     try {
@@ -282,10 +284,11 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           <select value={quality} disabled={!!working} onChange={e => setQuality(e.target.value as typeof quality)}>
             <option value="low">Low — economical</option><option value="medium">Medium — recommended</option><option value="high">High</option>
           </select>
-          <button type="button" className="primary-btn" onClick={() => void generate()} disabled={!loaded || !assets.length || !!working}>
+          <button type="button" className="primary-btn" onClick={() => void generate()} disabled={!loaded || !assets.length || !!working || !precedingApproved}>
             {working === 'generate' ? <LoaderCircle className="spin" size={16}/> : <Sparkles size={16}/>}
             {current?.backgroundUrl ? 'Regenerate AI background + lettering' : 'Generate Image ' + String(step).padStart(2,'0')}
           </button>
+          {!precedingApproved && <small style={{ color: '#94502e' }}>Approve the earlier images in order before generating this image.</small>}
           {(step === 3 || step === 5) && <button className="outline-btn" type="button" onClick={() => void categorize()} disabled={!!working}>Analyze collection categories (optional)</button>}
           <small style={{ color: '#74695e' }}>Only the graphic background, premium lettering and blank mockup environment are AI-generated. PaletteIQ composites original collection assets, preserving their identity. Generation uses paid API requests.</small>
           <hr style={{ width: '100%', border: 0, borderTop: '1px solid #eee4d9' }}/>
