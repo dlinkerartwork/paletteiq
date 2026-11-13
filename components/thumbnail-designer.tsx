@@ -549,6 +549,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         designBriefSettings: {
           ...currentBriefSettings(), scope: 'single' as const, slide: 'Custom Canvas Artwork',
           headline: hasLettering ? heading : '', subtitle: hasLettering ? subtitle : '',
+          badge: hasLettering ? badge : '',
           typography: hasLettering ? 'ai-artwork' as const : 'editable' as const,
           textDisabled: !hasLettering,
           imageModel: imageModelChoice
