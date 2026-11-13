@@ -60,6 +60,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
   const [activeId, setActiveId] = useState(designs[0]?.id || '');
   const [selectedId, setSelectedId] = useState('');
   const [previewZoom, setPreviewZoom] = useState(1);
+  const [showTypographyGuide, setShowTypographyGuide] = useState(true);
   const [sideTab, setSideTab] = useState<'reference' | 'generation'>('reference');
   const [viewportSize, setViewportSize] = useState({ width: 300, height: 300 });
   const [reference, setReference] = useState('');
@@ -551,6 +552,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         : d);
       latestDesignsRef.current = next;
       onChange(next);
+      if (!result.qcRejected) setShowTypographyGuide(false);
       setMessage(result.qcRejected
         ? 'New AI background was flagged for review. Inspect it and explicitly approve it before composition; original clipart positions are preserved.'
         : 'AI background, exact title, subtitle and optional badge applied. Manual clipart positions are unchanged. Save the design to persist the result.');
@@ -842,6 +844,20 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     if (!window.confirm('Have you OPENED and inspected this AI artwork at full size? Confirm it contains NO AI-generated collection clipart, foods, animals, product illustrations or imitations of your collection assets. Decorative shapes and lettering are allowed. Only approve if all artwork is background/typography.')) return;
     setBackgroundRetryId(target.id);
     try {
+      if (target.packSlideKey === 'custom-canvas') {
+        const next = latestDesignsRef.current.map(d => d.id === target.id ? {
+          ...d, backgroundImageUrl: d.rejectedBackgroundUrl,
+          rejectedBackgroundUrl: undefined, rejectedBackgroundReason: undefined,
+          generationError: undefined, updatedAt: Date.now(),
+          // Never replace the hand-arranged slots with AI Vision coordinates.
+          elements: d.elements.filter(e => e.type === 'image').map(e => ({ ...e, source: 'original' as const }))
+        } : d);
+        latestDesignsRef.current = next;
+        onChange(next);
+        setShowTypographyGuide(false);
+        setMessage('Reviewed AI lettering and background applied without moving any original collection PNGs.');
+        return;
+      }
       setMessage('AI Vision analyzing approved background before overlaying original collection PNGs...');
       const available = filterThemeCharacters(title, characters);
       const candidates = buildPack('complete-10', title, available);
@@ -1349,7 +1365,8 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           <span>{Math.round(previewZoom*100)}%</span>
           <button className="outline-btn" aria-label="Zoom in canvas" onClick={() => setPreviewZoom(z => clamp(z + .25, .5, 3))}>+</button>
           <button className="outline-btn" onClick={() => setPreviewZoom(1)} title="Reset zoom"><RotateCcw size={15}/></button>
-          <button className="outline-btn" type="button" onClick={() => add(newText())}><Plus size={15}/> Text</button>
+          <button className="outline-btn" type="button" onClick={() => setShowTypographyGuide(v => !v)}>{showTypographyGuide ? 'Hide type guide' : 'Show type guide'}</button>
+          <button className="outline-btn" type="button" onClick={() => add(newText())}><Plus size={15}/> Editable text</button>
           <button className="outline-btn" type="button" disabled={!selection || selection.locked} onClick={remove} title="Delete selected object"><Trash2 size={15}/> Delete</button>
           <span style={{ marginLeft: 'auto' }}>{design.width}×{design.height}</span>
         </div>
@@ -1365,6 +1382,23 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
                 draggable={false}
                 style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none', userSelect: 'none' }}
               />}
+              {showTypographyGuide && <div aria-label="Reserved AI typography zone" style={{
+                position: 'absolute',
+                left: (design.packTextZone || { x: 22, y: 30, width: 56, height: 34 }).x + '%',
+                top: (design.packTextZone || { x: 22, y: 30, width: 56, height: 34 }).y + '%',
+                width: (design.packTextZone || { x: 22, y: 30, width: 56, height: 34 }).width + '%',
+                height: (design.packTextZone || { x: 22, y: 30, width: 56, height: 34 }).height + '%',
+                border: '2px dashed #c76a31', boxSizing: 'border-box', borderRadius: 9,
+                background: 'rgba(255,244,223,0.28)', color: '#704129', pointerEvents: 'none',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                gap: '4%', padding: '2%', textAlign: 'center', zIndex: 2
+              }}>
+                {!design.backgroundImageUrl && !design.aiImageUrl && <>
+                  <strong style={{ fontSize: 'clamp(7px, 4cqw, 48px)', lineHeight: 1.08, overflowWrap: 'anywhere' }}>{design.packHeadline ?? title}</strong>
+                  <span style={{ fontSize: 'clamp(6px, 1.7cqw, 23px)', lineHeight: 1.2 }}>{design.packSubtitle ?? 'Digital Clipart Collection'}</span>
+                  {Boolean(design.packBadge?.trim()) && <span style={{ fontSize: 'clamp(6px, 1.4cqw, 20px)', background: '#fff4de', border: '1px solid #d7b28f', borderRadius: 20, padding: '1% 4%' }}>{design.packBadge}</span>}
+                </>}
+              </div>}
               {design.elements.map(e => {
                 const isSelected = e.id === selectedId;
                 return <div key={e.id} data-thumbnail-element="true" onPointerDown={event => startDrag(event,e,'move')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
@@ -1484,10 +1518,10 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
             {item.upscaledImageUrl ? <button type="button" className="outline-btn" style={{ fontSize: 12, marginTop: 6 }} onClick={() => void compareThumbnail(item)}>Compare images</button>
               : item.aiImageUrl && <a href={item.aiImageUrl} download style={{ display: 'block', fontSize: 12 }}>View AI image</a>}
             <div style={{ display: 'flex', gap: 5, marginTop: 8, flexWrap: 'wrap' }}>
-              {item.originalAssetsOnly && item.backgroundImageUrl && <button type="button" className="outline-btn" style={{ fontSize: 11, padding: '5px 7px', flex: 1 }} disabled={aiBusy || Boolean(backgroundRetryId)} onClick={() => void reLayoutWithVision(item)}>
+              {item.originalAssetsOnly && item.backgroundImageUrl && <button type="button" className="outline-btn" style={{ fontSize: 11, padding: '5px 7px', flex: 1 }} disabled={aiBusy || Boolean(backgroundRetryId)} onClick={() => item.packSlideKey === 'custom-canvas' ? (setActiveId(item.id), setMessage('Custom canvas positions are manually authored. Move original clipart on the canvas; no AI re-layout is applied.')) : void reLayoutWithVision(item)}>
                 <WandSparkles size={12}/> {backgroundRetryId === item.id ? 'Analyzing...' : 'Re-layout with AI Vision'}
               </button>}
-              {item.originalAssetsOnly && <button type="button" className="outline-btn" style={{ fontSize: 11, padding: '5px 7px', flex: 1 }} disabled={aiBusy || Boolean(backgroundRetryId)} onClick={() => void retryBackground(item)}>
+              {item.originalAssetsOnly && <button type="button" className="outline-btn" style={{ fontSize: 11, padding: '5px 7px', flex: 1 }} disabled={aiBusy || Boolean(backgroundRetryId)} onClick={() => item.packSlideKey === 'custom-canvas' ? (setActiveId(item.id), setMessage('Choose Generate AI Background & Typography in Reference & Assets to regenerate without changing clipart placement.')) : void retryBackground(item)}>
                 <WandSparkles size={12}/> {backgroundRetryId === item.id ? 'Generating...' : item.backgroundImageUrl ? 'Regenerate AI' : 'Generate AI Background'}
               </button>}
               <button type="button" className="outline-btn" aria-label={'Delete thumbnail ' + item.name} title="Delete this thumbnail only" style={{ color: '#b91c1c', fontSize: 11, padding: '5px 7px' }} disabled={aiBusy || Boolean(item.upscaleJob)} onClick={() => deleteThumbnail(item.id)}>
