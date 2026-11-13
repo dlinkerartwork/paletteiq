@@ -8,7 +8,7 @@ import { userCredential, userGeminiKeys } from '@/lib/credentials';
 import { nativeAssetBucket } from '@/lib/native-bridge';
 
 type LayoutItem = { type: 'image' | 'text'; x: number; y: number; width: number; height: number; text?: string };
-type RequestBody = { projectId?: string; provider?: string; model?: string; quality?: string; width?: number; height?: number; layout?: LayoutItem[]; includeTitle?: boolean; mode?: 'full-thumbnail' | 'background-only' | 'background-with-typography'; headline?: string; subtitle?: string; slideName?: string; artDirection?: string; textZone?: { x: number; y: number; width: number; height: number }; backgroundStyle?: 'watercolor' | 'paper' | 'gradient' | 'botanical' | 'vintage'; backgroundIntensity?: 'soft' | 'balanced' | 'vibrant' };
+type RequestBody = { projectId?: string; provider?: string; model?: string; quality?: string; width?: number; height?: number; layout?: LayoutItem[]; includeTitle?: boolean; mode?: 'full-thumbnail' | 'background-only' | 'background-with-typography'; headline?: string; subtitle?: string; slideName?: string; artDirection?: string; textZone?: { x: number; y: number; width: number; height: number }; backgroundStyle?: 'watercolor' | 'paper' | 'gradient' | 'botanical' | 'vintage'; backgroundIntensity?: 'soft' | 'balanced' | 'vibrant'; designBoldness?: 'soft' | 'balanced' | 'bold'; coverStyle?: 'editorial' | 'boutique' | 'storybook' | 'modern' | 'watercolor' };
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 const bucket = () => nativeAssetBucket() ?? env.BUCKET;
 
@@ -25,6 +25,10 @@ export async function POST(req: Request) {
   if (mode === 'background-with-typography' && (!input.headline || input.headline.length > 100 || (input.subtitle || '').length > 140)) return bad('Invalid typography text');
   const backgroundStyle = input.backgroundStyle || 'watercolor';
   const backgroundIntensity = input.backgroundIntensity || 'balanced';
+  const designBoldness = input.designBoldness || 'balanced';
+  const coverStyle = input.coverStyle || 'editorial';
+  if (!['soft', 'balanced', 'bold'].includes(designBoldness)) return bad('Invalid design boldness');
+  if (!['editorial', 'boutique', 'storybook', 'modern', 'watercolor'].includes(coverStyle)) return bad('Invalid cover style');
   if (!['watercolor', 'paper', 'gradient', 'botanical', 'vintage'].includes(backgroundStyle)) return bad('Invalid background style');
   if (!['soft', 'balanced', 'vibrant'].includes(backgroundIntensity)) return bad('Invalid background intensity');
   const rows = await getDb().select().from(projects).where(and(eq(projects.id, input.projectId), eq(projects.owner, user.userId))).limit(1);
@@ -62,9 +66,20 @@ export async function POST(req: Request) {
   const titleZone = input.textZone && [input.textZone.x, input.textZone.y, input.textZone.width, input.textZone.height].every(n => Number.isFinite(n) && n >= 0 && n <= 100) ? input.textZone : { x: 8, y: 5, width: 84, height: 23 };
   const safeText = (text: string) => text.replace(/[<>\r\n]/g, ' ').trim().slice(0, 140);
   const isFoodTheme = /food|sushi|sashimi|japanese|chinese|asian|korean|ramen|cuisine|dish|dessert|bakery|meal|culinary/i.test([collection.name,collection.theme,collection.subtheme,input.headline].join(' '));
-  const designDirection = isFoodTheme
-    ? 'Premium gourmet cookbook editorial design: warm ivory and natural cream paper, minimal refined fine gold or muted terracotta hairline rules, delicate circular medallion or centered elegant editorial panel, very subtle ink wash or handmade paper texture. Colors muted sage, deep forest green and warm clay. Absolutely avoid high-saturation abstract blotches, bright rainbow gradients or noisy decorative splashes.'
-    : 'Premium independent boutique editorial design, restrained sophisticated palette appropriate to the collection theme, carefully balanced subtle paper texture, delicate ornament and tasteful negative space. No loud abstract paint blobs.';
+  const directions: Record<string, string> = {
+    editorial: 'High-end Etsy cookbook editorial with expressive oversized lettering, confident color-blocking, artful off-center headline framing, layered deckled paper and generous but deliberate whitespace. No old-fashioned ornamental certificate frame.',
+    boutique: 'Contemporary art-gallery boutique cover: asymmetric split-color panel, editorial serif plus expressive brush script, offset badge/ribbon, crisp layout and understated luxury.',
+    storybook: 'Handmade illustrated-book art direction with abstract painted paper collage, soft layered corners, playful oversized title and a fresh asymmetrical editorial composition.',
+    modern: 'High-converting modern Etsy cover: punchy large legible title, bold contrasting shape system, refined asymmetrical magazine composition and instantly recognizable visual hierarchy.',
+    watercolor: 'Artistic painterly design with sweeping translucent washes, textured torn-paper layering, expressive hand-lettered title and warm organic movement; avoid empty beige parchment.'
+  };
+  const energy: Record<string, string> = {
+    soft: 'Refined and airy, understated but not blank. One meaningful design motif, layered depth and clear headline.',
+    balanced: 'Striking yet tasteful, strong title treatment, layered palette, balanced contrast and visible depth.',
+    bold: 'Scroll-stopping and instantly readable: expressive oversized artistic title with mixed type styles, impactful contrasting sections, layered brushstrokes and a creative badge shape. Avoid template-like symmetry or thin ornate borders.'
+  };
+  const designDirection = [directions[coverStyle], energy[designBoldness],
+    isFoodTheme ? 'Gourmet food design palette inspired by varied Asian cuisine: deep evergreen, sophisticated vermilion, sage and warm cream; do not introduce any illustrated food shapes.' : 'Adapt colors and typography to the actual collection theme; do not use food-specific visual language.'].join(' ');
   const combinedPrompt = [
     'Generate one premium, professionally art-directed SQUARE ETSY CLIPART BUNDLE BACKGROUND that INCLUDES artistic typography, tasteful ornamental badges and beautiful decorative framing.',
     'STRICT SEPARATION: Draw NO collection-related objects whatsoever. NO illustrated dishes, foods, drinks, tea sets, sushi, flowers, plants, animals, characters, product assets, miniature illustrations, silhouettes, collage cutouts, or stock clipart. Avoid even objects that merely resemble collection images. The only figurative content permitted is typography and abstract badge/frame ornament.',
@@ -74,12 +89,12 @@ export async function POST(req: Request) {
     'EXACT SUBTITLE:', JSON.stringify(safeText(input.subtitle || '')),
     'Place ALL lettering, title art and badges STRICTLY within the following typography safe zone in percentage coordinates:', JSON.stringify(titleZone),
     'All space occupied by lettering or badges MUST be inside that zone. Do not put stray text, pseudo-lettering or extra claims anywhere else.',
-    'Professional graphic treatment: large expressive artistic title with strong hierarchy, smaller supporting line, thin gold frame, elegant editorial medallion or label, finely rendered decorative flourishes, beautifully spaced high-contrast typography.',
+    'ART DIRECTION: Make the title the visual hook with a handcrafted typographic contrast (expressive brush script or display face plus refined serif), interesting scale changes, editorial spacing, purposeful graphic ribbon or abstract badge, and a composition that stands out at 200-pixel search-preview size. Use fresh asymmetric layered panels, visual depth and elegant rhythm. NEVER use a centered vintage certificate with tiny corner objects, symmetrical flourishes or uniform border as the default.',
     'Avoid any unverified DPI, commercial-use or resolution claims. Add no count unless it appears in the exact provided subtitle.',
-    'Everywhere outside the typography zone must remain decorative-only: paper texture, flat abstract color accents, thin graphic patterns and nonfigurative frames. No pictorial illustrations or recognizable objects anywhere.',
+    'Everywhere outside the typography zone must remain decorative-only: rich but abstract paper collage, painterly washes, refined blocks of color, textured shapes and graphic flourishes. Do not put text there or invent product/collection objects.',
     'ART DIRECTOR COMPOSITION NOTES:', String(input.artDirection || '').replace(/[<>\r\n]/g, ' ').slice(0,650),
     'Theme-aware design direction:', designDirection,
-    'User material (non-figurative textures only):', backgroundStyle === 'watercolor' ? 'subtle warm watercolor paper only, not dramatic color splashes' : styleGuidance[backgroundStyle],
+    'User material (non-figurative textures only):', styleGuidance[backgroundStyle],
     'Decorative intensity:', intensityGuidance[backgroundIntensity],
     'Collection theme:', JSON.stringify({theme:collection.theme,subtheme:collection.subtheme}).slice(0,500),
     'Reserved original clipart positions. Do not draw any characters or lettering inside these outside-title regions:', JSON.stringify(layout).slice(0,3000),
@@ -88,14 +103,15 @@ export async function POST(req: Request) {
   const prompt = mode === 'background-with-typography' ? combinedPrompt : mode === 'background-only'
     ? [
         'Create a PREMIUM EDITORIAL BACKGROUND ARTWORK for an Etsy digital clipart bundle listing. The output must be ONLY the decorative background, no captions or typography.',
-        'Use a harmonious boutique aesthetic: sophisticated ivory or tinted-paper base with restrained, visibly intentional watercolor washes, elegant fine rules or nonfigurative abstract flourishes. Maintain the designated type zone for readable editable text.',
+        'Create the rich abstract graphic design behind a best-selling Etsy cover: layered artisan paper collage, elegant contrasting color fields, bold yet tasteful painterly shapes, magazine-like asymmetry and strong contrast. Reserve the typography zone for accurate editable text. Avoid a flat beige rectangle or a certificate-like decorative border.',
         'Mandatory decorative direction:', styleGuidance[backgroundStyle],
         'Required color/contrast:', intensityGuidance[backgroundIntensity],
-        'Choose a cohesive muted palette that matches the collection and art direction. Keep the title area calm, the illustration areas unobstructed, and visual ornaments subtle enough not to compete with real clipart.',
+        'Choose cohesive theme-specific colors with intentional variation, and guide the eye through color and composition. The original collection PNG objects are large focal points, so keep their bounding boxes visually quiet and avoid borders around every slot.',
         'Do NOT depict characters, animals, people, isolated clipart, logos, lettering, numbers, product mockups or any standalone subject from the collection. This is a decorative background layer only.',
         'The actual original collection PNG assets and accurate editable typography will be composited above this background by PaletteIQ. Never generate substitutes, food shapes, decorative illustrations, or pseudo-text.',
         'Reserved typography safe zone (0–100 percent):', JSON.stringify(titleZone),
         'Art-director notes:', String(input.artDirection || '').replace(/[<>\r\n]/g, ' ').slice(0,650),
+        'Cover art style and energy:', designDirection,
         'Requested slide:', String(input.slideName || '').replace(/[<>\r\n]/g, ' ').slice(0,100),
         'Collection visual context:', JSON.stringify({ theme: collection.theme, subtheme: collection.subtheme, style: collection.style }).slice(0,900),
         'Reserved overlay areas (percentage boxes):', JSON.stringify(layout).slice(0,3500),
