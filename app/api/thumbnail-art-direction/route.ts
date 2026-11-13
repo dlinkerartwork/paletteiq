@@ -49,7 +49,7 @@ export async function POST(request: Request) {
     'You must place ONLY provided ORIGINAL CLIPART ASSET IDs. The thumbnail compositor will use exact original PNG files. Never create, rename or invent characters.',
     'Return JSON: {"artDirection":"short coherent descriptive direction","slots":[{"characterId":"EXACT_ID","x":0,"y":0,"width":15,"height":18,"rotation":0}]}',
     'All coordinates are 0–100 percentages of the full square canvas, top-left origin. Width and height describe the clipart bounding box.',
-    'Keep every character fully within 2% to 98% of the canvas, considering rotation. Avoid overlap with any other character and the title rectangle, including 5% clearance. Rotation -10 through +10 degrees.',
+    'Keep every character fully within 2% to 98% of canvas, considering rotation. NEVER overlap the title/lettering-safe zone (5% clearance). For cover/hero/editorial slides, overlap BETWEEN original clipart assets is intentionally allowed, up to about 30% of the smaller rotated bounding box for attractive layered depth. Catalogue grid slides remain non-overlapping. Rotation -10 through +10 degrees.',
     'NON-GRID HERO / BOUTIQUE / CLOSEUP: pick one large focal original object around 22–32% canvas width, two secondary originals around 15–22%, smaller accents around 8–14%. Make largest at least 1.7x the smallest in width. Do not shrink every asset to the margins; balance large pieces around the title-safe zone. Catalogue grid slides may use consistent small sizes.',
     'Clipart hierarchy preference:', body.hierarchy || 'dramatic',
     'Cover design style:', String(body.coverStyle || 'editorial').slice(0,50),
@@ -85,7 +85,16 @@ export async function POST(request: Request) {
       };
       const box = bounds(slot);
       if (box.x < 2 || box.y < 2 || box.x + box.width > 98 || box.y + box.height > 98) continue;
-      if (collides(box,titleArea,5) || placed.some(p => collides(box,bounds(p),2))) continue;
+      if (collides(box,titleArea,5)) continue;
+      const isCatalogue = ['showcase','preview','storybook','category-0','category-1'].includes(String(body.slideKey || '')) || String(body.slideKey || '').startsWith('category-');
+      if (isCatalogue && placed.some(p => collides(box,bounds(p),2))) continue;
+      if (!isCatalogue && placed.some(p => {
+        const other = bounds(p);
+        const iw = Math.max(0, Math.min(box.x + box.width, other.x + other.width) - Math.max(box.x, other.x));
+        const ih = Math.max(0, Math.min(box.y + box.height, other.y + other.height) - Math.max(box.y, other.y));
+        const smaller = Math.min(box.width * box.height, other.width * other.height);
+        return smaller <= 0 || (iw * ih) / smaller > .30;
+      })) continue;
       placed.push(slot); used.add(slot.characterId);
     }
     if (!placed.length) return fail('AI did not return any safe original-asset positions', 422);
