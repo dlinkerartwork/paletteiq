@@ -16,6 +16,7 @@ export type ThumbnailDesign = {
   rejectedBackgroundUrl?: string; rejectedBackgroundReason?: string;
   packTypography?: 'editable' | 'ai-artwork'; packHeadline?: string; packSubtitle?: string; packTextZone?: { x: number; y: number; width: number; height: number };
   packHierarchy?: ClipartHierarchy; packBoldness?: 'soft' | 'balanced' | 'bold'; packCoverStyle?: 'editorial' | 'boutique' | 'storybook' | 'modern' | 'watercolor';
+  referenceDesign?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string };
 };
 type Character = { id: string; name: string; imageUrl?: string; upscaledImageUrl?: string; category?: string; subtheme?: string; group?: string };
 export type ThumbnailSaveControls = { save: () => Promise<void>; hasUnsaved: () => boolean };
@@ -61,6 +62,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const [aiBusy, setAiBusy] = useState(false);
   const [generationScope, setGenerationScope] = useState<'single' | PackPreset>('single');
   const [singleSlideKey, setSingleSlideKey] = useState('hero');
+  const [coverHeadline, setCoverHeadline] = useState('');
   const [packQuality, setPackQuality] = useState<'low' | 'medium' | 'high'>('medium');
   const [packTypography, setPackTypography] = useState<'editable' | 'ai-artwork'>('ai-artwork');
   const [packHierarchy, setPackHierarchy] = useState<ClipartHierarchy>('dramatic');
@@ -373,6 +375,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
       return generationScope === 'single' ? all.filter(slide => slide.key === singleSlideKey).slice(0, 1) : all;
     };
     let slides = chooseSlides(available);
+    if (generationScope === 'single' && coverHeadline.trim()) slides = slides.map(slide => ({ ...slide, headline: coverHeadline.trim().slice(0,75) }));
     if (!slides.length) { setMessage('No matching thumbnail concept is available. Select another thumbnail type.'); return; }
     // Single mode should not run category AI unless the chosen thumbnail actually needs category metadata.
     const needsCategories = !available.some(c => c.category || c.subtheme || c.group) &&
@@ -387,6 +390,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     try {
       let slots: Array<{ x: number; y: number; width: number; height: number }> = [];
       let color = '#f7f1e9';
+      let referenceDesign: ThumbnailDesign['referenceDesign'];
       if (needsCategories) {
         setPackStatus('Finding meaningful artwork categories...');
         try {
@@ -398,6 +402,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
           if (new Set(groupById.values()).size > 1) {
             available = available.map(c => ({ ...c, category: groupById.get(c.id) }));
             slides = chooseSlides(available);
+            if (generationScope === 'single' && coverHeadline.trim()) slides = slides.map(slide => ({ ...slide, headline: coverHeadline.trim().slice(0,75) }));
           }
         } catch (error) {
           setPackStatus('Category analysis unavailable; using neutral collection selections.');
@@ -409,9 +414,10 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ projectId, imageUrl: reference, provider, model, count: Math.min(available.length, 24), referenceStyle })
         });
-        const body = await response.json() as { error?: string; layout?: { slots?: typeof slots; background?: string } };
+        const body = await response.json() as { error?: string; layout?: { slots?: typeof slots; background?: string; graphicMotif?: string; letteringStyle?: string; paletteMood?: string } };
         if (!response.ok) throw Error(body.error || 'Reference analysis failed');
         slots = body.layout?.slots || [];
+        referenceDesign = { graphicMotif: body.layout?.graphicMotif, letteringStyle: body.layout?.letteringStyle, paletteMood: body.layout?.paletteMood };
         if (/^#[0-9a-f]{6}$/i.test(body.layout?.background || '')) color = body.layout!.background!;
       }
       // Each slot already avoids the title-safe-zone before we call the image API.
@@ -420,7 +426,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         name: String(index + 1).padStart(2, '0') + ' · ' + slide.name,
         originalAssetsOnly: true,
         packTypography, packHeadline: slide.headline, packSubtitle: slide.subtitle, packTextZone: slide.textZone,
-        packHierarchy, packBoldness, packCoverStyle,
+        packHierarchy, packBoldness, packCoverStyle, referenceDesign,
         background: color,
         referenceUrl: reference.startsWith('https://') ? reference : undefined,
         elements: [
@@ -463,7 +469,11 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
               error?: string; artDirection?: string;
               slots?: Array<{ characterId: string; x: number; y: number; width: number; height: number; rotation: number }>
             };
-            if (!planResponse.ok || !plan.slots?.length) throw Error(plan.error || 'AI did not produce usable asset positions');
+            // A one-object AI plan is NOT a viable cover when the collection provides several originals.
+            // Preserve the complete curated layout instead of silently losing artwork.
+            const expectedMin = Math.min(plannedElements.length, slide.layout === 'grid' || slide.layout === 'showcase' ? 4 : 3);
+            if (!planResponse.ok || !plan.slots?.length || plan.slots.length < expectedMin)
+              throw Error(plan.error || 'AI returned too few original collection placements');
             plannedElements = plan.slots.map(position => ({
               ...newImage(available.find(c => c.id === position.characterId)!, i, 'original'),
               ...position, source: 'original'
@@ -490,6 +500,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
               headline: slide.headline, subtitle: slide.subtitle,
               slideName: slide.name, artDirection, textZone: slide.textZone,
               designBoldness: packBoldness, coverStyle: packCoverStyle,
+              referenceDesign,
               layout: plannedElements.map(e => ({ type: 'image', x: e.x, y: e.y, width: e.width, height: e.height }))
             })
           });
@@ -554,6 +565,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
           subtitle: target.packSubtitle || 'Digital Clipart Collection',
           slideName: target.name,
           designBoldness: target.packBoldness || packBoldness, coverStyle: target.packCoverStyle || packCoverStyle,
+          referenceDesign: target.referenceDesign,
           textZone: target.packTextZone || { x: 22, y: 31, width: 56, height: 38 },
           layout: imageLayers.map(e => ({ type: 'image', x: e.x, y: e.y, width: e.width, height: e.height }))
         })
@@ -987,6 +999,8 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
           {buildPack('complete-10', title, characters).map((slide,index) => <option key={slide.key} value={slide.key}>{String(index+1).padStart(2,'0')} · {slide.name}</option>)}
         </select>
       </>}
+      <label className="input-label">CUSTOM MAIN TITLE (OPTIONAL)</label>
+      <input aria-label="Etsy custom cover headline" value={coverHeadline} disabled={aiBusy} maxLength={75} placeholder={title} onChange={event => setCoverHeadline(event.target.value)} />
       <label className="input-label">TYPOGRAPHY MODE</label>
       <select aria-label="Etsy pack typography mode" disabled={aiBusy} value={packTypography} onChange={event => setPackTypography(event.target.value as typeof packTypography)}>
         <option value="editable">Editable artistic fonts · accurate text</option>
@@ -1065,6 +1079,8 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
                 {buildPack('complete-10', title, characters).map((slide,index) => <option key={slide.key} value={slide.key}>{String(index+1).padStart(2,'0')} · {slide.name}</option>)}
               </select>
             </>}
+            <label className="input-label">CUSTOM MAIN TITLE (OPTIONAL)</label>
+            <input aria-label="Etsy custom cover headline" value={coverHeadline} disabled={aiBusy} maxLength={75} placeholder={title} onChange={event => setCoverHeadline(event.target.value)} />
             <label className="input-label">TYPOGRAPHY MODE</label>
             <select aria-label="Etsy pack typography mode" value={packTypography} disabled={aiBusy} onChange={e => setPackTypography(e.target.value as typeof packTypography)}>
               <option value="editable">Editable fonts · precise wording</option>
