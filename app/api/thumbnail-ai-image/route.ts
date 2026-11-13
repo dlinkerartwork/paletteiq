@@ -9,7 +9,7 @@ import { userCredential, userGeminiKeys } from '@/lib/credentials';
 import { nativeAssetBucket } from '@/lib/native-bridge';
 
 type LayoutItem = { type: 'image' | 'text'; x: number; y: number; width: number; height: number; text?: string };
-type RequestBody = { projectId?: string; provider?: string; model?: string; quality?: string; width?: number; height?: number; layout?: LayoutItem[]; includeTitle?: boolean; mode?: 'full-thumbnail' | 'background-only' | 'background-with-typography'; headline?: string; subtitle?: string; slideName?: string; artDirection?: string; textZone?: { x: number; y: number; width: number; height: number }; backgroundStyle?: 'watercolor' | 'paper' | 'gradient' | 'botanical' | 'vintage'; backgroundIntensity?: 'soft' | 'balanced' | 'vibrant'; designBoldness?: 'soft' | 'balanced' | 'bold'; coverStyle?: 'editorial' | 'boutique' | 'storybook' | 'modern' | 'watercolor'; referenceDesign?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string }; designBriefSettings?: ThumbnailBriefSettings };
+type RequestBody = { projectId?: string; provider?: string; model?: string; quality?: string; width?: number; height?: number; layout?: LayoutItem[]; includeTitle?: boolean; mode?: 'full-thumbnail' | 'background-only' | 'background-with-typography'; headline?: string; subtitle?: string; badge?: string; slideName?: string; artDirection?: string; textZone?: { x: number; y: number; width: number; height: number }; backgroundStyle?: 'watercolor' | 'paper' | 'gradient' | 'botanical' | 'vintage'; backgroundIntensity?: 'soft' | 'balanced' | 'vibrant'; designBoldness?: 'soft' | 'balanced' | 'bold'; coverStyle?: 'editorial' | 'boutique' | 'storybook' | 'modern' | 'watercolor'; referenceDesign?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string }; designBriefSettings?: ThumbnailBriefSettings };
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 const bucket = () => nativeAssetBucket() ?? env.BUCKET;
 
@@ -22,8 +22,7 @@ export async function POST(req: Request) {
   if (input.includeTitle !== undefined && typeof input.includeTitle !== 'boolean') return bad('includeTitle must be a boolean');
   const mode = input.mode || 'full-thumbnail';
   if (!['full-thumbnail', 'background-only', 'background-with-typography'].includes(mode)) return bad('Invalid image generation mode');
-  if (mode !== 'full-thumbnail' && input.provider !== 'openai') return bad('Background generation uses OpenAI');
-  if (mode === 'background-with-typography' && (!input.headline || input.headline.length > 100 || (input.subtitle || '').length > 140)) return bad('Invalid typography text');
+  if (mode === 'background-with-typography' && (!input.headline || input.headline.length > 100 || (input.subtitle || '').length > 140 || (input.badge || '').length > 60)) return bad('Invalid title, subtitle, or badge text');
   const backgroundStyle = input.backgroundStyle || 'watercolor';
   const backgroundIntensity = input.backgroundIntensity || 'balanced';
   const designBoldness = input.designBoldness || 'balanced';
@@ -138,7 +137,7 @@ export async function POST(req: Request) {
   ].join(' ');
   const typographyInstruction = mode === 'background-only'
     ? 'ZERO LETTERING: Do not render words, letters, digits, pseudo-letters, logos or glyphs. Accurate editable lettering will be added separately by PaletteIQ.'
-    : 'TYPOGRAPHY ONLY: Render these exact strings as beautifully designed, readable, premium lettering. Main title: ' + JSON.stringify(safeText(input.headline || '')) + '. Subtitle: ' + JSON.stringify(safeText(input.subtitle || '')) + '. They are words to typeset, NOT objects to illustrate. Do not draw a visual depiction of the title words. Do not add any other words, quantity, DPI or marketing claims.';
+    : 'TYPOGRAPHY ONLY: Render these exact strings as beautifully designed, readable, premium lettering. Main title: ' + JSON.stringify(safeText(input.headline || '')) + '. Subtitle: ' + JSON.stringify(safeText(input.subtitle || '')) + '. ' + (input.badge?.trim() ? 'Optional small typographic badge — print these exact words inside an elegant abstract geometric badge: ' + JSON.stringify(safeText(input.badge)) + '. ' : 'NO BADGE: do not invent a badge or extra label. ') + 'These are words to typeset, NOT objects to illustrate. Do not draw a visual depiction of the title words. Do not add any other words, quantity, DPI or marketing claims.';
   const heroReferenceStyle = [
     'Create a premium Etsy cover with a large soft cream central medallion panel.',
     'Use a blush watercolor circular brush ring around the central title area.',
