@@ -31,7 +31,7 @@ type Props = { onStartListingStudio?: (settings: ListingStudioConfig) => void | 
 const id = () => crypto.randomUUID();
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 const THUMBNAIL_SIZE = 1024;
-const newDesign = (index: number, seo: { title: string; subtitle: string }): ThumbnailDesign => ({ id: id(), name: 'Thumbnail ' + index, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, background: '#f7f1e9', elements: [], packHeadline: seo.title, packSubtitle: seo.subtitle, packAiTypographyEnabled: true, packLetteringStyle: 'auto', packTextZone: { x: 22, y: 30, width: 56, height: 34 }, updatedAt: Date.now() });
+const newDesign = (index: number, seo: { title: string; subtitle: string } = { title: '', subtitle: 'Digital Clipart Collection' }): ThumbnailDesign => ({ id: id(), name: 'Thumbnail ' + index, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, background: '#f7f1e9', elements: [], packHeadline: seo.title, packSubtitle: seo.subtitle, packAiTypographyEnabled: true, packLetteringStyle: 'auto', packTextZone: { x: 22, y: 30, width: 56, height: 34 }, updatedAt: Date.now() });
 const newImage = (character: Character, index: number, preferredSource: 'auto' | 'original' | 'upscaled' = 'original'): ThumbnailElement => ({
   id: id(), type: 'image', characterId: character.id, source: preferredSource === 'auto' ? (character.upscaledImageUrl ? 'upscaled' : 'original') : preferredSource,
   x: 10 + (index % 4) * 21, y: 17 + (Math.floor(index / 4) % 3) * 25, width: 22, height: 28, rotation: 0
