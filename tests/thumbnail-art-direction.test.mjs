@@ -15,11 +15,13 @@ test('AI positioning is restricted to saved original collection images, not inve
   assert.match(designer,/source: 'original'/);
 });
 
-test('AI planner protects text and restricts excess overlap while allowing layered originals', () => {
+test('AI planner fits original artwork away from actual title and subtitle regions', () => {
   assert.match(planner,/const box = bounds\(slot\)/);
-  assert.match(planner,/collides\(box,titleArea,5\)/);
+  assert.match(planner,/const fitted = fitClipartAroundTypography\(/);
+  assert.match(planner,/detectedSubtitleZone\?: Box/);
+  assert.match(planner,/detectedTitleZone\?: Box/);
+  assert.match(planner,/slots:fitted/);
   assert.match(planner,/isCatalogue && placed\.some\(p => collides\(box,bounds\(p\),2\)\)/);
-  assert.match(planner, /\(iw \* ih\) \/ smaller > \.30/);
 });
 
 test('One-click batch uses AI layout positions and background with AI lettering and badges', () => {
@@ -188,4 +190,12 @@ test('Optional reference layout timeout does not abort paid thumbnail generation
   assert.match(analysis, /referenceDesign = \{ graphicMotif: 'blush-brush-ring'/);
   assert.match(batch, /referenceWarning \? ' ' \+ referenceWarning/);
   assert.match(batch, /count: Math\.min\(available\.length, 12\)/);
+});
+
+test('Vision client performs local fitting, even when planner produced a layout', () => {
+  assert.match(designer, /import \{ fitClipartAroundTypography/);
+  assert.match(designer, /const safeFallback = fit\(imageElements, \[slide\.textZone\], \[\]\)/);
+  assert.match(designer, /result\.detectedSubtitleZone/);
+  assert.match(designer, /const fitted = fit\(selected,/);
+  assert.match(planner, /minScale:body\.hierarchy/);
 });
