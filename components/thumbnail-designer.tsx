@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import UpscaleCompare from '@/components/upscale-compare';
+import type { ListingStudioConfig } from '@/lib/listing-studio-config';
 import { fitClipartAroundTypography, type ThumbnailBox } from '@/lib/thumbnail-fit';
 import { buildThumbnailDesignBrief, type ThumbnailBriefSettings } from '@/lib/thumbnail-design-brief';
 import { buildPack, filterThemeCharacters, placeOriginals, type PackPreset, type PackSlide, type ClipartHierarchy } from '@/lib/etsy-listing-pack';
@@ -22,7 +23,7 @@ export type ThumbnailDesign = {
 };
 type Character = { id: string; name: string; imageUrl?: string; upscaledImageUrl?: string; category?: string; subtheme?: string; group?: string };
 export type ThumbnailSaveControls = { save: () => Promise<void>; hasUnsaved: () => boolean };
-type Props = { registerSaveControls?: (controls: ThumbnailSaveControls | null) => void; title: string; collectionVisualSettings?: {style?: string; palette?: string; texture?: string}; aiDefaults: { provider: 'openai' | 'gemini'; openaiModel: string; geminiModel: string }; projectId: string; characters: Character[]; references: string[]; designs: ThumbnailDesign[]; onChange: (designs: ThumbnailDesign[]) => void; onSave: (designs: ThumbnailDesign[]) => Promise<void> };
+type Props = { onStartListingStudio?: (settings: ListingStudioConfig) => void | Promise<void>; registerSaveControls?: (controls: ThumbnailSaveControls | null) => void; title: string; collectionVisualSettings?: {style?: string; palette?: string; texture?: string}; aiDefaults: { provider: 'openai' | 'gemini'; openaiModel: string; geminiModel: string }; projectId: string; characters: Character[]; references: string[]; designs: ThumbnailDesign[]; onChange: (designs: ThumbnailDesign[]) => void; onSave: (designs: ThumbnailDesign[]) => Promise<void> };
 const id = () => crypto.randomUUID();
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 const THUMBNAIL_SIZE = 1024;
@@ -53,7 +54,7 @@ async function loadForExport(url: string): Promise<HTMLImageElement> {
   await image.decode();
   return image;
 }
-export default function ThumbnailDesigner({ registerSaveControls, title, collectionVisualSettings, aiDefaults, projectId, characters, references, designs, onChange, onSave }: Props) {
+export default function ThumbnailDesigner({ onStartListingStudio, registerSaveControls, title, collectionVisualSettings, aiDefaults, projectId, characters, references, designs, onChange, onSave }: Props) {
   const [activeId, setActiveId] = useState(designs[0]?.id || '');
   const [selectedId, setSelectedId] = useState('');
   const [previewZoom, setPreviewZoom] = useState(1);
@@ -86,6 +87,13 @@ export default function ThumbnailDesigner({ registerSaveControls, title, collect
   const [imageModel, setImageModel] = useState('gpt-image-1-mini');
   const [imageModels, setImageModels] = useState<Array<{ id: string; name: string }>>([]);
   const [layoutMode, setLayoutMode] = useState<'ai' | 'manual'>('ai');
+  const startListingStudio = () => onStartListingStudio?.({
+    layoutMode, analysisProvider: provider, analysisModel: model,
+    imageModel, quality: packQuality, typography: 'ai-artwork',
+    boldness: packBoldness, hierarchy: packHierarchy, coverStyle: packCoverStyle,
+    backgroundStyle, intensity: backgroundIntensity, referenceStyle,
+    referenceImage: reference || undefined, headline: coverHeadline.trim() || undefined
+  });
   const [provider, setProvider] = useState<'openai' | 'gemini'>(aiDefaults.provider);
   const [model, setModel] = useState(aiDefaults.provider === 'gemini' ? aiDefaults.geminiModel : aiDefaults.openaiModel);
   const [models, setModels] = useState<Record<string, Array<{ id: string; name: string }>>>({ openai: [], gemini: [] });
@@ -1119,6 +1127,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, collect
       <button className="primary-btn" disabled={aiBusy || !characters.some(c => c.imageUrl)} onClick={() => void generateReferenceBatch()}>{aiBusy ? 'Generating ' + (generationScope === 'single' ? '1 thumbnail' : 'Etsy pack') + '...' : generationScope === 'single' ? 'Generate 1 Thumbnail' : generationScope === 'core-5' ? 'Generate 5 Thumbnails' : generationScope === 'complete-10' ? 'Generate 10 Thumbnails' : 'Generate Category Showcase'}</button>
       {aiBusy && <button className="outline-btn" onClick={() => { cancelPackRef.current = true; }}>Stop after current image</button>}
       {packStatus && <small role="status">{packStatus}</small>}
+      {onStartListingStudio && <button type="button" className="primary-btn" disabled={aiBusy || !characters.some(c=>c.imageUrl)} onClick={() => void startListingStudio()}><WandSparkles size={15}/> Start 15 Listing Images from Reference & Assets</button>}
       <button className="outline-btn" onClick={create}>Or start with a blank design</button>
     </div> :
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(190px, 245px) minmax(0, 1fr) minmax(245px, 290px)', gap: 12, alignItems: 'start' }}>
@@ -1212,6 +1221,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, collect
             </button>
             {aiBusy && <button type="button" className="outline-btn" onClick={() => { cancelPackRef.current = true; setPackStatus('Stopping after current request...'); }}>Stop after current image</button>}
             {packStatus && <small role="status">{packStatus}</small>}
+            {onStartListingStudio && <div style={{ borderTop:'1px solid #e5e7eb', paddingTop:12, display:'grid', gap:8 }}><strong>15-Image Etsy Listing Studio</strong><small>Start the 15-image review workflow using these Reference & Assets settings and only original collection clipart. Output: 3000 × 2250 JPG. AI lettering is enabled for the listing workflow.</small><button type="button" className="primary-btn" disabled={aiBusy || !characters.some(c => c.imageUrl)} onClick={() => void startListingStudio()}><WandSparkles size={15}/> Start 15 Listing Images</button></div>}
             <small>All characters are existing collection PNG files, never reconstructed by AI. Editable mode adds distinct typographic layers over a no-text AI background. AI lettering mode combines text and decoration in one image and checks for generated objects; verify its spelling. Native editor canvas: 1024 × 1024 px. API charges apply.</small>
             <small>Only original collection clipart is placed on top. Upscaled assets are not used.</small>
           </div>
