@@ -1526,7 +1526,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         <input id="thumbnail-background-opacity" aria-label="Background opacity" type="range" min="0" max="100" step="1"
           value={Math.round(backgroundAlpha(design) * 100)}
           onChange={e => mutate({ backgroundOpacity: Number(e.target.value) / 100, renderedImageUrl: undefined, upscaledImageUrl: undefined })}/>
-        <small>0% = latar putih, 100% = warna/background asli. Hanya lapisan background yang berubah; PNG clipart dan editable text tetap terlihat penuh. Hasil Save, PNG, dan JPG menggunakan opacity yang sama.</small>
+        <small>0% = latar memudar putih, 100% = desain asli. PNG clipart dan teks editable tidak memudar. AI lettering yang menyatu dengan background ikut memudar karena masih satu gambar. Save, PNG, dan JPG memakai opacity yang sama.</small>
         <label className="input-label">AI DECORATIVE BACKGROUND (OPENAI)</label>
         <label className="input-label">BACKGROUND STYLE</label>
         <select aria-label="Background style" value={backgroundStyle} disabled={backgroundGenerating} onChange={event => setBackgroundStyle(event.target.value as typeof backgroundStyle)}><option value="watercolor">Artistic watercolor washes</option><option value="paper">Luxury textured paper</option><option value="gradient">Premium colorful gradient</option><option value="botanical">Abstract botanical motifs</option><option value="vintage">Vintage decorative texture</option></select>
