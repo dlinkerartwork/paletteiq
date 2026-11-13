@@ -175,3 +175,17 @@ test('Saved thumbnail can be re-laid out by Vision without paying for a second i
   assert.match(designer, /packSlideKey: slide\.key/);
   assert.match(designer, /candidate\.key === target\.packSlideKey/);
 });
+
+test('Optional reference layout timeout does not abort paid thumbnail generation', () => {
+  const batch = designer.slice(designer.indexOf('const generateReferenceBatch ='), designer.indexOf('const retryBackground ='));
+  const refStart = batch.indexOf("if (reference) {");
+  const imageStart = batch.indexOf("fetch('/api/thumbnail-ai-image'");
+  assert.ok(refStart >= 0 && imageStart > refStart);
+  const analysis = batch.slice(refStart, imageStart);
+  assert.match(analysis, /try \{/);
+  assert.match(analysis, /catch \(error\) \{/);
+  assert.match(analysis, /Reference analysis failed/);
+  assert.match(analysis, /referenceDesign = \{ graphicMotif: 'blush-brush-ring'/);
+  assert.match(batch, /referenceWarning \? ' ' \+ referenceWarning/);
+  assert.match(batch, /count: Math\.min\(available\.length, 12\)/);
+});

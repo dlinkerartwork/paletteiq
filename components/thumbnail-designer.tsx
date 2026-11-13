@@ -433,6 +433,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     const failures: string[] = [];
     let completed = 0;
     let rejected = 0;
+    let referenceWarning = '';
     try {
       let slots: Array<{ x: number; y: number; width: number; height: number }> = [];
       let color = '#f7f1e9';
@@ -456,15 +457,28 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
       }
       if (reference) {
         setPackStatus('Analyzing optional reference...');
-        const response = await fetch('/api/thumbnail-layout', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ projectId, imageUrl: reference, provider, model, count: Math.min(available.length, 24), referenceStyle })
-        });
-        const body = await response.json() as { error?: string; layout?: { slots?: typeof slots; background?: string; graphicMotif?: string; letteringStyle?: string; paletteMood?: string } };
-        if (!response.ok) throw Error(body.error || 'Reference analysis failed');
-        slots = body.layout?.slots || [];
-        referenceDesign = { graphicMotif: body.layout?.graphicMotif, letteringStyle: body.layout?.letteringStyle, paletteMood: body.layout?.paletteMood };
-        if (/^#[0-9a-f]{6}$/i.test(body.layout?.background || '')) color = body.layout!.background!;
+        try {
+          const response = await fetch('/api/thumbnail-layout', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ projectId, imageUrl: reference, provider, model, count: Math.min(available.length, 12), referenceStyle })
+          });
+          const body = await response.json() as { error?: string; layout?: { slots?: typeof slots; background?: string; graphicMotif?: string; letteringStyle?: string; paletteMood?: string } };
+          if (!response.ok) throw Error(body.error || 'Reference analysis failed');
+          slots = body.layout?.slots || [];
+          referenceDesign = { graphicMotif: body.layout?.graphicMotif, letteringStyle: body.layout?.letteringStyle, paletteMood: body.layout?.paletteMood };
+          if (/^#[0-9a-f]{6}$/i.test(body.layout?.background || '')) color = body.layout!.background!;
+        } catch (error) {
+          // Reference analysis is optional. A timeout must NOT abort the entire
+          // pack before we even request the paid background.
+          const reason = error instanceof Error ? error.message : String(error);
+          referenceWarning = 'Reference analysis failed (' + reason.slice(0, 100) + '); used curated fallback style.';
+          setPackStatus(referenceWarning + ' Continuing to image generation.');
+          // Prefer an airy medallion instead of a generic orange abstract design
+          // when the user is generating the central-title Hero Cover.
+          if (slides.some(slide => slide.key === 'hero')) {
+            referenceDesign = { graphicMotif: 'blush-brush-ring', letteringStyle: 'script-serif', paletteMood: 'blush-sage' };
+          }
+        }
       }
       // Each slot already avoids the title-safe-zone before we call the image API.
       const created: ThumbnailDesign[] = slides.map((slide, index) => ({
@@ -557,7 +571,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         }
       }
       setPackStatus(cancelPackRef.current ? 'Stopped. Generated images are retained.' : rejected >= 2 ? 'Paused after repeated QC rejections. Review saved candidate artwork before additional paid requests.' : 'Pack generation finished.');
-      setMessage('Pack: ' + created.length + ' designs with exact original collection PNGs; ' + completed + ' editorial backgrounds generated. ' + (packTypography === 'editable' ? 'Text remains independently editable and was not AI-rasterized.' : 'Check AI-generated lettering for spelling and factual accuracy.') + (failures.length ? ' Failed: ' + failures.join(' | ').slice(0,450) : ''));
+      setMessage('Pack: ' + created.length + ' designs with exact original collection PNGs; ' + completed + ' editorial backgrounds generated. ' + (packTypography === 'editable' ? 'Text remains independently editable and was not AI-rasterized.' : 'Check AI-generated lettering for spelling and factual accuracy.') + (referenceWarning ? ' ' + referenceWarning : '') + (failures.length ? ' Failed: ' + failures.join(' | ').slice(0,450) : ''));
     } catch (error) {
       setMessage('Etsy listing pack failed: ' + (error instanceof Error ? error.message : String(error)));
     } finally { setAiBusy(false); }
