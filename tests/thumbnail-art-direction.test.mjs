@@ -26,12 +26,12 @@ test('One-click batch uses AI layout positions and background with AI lettering 
   assert.match(designer,/plan\.slots\.map\(position =>/);
   assert.match(designer,/layout: plannedElements\.map/);
   assert.match(generator,/INCLUDES artistic typography, tasteful ornamental badges/);
-  assert.match(generator,/STRICT SEPARATION: Draw NO collection-related objects whatsoever/);
+  assert.match(generator,/STRICT SEPARATION: Do not draw recognizable standalone product\/collection illustrations/);
   assert.match(generator,/The AI must never invent, reconstruct, imitate, redraw/);
 });
 
 test('AI thumbnail backgrounds prohibit object illustrations and are screened before storage', () => {
-  assert.match(generator, /Draw NO collection-related objects whatsoever/);
+  assert.match(generator, /Do not draw recognizable standalone product\/collection illustrations/);
   assert.match(generator, /The AI must never invent, reconstruct, imitate, redraw/);
   assert.match(generator, /decision\.containsObjects !== false/);
   assert.ok(generator.indexOf('decision.containsObjects !== false') < generator.indexOf("await storage.put("));
@@ -71,4 +71,12 @@ test('Every collection thumbnail offers safe deletion and a background retry', (
   assert.match(designer, /onClick=\{\(\) => deleteThumbnail\(item\.id\)\}/);
   assert.match(designer, /onClick=\{\(\) => void retryBackground\(item\)\}/);
   assert.match(designer, /backgroundRetryId === item\.id/);
+});
+
+test('Background QC accepts integrated abstract decoration but rejects standalone saleable clipart', () => {
+  assert.match(generator, /An ornamental pattern is NOT a product image/);
+  assert.match(generator, /a tiny product illustration/);
+  assert.match(generator, /decorative motifs that are NOT standalone product subjects/);
+  assert.match(generator, /decision\.containsObjects !== false/);
+  assert.match(generator, /reason\.replace/);
 });
