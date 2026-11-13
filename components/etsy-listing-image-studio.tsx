@@ -121,8 +121,19 @@ export default function EtsyListingImageStudio({ config, projectId, name, theme,
   const [categories, setCategories] = useState<Record<string,string>>({});
 
   const categorizedAssets = useMemo(() => assets.map(a => ({ ...a, category: categories[a.id] || a.category })), [assets, categories]);
+  const initialPlacements = useCallback((number: number) => {
+    const planned = planListingPlacements(number, categorizedAssets);
+    if (!config || ![1,4,7,15].includes(number)) return planned;
+    return planned.map((p, i) => {
+      const factor = config.hierarchy === 'dramatic' ? (i < 3 ? 1.12 : 0.95) :
+        config.hierarchy === 'soft' ? 0.92 : 1;
+      const width = clamp(p.width * factor, 2, 100), height = clamp(p.height * factor, 2, 100);
+      return { ...p, x: clamp(p.x + (p.width - width) / 2, 0, 100 - width),
+        y: clamp(p.y + (p.height - height) / 2, 23, 100 - height), width, height };
+    });
+  }, [categorizedAssets, config]);
   const current = records.find(item => item.number === step);
-  const positions = changes[step] || current?.placements || planListingPlacements(step, categorizedAssets);
+  const positions = changes[step] || current?.placements || initialPlacements(step);
   const selected = positions[selectedIndex] || positions[0];
   const approved = LISTING_IMAGE_SPECS.filter(s => records.some(r => r.number === s.number && r.status === 'approved')).length;
   const precedingApproved = LISTING_IMAGE_SPECS.slice(0, step - 1).every(s => records.some(r => r.number === s.number && r.status === 'approved'));
@@ -228,7 +239,7 @@ export default function EtsyListingImageStudio({ config, projectId, name, theme,
       if (!response.backgroundUrl) throw Error('OpenAI did not return the background');
       let suggested = effectivePositions;
       let layoutWarning = '';
-      if (effectivePositions.length <= 24) {
+      if (config?.layoutMode !== 'manual' && effectivePositions.length <= 24) {
         setMessage('AI Vision is finding typography-safe original artwork slots on the actual generated background...');
         try {
           const vision = await send({ action: 'layout', projectId, number: step, backgroundUrl: response.backgroundUrl, placements: effectivePositions, settings: config ? { ...config, referenceImage: undefined } : undefined });
@@ -262,7 +273,7 @@ export default function EtsyListingImageStudio({ config, projectId, name, theme,
   };
   const move = (field: 'assetId' | 'x' | 'y' | 'width' | 'height' | 'rotation', value: string) => {
     setChanges(prev => {
-      const list = [...(prev[step] || current?.placements || planListingPlacements(step, categorizedAssets))];
+      const list = [...(prev[step] || current?.placements || initialPlacements(step))];
       const target = list[selectedIndex];
       if (!target) return prev;
       list[selectedIndex] = { ...target, [field]: field === 'assetId' ? value : clamp(Number(value), field === 'rotation' ? -30 : field === 'width' || field === 'height' ? 2 : 0, field === 'rotation' ? 30 : 100) };
