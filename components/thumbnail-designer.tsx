@@ -59,7 +59,8 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const [reference, setReference] = useState('');
   const [uploadedReference, setUploadedReference] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
-  const [packPreset, setPackPreset] = useState<PackPreset>('complete-10');
+  const [generationScope, setGenerationScope] = useState<'single' | PackPreset>('single');
+  const [singleSlideKey, setSingleSlideKey] = useState('hero');
   const [packQuality, setPackQuality] = useState<'low' | 'medium' | 'high'>('medium');
   const [packTypography, setPackTypography] = useState<'editable' | 'ai-artwork'>('ai-artwork');
   const [packHierarchy, setPackHierarchy] = useState<ClipartHierarchy>('dramatic');
@@ -367,9 +368,16 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const generateReferenceBatch = async () => {
     let available = filterThemeCharacters(title, characters);
     if (!available.length) { setMessage('No original collection images match this specific theme (' + title + '). Generate theme-matching clipart first; unrelated artwork will not be added.'); return; }
-    let slides = buildPack(packPreset, title, available);
-    if (!slides.length) { setMessage('No collection images available for this pack.'); return; }
-    const needsCategories = packPreset !== 'core-5' && !available.some(c => c.category || c.subtheme || c.group);
+    const chooseSlides = (items: typeof available) => {
+      const all = buildPack(generationScope === 'single' ? 'complete-10' : generationScope, title, items);
+      return generationScope === 'single' ? all.filter(slide => slide.key === singleSlideKey).slice(0, 1) : all;
+    };
+    let slides = chooseSlides(available);
+    if (!slides.length) { setMessage('No matching thumbnail concept is available. Select another thumbnail type.'); return; }
+    // Single mode should not run category AI unless the chosen thumbnail actually needs category metadata.
+    const needsCategories = !available.some(c => c.category || c.subtheme || c.group) &&
+      (generationScope === 'complete-10' || generationScope === 'category-showcase' ||
+        (generationScope === 'single' && singleSlideKey.startsWith('category-')));
     if (!window.confirm('Create ' + slides.length + ' Etsy listing thumbnails? This makes up to ' + slides.length + ' paid OpenAI image requests, ' + slides.length + ' layout planning requests, and ' + slides.length + ' visual checks' + (reference ? ' plus one reference analysis' : '') + (needsCategories ? ' plus one category analysis' : '') + '. Existing thumbnails are preserved. Continue?')) return;
     cancelPackRef.current = false;
     setAiBusy(true); setPackStatus('Preparing ' + slides.length + ' Etsy listing designs...');
@@ -389,7 +397,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
           for (const group of result.groups || []) for (const key of group.ids) groupById.set(key, group.name);
           if (new Set(groupById.values()).size > 1) {
             available = available.map(c => ({ ...c, category: groupById.get(c.id) }));
-            slides = buildPack(packPreset, title, available);
+            slides = chooseSlides(available);
           }
         } catch (error) {
           setPackStatus('Category analysis unavailable; using neutral collection selections.');
@@ -966,12 +974,19 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     {!design ? <div className="panel empty-state" style={{ display: 'grid', gap: 12, maxWidth: 520, margin: '20px auto', padding: 24 }}>
       <h2>Generate Etsy Listing Pack</h2>
       <p>Use original collection clipart directly, without ZIP export. Reference images are optional. AI directs the layout and background; PaletteIQ places exact original PNGs and editable lettering.</p>
-      <label className="input-label">PACK PRESET</label>
-      <select aria-label="Etsy listing pack" value={packPreset} onChange={event => setPackPreset(event.target.value as PackPreset)}>
-        <option value="complete-10">Complete Etsy Listing Pack — 10 thumbnails</option>
-        <option value="core-5">Core Etsy Pack — 5 thumbnails</option>
+      <label className="input-label">GENERATION SCOPE</label>
+      <select aria-label="Etsy generation scope" disabled={aiBusy} value={generationScope} onChange={event => setGenerationScope(event.target.value as typeof generationScope)}>
+        <option value="single">1 Thumbnail · low-cost trial (default)</option>
+        <option value="core-5">5 Thumbnails · core pack</option>
+        <option value="complete-10">10 Thumbnails · complete pack</option>
         <option value="category-showcase">Category Showcase Pack</option>
       </select>
+      {generationScope === 'single' && <>
+        <label className="input-label">THUMBNAIL TYPE</label>
+        <select aria-label="Single thumbnail type" disabled={aiBusy} value={singleSlideKey} onChange={event => setSingleSlideKey(event.target.value)}>
+          {buildPack('complete-10', title, characters).map((slide,index) => <option key={slide.key} value={slide.key}>{String(index+1).padStart(2,'0')} · {slide.name}</option>)}
+        </select>
+      </>}
       <label className="input-label">TYPOGRAPHY MODE</label>
       <select aria-label="Etsy pack typography mode" disabled={aiBusy} value={packTypography} onChange={event => setPackTypography(event.target.value as typeof packTypography)}>
         <option value="editable">Editable artistic fonts · accurate text</option>
@@ -992,7 +1007,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
       <label className="input-label">OPTIONAL REFERENCE IMAGE</label>
       <input aria-label="Upload optional reference" type="file" accept="image/png,image/jpeg,image/webp" onChange={event => void onReferenceUpload(event.target.files?.[0])}/>
       {reference && <img src={reference} alt="Optional reference" style={{ maxHeight: 130, maxWidth: '100%', objectFit: 'contain' }}/>}
-      <button className="primary-btn" disabled={aiBusy || !characters.some(c => c.imageUrl)} onClick={() => void generateReferenceBatch()}>{aiBusy ? 'Generating Etsy pack...' : 'Generate Etsy Listing Pack'}</button>
+      <button className="primary-btn" disabled={aiBusy || !characters.some(c => c.imageUrl)} onClick={() => void generateReferenceBatch()}>{aiBusy ? 'Generating ' + (generationScope === 'single' ? '1 thumbnail' : 'Etsy pack') + '...' : generationScope === 'single' ? 'Generate 1 Thumbnail' : generationScope === 'core-5' ? 'Generate 5 Thumbnails' : generationScope === 'complete-10' ? 'Generate 10 Thumbnails' : 'Generate Category Showcase'}</button>
       {aiBusy && <button className="outline-btn" onClick={() => { cancelPackRef.current = true; }}>Stop after current image</button>}
       {packStatus && <small role="status">{packStatus}</small>}
       <button className="outline-btn" onClick={create}>Or start with a blank design</button>
@@ -1037,12 +1052,19 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
           <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 12, display: 'grid', gap: 8 }}>
             <strong>Generate Etsy Listing Pack</strong>
             <small>Reference optional. AI designs the layout and decorative background; PaletteIQ composites unmodified collection PNGs. Choose accurate editable lettering or experimental AI typography artwork.</small>
-            <label className="input-label">ETSY PACK PRESET</label>
-            <select aria-label="Etsy listing pack" value={packPreset} disabled={aiBusy} onChange={e => setPackPreset(e.target.value as PackPreset)}>
-              <option value="complete-10">Complete Etsy Listing Pack — 10 thumbnails</option>
-              <option value="core-5">Core Etsy Pack — 5 thumbnails</option>
-              <option value="category-showcase">Category Showcase Pack — based on collection groups</option>
+            <label className="input-label">GENERATION SCOPE</label>
+            <select aria-label="Etsy generation scope" value={generationScope} disabled={aiBusy} onChange={e => setGenerationScope(e.target.value as typeof generationScope)}>
+              <option value="single">1 Thumbnail · low-cost trial (default)</option>
+              <option value="core-5">5 Thumbnails · core pack</option>
+              <option value="complete-10">10 Thumbnails · complete pack</option>
+              <option value="category-showcase">Category Showcase Pack · collection groups</option>
             </select>
+            {generationScope === 'single' && <>
+              <label className="input-label">THUMBNAIL TYPE</label>
+              <select aria-label="Single thumbnail type" disabled={aiBusy} value={singleSlideKey} onChange={e => setSingleSlideKey(e.target.value)}>
+                {buildPack('complete-10', title, characters).map((slide,index) => <option key={slide.key} value={slide.key}>{String(index+1).padStart(2,'0')} · {slide.name}</option>)}
+              </select>
+            </>}
             <label className="input-label">TYPOGRAPHY MODE</label>
             <select aria-label="Etsy pack typography mode" value={packTypography} disabled={aiBusy} onChange={e => setPackTypography(e.target.value as typeof packTypography)}>
               <option value="editable">Editable fonts · precise wording</option>
@@ -1071,7 +1093,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
               <option value="soft">Soft</option><option value="balanced">Balanced</option><option value="vibrant">Vibrant</option>
             </select>
             <button className="primary-btn" type="button" disabled={aiBusy || !characters.some(c => c.imageUrl)} onClick={() => void generateReferenceBatch()}>
-              <WandSparkles size={15}/> {aiBusy ? 'Generating listing pack...' : 'Generate Etsy Listing Pack'}
+              <WandSparkles size={15}/> {aiBusy ? 'Generating...' : generationScope === 'single' ? 'Generate 1 Thumbnail' : generationScope === 'core-5' ? 'Generate 5 Thumbnails' : generationScope === 'complete-10' ? 'Generate 10 Thumbnails' : 'Generate Category Showcase'}
             </button>
             {aiBusy && <button type="button" className="outline-btn" onClick={() => { cancelPackRef.current = true; setPackStatus('Stopping after current request...'); }}>Stop after current image</button>}
             {packStatus && <small role="status">{packStatus}</small>}
