@@ -13,6 +13,7 @@ export type ThumbnailElement = {
 export type ThumbnailDesign = {
   id: string; name: string; width: number; height: number; background: string; backgroundImageUrl?: string; aiImageUrl?: string; aiImagePrompt?: string; renderedImageUrl?: string; upscaledImageUrl?: string; upscaleJob?: { id: string; sourceUrl: string; factor: 2 | 4 | 6 | 8; submittedAt: number }; elements: ThumbnailElement[];
   referenceUrl?: string; originalAssetsOnly?: boolean; generationError?: string; updatedAt: number;
+  rejectedBackgroundUrl?: string; rejectedBackgroundReason?: string;
   packTypography?: 'editable' | 'ai-artwork'; packHeadline?: string; packSubtitle?: string; packTextZone?: { x: number; y: number; width: number; height: number };
   packHierarchy?: ClipartHierarchy; packBoldness?: 'soft' | 'balanced' | 'bold'; packCoverStyle?: 'editorial' | 'boutique' | 'storybook' | 'modern' | 'watercolor';
 };
@@ -374,6 +375,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     setAiBusy(true); setPackStatus('Preparing ' + slides.length + ' Etsy listing designs...');
     const failures: string[] = [];
     let completed = 0;
+    let rejected = 0;
     try {
       let slots: Array<{ x: number; y: number; width: number; height: number }> = [];
       let color = '#f7f1e9';
@@ -483,12 +485,32 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
               layout: plannedElements.map(e => ({ type: 'image', x: e.x, y: e.y, width: e.width, height: e.height }))
             })
           });
-          const result = await response.json() as { imageUrl?: string; error?: string };
+          const result = await response.json() as { imageUrl?: string; error?: string; qcRejected?: boolean; qcReason?: string };
           if (!response.ok || !result.imageUrl) throw Error(result.error || 'Generation failed');
           await loadForExport(result.imageUrl);
-          const next = latestDesignsRef.current.map(d => d.id === item.id ? { ...d, backgroundImageUrl: result.imageUrl, generationError: undefined } : d);
+          if (result.qcRejected) {
+            const reason = result.qcReason || 'AI background requires manual inspection.';
+            const next = latestDesignsRef.current.map(d => d.id === item.id ? {
+              ...d, rejectedBackgroundUrl: result.imageUrl, rejectedBackgroundReason: reason,
+              generationError: 'AI QC review required: ' + reason
+            } : d);
+            latestDesignsRef.current = next;
+            onChange(next);
+            failures.push(slide.name + ': QC review required');
+            rejected++;
+            if (rejected >= 2) {
+              setPackStatus('Stopped after two QC rejections to avoid repeated paid image requests. Inspect the review drafts before retrying.');
+              break;
+            }
+            continue;
+          }
+          const next = latestDesignsRef.current.map(d => d.id === item.id ? {
+            ...d, backgroundImageUrl: result.imageUrl, rejectedBackgroundUrl: undefined,
+            rejectedBackgroundReason: undefined, generationError: undefined
+          } : d);
           latestDesignsRef.current = next;
           onChange(next);
+          rejected = 0;
           completed += 1;
         } catch (error) {
           const reason = error instanceof Error ? error.message : String(error);
@@ -498,7 +520,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
           onChange(next);
         }
       }
-      setPackStatus(cancelPackRef.current ? 'Stopped. Generated images are retained.' : 'Pack generation finished.');
+      setPackStatus(cancelPackRef.current ? 'Stopped. Generated images are retained.' : rejected >= 2 ? 'Paused after repeated QC rejections. Review saved candidate artwork before additional paid requests.' : 'Pack generation finished.');
       setMessage('Pack: ' + created.length + ' designs with exact original collection PNGs; ' + completed + ' editorial backgrounds generated. ' + (packTypography === 'editable' ? 'Text remains independently editable and was not AI-rasterized.' : 'Check AI-generated lettering for spelling and factual accuracy.') + (failures.length ? ' Failed: ' + failures.join(' | ').slice(0,450) : ''));
     } catch (error) {
       setMessage('Etsy listing pack failed: ' + (error instanceof Error ? error.message : String(error)));
@@ -528,11 +550,22 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
           layout: imageLayers.map(e => ({ type: 'image', x: e.x, y: e.y, width: e.width, height: e.height }))
         })
       });
-      const result = await response.json() as { imageUrl?: string; error?: string };
+      const result = await response.json() as { imageUrl?: string; error?: string; qcRejected?: boolean; qcReason?: string };
       if (!response.ok || !result.imageUrl) throw Error(result.error || 'No background returned');
       await loadForExport(result.imageUrl);
+      if (result.qcRejected) {
+        const reason = result.qcReason || 'The AI artwork needs manual inspection.';
+        const pending = latestDesignsRef.current.map(d => d.id === target.id
+          ? { ...d, rejectedBackgroundUrl: result.imageUrl, rejectedBackgroundReason: reason,
+            generationError: 'AI QC review required: ' + reason, updatedAt: Date.now() } : d);
+        latestDesignsRef.current = pending;
+        onChange(pending);
+        setMessage('Background saved for review, not applied. Inspect the image before accepting or regenerating.');
+        return;
+      }
       const next = latestDesignsRef.current.map(d => d.id === target.id
-        ? { ...d, backgroundImageUrl: result.imageUrl, generationError: undefined, updatedAt: Date.now() } : d);
+        ? { ...d, backgroundImageUrl: result.imageUrl, rejectedBackgroundUrl: undefined,
+          rejectedBackgroundReason: undefined, generationError: undefined, updatedAt: Date.now() } : d);
       latestDesignsRef.current = next;
       onChange(next);
       setMessage('AI background generated for ' + target.name + '. Save designs to persist it.');
@@ -545,6 +578,18 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     } finally {
       setBackgroundRetryId('');
     }
+  };
+
+  const approveReviewedBackground = (target: ThumbnailDesign) => {
+    if (!target.rejectedBackgroundUrl) return;
+    if (!window.confirm('Have you OPENED and inspected this AI artwork at full size? Confirm it contains NO AI-generated collection clipart, foods, animals, product illustrations or imitations of your collection assets. Decorative shapes and lettering are allowed. Only approve if all artwork is background/typography.')) return;
+    const next = latestDesignsRef.current.map(d => d.id === target.id ? {
+      ...d, backgroundImageUrl: d.rejectedBackgroundUrl, rejectedBackgroundUrl: undefined,
+      rejectedBackgroundReason: undefined, generationError: undefined, updatedAt: Date.now()
+    } : d);
+    latestDesignsRef.current = next;
+    onChange(next);
+    setMessage('Reviewed background applied. Save designs to retain it. Original collection PNG layers are unchanged.');
   };
 
   const onReferenceUpload = async (file?: File) => {
@@ -1194,7 +1239,12 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
               {!item.aiImageUrl && item.elements.map(element => element.type === 'image' ? <img key={element.id} src={imageUrl(element)} alt="" style={{ position: 'absolute', left: element.x + '%', top: element.y + '%', width: element.width + '%', height: element.height + '%', objectFit: 'contain', transform: 'rotate(' + element.rotation + 'deg)' }}/> : <span key={element.id} style={{ position: 'absolute', left: element.x + '%', top: element.y + '%', width: element.width + '%', color: element.color, fontFamily: element.fontFamily, fontSize: 9, overflow: 'hidden' }}>{element.text}</span>)}
             </div>
             <strong style={{ display: 'block', marginTop: 7, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</strong>
-            {item.generationError && <small style={{ color: '#b91c1c', display: 'block' }} title={item.generationError}>AI background failed: {item.generationError.slice(0, 75)}</small>}
+            {item.generationError && <small style={{ color: '#b91c1c', display: 'block' }} title={item.generationError}>{item.rejectedBackgroundUrl ? 'Review AI background: ' : 'AI background failed: '}{item.generationError.slice(0, 110)}</small>}
+            {item.rejectedBackgroundUrl && <div style={{ display: 'grid', gap: 5, marginTop: 6 }}>
+              <a href={item.rejectedBackgroundUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, textDecoration: 'underline' }}>View rejected AI artwork</a>
+              <button type="button" className="outline-btn" style={{ fontSize: 11, padding: '5px 7px' }} disabled={aiBusy || Boolean(backgroundRetryId)} onClick={() => approveReviewedBackground(item)}>Approve after visual inspection</button>
+              <small>QC flagged a possible product illustration. Not used in the thumbnail until approved.</small>
+            </div>
             <small>{item.aiImageUrl ? 'AI image' : 'Editable design'} · {item.width}×{item.height}</small>
             </button>
             <small style={{ display: 'block', marginTop: 5 }}>{item.upscaleJob ? (upscaleRemaining[item.id] != null ? 'Est. remaining: ' + Math.ceil(upscaleRemaining[item.id]! / 60) + ' min' : 'Time remaining: waiting for GPU / estimating…') : item.upscaledImageUrl ? '✓ Upscale completed' : 'Not upscaled'}</small>
