@@ -1022,13 +1022,24 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
   const renderDesignBlob = async (target: ThumbnailDesign, format: 'png' | 'jpeg' = 'png'): Promise<Blob> => {
       const canvas = document.createElement('canvas'); canvas.width = THUMBNAIL_SIZE; canvas.height = THUMBNAIL_SIZE;
       const ctx = canvas.getContext('2d'); if (!ctx) throw new Error('Canvas unavailable');
-      ctx.fillStyle = target.background; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      // Apply opacity to the COMPLETE background composite (flat color + AI
+      // backdrop) over white. Foreground original PNGs always stay opaque.
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      const backdrop = document.createElement('canvas');
+      backdrop.width = THUMBNAIL_SIZE; backdrop.height = THUMBNAIL_SIZE;
+      const backdropContext = backdrop.getContext('2d'); if (!backdropContext) throw new Error('Background canvas unavailable');
+      backdropContext.fillStyle = target.background;
+      backdropContext.fillRect(0, 0, backdrop.width, backdrop.height);
       if (target.aiImageUrl || target.backgroundImageUrl) {
         const background = await loadForExport(target.aiImageUrl || target.backgroundImageUrl!);
         const scale = Math.max(THUMBNAIL_SIZE / background.naturalWidth, THUMBNAIL_SIZE / background.naturalHeight);
         const w = background.naturalWidth * scale, h = background.naturalHeight * scale;
-        ctx.drawImage(background, (THUMBNAIL_SIZE - w) / 2, (THUMBNAIL_SIZE - h) / 2, w, h);
+        backdropContext.drawImage(background, (THUMBNAIL_SIZE - w) / 2, (THUMBNAIL_SIZE - h) / 2, w, h);
       }
+      ctx.save();
+      ctx.globalAlpha = backgroundAlpha(target);
+      ctx.drawImage(backdrop, 0, 0);
+      ctx.restore();
       for (const element of target.elements) {
         const x = element.x / 100 * THUMBNAIL_SIZE, y = element.y / 100 * THUMBNAIL_SIZE;
         const w = element.width / 100 * THUMBNAIL_SIZE, h = element.height / 100 * THUMBNAIL_SIZE;
@@ -1207,7 +1218,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     const operation = saveQueueRef.current.catch(() => {}).then(async () => {
       const prepared: ThumbnailDesign[] = [];
       for (const item of snapshot) {
-        if (item.aiImageUrl) {
+        if (item.aiImageUrl && backgroundAlpha(item) === 1) {
           if (item.aiImageUrl.includes('format=jpg')) { prepared.push(item); continue; }
           // Preserve the AI artwork, but persist its collection thumbnail as JPEG.
           const original = await loadForExport(item.aiImageUrl);
@@ -1223,7 +1234,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           continue;
         }
         // Cached JPEG is reusable until the editable content changes.
-        const signature = JSON.stringify({ format: 'jpeg', width: item.width, height: item.height, background: item.background, backgroundImageUrl: item.backgroundImageUrl, elements: item.elements });
+        const signature = JSON.stringify({ format: 'jpeg', width: item.width, height: item.height, background: item.background, backgroundOpacity: backgroundAlpha(item), backgroundImageUrl: item.backgroundImageUrl, aiImageUrl: item.aiImageUrl, elements: item.elements });
         const cached = renderCacheRef.current.get(item.id);
         if (cached?.signature === signature) {
           prepared.push({ ...item, renderedImageUrl: cached.url });
