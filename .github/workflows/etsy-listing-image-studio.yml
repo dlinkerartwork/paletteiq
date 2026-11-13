@@ -12,6 +12,12 @@ on:
       - 'tests/etsy-listing-image-studio.test.mjs'
       - 'app/page.tsx'
       - 'app/api/studio/route.ts'
+      - 'components/thumbnail-designer.tsx'
+      - 'app/api/thumbnail-ai-image/route.ts'
+      - 'lib/thumbnail-seo-defaults.ts'
+      - 'lib/thumbnail-design-brief.ts'
+      - 'tests/thumbnail-*.test.mjs'
+      - '.github/workflows/etsy-listing-image-studio.yml'
 
 jobs:
   verify:
