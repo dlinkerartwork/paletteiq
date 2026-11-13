@@ -439,20 +439,32 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     }))
   ).join('\n\n--- NEXT THUMBNAIL ---\n\n');
 
+  const typographyEnabled = design?.packAiTypographyEnabled !== false;
+  const previewHeading = design?.packHeadline ?? seoDefaults.title;
+  const previewSubtitle = design?.packSubtitle ?? seoDefaults.subtitle;
+  const previewBadge = design?.packBadge ?? '';
+  const previewHasText = typographyEnabled && Boolean(previewHeading.trim() || previewSubtitle.trim() || previewBadge.trim());
   const manualCanvasPromptPreview = [
-    'ETSY MANUAL CANVAS — AI GRAPHIC BACKGROUND + ARTISTIC LETTERING (1024 × 1024)',
-    'Generate nonfigurative design and exact typography only. DO NOT draw clipart, characters, food, products, or references.',
-    'Main title: ' + JSON.stringify(design?.packHeadline ?? title),
-    'Subtitle: ' + JSON.stringify(design?.packSubtitle ?? 'Digital Clipart Collection'),
-    'Badge (omit entirely when blank): ' + JSON.stringify(design?.packBadge ?? ''),
-    'Typography safe zone: ' + JSON.stringify(design?.packTextZone || { x: 22, y: 30, width: 56, height: 34 }),
+    'ETSY MANUAL CANVAS — AI GRAPHIC BACKGROUND' + (previewHasText ? ' + CUSTOM ARTISTIC LETTERING' : ' WITHOUT ANY TEXT') + ' (1024 × 1024)',
+    'Generate nonfigurative design only. DO NOT redraw clipart, characters, food, products, or reference illustrations.',
+    ...(previewHasText ? [
+      'Main title (omit when blank): ' + JSON.stringify(previewHeading),
+      'Subtitle (omit when blank): ' + JSON.stringify(previewSubtitle),
+      'Badge (omit when blank): ' + JSON.stringify(previewBadge),
+      'Artistic lettering direction: ' + (design?.packLetteringStyle || 'auto') + '. Use fluid hand-drawn expressive lettering; arched, curved, flowing or layered title layouts are welcome when readable.'
+    ] : ['ZERO TYPOGRAPHY: no titles, subtitles, badges, symbols resembling letters, or decorative words.']),
+    ...(previewHasText ? ['Typography safe zone: ' + JSON.stringify(design?.packTextZone || { x: 22, y: 30, width: 56, height: 34 })] : []),
     'Image provider/model: ' + imageProvider + ' / ' + (imageProvider === 'gemini' ? geminiImageModel : imageModel),
     'Style: ' + packCoverStyle + ', ' + backgroundStyle + ', ' + backgroundIntensity + ', boldness ' + packBoldness,
     'Reference template: ' + (reference ? 'selected (style cues only)' : 'none') + ', interpretation ' + referenceStyle,
-    'The following rectangles are RESERVED for the exact PNGs placed manually in the editor. Their pixels and identities are NEVER sent to the provider:',
+    'Original assets may deliberately extend beyond the canvas and will be CROPPED by the final canvas edge.',
+    'Only the VISIBLE portions of these manually positioned PNG rectangles are reserved on canvas; their pixels and identities are NEVER sent to the image provider:',
     JSON.stringify((design?.elements || []).filter(e => e.type === 'image')
-      .map(e => ({ x:e.x, y:e.y, width:e.width, height:e.height })), null, 2),
-    'Composite original PNGs without changing their user-authored coordinates.'
+      .map(e => ({ x: Math.max(0,e.x), y: Math.max(0,e.y),
+        width: Math.max(0,Math.min(100,e.x+e.width)-Math.max(0,e.x)),
+        height: Math.max(0,Math.min(100,e.y+e.height)-Math.max(0,e.y)) }))
+      .filter(e=>e.width>0&&e.height>0), null, 2),
+    'PaletteIQ composites exact original collection PNGs with the user-authored coordinates; crop at canvas borders.'
   ].join('\n\n');
 
   // User-directed workflow: layout is authored ON the current canvas. The AI
