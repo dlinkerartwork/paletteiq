@@ -1240,13 +1240,13 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
             </div>
             <strong style={{ display: 'block', marginTop: 7, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</strong>
             {item.generationError && <small style={{ color: '#b91c1c', display: 'block' }} title={item.generationError}>{item.rejectedBackgroundUrl ? 'Review AI background: ' : 'AI background failed: '}{item.generationError.slice(0, 110)}</small>}
+            <small>{item.aiImageUrl ? 'AI image' : 'Editable design'} · {item.width}×{item.height}</small>
+            </button>
             {item.rejectedBackgroundUrl && <div style={{ display: 'grid', gap: 5, marginTop: 6 }}>
               <a href={item.rejectedBackgroundUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, textDecoration: 'underline' }}>View rejected AI artwork</a>
               <button type="button" className="outline-btn" style={{ fontSize: 11, padding: '5px 7px' }} disabled={aiBusy || Boolean(backgroundRetryId)} onClick={() => approveReviewedBackground(item)}>Approve after visual inspection</button>
               <small>QC flagged a possible product illustration. Not used in the thumbnail until approved.</small>
-            </div>
-            <small>{item.aiImageUrl ? 'AI image' : 'Editable design'} · {item.width}×{item.height}</small>
-            </button>
+            </div>}
             <small style={{ display: 'block', marginTop: 5 }}>{item.upscaleJob ? (upscaleRemaining[item.id] != null ? 'Est. remaining: ' + Math.ceil(upscaleRemaining[item.id]! / 60) + ' min' : 'Time remaining: waiting for GPU / estimating…') : item.upscaledImageUrl ? '✓ Upscale completed' : 'Not upscaled'}</small>
             {item.upscaledImageUrl ? <button type="button" className="outline-btn" style={{ fontSize: 12, marginTop: 6 }} onClick={() => void compareThumbnail(item)}>Compare images</button>
               : item.aiImageUrl && <a href={item.aiImageUrl} download style={{ display: 'block', fontSize: 12 }}>View AI image</a>}
