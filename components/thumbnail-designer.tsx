@@ -1312,18 +1312,33 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         <small>AI Vision extracts only layout styling and typographic direction from the reference, not its product images, text, or brand. User-placed clipart positions stay fixed.</small>
         <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 12, display: 'grid', gap: 9 }}>
           <strong>Background &amp; AI Typography</strong>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, fontWeight: 600 }}>
+            <input aria-label="Enable AI typography" type="checkbox" checked={typographyEnabled} disabled={aiBusy} onChange={e => mutate({ packAiTypographyEnabled: e.target.checked, renderedImageUrl: undefined })}/>
+            Enable AI Typography (title, subtitle &amp; badge)
+          </label>
+          <small>{typographyEnabled ? 'AI creates hand-crafted artistic lettering in the background. Each field may be left blank.' : 'No text, badge, letters or pseudo-writing will be requested from the AI. Only a decorative background will be generated.'}</small>
+          <button type="button" className="outline-btn" disabled={aiBusy || !typographyEnabled} onClick={() => mutate({ packHeadline: seoDefaults.title, packSubtitle: seoDefaults.subtitle, renderedImageUrl: undefined })}>Use SEO defaults from Etsy Listing Draft</button>
+          <small>{seoDefaults.hasSeoTitle ? 'Main title is derived from Etsy SEO title' : 'No SEO title saved; collection title is used'} · {seoDefaults.hasSeoSubtitle ? 'subtitle uses SEO keyword/category' : 'subtitle falls back to Digital Clipart Collection'}. Existing manual edits remain until you reset them.</small>
           <label className="input-label">MAIN TITLE</label>
-          <input aria-label="Canvas main title" maxLength={100} value={design.packHeadline ?? title} disabled={aiBusy} onChange={e => mutate({ packHeadline: e.target.value, renderedImageUrl: undefined })}/>
+          <input aria-label="Canvas main title" maxLength={100} value={design.packHeadline ?? seoDefaults.title} disabled={aiBusy || !typographyEnabled} onChange={e => mutate({ packHeadline: e.target.value, renderedImageUrl: undefined })}/>
           <label className="input-label">SUBTITLE</label>
-          <input aria-label="Canvas subtitle" maxLength={140} value={design.packSubtitle ?? 'Digital Clipart Collection'} disabled={aiBusy} onChange={e => mutate({ packSubtitle: e.target.value, renderedImageUrl: undefined })}/>
+          <input aria-label="Canvas subtitle" maxLength={140} value={design.packSubtitle ?? seoDefaults.subtitle} disabled={aiBusy || !typographyEnabled} onChange={e => mutate({ packSubtitle: e.target.value, renderedImageUrl: undefined })}/>
           <label className="input-label">BADGE TEXT (OPTIONAL)</label>
-          <input aria-label="Canvas badge text" maxLength={60} placeholder="Leave empty for no badge" value={design.packBadge ?? ''} disabled={aiBusy} onChange={e => mutate({ packBadge: e.target.value, renderedImageUrl: undefined })}/>
+          <input aria-label="Canvas badge text" maxLength={60} placeholder="Leave empty for no badge" value={design.packBadge ?? ''} disabled={aiBusy || !typographyEnabled} onChange={e => mutate({ packBadge: e.target.value, renderedImageUrl: undefined })}/>
+          <label className="input-label">ARTISTIC LETTERING COMPOSITION</label>
+          <select aria-label="Artistic lettering composition" value={design.packLetteringStyle || 'auto'} disabled={aiBusy || !typographyEnabled} onChange={e => mutate({ packLetteringStyle: e.target.value as NonNullable<ThumbnailDesign['packLetteringStyle']>, renderedImageUrl: undefined })}>
+            <option value="auto">AI creative art direction</option>
+            <option value="arched">Arched &amp; curved lettering</option>
+            <option value="flowing">Flowing brush calligraphy</option>
+            <option value="stacked">Layered expressive typography</option>
+            <option value="hand-painted">Hand-painted lettering</option>
+          </select>
           <strong>Typography safe area</strong>
-          <small>The shaded preview on the canvas shows where AI can place title, subtitle and badge. Adjust this zone or move clipart so they do not overlap.</small>
+          <small>{typographyEnabled ? 'The optional canvas guide marks the lettering region. Clipart may bleed beyond the frame, but should avoid this region.' : 'Typography is disabled; this area is ignored during background generation.'}</small>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 6 }}>
             {(['x','y','width','height'] as const).map(field => <label key={field} style={{ minWidth: 0, display: 'grid', gap: 3 }}>
               <span className="input-label">{field.toUpperCase()} (%)</span>
-              <input aria-label={'Typography zone ' + field} type="number" min={0} max={100} step={1} disabled={aiBusy}
+              <input aria-label={'Typography zone ' + field} type="number" min={0} max={100} step={1} disabled={aiBusy || !typographyEnabled}
                 value={(design.packTextZone || { x: 22, y: 30, width: 56, height: 34 })[field]}
                 onChange={e => mutate({ packTextZone: { ...(design.packTextZone || { x: 22, y: 30, width: 56, height: 34 }), [field]: Number(e.target.value) }, renderedImageUrl: undefined })}/>
             </label>)}
@@ -1366,7 +1381,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
             <WandSparkles size={15}/> {aiBusy ? 'Generating AI artwork...' : 'Generate AI Background & Typography'}
           </button>
           {packStatus && <small role="status">{packStatus}</small>}
-          <small>AI generates only abstract background, exact artistic title, subtitle and optional typographic badge. PaletteIQ keeps your original PNG positions. Changing any text requires generating new AI lettering. OpenAI verification is currently required even when Gemini generates the artwork. Review spelling before use; API charges apply.</small>
+          <small>Artistic lettering can be curved, arched, flowing, or hand-painted rather than rigid font typesetting. Disable the checkbox for a background with no text. Clipart is clipped naturally at the canvas edge. Changing lettering requires another AI generation; verify spelling before use. API charges apply.</small>
         </div>
         <h3>Characters</h3>
         <div style={{ maxHeight: 400, overflowY: 'auto', display: 'grid', gap: 8 }}>
@@ -1421,7 +1436,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
                 draggable={false}
                 style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none', userSelect: 'none' }}
               />}
-              {showTypographyGuide && <div aria-label="Reserved AI typography zone" style={{
+              {showTypographyGuide && typographyEnabled && <div aria-label="Reserved AI typography zone" style={{
                 position: 'absolute',
                 left: (design.packTextZone || { x: 22, y: 30, width: 56, height: 34 }).x + '%',
                 top: (design.packTextZone || { x: 22, y: 30, width: 56, height: 34 }).y + '%',
@@ -1433,8 +1448,8 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
                 gap: '4%', padding: '2%', textAlign: 'center', zIndex: 2
               }}>
                 {!design.backgroundImageUrl && !design.aiImageUrl && <>
-                  <strong style={{ fontSize: 'clamp(7px, 4cqw, 48px)', lineHeight: 1.08, overflowWrap: 'anywhere' }}>{design.packHeadline ?? title}</strong>
-                  <span style={{ fontSize: 'clamp(6px, 1.7cqw, 23px)', lineHeight: 1.2 }}>{design.packSubtitle ?? 'Digital Clipart Collection'}</span>
+                  <strong style={{ fontSize: 'clamp(7px, 4cqw, 48px)', lineHeight: 1.08, overflowWrap: 'anywhere' }}>{design.packHeadline ?? seoDefaults.title}</strong>
+                  <span style={{ fontSize: 'clamp(6px, 1.7cqw, 23px)', lineHeight: 1.2 }}>{design.packSubtitle ?? seoDefaults.subtitle}</span>
                   {Boolean(design.packBadge?.trim()) && <span style={{ fontSize: 'clamp(6px, 1.4cqw, 20px)', background: '#fff4de', border: '1px solid #d7b28f', borderRadius: 20, padding: '1% 4%' }}>{design.packBadge}</span>}
                 </>}
               </div>}
