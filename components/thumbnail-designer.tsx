@@ -13,6 +13,7 @@ export type ThumbnailElement = {
 export type ThumbnailDesign = {
   id: string; name: string; width: number; height: number; background: string; backgroundImageUrl?: string; aiImageUrl?: string; aiImagePrompt?: string; renderedImageUrl?: string; upscaledImageUrl?: string; upscaleJob?: { id: string; sourceUrl: string; factor: 2 | 4 | 6 | 8; submittedAt: number }; elements: ThumbnailElement[];
   referenceUrl?: string; originalAssetsOnly?: boolean; generationError?: string; updatedAt: number;
+  packTypography?: 'editable' | 'ai-artwork'; packHeadline?: string; packSubtitle?: string; packTextZone?: { x: number; y: number; width: number; height: number };
 };
 type Character = { id: string; name: string; imageUrl?: string; upscaledImageUrl?: string; category?: string; subtheme?: string; group?: string };
 export type ThumbnailSaveControls = { save: () => Promise<void>; hasUnsaved: () => boolean };
@@ -58,8 +59,9 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const [aiBusy, setAiBusy] = useState(false);
   const [packPreset, setPackPreset] = useState<PackPreset>('complete-10');
   const [packQuality, setPackQuality] = useState<'low' | 'medium' | 'high'>('medium');
-  const [packTypography, setPackTypography] = useState<'editable' | 'ai-artwork'>('editable');
+  const [packTypography, setPackTypography] = useState<'editable' | 'ai-artwork'>('ai-artwork');
   const [packStatus, setPackStatus] = useState('');
+  const [backgroundRetryId, setBackgroundRetryId] = useState('');
   const cancelPackRef = useRef(false);
   const [referenceStyle, setReferenceStyle] = useState<'creative' | 'similar' | 'palette'>('creative');
   const [imageBusy, setImageBusy] = useState(false);
@@ -254,7 +256,18 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
 
   const create = () => { const next = newDesign(designs.length + 1); onChange([...designs, next]); setActiveId(next.id); };
   const duplicate = () => { if (!design) return; const copy = { ...design, id: id(), name: design.name + ' copy', elements: design.elements.map(e => ({ ...e, id: id() })), updatedAt: Date.now() }; onChange([...designs, copy]); setActiveId(copy.id); };
-  const removeDesign = () => { if (!design || !window.confirm('Delete this thumbnail design?')) return; onChange(designs.filter(d => d.id !== design.id)); setActiveId(designs.find(d => d.id !== design.id)?.id || ''); };
+  const deleteThumbnail = (thumbnailId: string) => {
+    const target = latestDesignsRef.current.find(d => d.id === thumbnailId);
+    if (!target || !window.confirm('Delete thumbnail "' + target.name + '" from this collection? Original clipart assets will not be deleted.')) return;
+    if (target.upscaleJob) { setMessage('This thumbnail has an active GPU upscale job. Let it complete before deleting the design.'); return; }
+    const next = latestDesignsRef.current.filter(d => d.id !== thumbnailId);
+    latestDesignsRef.current = next;
+    onChange(next);
+    setSelectedThumbnailIds(old => { const updated = new Set(old); updated.delete(thumbnailId); return updated; });
+    if (activeId === thumbnailId) setActiveId(next[0]?.id || '');
+    setMessage('Thumbnail removed from this collection. Save designs to persist the change.');
+  };
+  const removeDesign = () => { if (design) deleteThumbnail(design.id); };
   const undo = () => { if (!history.length || !design) return; const previous = history[history.length - 1]; setHistory(history.slice(0, -1)); setFuture(old => [...old, design]); commit(previous, false); };
   const redo = () => { if (!future.length || !design) return; const next = future[future.length - 1]; setFuture(future.slice(0, -1)); setHistory(old => [...old, design]); commit(next, false); };
   const imageUrl = (e: ThumbnailElement) => {
@@ -392,6 +405,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         ...newDesign(latestDesignsRef.current.length + index + 1),
         name: String(index + 1).padStart(2, '0') + ' · ' + slide.name,
         originalAssetsOnly: true,
+        packTypography, packHeadline: slide.headline, packSubtitle: slide.subtitle, packTextZone: slide.textZone,
         background: color,
         referenceUrl: reference.startsWith('https://') ? reference : undefined,
         elements: [
@@ -416,31 +430,40 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
             const c = available.find(c => c.id === e.characterId);
             return c ? { id: c.id, name: c.name } : null;
           }).filter((c): c is {id: string; name: string} => c !== null);
-          const planResponse = await fetch('/api/thumbnail-art-direction', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              projectId, slideKey: slide.key, slideName: slide.name,
-              headline: slide.headline, subtitle: slide.subtitle, textZone: slide.textZone,
-              characters: originalChoices,
-              suggestedSlots: item.elements.filter(e => e.type === 'image').map(e => ({ characterId: e.characterId, x: e.x, y: e.y, width: e.width, height: e.height }))
-            })
-          });
-          const plan = await planResponse.json() as {
-            error?: string; artDirection?: string;
-            slots?: Array<{ characterId: string; x: number; y: number; width: number; height: number; rotation: number }>
-          };
-          if (!planResponse.ok || !plan.slots?.length) throw Error(plan.error || 'AI could not arrange safe character positions');
-          const plannedElements: ThumbnailElement[] = plan.slots.map(position => ({
-            ...newImage(available.find(c => c.id === position.characterId)!, i, 'original'),
-            ...position, source: 'original'
-          }));
+          // Planner failures must not skip the paid background/typography generation.
+          // Safe local placement is already available from placeOriginals().
+          let plannedElements: ThumbnailElement[] = item.elements.filter(e => e.type === 'image');
+          let artDirection = '';
+          try {
+            const planResponse = await fetch('/api/thumbnail-art-direction', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                projectId, slideKey: slide.key, slideName: slide.name,
+                headline: slide.headline, subtitle: slide.subtitle, textZone: slide.textZone,
+                characters: originalChoices,
+                suggestedSlots: plannedElements.map(e => ({ characterId: e.characterId, x: e.x, y: e.y, width: e.width, height: e.height }))
+              })
+            });
+            const plan = await planResponse.json() as {
+              error?: string; artDirection?: string;
+              slots?: Array<{ characterId: string; x: number; y: number; width: number; height: number; rotation: number }>
+            };
+            if (!planResponse.ok || !plan.slots?.length) throw Error(plan.error || 'AI did not produce usable asset positions');
+            plannedElements = plan.slots.map(position => ({
+              ...newImage(available.find(c => c.id === position.characterId)!, i, 'original'),
+              ...position, source: 'original'
+            }));
+            artDirection = plan.artDirection || '';
+          } catch {
+            setPackStatus('Using safe collection layout; continuing to AI background ' + (i + 1) + '/' + created.length);
+          }
           // Editable mode keeps verified product wording as independent text layers.
           // AI-artwork mode puts lettering only in the generated background.
           const plannedDesign = { ...item, elements: packTypography === 'editable' ? [...plannedElements, ...typographyForSlide(slide)] : plannedElements };
           let updated = latestDesignsRef.current.map(d => d.id === item.id ? plannedDesign : d);
           latestDesignsRef.current = updated;
           onChange(updated);
-          setPackStatus('AI designing typography, badges and background ' + (i + 1) + '/' + created.length + ': ' + slide.name);
+          setPackStatus('Requesting OpenAI ' + (packTypography === 'ai-artwork' ? 'background, artistic title and badges' : 'decorative background') + ' ' + (i + 1) + '/' + created.length + ': ' + slide.name);
           const response = await fetch('/api/thumbnail-ai-image', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -450,7 +473,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
               mode: packTypography === 'editable' ? 'background-only' : 'background-with-typography',
               backgroundStyle, backgroundIntensity,
               headline: slide.headline, subtitle: slide.subtitle,
-              slideName: slide.name, artDirection: plan.artDirection, textZone: slide.textZone,
+              slideName: slide.name, artDirection, textZone: slide.textZone,
               layout: plannedElements.map(e => ({ type: 'image', x: e.x, y: e.y, width: e.width, height: e.height }))
             })
           });
@@ -858,8 +881,8 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
       </select>
       <label className="input-label">TYPOGRAPHY MODE</label>
       <select aria-label="Etsy pack typography mode" disabled={aiBusy} value={packTypography} onChange={event => setPackTypography(event.target.value as typeof packTypography)}>
-        <option value="editable">Editable artistic fonts (recommended · accurate text)</option>
-        <option value="ai-artwork">AI-generated lettering artwork (review spelling)</option>
+        <option value="editable">Editable artistic fonts · accurate text</option>
+        <option value="ai-artwork">AI background + artistic title + badges · recommended</option>
       </select>
       <label className="input-label">OPTIONAL REFERENCE IMAGE</label>
       <input aria-label="Upload optional reference" type="file" accept="image/png,image/jpeg,image/webp" onChange={event => void onReferenceUpload(event.target.files?.[0])}/>
@@ -917,8 +940,8 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
             </select>
             <label className="input-label">TYPOGRAPHY MODE</label>
             <select aria-label="Etsy pack typography mode" value={packTypography} disabled={aiBusy} onChange={e => setPackTypography(e.target.value as typeof packTypography)}>
-              <option value="editable">Editable artistic fonts · recommended</option>
-              <option value="ai-artwork">AI lettering artwork · review spelling</option>
+              <option value="editable">Editable fonts · precise wording</option>
+              <option value="ai-artwork">AI background + artistic lettering + badges</option>
             </select>
             <label className="input-label">BACKGROUND QUALITY</label>
             <select aria-label="Etsy pack background quality" disabled={aiBusy} value={packQuality} onChange={e => setPackQuality(e.target.value as typeof packQuality)}><option value="low">Low · economical</option><option value="medium">Medium · recommended</option><option value="high">High · premium cost</option></select>
