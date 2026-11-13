@@ -60,3 +60,10 @@ test('Generated exact-asset thumbnails retain the provider prompt for audit with
   assert.doesNotMatch(designer, /mode: 'full-thumbnail'/);
   assert.match(generator, /THIS IS NOT AN ILLUSTRATION JOB/);
 });
+
+test('Prompt preview follows selected single, 5 and 10-thumbnail scopes', () => {
+  assert.match(designer, /const previewSlides = buildPack\(generationScope === 'single' \? 'complete-10' : generationScope/);
+  assert.match(designer, /generationScope === 'single'\s*\? previewSlides\.filter\(slide => slide\.key === singleSlideKey\)\.slice\(0, 1\)/);
+  assert.match(designer, /chosenPreviewSlides\.map\(slide =>/);
+  assert.match(designer, /NEXT THUMBNAIL/);
+});
