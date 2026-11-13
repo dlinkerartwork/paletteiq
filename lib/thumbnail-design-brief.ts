@@ -35,7 +35,7 @@ export function buildThumbnailDesignBrief(settings: ThumbnailBriefSettings): str
     'Collection visual style for NONFIGURATIVE design only: ' + compact(s.collectionStyle, 180) + '.',
     'Collection color palette for abstract decoration only: ' + compact(s.collectionPalette, 180) + '.',
     'Collection texture for abstract background only: ' + compact(s.collectionTexture, 180) + '.',
-    (s.textDisabled ? 'No text at all: retain quiet graphical negative space.' : 'Keep requested title and subtitle readable and use sophisticated organic lettering.') + ' Leave perimeter suitable for original asset placement, with a mixture of large, medium and small objects; object overlap is handled only by the compositor.'
+    (s.textDisabled ? 'No text at all: retain quiet graphical negative space.' : 'Keep requested title and subtitle readable and use sophisticated organic lettering.') + ' Leave perimeter suitable for original asset placement, with a mixture of large, medium and small objects; object overlap is handled only by the compositor.',
     'STRICTLY FORBIDDEN: generate, redraw, imitate, stylize or recreate any clipart, character, food, animal, plant, product, icon, standalone illustration, photo, or artwork from the collection or reference image.',
     'Do not add invented product quantities, DPI, licensing claims, or unrelated words.'
   ].join('\n');
