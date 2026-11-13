@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import UpscaleCompare from '@/components/upscale-compare';
 import { readApiJson } from '@/lib/listing-image-upload';
+import { thumbnailSeoDefaults, type ThumbnailSeoSource } from '@/lib/thumbnail-seo-defaults';
 import type { ListingStudioConfig } from '@/lib/listing-studio-config';
 import { fitClipartAroundTypography, type ThumbnailBox } from '@/lib/thumbnail-fit';
 import { buildThumbnailDesignBrief, type ThumbnailBriefSettings } from '@/lib/thumbnail-design-brief';
@@ -20,16 +21,17 @@ export type ThumbnailDesign = {
   rejectedBackgroundUrl?: string; rejectedBackgroundReason?: string;
   packTypography?: 'editable' | 'ai-artwork'; packSlideKey?: string; packHeadline?: string; packSubtitle?: string; packBadge?: string; packTextZone?: { x: number; y: number; width: number; height: number };
   packImageProvider?: 'openai' | 'gemini'; packImageModel?: string;
+  packAiTypographyEnabled?: boolean; packLetteringStyle?: 'auto' | 'arched' | 'flowing' | 'stacked' | 'hand-painted';
   packHierarchy?: ClipartHierarchy; packBoldness?: 'soft' | 'balanced' | 'bold'; packCoverStyle?: 'editorial' | 'boutique' | 'storybook' | 'modern' | 'watercolor';
   referenceDesign?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string };
 };
 type Character = { id: string; name: string; imageUrl?: string; upscaledImageUrl?: string; category?: string; subtheme?: string; group?: string };
 export type ThumbnailSaveControls = { save: () => Promise<void>; hasUnsaved: () => boolean };
-type Props = { onStartListingStudio?: (settings: ListingStudioConfig) => void | Promise<void>; registerSaveControls?: (controls: ThumbnailSaveControls | null) => void; title: string; collectionVisualSettings?: {style?: string; palette?: string; texture?: string}; aiDefaults: { provider: 'openai' | 'gemini'; openaiModel: string; geminiModel: string }; projectId: string; characters: Character[]; references: string[]; designs: ThumbnailDesign[]; onChange: (designs: ThumbnailDesign[]) => void; onSave: (designs: ThumbnailDesign[]) => Promise<void> };
+type Props = { onStartListingStudio?: (settings: ListingStudioConfig) => void | Promise<void>; registerSaveControls?: (controls: ThumbnailSaveControls | null) => void; title: string; seoListing?: ThumbnailSeoSource; collectionVisualSettings?: {style?: string; palette?: string; texture?: string}; aiDefaults: { provider: 'openai' | 'gemini'; openaiModel: string; geminiModel: string }; projectId: string; characters: Character[]; references: string[]; designs: ThumbnailDesign[]; onChange: (designs: ThumbnailDesign[]) => void; onSave: (designs: ThumbnailDesign[]) => Promise<void> };
 const id = () => crypto.randomUUID();
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 const THUMBNAIL_SIZE = 1024;
-const newDesign = (index: number): ThumbnailDesign => ({ id: id(), name: 'Thumbnail ' + index, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, background: '#f7f1e9', elements: [], packSubtitle: 'Digital Clipart Collection', packTextZone: { x: 22, y: 30, width: 56, height: 34 }, updatedAt: Date.now() });
+const newDesign = (index: number, seo: { title: string; subtitle: string }): ThumbnailDesign => ({ id: id(), name: 'Thumbnail ' + index, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, background: '#f7f1e9', elements: [], packHeadline: seo.title, packSubtitle: seo.subtitle, packAiTypographyEnabled: true, packLetteringStyle: 'auto', packTextZone: { x: 22, y: 30, width: 56, height: 34 }, updatedAt: Date.now() });
 const newImage = (character: Character, index: number, preferredSource: 'auto' | 'original' | 'upscaled' = 'original'): ThumbnailElement => ({
   id: id(), type: 'image', characterId: character.id, source: preferredSource === 'auto' ? (character.upscaledImageUrl ? 'upscaled' : 'original') : preferredSource,
   x: 10 + (index % 4) * 21, y: 17 + (Math.floor(index / 4) % 3) * 25, width: 22, height: 28, rotation: 0
@@ -56,7 +58,8 @@ async function loadForExport(url: string): Promise<HTMLImageElement> {
   await image.decode();
   return image;
 }
-export default function ThumbnailDesigner({ onStartListingStudio, registerSaveControls, title, collectionVisualSettings, aiDefaults, projectId, characters, references, designs, onChange, onSave }: Props) {
+export default function ThumbnailDesigner({ onStartListingStudio, registerSaveControls, title, seoListing, collectionVisualSettings, aiDefaults, projectId, characters, references, designs, onChange, onSave }: Props) {
+  const seoDefaults = thumbnailSeoDefaults(seoListing, title);
   const [activeId, setActiveId] = useState(designs[0]?.id || '');
   const [selectedId, setSelectedId] = useState('');
   const [previewZoom, setPreviewZoom] = useState(1);
@@ -273,7 +276,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     return () => window.removeEventListener('keydown', keyDown);
   }, [selectedId, design, designs, onChange]);
 
-  const create = () => { const next = newDesign(designs.length + 1); onChange([...designs, next]); setActiveId(next.id); };
+  const create = () => { const next = newDesign(designs.length + 1, seoDefaults); onChange([...designs, next]); setActiveId(next.id); };
   const duplicate = () => { if (!design) return; const copy = { ...design, id: id(), name: design.name + ' copy', elements: design.elements.map(e => ({ ...e, id: id() })), updatedAt: Date.now() }; onChange([...designs, copy]); setActiveId(copy.id); };
   const deleteThumbnail = (thumbnailId: string) => {
     const target = latestDesignsRef.current.find(d => d.id === thumbnailId);
