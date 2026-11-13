@@ -111,7 +111,6 @@ export async function POST(request: Request) {
     };
     const detectedTitle = backgroundDataUrl ? visionZone(parsed.detectedTitleZone) : undefined;
     const detectedSubtitle = backgroundDataUrl ? visionZone(parsed.detectedSubtitleZone) : undefined;
-    const forbiddenZones = [titleArea, detectedTitle, detectedSubtitle].filter((z): z is Box => Boolean(z));
     const allowed = new Set(selected.map(c => c.id));
     const placed: Slot[] = [];
     const used = new Set<string>();
