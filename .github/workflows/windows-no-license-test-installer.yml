@@ -34,6 +34,7 @@ jobs:
         shell: powershell
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\prepare-windows-prerequisites.ps1
       - name: Build no-license Windows installer with bundled Node runtime
+        shell: powershell
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: npm.cmd run desktop:package:win:no-license
