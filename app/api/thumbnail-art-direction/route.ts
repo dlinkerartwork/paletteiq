@@ -4,6 +4,7 @@ import { getDb } from '@/db';
 import { projects } from '@/db/schema';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { userCredential } from '@/lib/credentials';
+import { nativeAssetBucket } from '@/lib/native-bridge';
 
 type Box = { x: number; y: number; width: number; height: number };
 type Slot = Box & { characterId: string; rotation: number };
@@ -27,6 +28,7 @@ export async function POST(request: Request) {
     projectId?: string; slideKey?: string; slideName?: string; headline?: string;
     subtitle?: string; textZone?: Box; characters?: Array<{ id: string; name: string }>; suggestedSlots?: Array<{ characterId: string; x: number; y: number; width: number; height: number }>;
     referenceStyle?: string; hierarchy?: 'soft' | 'medium' | 'dramatic'; coverStyle?: string;
+    backgroundImageUrl?: string;
   } | null;
   if (!body?.projectId || !/^[\w-]{8,80}$/.test(body.projectId)) return fail('Invalid collection');
   if (!Array.isArray(body.characters) || !body.characters.length || body.characters.length > 36) return fail('Select 1–36 collection clipart assets');
@@ -41,10 +43,35 @@ export async function POST(request: Request) {
   const titleArea = body.textZone || { x: 20, y: 29, width: 60, height: 40 };
   if (![titleArea.x,titleArea.y,titleArea.width,titleArea.height].every(v => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 100) ||
     titleArea.width < 12 || titleArea.height < 12 || titleArea.x + titleArea.width > 100 || titleArea.y + titleArea.height > 100) return fail('Invalid typography zone');
+  // Background-first Vision: read only a previously saved image belonging to this
+  // authenticated owner's collection. Never fetch arbitrary URLs from the client.
+  let backgroundDataUrl: string | undefined;
+  if (body.backgroundImageUrl) {
+    let parsedUrl: URL;
+    try { parsedUrl = new URL(body.backgroundImageUrl, 'http://paletteiq.local'); }
+    catch { return fail('Invalid background image URL', 422); }
+    if (parsedUrl.pathname !== '/api/thumbnail-background' || parsedUrl.searchParams.get('projectId') !== body.projectId)
+      return fail('Background does not belong to this collection', 403);
+    const assetId = parsedUrl.searchParams.get('assetId') || '';
+    const format = parsedUrl.searchParams.get('format') || '';
+    if (!/^[0-9a-f-]{36}$/.test(assetId) || !['png','jpg'].includes(format)) return fail('Invalid background identifier', 422);
+    const storage = nativeAssetBucket() ?? env.BUCKET;
+    const object = await storage?.get('generated/' + user.userId + '/' + assetId + '.' + format);
+    if (!object) return fail('Generated background not found', 404);
+    const bytes = new Uint8Array(await object.arrayBuffer());
+    if (bytes.length > 20_000_000) return fail('Background exceeds vision size limit', 413);
+    // The image was already validated by thumbnail-ai-image when stored.
+    // Encode the owner's stored image for vision without exposing arbitrary fetch access.
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 8192)
+      binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+    backgroundDataUrl = 'data:image/' + (format === 'png' ? 'png' : 'jpeg') + ';base64,' + btoa(binary);
+  }
   const key = await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
   if (!key) return fail('Configure OpenAI key in Settings', 503);
   const prompt = [
     'You are an expert premium Etsy listing art director. Return ONLY JSON; do not generate an image.',
+    backgroundDataUrl ? 'BACKGROUND-FIRST VISION: inspect the attached GENERATED BACKGROUND, locate actual title lettering and decorative shapes, and arrange original assets in visually quiet regions. Do not rely solely on the prior textZone: expand title protection if rendered lettering extends beyond it. The outer margins can have large hero artwork. Your positions must match the ACTUAL existing image.' : 'No background yet. Design an elegant initial layout.',
     'Design a visually compelling premium Etsy product cover, not a generic vintage certificate. Choose asymmetry, bold visual rhythm, layered depth, expressive yet legible type space and a dominant illustration focal point. Adapt composition specifically to the slide intent; avoid excessive borders, tiny equal-sized clipart and bland symmetry.',
     'You must place ONLY provided ORIGINAL CLIPART ASSET IDs. The thumbnail compositor will use exact original PNG files. Never create, rename or invent characters.',
     'Return JSON: {"artDirection":"short coherent descriptive direction","slots":[{"characterId":"EXACT_ID","x":0,"y":0,"width":15,"height":18,"rotation":0}]}',
@@ -54,7 +81,7 @@ export async function POST(request: Request) {
     'Clipart hierarchy preference:', body.hierarchy || 'dramatic',
     'Cover design style:', String(body.coverStyle || 'editorial').slice(0,50),
     'Do not place any collection asset inside the reserved typography zone; the typography/artwork layer occupies it. Treat this as a compositional anchor rather than an excuse to make the clipart microscopic.',
-    'The design direction should specify polished background, premium lettering and restrained decorative badges; use the collection theme, not generic saturated abstract art.',
+    'Design direction describes positioning of existing PNGs ONLY. Do not propose new illustrations or redraw the background.',
     'Be faithful to the slide headline and selected collection objects. If the headline is narrow, never choose thematically unrelated items.',
     'Slide:',JSON.stringify({key:body.slideKey,name:body.slideName,headline:body.headline,subtitle:body.subtitle}),
     'Theme:',JSON.stringify({theme:collection.theme,subtheme:collection.subtheme}),
@@ -65,7 +92,7 @@ export async function POST(request: Request) {
   try {
     const response = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model:'gpt-4.1-mini', input:prompt, text:{format:{type:'json_object'}} }),
+      body: JSON.stringify({ model:'gpt-4.1-mini', input: backgroundDataUrl ? [{ role:'user', content:[{type:'input_text',text:prompt}, {type:'input_image',image_url:backgroundDataUrl}] }] : prompt, text:{format:{type:'json_object'}} }),
       signal:AbortSignal.timeout(60000)
     });
     if (!response.ok) return fail('AI art direction unavailable (HTTP ' + response.status + ')', 502);
