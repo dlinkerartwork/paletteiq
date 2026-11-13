@@ -97,8 +97,9 @@ export async function GET(request: Request) {
 }
 
 type Input = {
-  action?: 'generate' | 'save'; projectId?: string; number?: number;
+  action?: 'generate' | 'save' | 'layout'; projectId?: string; number?: number;
   image?: ListingImageRecord; model?: string; quality?: string;
+  backgroundUrl?: string; placements?: ListingPlacement[];
 };
 const blankScene: Record<number, string> = {
   8: 'Premium realistic overhead flat-lay photograph of ONE blank, white sticker sheet on an elegant desk. The sticker sheet should have a broad clean unprinted center occupying 36%-66% horizontally and 38%-86% vertically, with soft natural shadows. Absolutely no stickers, illustrations or printed designs on the sheet.',
@@ -160,6 +161,67 @@ export async function POST(request: Request) {
       const images = await updateImage(project, input.number, input.image, user.userId);
       return Response.json({ images });
     } catch (error) { return bad(error instanceof Error ? error.message : 'Could not save listing image'); }
+  }
+  if (input.action === 'layout') {
+    const fallback = (Array.isArray(input.placements) ? input.placements : []).slice(0, 24);
+    const valid = new Map(originalAssets(project.characters || []).map(asset => [asset.id, asset.name]));
+    if (!fallback.length || fallback.some(p => !p || !valid.has(p.assetId) ||
+      ![p.x,p.y,p.width,p.height].every(x => typeof x === 'number' && Number.isFinite(x)) ||
+      p.x < 0 || p.y < 0 || p.width <= 0 || p.height <= 0 || p.x + p.width > 101 || p.y + p.height > 101))
+      return bad('Invalid original collection placement plan');
+    const key = savedAssetKey(input.backgroundUrl || '', input.projectId, user.userId);
+    if (!key || !key.endsWith('.png')) return bad('Invalid AI background');
+    const storedBackground = await bucket()?.get(key);
+    if (!storedBackground) return bad('AI background not found', 404);
+    const bytes = new Uint8Array(await storedBackground.arrayBuffer());
+    if (bytes.length > 20_000_000) return bad('AI background exceeds Vision limit', 413);
+    let binary = '';
+    for (let i=0; i<bytes.length; i+=8192) binary += String.fromCharCode(...bytes.subarray(i,i+8192));
+    const base64 = btoa(binary);
+    const keyOpenAi = await userCredential(user.userId, 'openai') || (env as unknown as Record<string,string|undefined>).OPENAI_API_KEY;
+    if (!keyOpenAi) return bad('Configure OpenAI API key for Vision positioning', 503);
+    const isMockup = input.number >= 8 && input.number <= 12;
+    const descriptor = fallback.map(p => ({ id:p.assetId, name:valid.get(p.assetId), x:p.x, y:p.y, width:p.width, height:p.height }));
+    try {
+      const response = await fetch('https://api.openai.com/v1/responses', {
+        method:'POST', headers:{Authorization:'Bearer '+keyOpenAi,'Content-Type':'application/json'},
+        body:JSON.stringify({
+          model:'gpt-4.1-mini',
+          input:[{role:'user',content:[
+            {type:'input_text',text:[
+              'You are an expert graphic designer positioning EXISTING ORIGINAL PNG LAYERS on an AI-generated empty listing design. NEVER draw or regenerate clipart.',
+              'Inspect the supplied BACKGROUND IMAGE PIXELS to locate the already-rendered artistic typography and unobstructed blank printable space.',
+              'Final export is 4:3 landscape (3000x2250), made by center-cropping the supplied 3:2 background, removing approximately 5.56% from both left and right edges. Return coordinate percentages relative to this FINAL 4:3 crop, NOT the uncropped source.',
+              'The title and subtitle must remain unobstructed, usually in the upper 23% of the final canvas.',
+              isMockup ? 'This is a realistic BLANK PRODUCT MOCKUP. All supplied original asset layers MUST fit on the blank flat printable area of the product and not float on table/background. Account for actual blank surface position in visible pixels. Do not cover straps, hands, folds, shadows or the product edge.' : 'Use intentional size hierarchy and negative space. For many gallery items keep original grid, adjust only to avoid title, maintain layout clarity.',
+              'Return ONLY JSON: {"placements":[{"assetId":"source-id","x":30,"y":40,"width":18,"height":22,"rotation":0}],"unsafe":false,"notes":""}.',
+              'Return each listed assetId EXACTLY ONCE and NO new IDs. Coordinate ranges 0–100. Retain approximate proportions of existing placement slots; never infer an object shape or invent an asset from its name.',
+              'If a safe printable area does not exist, set unsafe=true and return current proposed placements unchanged. Values must be numbers.',
+              'Current original-layer plan:',JSON.stringify(descriptor)
+            ].join('\n')},
+            {type:'input_image',image_url:'data:image/png;base64,'+base64}
+          ]}],text:{format:{type:'json_object'}}
+        }), signal:AbortSignal.timeout(60000)
+      });
+      if (!response.ok) return Response.json({placements:fallback, fallback:'Vision layout unavailable; original asset-safe placement retained.'});
+      const answer = await response.json() as {output?:Array<{content?:Array<{text?:string}>}>};
+      const raw = answer.output?.flatMap(a=>a.content||[]).map(c=>c.text||'').join('') || '{}';
+      const parsed = JSON.parse(raw) as {placements?:ListingPlacement[]; unsafe?:boolean; notes?:string};
+      const candidates = Array.isArray(parsed.placements) ? parsed.placements : [];
+      const ids = new Set(fallback.map(p=>p.assetId));
+      const seen = new Set<string>();
+      const correct = !parsed.unsafe && candidates.length === fallback.length && candidates.every(p => {
+        if (!p || !ids.has(p.assetId) || seen.has(p.assetId)) return false;
+        seen.add(p.assetId);
+        return [p.x,p.y,p.width,p.height,p.rotation ?? 0].every(n=>typeof n==='number' && Number.isFinite(n)) &&
+          p.x>=0 && p.y>=23 && p.width>=2 && p.height>=2 &&
+          p.x+p.width<=100 && p.y+p.height<=98 && Math.abs(p.rotation??0)<=15;
+      });
+      if (!correct) return Response.json({placements:fallback, fallback:'Vision could not verify a safe layout. Review and adjust the original asset positions.'});
+      return Response.json({placements:candidates, note:sanitizedText(parsed.notes||'',180)});
+    } catch {
+      return Response.json({placements:fallback, fallback:'Vision layout timed out; safe original placement plan retained.'});
+    }
   }
   if (input.action !== 'generate') return bad('Unknown listing image action');
   const storage = bucket();
