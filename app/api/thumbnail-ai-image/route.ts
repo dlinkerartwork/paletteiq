@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { thumbnailImagePrompt } from '@/lib/thumbnail-image-prompt';
+import { buildThumbnailDesignBrief, type ThumbnailBriefSettings } from '@/lib/thumbnail-design-brief';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '@/db';
 import { projects } from '@/db/schema';
@@ -8,7 +9,7 @@ import { userCredential, userGeminiKeys } from '@/lib/credentials';
 import { nativeAssetBucket } from '@/lib/native-bridge';
 
 type LayoutItem = { type: 'image' | 'text'; x: number; y: number; width: number; height: number; text?: string };
-type RequestBody = { projectId?: string; provider?: string; model?: string; quality?: string; width?: number; height?: number; layout?: LayoutItem[]; includeTitle?: boolean; mode?: 'full-thumbnail' | 'background-only' | 'background-with-typography'; headline?: string; subtitle?: string; slideName?: string; artDirection?: string; textZone?: { x: number; y: number; width: number; height: number }; backgroundStyle?: 'watercolor' | 'paper' | 'gradient' | 'botanical' | 'vintage'; backgroundIntensity?: 'soft' | 'balanced' | 'vibrant'; designBoldness?: 'soft' | 'balanced' | 'bold'; coverStyle?: 'editorial' | 'boutique' | 'storybook' | 'modern' | 'watercolor'; referenceDesign?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string } };
+type RequestBody = { projectId?: string; provider?: string; model?: string; quality?: string; width?: number; height?: number; layout?: LayoutItem[]; includeTitle?: boolean; mode?: 'full-thumbnail' | 'background-only' | 'background-with-typography'; headline?: string; subtitle?: string; slideName?: string; artDirection?: string; textZone?: { x: number; y: number; width: number; height: number }; backgroundStyle?: 'watercolor' | 'paper' | 'gradient' | 'botanical' | 'vintage'; backgroundIntensity?: 'soft' | 'balanced' | 'vibrant'; designBoldness?: 'soft' | 'balanced' | 'bold'; coverStyle?: 'editorial' | 'boutique' | 'storybook' | 'modern' | 'watercolor'; referenceDesign?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string }; designBriefSettings?: ThumbnailBriefSettings };
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 const bucket = () => nativeAssetBucket() ?? env.BUCKET;
 
@@ -148,6 +149,22 @@ export async function POST(req: Request) {
     'Leave the outer perimeter visually suitable for exact original PNG clipart placements.'
   ].join(' ');
   const isHeroCover = /hero cover/i.test(String(input.slideName || ''));
+  // Preserve selected Reference & Assets configuration, but never accept untrusted
+  // freeform image-generation instructions from the client.
+  const brief = input.designBriefSettings;
+  const designBrief = mode === 'full-thumbnail' || !brief ? '' : buildThumbnailDesignBrief({
+    ...brief,
+    headline: input.headline || brief.headline,
+    subtitle: input.subtitle || brief.subtitle,
+    typography: mode === 'background-only' ? 'editable' : 'ai-artwork',
+    quality: String(input.quality || brief.quality),
+    coverStyle, boldness: designBoldness,
+    backgroundStyle, intensity: backgroundIntensity,
+    // Collection style fields are read from the authenticated database, not the client.
+    collectionStyle: (collection as {style?:string}).style,
+    collectionPalette: (collection as {palette?:string}).palette,
+    collectionTexture: (collection as {texture?:string}).texture
+  });
   const prompt = mode === 'full-thumbnail'
     ? thumbnailImagePrompt(collection, layout, width, height, input.includeTitle !== false)
     : [
@@ -160,6 +177,7 @@ export async function POST(req: Request) {
       'Reserved areas where original PNG assets will later be composited. Leave these shapes free of visually busy decoration; never fill them with substitutes:', JSON.stringify(layout.map(({x,y,width,height})=>({x,y,width,height}))),
       'A small degree of deliberate original-PNG overlap is permitted and handled by PaletteIQ, but DO NOT draw any items in that space.',
       'Premium design mood (follow reference graphic style when provided):', graphicDirection,
+      ...(designBrief ? ['REFERENCE & ASSETS SETTINGS (graphic art direction ONLY; never synthesize objects):', designBrief] : []),
       ...(isHeroCover ? ['HERO ART DIRECTION PRIORITY:', heroReferenceStyle] : []),
       'If a blush brush-ring reference is provided, DO NOT substitute red-orange geometric blobs. Keep the watercolor ring delicate and the central typography visually expressive.',
       'Slide composition identifier:', slideLabel.replace(/[^a-z0-9 -]/g,'').slice(0,50),
