@@ -16,3 +16,19 @@ export type ListingStudioConfig = {
   referenceImage?: string;
   headline?: string;
 };
+
+/** Defaults used when Listing Studio is opened directly without legacy Thumbnail Designer. */
+export const DEFAULT_LISTING_STUDIO_CONFIG: ListingStudioConfig = {
+  layoutMode: 'ai',
+  analysisProvider: 'openai',
+  analysisModel: 'gpt-4.1-mini',
+  imageModel: 'gpt-image-1-mini',
+  quality: 'medium',
+  typography: 'ai-artwork',
+  boldness: 'balanced',
+  hierarchy: 'dramatic',
+  coverStyle: 'watercolor',
+  backgroundStyle: 'watercolor',
+  intensity: 'balanced',
+  referenceStyle: 'similar',
+};
