@@ -400,7 +400,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, collect
   };
 
   const currentBriefSettings = (slide?: PackSlide): ThumbnailBriefSettings => ({
-    scope: generationScope, slide: slide?.name || singleSlideKey,
+    layoutMode, scope: generationScope, slide: slide?.name || singleSlideKey,
     headline: slide?.headline || coverHeadline.trim() || title,
     subtitle: slide?.subtitle || 'CLIPART COLLECTION',
     typography: packTypography, boldness: packBoldness, hierarchy: packHierarchy,
@@ -737,7 +737,9 @@ export default function ThumbnailDesigner({ registerSaveControls, title, collect
     try {
       const response = await fetch('/api/thumbnail-ai-image', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId, provider: 'openai', model: imageModel.startsWith('gpt-image-') ? imageModel : 'gpt-image-1-mini', quality: imageQuality, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, mode: 'background-only', backgroundStyle, backgroundIntensity, layout: design.elements.map(e => ({ type: e.type, x: e.x, y: e.y, width: e.width, height: e.height })) })
+        body: JSON.stringify({ projectId, provider: 'openai', model: imageModel.startsWith('gpt-image-') ? imageModel : 'gpt-image-1-mini', quality: packQuality, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, mode: 'background-only', backgroundStyle, backgroundIntensity,
+          designBriefSettings: { ...currentBriefSettings(), typography: 'editable', headline: design.packHeadline || title, subtitle: design.packSubtitle || 'CLIPART COLLECTION', slide: design.name },
+          layout: design.elements.map(e => ({ type: e.type, x: e.x, y: e.y, width: e.width, height: e.height })) })
       });
       const result = await response.json() as { error?: string; imageUrl?: string };
       if (!response.ok || !result.imageUrl) throw Error(result.error || 'Background generation failed');
