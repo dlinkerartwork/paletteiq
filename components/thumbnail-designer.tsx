@@ -491,7 +491,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     'Image provider/model: ' + imageProvider + ' / ' + (imageProvider === 'gemini' ? geminiImageModel : imageModel),
     'Style: ' + packCoverStyle + ', ' + backgroundStyle + ', ' + backgroundIntensity + ', boldness ' + packBoldness,
     'Reference template: ' + (reference ? 'selected (style cues only)' : 'none') + ', interpretation ' + referenceStyle,
-    'Original assets may deliberately extend beyond the canvas and will be CROPPED by the final canvas edge.',
+    'Original assets may deliberately overlap the artistic text as foreground PNG layers or extend beyond the canvas and will be CROPPED by the final canvas edge.',
     'Only the VISIBLE portions of these manually positioned PNG rectangles are reserved on canvas; their pixels and identities are NEVER sent to the image provider:',
     JSON.stringify((design?.elements || []).filter(e => e.type === 'image')
       .map(e => ({ x: Math.max(0,e.x), y: Math.max(0,e.y),
@@ -528,11 +528,8 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
       zone.x + zone.width > 100 || zone.y + zone.height > 100)) {
       setMessage('Set a valid typography safe zone inside the canvas.'); return;
     }
-    const overlapsType = hasLettering && imageLayers.some(e =>
-      e.x < zone.x + zone.width && e.x + e.width > zone.x &&
-      e.y < zone.y + zone.height && e.y + e.height > zone.y
-    );
-    if (overlapsType) { setMessage('Clipart overlaps the selected lettering area. Move it or change the typography zone; bleed outside the canvas is allowed.'); return; }
+    // Intentional image/text overlap is supported. Original PNGs are composited
+    // above the image-generated lettering; they can obscure portions of it.
     if (hasLettering && (heading.length > 100 || subtitle.length > 140 || badge.length > 60)) {
       setMessage('Title (max 100), subtitle (max 140), or badge (max 60) is too long.'); return;
     }
@@ -576,6 +573,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         backgroundStyle, backgroundIntensity, designBoldness: packBoldness,
         coverStyle: packCoverStyle, referenceDesign,
         textZone: zone,
+        // Image rectangles may intersect the text zone intentionally.
         // Exact source files, their contents, character names, and reference
         // images are never part of the generation request.
         layout: imageLayers.map(e => ({ type: 'image' as const,
@@ -1369,7 +1367,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
             <option value="hand-painted">Hand-painted lettering</option>
           </select>
           <strong>Typography safe area</strong>
-          <small>{typographyEnabled ? 'The optional canvas guide marks the lettering region. Clipart may bleed beyond the frame, but should avoid this region.' : 'Typography is disabled; this area is ignored during background generation.'}</small>
+          <small>{typographyEnabled ? 'Typography guide is only a composition aid. Clipart may overlap text intentionally or extend beyond canvas edges. PNGs remain above AI lettering, so verify that important words stay legible.' : 'Typography is disabled; this area is ignored during background generation.'}</small>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 6 }}>
             {(['x','y','width','height'] as const).map(field => <label key={field} style={{ minWidth: 0, display: 'grid', gap: 3 }}>
               <span className="input-label">{field.toUpperCase()} (%)</span>
