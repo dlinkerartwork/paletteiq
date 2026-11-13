@@ -110,7 +110,13 @@ export function placeOriginals(slide: PackSlide, characters: PackCharacter[], re
   // Artwork-first editorials: a large focal original, medium supporting originals,
   // and small accents. Grids intentionally preserve their catalogue rhythm.
   const focal: Zone[] = boutique
-    ? [{ x: 56, y: 12, width: 35, height: 35 }, { x: 58, y: 55, width: 32, height: 31 }]
+    ? [
+        { x: 57, y: 4, width: 38, height: 35 },
+        { x: 52, y: 41, width: 25, height: 24 },
+        { x: 76, y: 41, width: 21, height: 24 },
+        { x: 52, y: 71, width: 24, height: 24 },
+        { x: 76, y: 71, width: 21, height: 24 }
+      ]
     : closeup
       ? [{ x: 5, y: 35, width: 39, height: 38 }, { x: 54, y: 48, width: 37, height: 36 }]
       : [{ x: 35, y: 74, width: 30, height: 23 }, { x: 72, y: 4, width: 24, height: 24 }, { x: 4, y: 4, width: 24, height: 24 },

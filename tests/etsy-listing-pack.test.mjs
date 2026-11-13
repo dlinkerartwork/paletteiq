@@ -88,3 +88,13 @@ test('Catalogue showcase and hero layouts are intentionally different', () => {
   assert.ok(preview.length > hero.length);
   assert.ok(Math.max(...hero.map(p => p.width)) > Math.max(...preview.map(p => p.width)));
 });
+
+test('Modern Boutique offers several distinct original collection image positions', () => {
+  const slides = buildPack('complete-10','Asian Food',characters);
+  const boutique = slides.find(slide => slide.key === 'boutique');
+  assert.ok(boutique);
+  const actual = placeOriginals(boutique, characters, [], 'dramatic');
+  assert.ok(actual.length >= 3, 'Boutique cover must not display just one collection clipart');
+  assert.equal(new Set(actual.map(item => item.characterId)).size, actual.length);
+  assert.ok(actual.every(item => item.x >= 50), 'Keep the left typography region legible');
+});

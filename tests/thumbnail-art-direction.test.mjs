@@ -56,7 +56,7 @@ test('Both background modes reject illustrated substitutes, and editable mode re
   assert.match(generator, /mode === 'background-with-typography' \|\| mode === 'background-only'/);
   assert.match(generator, /decision\.containsObjects !== false/);
   assert.match(generator, /mode === 'background-only' && decision\.containsText !== false/);
-  assert.match(generator, /Premium design mood:/);
+  assert.match(generator, /Premium design mood/);
 });
 
 test('Batch requests the AI background even if art direction fails', () => {
@@ -125,4 +125,20 @@ test('Single thumbnail is the default and respects selected slide key and one-im
   assert.match(designer, /generationScope === 'single' \? 'Generate 1 Thumbnail'/);
   assert.match(designer, /aria-label="Single thumbnail type"/);
   assert.match(designer, /generationScope === 'single' && singleSlideKey\.startsWith\('category-'\)/);
+});
+
+test('Reference styles influence only abstract graphic and lettering prompts, not object generation', () => {
+  assert.match(generator, /referenceDesign\?: \{ graphicMotif\?: string/);
+  assert.match(generator, /blush-brush-ring/);
+  assert.match(generator, /Delicate translucent pale blush-pink hand-painted CIRCULAR BRUSH RING/);
+  assert.match(generator, /No flowers, petals, leaves, food or illustrated objects/);
+  assert.match(generator, /referenceGuide \|\| abstractStyles\[coverStyle\]/);
+  assert.match(designer, /referenceDesign = \{ graphicMotif: body\.layout\?\.graphicMotif/);
+  assert.match(designer, /referenceDesign: target\.referenceDesign/);
+  assert.match(designer, /aria-label="Etsy custom cover headline"/);
+});
+test('AI planner cannot collapse a multi-asset cover to one original clipart', () => {
+  assert.match(designer, /const expectedMin = Math\.min\(plannedElements\.length/);
+  assert.match(designer, /plan\.slots\.length < expectedMin/);
+  assert.match(designer, /Using safe collection layout/);
 });

@@ -8,7 +8,7 @@ import { userCredential, userGeminiKeys } from '@/lib/credentials';
 import { nativeAssetBucket } from '@/lib/native-bridge';
 
 type LayoutItem = { type: 'image' | 'text'; x: number; y: number; width: number; height: number; text?: string };
-type RequestBody = { projectId?: string; provider?: string; model?: string; quality?: string; width?: number; height?: number; layout?: LayoutItem[]; includeTitle?: boolean; mode?: 'full-thumbnail' | 'background-only' | 'background-with-typography'; headline?: string; subtitle?: string; slideName?: string; artDirection?: string; textZone?: { x: number; y: number; width: number; height: number }; backgroundStyle?: 'watercolor' | 'paper' | 'gradient' | 'botanical' | 'vintage'; backgroundIntensity?: 'soft' | 'balanced' | 'vibrant'; designBoldness?: 'soft' | 'balanced' | 'bold'; coverStyle?: 'editorial' | 'boutique' | 'storybook' | 'modern' | 'watercolor' };
+type RequestBody = { projectId?: string; provider?: string; model?: string; quality?: string; width?: number; height?: number; layout?: LayoutItem[]; includeTitle?: boolean; mode?: 'full-thumbnail' | 'background-only' | 'background-with-typography'; headline?: string; subtitle?: string; slideName?: string; artDirection?: string; textZone?: { x: number; y: number; width: number; height: number }; backgroundStyle?: 'watercolor' | 'paper' | 'gradient' | 'botanical' | 'vintage'; backgroundIntensity?: 'soft' | 'balanced' | 'vibrant'; designBoldness?: 'soft' | 'balanced' | 'bold'; coverStyle?: 'editorial' | 'boutique' | 'storybook' | 'modern' | 'watercolor'; referenceDesign?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string } };
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 const bucket = () => nativeAssetBucket() ?? env.BUCKET;
 
@@ -97,8 +97,37 @@ export async function POST(req: Request) {
     modern: 'bold contemporary graphic design, oversized typography and geometric color blocks',
     watercolor: 'free-flowing abstract watercolor pigments behind elegant hand-lettering'
   };
+  // Reference layout analysis returns only allowlisted nonfigurative design tokens.
+  // No uploaded image, original character name or semantic product content enters image-generation prompts.
+  const reference = input.referenceDesign;
+  const graphicMotifs: Record<string, string> = {
+    'blush-brush-ring': 'Delicate translucent pale blush-pink hand-painted CIRCULAR BRUSH RING surrounding an airy title region; cream watercolor paper. No flowers, petals, leaves, food or illustrated objects.',
+    'split-panel': 'Refined asymmetric panel division with gentle soft-edged color fields, not large hard geometric slabs.',
+    'paper-collage': 'Layered subtly deckled handmade paper and restrained warm painterly edges.',
+    'soft-wash': 'Very light watercolor pigment haze around outer edges, mostly ivory negative space.',
+    'minimal-lines': 'Thin elegant editorial rules and subtle typographic framing on ivory paper.'
+  };
+  const letteringStyles: Record<string, string> = {
+    'script-serif': 'Hand-lettered expressive flowing brush-script on the first key word paired with oversized elegant contrast serif for the second, dark forest-green lettering and earthy burgundy accent; premium magazine cover, perfectly legible.',
+    'editorial-serif': 'Elegant high-contrast editorial serif display title with tasteful italic and varied line sizes.',
+    'modern-display': 'Premium contemporary display typography, striking size contrast and balanced letterspacing.',
+    'hand-lettered': 'Confident, flowing artisanal calligraphy hand lettering with clean supporting small caps.'
+  };
+  const paletteMoods: Record<string, string> = {
+    'blush-sage': 'Warm ivory paper, blush pink watercolor accents, deep forest green title, gentle sage secondary marks, and muted terracotta detail; do not use orange or blue color blocks.',
+    'earthy-warm': 'Warm ivory, gentle terracotta, espresso ink, soft tan watercolor stains and natural cream.',
+    'forest-cream': 'Creamy ivory, pine green, sage watercolor and a very small blush accent.',
+    'pastel': 'Soft powder pastel pink, muted sage, ivory and dusty peach with very low contrast backgrounds.',
+    'vibrant': 'Distinct but tasteful editorial accents with ivory background and deep ink lettering.'
+  };
+  const referenceGuide = [
+    graphicMotifs[reference?.graphicMotif || ''] || '',
+    letteringStyles[reference?.letteringStyle || ''] || '',
+    paletteMoods[reference?.paletteMood || ''] || ''
+  ].filter(Boolean).join(' ');
   const graphicDirection = [
-    abstractStyles[coverStyle],
+    // Reference style deliberately outranks generic cover style when available.
+    referenceGuide || abstractStyles[coverStyle],
     energy[designBoldness],
     styleGuidance[backgroundStyle],
     intensityGuidance[backgroundIntensity],
@@ -120,7 +149,8 @@ export async function POST(req: Request) {
       'Keep type inside the reserved safe area specified in 0-100 percent canvas coordinates:', JSON.stringify(titleZone),
       'Reserved areas where original PNG assets will later be composited. Leave these shapes free of visually busy decoration; never fill them with substitutes:', JSON.stringify(layout.map(({x,y,width,height})=>({x,y,width,height}))),
       'A small degree of deliberate original-PNG overlap is permitted and handled by PaletteIQ, but DO NOT draw any items in that space.',
-      'Premium design mood:', graphicDirection,
+      'Premium design mood (follow reference graphic style when provided):', graphicDirection,
+      'If a blush brush-ring reference is provided, DO NOT substitute red-orange geometric blobs. Keep the watercolor ring delicate and the central typography visually expressive.',
       'Slide composition identifier:', slideLabel.replace(/[^a-z0-9 -]/g,'').slice(0,50),
       'Graphic layout direction:', slideDirection.replace(/collection assets|original products|original clipart/gi,'empty image areas'),
       'Prioritize decorative graphic design, NOT themed illustration. No accidental images, illustration vignettes or iconography.'
