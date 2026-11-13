@@ -436,6 +436,22 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     }))
   ).join('\n\n--- NEXT THUMBNAIL ---\n\n');
 
+  const manualCanvasPromptPreview = [
+    'ETSY MANUAL CANVAS — AI GRAPHIC BACKGROUND + ARTISTIC LETTERING (1024 × 1024)',
+    'Generate nonfigurative design and exact typography only. DO NOT draw clipart, characters, food, products, or references.',
+    'Main title: ' + JSON.stringify(design?.packHeadline ?? title),
+    'Subtitle: ' + JSON.stringify(design?.packSubtitle ?? 'Digital Clipart Collection'),
+    'Badge (omit entirely when blank): ' + JSON.stringify(design?.packBadge ?? ''),
+    'Typography safe zone: ' + JSON.stringify(design?.packTextZone || { x: 22, y: 30, width: 56, height: 34 }),
+    'Image provider/model: ' + imageProvider + ' / ' + (imageProvider === 'gemini' ? geminiImageModel : imageModel),
+    'Style: ' + packCoverStyle + ', ' + backgroundStyle + ', ' + backgroundIntensity + ', boldness ' + packBoldness,
+    'Reference template: ' + (reference ? 'selected (style cues only)' : 'none') + ', interpretation ' + referenceStyle,
+    'The following rectangles are RESERVED for the exact PNGs placed manually in the editor. Their pixels and identities are NEVER sent to the provider:',
+    JSON.stringify((design?.elements || []).filter(e => e.type === 'image')
+      .map(e => ({ x:e.x, y:e.y, width:e.width, height:e.height })), null, 2),
+    'Composite original PNGs without changing their user-authored coordinates.'
+  ].join('\n\n');
+
   // User-directed workflow: layout is authored ON the current canvas. The AI
   // receives only empty rectangles + exact text, never the original PNG pixels.
   // Unlike the legacy pack generator, this must never overwrite manual positions.
@@ -1341,19 +1357,19 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         </div>}
         {sideTab === 'generation' && <div id="thumbnail-generation-panel" role="tabpanel" aria-labelledby="thumbnail-generation-tab" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0, gap: 12 }}>
         <h3>Thumbnail Prompt</h3>
-        <small>Generated from your Reference & Assets settings. OpenAI creates only the abstract background and optional artistic lettering; PaletteIQ overlays the exact original collection PNGs. No clipart is redrawn.</small>
+        <small>Live brief derived from your Reference &amp; Assets inputs and actual original PNG layer rectangles. The AI generates only a background with title, subtitle and optional badge. PaletteIQ keeps your canvas layout unchanged.</small>
         <label className="input-label">OPENAI BACKGROUND MODEL</label>
         <select aria-label="OpenAI thumbnail background model" disabled={aiBusy} value={imageModel} onChange={e => setImageModel(e.target.value)}>
           {!imageModels.some(m => m.id === imageModel) && <option value={imageModel}>{imageModel} (saved/default)</option>}
           {imageModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
         </select>
         <label className="input-label">PROMPT FROM REFERENCE & ASSETS</label>
-        <textarea aria-label="Thumbnail design prompt preview" readOnly rows={15} value={currentBriefPreview} style={{ width: '100%', fontSize: 11, lineHeight: 1.35 }} />
-        <button className="outline-btn" type="button" onClick={() => void navigator.clipboard.writeText(currentBriefPreview)}>Copy thumbnail prompt</button>
-        <button className="primary-btn" type="button" disabled={aiBusy || !characters.some(c => c.imageUrl)} onClick={() => void generateReferenceBatch()}>
-          <WandSparkles size={15}/> {aiBusy ? 'Generating...' : generationScope === 'single' ? 'Generate 1 Thumbnail from Prompt' : 'Generate Exact-Asset Pack from Prompt'}
+        <textarea aria-label="Thumbnail design prompt preview" readOnly rows={15} value={manualCanvasPromptPreview} style={{ width: '100%', fontSize: 11, lineHeight: 1.35 }} />
+        <button className="outline-btn" type="button" onClick={() => void navigator.clipboard.writeText(manualCanvasPromptPreview)}>Copy thumbnail prompt</button>
+        <button className="primary-btn" type="button" disabled={aiBusy || !design.elements.some(e => e.type === 'image')} onClick={() => void generateCanvasArtwork()}>
+          <WandSparkles size={15}/> {aiBusy ? 'Generating...' : 'Generate AI Background & Typography from Canvas'}
         </button>
-        <small>AI image generation uses your chosen background quality in Reference & Assets. AI Vision then fits existing collection assets around the actual lettering. API charges apply.</small>
+        <small>AI image generation uses your chosen background quality in Reference & Assets. Your manual clipart positions and proportions are preserved. API charges apply.</small>
         </div>}
       </div>
       <div style={{ minWidth: 0, position: 'sticky', top: 12, alignSelf: 'start' }}>
