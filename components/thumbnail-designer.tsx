@@ -1317,7 +1317,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
             <input aria-label="Enable AI typography" type="checkbox" checked={typographyEnabled} disabled={aiBusy} onChange={e => mutate({ packAiTypographyEnabled: e.target.checked, renderedImageUrl: undefined })}/>
             Enable AI Typography (title, subtitle &amp; badge)
           </label>
-          <small>{typographyEnabled ? 'AI creates hand-crafted artistic lettering in the background. Each field may be left blank.' : 'No text, badge, letters or pseudo-writing will be requested from the AI. Only a decorative background will be generated.'}</small>
+          <small>{typographyEnabled ? 'AI creates hand-crafted artistic lettering in the background. Each field may be left blank.' : 'No text, badge, letters or pseudo-writing will be requested from the AI. Only a decorative background will be generated.'} Changes to this checkbox or wording take effect after the next Generate AI Background &amp; Typography; the previous background is kept until then.</small>
           <button type="button" className="outline-btn" disabled={aiBusy || !typographyEnabled} onClick={() => mutate({ packHeadline: seoDefaults.title, packSubtitle: seoDefaults.subtitle, renderedImageUrl: undefined })}>Use SEO defaults from Etsy Listing Draft</button>
           <small>{seoDefaults.hasSeoTitle ? 'Main title is derived from Etsy SEO title' : 'No SEO title saved; collection title is used'} · {seoDefaults.hasSeoSubtitle ? 'subtitle uses SEO keyword/category' : 'subtitle falls back to Digital Clipart Collection'}. Existing manual edits remain until you reset them.</small>
           <label className="input-label">MAIN TITLE</label>
