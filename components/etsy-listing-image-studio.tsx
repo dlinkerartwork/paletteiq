@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Check, Download, Image as ImageIcon, LoaderCircle, RotateCcw, Sparkles } from 'lucide-react';
+import type { ListingStudioConfig } from '@/lib/listing-studio-config';
 import {
   LISTING_IMAGE_SPECS, LISTING_WIDTH, LISTING_HEIGHT, originalAssets,
   planListingPlacements, listingFilename, type ListingAsset, type ListingImageRecord, type ListingPlacement
@@ -9,13 +10,14 @@ import {
 
 type Props = {
   projectId: string;
+  config?: ListingStudioConfig;
   name: string;
   theme: string;
   subtheme: string;
   characters: ListingAsset[];
   onSaved?: (images: ListingImageRecord[]) => void;
 };
-type ListResponse = { images?: ListingImageRecord[]; backgroundUrl?: string; placements?: ListingPlacement[]; fallback?: string; error?: string };
+type ListResponse = { images?: ListingImageRecord[]; backgroundUrl?: string; placements?: ListingPlacement[]; fallback?: string; error?: string; layout?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string } };
 const apiUrl = '/api/listing-image-studio';
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Number.isFinite(n) ? n : lo));
 const fileName = (number: number) => listingFilename(number);
@@ -102,15 +104,16 @@ async function upload(projectId: string, number: number, blob: Blob): Promise<st
   return result.url;
 }
 
-export default function EtsyListingImageStudio({ projectId, name, theme, subtheme, characters, onSaved }: Props) {
+export default function EtsyListingImageStudio({ config, projectId, name, theme, subtheme, characters, onSaved }: Props) {
   const assets = useMemo(() => originalAssets(characters), [characters]);
   const [records, setRecords] = useState<ListingImageRecord[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [step, setStep] = useState(1);
   const [working, setWorking] = useState('');
   const [message, setMessage] = useState('');
-  const [quality, setQuality] = useState<'low' | 'medium' | 'high'>('medium');
-  const [model, setModel] = useState('gpt-image-1-mini');
+  const [quality, setQuality] = useState<'low' | 'medium' | 'high'>(config?.quality || 'medium');
+  const [model, setModel] = useState(config?.imageModel || 'gpt-image-1-mini');
+  const [referenceDesign, setReferenceDesign] = useState<ListResponse['layout']>();
   const [availableModels, setAvailableModels] = useState<Array<{id: string; name: string}>>([]);
   const [changes, setChanges] = useState<Record<number, ListingPlacement[]>>({});
   const [notes, setNotes] = useState<Record<number, string>>({});
@@ -200,15 +203,35 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           }
         } catch { /* Continue with a neutral collection gallery rather than invent categories. */ }
       }
+      let styleTokens = referenceDesign;
+      if (!styleTokens && config?.referenceImage) {
+        setMessage('Analyzing selected Reference & Assets image for nonfigurative design cues...');
+        try {
+          const refResult = await request('/api/thumbnail-layout', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              projectId, imageUrl: config.referenceImage, provider: config.analysisProvider,
+              model: config.analysisModel, count: Math.min(assets.length, 12), referenceStyle: config.referenceStyle
+            })
+          });
+          styleTokens = refResult.layout;
+          if (styleTokens) setReferenceDesign(styleTokens);
+        } catch {
+          setMessage('Reference analysis unavailable; continuing with the chosen Reference & Assets style.');
+        }
+      }
       setMessage('Generating the AI graphic background and artistic typography...');
-      const response = await send({ action: 'generate', projectId, number: step, model, quality });
+      const response = await send({ action: 'generate', projectId, number: step, model, quality,
+        settings: config ? { ...config, referenceImage: undefined } : undefined,
+        referenceDesign: styleTokens
+      });
       if (!response.backgroundUrl) throw Error('OpenAI did not return the background');
       let suggested = effectivePositions;
       let layoutWarning = '';
       if (effectivePositions.length <= 24) {
         setMessage('AI Vision is finding typography-safe original artwork slots on the actual generated background...');
         try {
-          const vision = await send({ action: 'layout', projectId, number: step, backgroundUrl: response.backgroundUrl, placements: effectivePositions });
+          const vision = await send({ action: 'layout', projectId, number: step, backgroundUrl: response.backgroundUrl, placements: effectivePositions, settings: config ? { ...config, referenceImage: undefined } : undefined });
           if (vision.placements?.length === effectivePositions.length) suggested = vision.placements;
           layoutWarning = vision.fallback || '';
         } catch { layoutWarning = 'Vision placement unavailable; original image placements retained.'; }
@@ -252,7 +275,8 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   return <div style={{ display: 'grid', gap: 18 }}>
     <div className="panel" style={{ padding: 20 }}>
       <h2>Etsy Listing Image Studio</h2>
-      <p className="sub">15-image workflow • 3000 × 2250 px • 4:3 landscape • OpenAI artistic lettering • exact original collection clipart. Thumbnail Designer remains separate.</p>
+      <p className="sub">15-image workflow • 3000 × 2250 px • 4:3 landscape • OpenAI artistic lettering • exact original collection clipart. Started from Thumbnail Designer / Reference & Assets; existing thumbnail projects stay intact.</p>
+      {config && <p className="sub">Style: {config.coverStyle} · {config.backgroundStyle} · {config.boldness} · {config.hierarchy} hierarchy · {config.intensity} decoration · {config.referenceImage ? 'Selected reference enabled' : 'No reference'}. These settings guide each generated listing image.</p>}
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         <strong>{approved}/15 approved • {assets.length} original images available</strong>
         <button type="button" className="primary-btn" disabled={approved !== 15 || !!working} onClick={() => {
