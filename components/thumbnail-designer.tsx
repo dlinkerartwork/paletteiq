@@ -456,15 +456,27 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
       }
       if (reference) {
         setPackStatus('Analyzing optional reference...');
-        const response = await fetch('/api/thumbnail-layout', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ projectId, imageUrl: reference, provider, model, count: Math.min(available.length, 24), referenceStyle })
-        });
-        const body = await response.json() as { error?: string; layout?: { slots?: typeof slots; background?: string; graphicMotif?: string; letteringStyle?: string; paletteMood?: string } };
-        if (!response.ok) throw Error(body.error || 'Reference analysis failed');
-        slots = body.layout?.slots || [];
-        referenceDesign = { graphicMotif: body.layout?.graphicMotif, letteringStyle: body.layout?.letteringStyle, paletteMood: body.layout?.paletteMood };
-        if (/^#[0-9a-f]{6}$/i.test(body.layout?.background || '')) color = body.layout!.background!;
+        try {
+          const response = await fetch('/api/thumbnail-layout', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ projectId, imageUrl: reference, provider, model, count: Math.min(available.length, 12), referenceStyle })
+          });
+          const body = await response.json() as { error?: string; layout?: { slots?: typeof slots; background?: string; graphicMotif?: string; letteringStyle?: string; paletteMood?: string } };
+          if (!response.ok) throw Error(body.error || 'Reference analysis failed');
+          slots = body.layout?.slots || [];
+          referenceDesign = { graphicMotif: body.layout?.graphicMotif, letteringStyle: body.layout?.letteringStyle, paletteMood: body.layout?.paletteMood };
+          if (/^#[0-9a-f]{6}$/i.test(body.layout?.background || '')) color = body.layout!.background!;
+        } catch (error) {
+          // Reference analysis is optional. A timeout must NOT abort the entire
+          // pack before we even request the paid background.
+          const reason = error instanceof Error ? error.message : String(error);
+          setPackStatus('Reference analysis unavailable (' + reason.slice(0, 110) + '). Continuing with premium curated style.');
+          // Prefer an airy medallion instead of a generic orange abstract design
+          // when the user is generating the central-title Hero Cover.
+          if (slides.some(slide => slide.key === 'hero')) {
+            referenceDesign = { graphicMotif: 'blush-brush-ring', letteringStyle: 'script-serif', paletteMood: 'blush-sage' };
+          }
+        }
       }
       // Each slot already avoids the title-safe-zone before we call the image API.
       const created: ThumbnailDesign[] = slides.map((slide, index) => ({
