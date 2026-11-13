@@ -1483,7 +1483,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
                 border: '2px dashed #c76a31', boxSizing: 'border-box', borderRadius: 9,
                 background: 'rgba(255,244,223,0.28)', color: '#704129', pointerEvents: 'none',
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                gap: '4%', padding: '2%', textAlign: 'center', zIndex: 2
+                gap: '4%', padding: '2%', textAlign: 'center', zIndex: 1
               }}>
                 {!design.backgroundImageUrl && !design.aiImageUrl && <>
                   <strong style={{ fontSize: 'clamp(7px, 4cqw, 48px)', lineHeight: 1.08, overflowWrap: 'anywhere' }}>{design.packHeadline ?? seoDefaults.title}</strong>
@@ -1494,7 +1494,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
               {design.elements.map(e => {
                 const isSelected = e.id === selectedId;
                 return <div key={e.id} data-thumbnail-element="true" onPointerDown={event => startDrag(event,e,'move')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
-                  style={{ position: 'absolute', left: e.x+'%', top: e.y+'%', width: e.width+'%', height: e.height+'%', transform: `rotate(${e.rotation}deg)`, opacity: e.opacity ?? 1, border: isSelected ? '2px dashed #e36a1b' : '1px solid transparent', cursor: e.locked ? 'not-allowed' : 'move', boxSizing: 'border-box', touchAction: 'none', userSelect: 'none' }}>
+                  style={{ position: 'absolute', left: e.x+'%', top: e.y+'%', width: e.width+'%', height: e.height+'%', transform: `rotate(${e.rotation}deg)`, opacity: e.opacity ?? 1, zIndex: 2, border: isSelected ? '2px dashed #e36a1b' : '1px solid transparent', cursor: e.locked ? 'not-allowed' : 'move', boxSizing: 'border-box', touchAction: 'none', userSelect: 'none' }}>
                   {e.type === 'image' ? (imageUrl(e) ? <img src={imageUrl(e)} alt={assetMap.get(e.characterId || '')?.name || 'Character'} draggable={false} style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }}/> : <div style={{ color: '#d33' }}>Image unavailable</div>) :
                     (e.curve ? <CurvedText element={e} designWidth={design.width}/> : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', fontSize: `clamp(5px, ${(e.fontSize || 80) / design.width * 100}cqw, 250px)`, fontFamily: e.fontFamily || 'Arial', fontWeight: e.fontWeight || 'bold', color: e.color || '#333', whiteSpace: 'pre-line', overflow: 'hidden', pointerEvents: 'none' }}>{e.text}</div>)}
                   {isSelected && !e.locked && <div title="Drag to rotate" onPointerDown={event => startDrag(event,e,'rotate')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
