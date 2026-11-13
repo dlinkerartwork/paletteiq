@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import UpscaleCompare from '@/components/upscale-compare';
+import { fitClipartAroundTypography, type ThumbnailBox } from '@/lib/thumbnail-fit';
 import { buildPack, filterThemeCharacters, placeOriginals, type PackPreset, type PackSlide, type ClipartHierarchy } from '@/lib/etsy-listing-pack';
 import { Download, Plus, Trash2, Copy, Undo2, Redo2, WandSparkles, RotateCcw } from 'lucide-react';
 
@@ -374,6 +375,14 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   ): Promise<{ elements: ThumbnailElement[]; usedFallback: boolean }> => {
     const imageElements = fallback.filter(e => e.type === 'image' && e.characterId);
     if (!imageElements.length) return { elements: fallback, usedFallback: true };
+    const catalogue = slide.layout === 'grid' || slide.layout === 'showcase';
+    const fit = (items: ThumbnailElement[], titleAreas: ThumbnailBox[], subtitleAreas: ThumbnailBox[]) =>
+      fitClipartAroundTypography(items, titleAreas, subtitleAreas, {
+        grid: catalogue, titlePadding: 5, subtitlePadding: 3, maxArtworkOverlap: .30,
+        minScale: hierarchy === 'soft' ? .75 : hierarchy === 'medium' ? .65 : .55
+      });
+    // Safe fallback must never paint original clipart over the known typography area.
+    const safeFallback = fit(imageElements, [slide.textZone], []);
     try {
       const response = await fetch('/api/thumbnail-art-direction', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -390,9 +399,10 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
           }))
         })
       });
-      const result = await response.json() as {error?: string; slots?: Array<{
-        characterId: string; x: number; y: number; width: number; height: number; rotation: number
-      }>};
+      const result = await response.json() as {
+        error?: string; detectedTitleZone?: ThumbnailBox; detectedSubtitleZone?: ThumbnailBox;
+        slots?: Array<{characterId: string; x: number; y: number; width: number; height: number; rotation: number}>;
+      };
       const expectedMin = Math.min(imageElements.length, slide.layout === 'grid' || slide.layout === 'showcase' ? 4 : 3);
       if (!response.ok || !result.slots || result.slots.length < expectedMin)
         throw Error(result.error || 'Vision returned too few original PNG positions');
@@ -403,11 +413,14 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         })
         .filter(element => element !== null) as ThumbnailElement[];
       if (selected.length < expectedMin) throw Error('Vision returned insufficient valid original PNGs');
-      return { elements: selected, usedFallback: false };
+      const fitted = fit(selected, [slide.textZone, ...(result.detectedTitleZone ? [result.detectedTitleZone] : [])],
+        result.detectedSubtitleZone ? [result.detectedSubtitleZone] : []);
+      if (fitted.length < Math.min(expectedMin, safeFallback.length)) throw Error('Vision layout collides with typography after fitting');
+      return { elements: fitted, usedFallback: false };
     } catch {
       // Background generation is paid. Never discard it because vision layout failed.
       // Preserve existing original-only positions as a readable editable fallback.
-      return { elements: imageElements, usedFallback: true };
+      return { elements: safeFallback, usedFallback: true };
     }
   };
 
