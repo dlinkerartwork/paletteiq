@@ -635,6 +635,35 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     }
   };
 
+  const reLayoutWithVision = async (target: ThumbnailDesign) => {
+    if (!target.backgroundImageUrl || aiBusy || backgroundRetryId) return;
+    setBackgroundRetryId(target.id);
+    try {
+      const available = filterThemeCharacters(title, characters);
+      const slides = buildPack('complete-10', title, available);
+      const slide = slides.find(item => target.name.toLowerCase().includes(item.name.toLowerCase())) || slides[0];
+      if (!slide) throw Error('No collection layout available');
+      const originals = target.elements.filter(e => e.type === 'image');
+      setMessage('AI Vision inspecting saved background and adjusting original PNG positions...');
+      const result = await placeOriginalsOverBackground(
+        slide, target.backgroundImageUrl, originals, available,
+        target.packHierarchy || packHierarchy, target.packCoverStyle || packCoverStyle
+      );
+      const next = latestDesignsRef.current.map(d => d.id === target.id ? {
+        ...d, elements: [...result.elements, ...d.elements.filter(e => e.type === 'text')],
+        generationError: result.usedFallback ? 'AI Vision layout unavailable; original positions retained.' : undefined,
+        updatedAt: Date.now()
+      } : d);
+      latestDesignsRef.current = next;
+      onChange(next);
+      setMessage(result.usedFallback
+        ? 'Vision could not improve the layout; current original PNG positions remain unchanged.'
+        : 'AI Vision repositioned original PNGs without another paid image generation. Save designs to persist.');
+    } catch (error) {
+      setMessage('Vision re-layout failed: ' + (error instanceof Error ? error.message : String(error)));
+    } finally { setBackgroundRetryId(''); }
+  };
+
   const approveReviewedBackground = async (target: ThumbnailDesign) => {
     if (!target.rejectedBackgroundUrl || aiBusy || backgroundRetryId) return;
     if (!window.confirm('Have you OPENED and inspected this AI artwork at full size? Confirm it contains NO AI-generated collection clipart, foods, animals, product illustrations or imitations of your collection assets. Decorative shapes and lettering are allowed. Only approve if all artwork is background/typography.')) return;
@@ -1346,6 +1375,9 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
             {item.upscaledImageUrl ? <button type="button" className="outline-btn" style={{ fontSize: 12, marginTop: 6 }} onClick={() => void compareThumbnail(item)}>Compare images</button>
               : item.aiImageUrl && <a href={item.aiImageUrl} download style={{ display: 'block', fontSize: 12 }}>View AI image</a>}
             <div style={{ display: 'flex', gap: 5, marginTop: 8, flexWrap: 'wrap' }}>
+              {item.originalAssetsOnly && item.backgroundImageUrl && <button type="button" className="outline-btn" style={{ fontSize: 11, padding: '5px 7px', flex: 1 }} disabled={aiBusy || Boolean(backgroundRetryId)} onClick={() => void reLayoutWithVision(item)}>
+                <WandSparkles size={12}/> {backgroundRetryId === item.id ? 'Analyzing...' : 'Re-layout with AI Vision'}
+              </button>}
               {item.originalAssetsOnly && <button type="button" className="outline-btn" style={{ fontSize: 11, padding: '5px 7px', flex: 1 }} disabled={aiBusy || Boolean(backgroundRetryId)} onClick={() => void retryBackground(item)}>
                 <WandSparkles size={12}/> {backgroundRetryId === item.id ? 'Generating...' : item.backgroundImageUrl ? 'Regenerate AI' : 'Generate AI Background'}
               </button>}
