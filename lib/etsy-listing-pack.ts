@@ -94,7 +94,18 @@ export function placeOriginals(slide: PackSlide, characters: PackCharacter[], re
     const rect = rotatedBounds(zone, rotation);
     return rect.x >= 2 && rect.y >= 2 && rect.x + rect.width <= 98 && rect.y + rect.height <= 98
       && !overlap(rect, slide.textZone, hero ? 4 : 3)
-      && placed.every(other => !overlap(rect, rotatedBounds(other, other.rotation), margin));
+      // Editorial artwork layers may overlap each other for natural depth.
+      // Catalogue/grid slides stay tidy. The title safe area is always protected.
+      && (isGrid || !placed.length
+        ? placed.every(other => !overlap(rect, rotatedBounds(other, other.rotation), margin))
+        : placed.every(other => {
+            const next = rotatedBounds(other, other.rotation);
+            const intersectionW = Math.max(0, Math.min(rect.x + rect.width, next.x + next.width) - Math.max(rect.x, next.x));
+            const intersectionH = Math.max(0, Math.min(rect.y + rect.height, next.y + next.height) - Math.max(rect.y, next.y));
+            const overlapArea = intersectionW * intersectionH;
+            const smallerArea = Math.min(rect.width * rect.height, next.width * next.height);
+            return smallerArea > 0 && overlapArea / smallerArea <= .30;
+          }));
   };
   // Artwork-first editorials: a large focal original, medium supporting originals,
   // and small accents. Grids intentionally preserve their catalogue rhythm.
