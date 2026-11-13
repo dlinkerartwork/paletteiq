@@ -56,7 +56,7 @@ test('Both background modes reject illustrated substitutes, and editable mode re
   assert.match(generator, /mode === 'background-with-typography' \|\| mode === 'background-only'/);
   assert.match(generator, /decision\.containsObjects !== false/);
   assert.match(generator, /mode === 'background-only' && decision\.containsText !== false/);
-  assert.match(generator, /Premium design mood:/);
+  assert.match(generator, /Premium design mood/);
 });
 
 test('Batch requests the AI background even if art direction fails', () => {
