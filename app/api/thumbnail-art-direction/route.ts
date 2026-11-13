@@ -40,7 +40,7 @@ export async function POST(request: Request) {
   const selected = body.characters.filter(c => originals.has(c.id)).slice(0, 36)
     .map(c => ({ id: c.id, name: originals.get(c.id) }));
   if (!selected.length) return fail('No original collection clipart files found', 422);
-  const titleArea = body.textZone || { x: 20, y: 29, width: 60, height: 40 };
+  let titleArea = body.textZone || { x: 20, y: 29, width: 60, height: 40 };
   if (![titleArea.x,titleArea.y,titleArea.width,titleArea.height].every(v => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 100) ||
     titleArea.width < 12 || titleArea.height < 12 || titleArea.x + titleArea.width > 100 || titleArea.y + titleArea.height > 100) return fail('Invalid typography zone');
   // Background-first Vision: read only a previously saved image belonging to this
@@ -74,7 +74,7 @@ export async function POST(request: Request) {
     backgroundDataUrl ? 'BACKGROUND-FIRST VISION: inspect the attached GENERATED BACKGROUND, locate actual title lettering and decorative shapes, and arrange original assets in visually quiet regions. Do not rely solely on the prior textZone: expand title protection if rendered lettering extends beyond it. The outer margins can have large hero artwork. Your positions must match the ACTUAL existing image.' : 'No background yet. Design an elegant initial layout.',
     'Design a visually compelling premium Etsy product cover, not a generic vintage certificate. Choose asymmetry, bold visual rhythm, layered depth, expressive yet legible type space and a dominant illustration focal point. Adapt composition specifically to the slide intent; avoid excessive borders, tiny equal-sized clipart and bland symmetry.',
     'You must place ONLY provided ORIGINAL CLIPART ASSET IDs. The thumbnail compositor will use exact original PNG files. Never create, rename or invent characters.',
-    'Return JSON: {"artDirection":"short coherent descriptive direction","slots":[{"characterId":"EXACT_ID","x":0,"y":0,"width":15,"height":18,"rotation":0}]}',
+    'Return JSON: {"artDirection":"short coherent descriptive direction","detectedTitleZone":{"x":20,"y":29,"width":60,"height":40},"slots":[{"characterId":"EXACT_ID","x":0,"y":0,"width":15,"height":18,"rotation":0}]}',
     'All coordinates are 0–100 percentages of the full square canvas, top-left origin. Width and height describe the clipart bounding box.',
     'Keep every character fully within 2% to 98% of canvas, considering rotation. NEVER overlap the title/lettering-safe zone (5% clearance). For cover/hero/editorial slides, overlap BETWEEN original clipart assets is intentionally allowed, up to about 30% of the smaller rotated bounding box for attractive layered depth. Catalogue grid slides remain non-overlapping. Rotation -10 through +10 degrees.',
     'NON-GRID HERO / BOUTIQUE / CLOSEUP: pick one large focal original object around 22–32% canvas width, two secondary originals around 15–22%, smaller accents around 8–14%. Make largest at least 1.7x the smallest in width. Do not shrink every asset to the margins; balance large pieces around the title-safe zone. Catalogue grid slides may use consistent small sizes.',
@@ -98,7 +98,19 @@ export async function POST(request: Request) {
     if (!response.ok) return fail('AI art direction unavailable (HTTP ' + response.status + ')', 502);
     const answer = await response.json() as { output?: Array<{ content?: Array<{text?:string}> }> };
     const raw = answer.output?.flatMap(x => x.content || []).map(x => x.text || '').join('') || '{}';
-    const parsed = JSON.parse(raw) as { artDirection?: string; slots?: Slot[] };
+    const parsed = JSON.parse(raw) as { artDirection?: string; slots?: Slot[]; detectedTitleZone?: Box };
+    // Union the AI-visible lettering zone with the user-specified title region.
+    // Do not trust arbitrary rectangles: restrict to meaningful on-canvas zones.
+    if (backgroundDataUrl && parsed.detectedTitleZone) {
+      const z = parsed.detectedTitleZone;
+      if ([z.x,z.y,z.width,z.height].every(v => typeof v === 'number' && Number.isFinite(v)) &&
+        z.x >= 0 && z.y >= 0 && z.width >= 10 && z.height >= 8 && z.x+z.width <= 100 && z.y+z.height <= 100) {
+        const left = Math.min(titleArea.x,z.x), top = Math.min(titleArea.y,z.y);
+        const right = Math.max(titleArea.x+titleArea.width,z.x+z.width);
+        const bottom = Math.max(titleArea.y+titleArea.height,z.y+z.height);
+        titleArea = { x:left,y:top,width:right-left,height:bottom-top };
+      }
+    }
     const allowed = new Set(selected.map(c => c.id));
     const placed: Slot[] = [];
     const used = new Set<string>();
