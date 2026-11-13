@@ -4,7 +4,7 @@
  * to synthesize product illustrations. The exact collection PNGs are composed later.
  */
 export type ThumbnailBriefSettings = {
-  scope: string; slide: string; headline: string; subtitle: string;
+  layoutMode: string; scope: string; slide: string; headline: string; subtitle: string;
   typography: 'editable' | 'ai-artwork'; boldness: string; hierarchy: string;
   coverStyle: string; quality: string; backgroundStyle: string; intensity: string;
   referenceInterpretation: string; hasReference: boolean;
@@ -21,7 +21,7 @@ export function buildThumbnailDesignBrief(settings: ThumbnailBriefSettings): str
     'Generate only decorative nonfigurative background design and ' +
       (s.typography === 'ai-artwork' ? 'exact premium lettering.' : 'NO text; editable typography will be composited separately.'),
     'Output: 1:1 square; exact original collection PNG assets are placed by PaletteIQ after AI Vision analysis.',
-    'Selected generation scope: ' + compact(s.scope) + '; thumbnail concept: ' + compact(s.slide) + '.',
+    'Layout mode: ' + compact(s.layoutMode) + '; selected generation scope: ' + compact(s.scope) + '; thumbnail concept: ' + compact(s.slide) + '.',
     'Exact main title: ' + JSON.stringify(compact(s.headline, 100)) + '; exact subtitle: ' + JSON.stringify(compact(s.subtitle, 140)) + '.',
     'Typography mode: ' + s.typography + '; design boldness: ' + compact(s.boldness) + '.',
     'Clipart size hierarchy (layout instructions only): ' + compact(s.hierarchy) + '.',
