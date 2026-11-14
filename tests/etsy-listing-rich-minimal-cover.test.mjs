@@ -69,10 +69,8 @@ test('small art-first typography and quiet theme-matched background are default 
   assert.match(api,/The actual collection images are NOT provided to you/);
   assert.match(api,/Do NOT generate clipart/);
   assert.match(api,/input\.backgroundStyle \?\? 'minimal'/);
-  assert.match(ui,/useState<'plain' \| 'minimal' \| 'soft-texture'>\('minimal'\)/);
-  assert.match(ui,/aria-label="Listing background style"/);
-  assert.match(ui,/<option value="plain">Plain/);
-  assert.match(ui,/<option value="minimal">Minimal/);
-  assert.match(ui,/placements: effectivePositions, textScale, backgroundStyle/);
+  assert.doesNotMatch(ui,/useState<'plain' \| 'minimal' \| 'soft-texture'>/);
+  assert.doesNotMatch(ui,/Listing background style|ARTISTIC LETTERING SIZE|BACKGROUND STYLE \(THEME-MATCHED\)/);
+  assert.match(ui,/placements: effectivePositions, compositionMode/);
   assert.match(ui,/data-listing-advanced-settings="always-visible"/);
 });
