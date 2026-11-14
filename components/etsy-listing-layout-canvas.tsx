@@ -28,7 +28,7 @@ export default function EtsyListingLayoutCanvas({
   const assetMap = new Map(assets.map(a => [a.id,a]));
   const begin = (event:React.PointerEvent<HTMLDivElement>, index:number, mode:'move'|'resize') => {
     if(disabled || event.button!==0) return;
-    const rect = event.currentTarget.parentElement?.getBoundingClientRect();
+    const rect = (mode==='resize' ? event.currentTarget.parentElement?.parentElement : event.currentTarget.parentElement)?.getBoundingClientRect();
     const item = placements[index];
     if(!rect || !item || !rect.width || !rect.height) return;
     event.preventDefault();
