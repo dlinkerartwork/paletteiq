@@ -235,7 +235,7 @@ type Input = {
   image?: ListingImageRecord; model?: string; quality?: string;
   backgroundUrl?: string; placements?: ListingPlacement[]; revisionNotes?: string;
   featuredCount?: number; critiqueFeedback?: string; textScale?: 'compact' | 'balanced' | 'statement'; backgroundStyle?: 'plain' | 'minimal' | 'soft-texture';
-  compositionMode?: ListingCompositionMode; artworkContactSheet?: string;
+  compositionMode?: ListingCompositionMode; artworkContactSheets?: string[];
   title?: string; subtitle?: string; badge?: string;
 };
 /**
@@ -407,11 +407,11 @@ export async function POST(request: Request) {
     const free = mode === 'free' && !isMockup;
     // The source-contact sheet is a small preview of actual original assets,
     // not an image-generation input. The model may SEE, but NEVER DRAW, clipart.
-    const contactSheet = input.artworkContactSheet;
-    if (contactSheet !== undefined && (typeof contactSheet !== 'string' ||
-      contactSheet.length > 2_000_000 ||
-      !/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(contactSheet)))
-      return bad('Invalid original artwork contact sheet', 413);
+    const contactSheets = input.artworkContactSheets || [];
+    if (!Array.isArray(contactSheets) || contactSheets.length > 5 ||
+      contactSheets.some(sheet => typeof sheet !== 'string' ||
+        sheet.length > 1_800_000 || !/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(sheet)))
+      return bad('Invalid original artwork contact sheets', 413);
     const descriptor = fallback.map((p,index) => ({
       index:index+1, assetId:p.assetId, name:valid.get(p.assetId),
       x:p.x,y:p.y,width:p.width,height:p.height,rotation:p.rotation||0
@@ -431,8 +431,8 @@ export async function POST(request: Request) {
         ? 'CANVAS BLEED IS ALLOWED for this Main Cover: x/y may be NEGATIVE (as low as -100) and x/y + width/height may exceed 100. Objects partially outside the final canvas crop naturally. All chosen assets must be at least partially visible. Size can be up to 200% of square for an intentional close-up, though most objects should remain much smaller.'
         : 'Keep all layers within 0–100% canvas bounds; for product mockups, use only the actual flat printable product surface.',
       isMockup ? 'This is a realistic BLANK PRODUCT MOCKUP. Never place clipart outside the printable surface, on hands, background or product edges.' : '',
-      contactSheet && free
-        ? 'The SECOND image is a numbered contact sheet of ACTUAL source artwork thumbnails, in the same order as the numbered asset descriptors, up to its available sample count. Use the shape, orientation and visual weight of those real objects to plan the collage, not guessed artwork from names. The contact sheet is reference only; never redraw its subjects.'
+      contactSheets.length && free
+        ? 'Following the BACKGROUND are up to five numbered contact sheets with small previews of ACTUAL original artwork, ordered by GLOBAL index 1..N matching the asset descriptors. Use real silhouettes, orientations and colors to choose a varied poster hierarchy. These images are reference samples ONLY: NEVER redraw any pictured object.'
         : 'If original artwork previews are unavailable, infer cautiously from names; do not invent visual attributes.',
       'RETURN JSON ONLY: {"placements":[{"assetId":"exact-source-id","x":-4,"y":22,"width":33,"height":38,"rotation":-7}],"unsafe":false,"notes":"..."}',
       'Return each listed assetId EXACTLY ONCE, and NO fabricated or duplicate asset IDs. No missing selected originals. All placement values must be finite numeric coordinates and sizes.',
@@ -450,7 +450,7 @@ export async function POST(request: Request) {
           input:[{role:'user',content:[
             {type:'input_text',text:directions.filter(Boolean).join('\n')},
             {type:'input_image',image_url:'data:image/png;base64,'+btoa(binary)},
-            ...(contactSheet && free ? [{type:'input_image',image_url:contactSheet}] : [])
+            ...(free ? contactSheets.map(image_url => ({type:'input_image',image_url})) : [])
           ]}],
           text:{format:{type:'json_object'}}
         }),
