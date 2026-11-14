@@ -20,8 +20,8 @@ test('Reference & Assets selections flow to AI background generation', () => {
   assert.match(route, /artPrompt\(input.number, project, count, input.settings, input.referenceDesign\)/);
   assert.doesNotMatch(route, /settings\?\.backgroundStyle/);
   assert.doesNotMatch(route, /settings\?\.coverStyle/);
-  assert.match(route, /GALLERY TEXT SAFETY/);
-  assert.match(route, /REFERENCE-LED CENTRAL HERO COMPOSITION/);
+  assert.match(route, /REFERENCE-DRIVEN TYPOGRAPHY/);
+  assert.match(route, /Text may appear at the top, center, bottom, sides/);
 });
 test('Thumbnails remain separate, and drafts preserve original collection PNGs', () => {
   assert.match(page, /tab === 'thumbnails' && <ThumbnailDesigner/);
