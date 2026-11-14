@@ -77,6 +77,10 @@ export async function POST(req: Request) {
     if (current.length) {
       // An older browser snapshot must not erase assets already persisted by the image worker.
       const old = JSON.parse(current[0].data) as { thumbnails?: Array<{ id: string; upscaledImageUrl?: string; upscaleJob?: { id: string } }>; characters?: Array<{ id: string; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: { id: string }; status?: string; similarityReview?: SimilarityReview }>; lastDownloadedAt?: number; downloadCount?: number; lastDownloadImageCount?: number; downloadedImageIds?: string[] };
+      // Style analysis is server-owned and derived from original collection pixels.
+      // A stale browser snapshot must never erase its cached (paid) Vision result.
+      const storedStyle = (old as { listingVisualStyle?: unknown }).listingVisualStyle;
+      if (storedStyle) (incoming as typeof incoming & { listingVisualStyle?: unknown }).listingVisualStyle = storedStyle;
       // Listing Image Studio persists individual approved images independently. A stale
       // browser save must never overwrite those saved results or the review decisions.
       if (Array.isArray((old as { listingImages?: unknown[] }).listingImages)) incoming.listingImages = (old as { listingImages: unknown[] }).listingImages;
