@@ -81,6 +81,10 @@ export async function POST(req: Request) {
       // A stale browser snapshot must never erase its cached (paid) Vision result.
       const storedStyle = (old as { listingVisualStyle?: unknown }).listingVisualStyle;
       if (storedStyle) (incoming as typeof incoming & { listingVisualStyle?: unknown }).listingVisualStyle = storedStyle;
+      // The white-canvas pre-layouts are server-owned per-image drafts.
+      // Preserve them when other tabs save an older collection snapshot.
+      const savedLayouts = (old as { listingPreLayouts?: Record<string, unknown> }).listingPreLayouts;
+      if (savedLayouts) (incoming as typeof incoming & { listingPreLayouts?: Record<string, unknown> }).listingPreLayouts = savedLayouts;
       // Listing Image Studio persists individual approved images independently. A stale
       // browser save must never overwrite those saved results or the review decisions.
       if (Array.isArray((old as { listingImages?: unknown[] }).listingImages)) incoming.listingImages = (old as { listingImages: unknown[] }).listingImages;
