@@ -8,6 +8,7 @@ import type { ImageGenerationCostEstimate } from '@/lib/etsy-listing-image-cost'
 import { listingCreativeDirection, listingMockupScene } from '@/lib/etsy-listing-creative-direction';
 import EtsyListingLayoutCanvas from '@/components/etsy-listing-layout-canvas';
 import { evaluateListingCoverTitle, suggestListingCoverCopy } from '@/lib/etsy-listing-cover-copy';
+import { aiFirstSampleIndices } from '@/lib/etsy-listing-ai-first';
 import {
   LISTING_IMAGE_SPECS, LISTING_WIDTH, LISTING_HEIGHT, originalAssets,
   planListingPlacements, curatedListingHighlights, DEFAULT_MAIN_COVER_CLIPART_COUNT, defaultListingCompositionMode, listingAllowsBleed, listingFilename, listingImageTextDefaults, isSquareListingApproved, type ListingCompositionMode, type ListingImageText, type ListingFinalReview, type ListingAsset, type ListingImageRecord, type ListingPlacement
@@ -28,7 +29,7 @@ type Props = {
   characters: ListingAsset[];
   onSaved?: (images: ListingImageRecord[]) => void;
 };
-type ListResponse = { backgroundPrompt?: string; layoutPrompt?: string; images?: ListingImageRecord[]; preLayouts?: Record<string, ListingPlacement[]>; compositionModes?: Record<string, ListingCompositionMode>; saved?: boolean; backgroundUrl?: string; placements?: ListingPlacement[]; finalReview?: ListingFinalReview | null; fallback?: string; reviewWarning?: string; costEstimate?: ImageGenerationCostEstimate | null; warning?: string; deleted?: boolean; error?: string };
+type ListResponse = { conceptUrl?: string; sampledSourceCount?: number; selectedSourceCount?: number; backgroundPrompt?: string; layoutPrompt?: string; images?: ListingImageRecord[]; preLayouts?: Record<string, ListingPlacement[]>; compositionModes?: Record<string, ListingCompositionMode>; saved?: boolean; backgroundUrl?: string; placements?: ListingPlacement[]; finalReview?: ListingFinalReview | null; fallback?: string; reviewWarning?: string; costEstimate?: ImageGenerationCostEstimate | null; warning?: string; deleted?: boolean; error?: string };
 const apiUrl = '/api/listing-image-studio';
 const styleApiUrl = '/api/listing-style-analysis';
 type StyleResponse = { profile?: ListingVisualStyleProfile | null; cached?: boolean; error?: string };
@@ -278,7 +279,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   const promptContext = JSON.stringify({
     projectId, step, textScale, backgroundStyle, compositionMode,
     lettering: currentLettering, revisionNotes: notes[step] ?? current?.notes ?? '',
-    placements: compositionMode === 'free' ? positions.map(p => p.assetId) : positions
+    placements: compositionMode === 'free' || compositionMode === 'ai-first' ? positions.map(p => p.assetId) : positions
   });
   const promptDraft = promptDrafts[step];
   const promptsReady = Boolean(promptDraft && promptDraft.context === promptContext &&
@@ -460,9 +461,9 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
    */
   const arrangeWithAI = async (
     backgroundUrl: string, initial: ListingPlacement[], critiqueFeedback = '',
-    visionArtPrompt = promptDraft?.layoutPrompt
+    visionArtPrompt = promptDraft?.layoutPrompt, conceptUrl?: string
   ): Promise<{ placements: ListingPlacement[]; warning: string }> => {
-    if (compositionMode !== 'free') {
+    if (compositionMode === 'structured') {
       const vision = await send({ action:'layout', projectId, number:step,
         backgroundUrl, placements:initial, compositionMode, critiqueFeedback, layoutPrompt:visionArtPrompt });
       return { placements:vision.placements?.length === initial.length ? vision.placements : initial,
@@ -483,8 +484,8 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       }
       try {
         const vision = await send({ action:'layout', projectId, number:step,
-          backgroundUrl, placements:batch, compositionMode:'free',
-          artworkContactSheets, existingPlacements:arranged, totalSelected:initial.length,
+          backgroundUrl, placements:batch, compositionMode,
+          conceptUrl, artworkContactSheets, existingPlacements:arranged, totalSelected:initial.length,
           critiqueFeedback, layoutPrompt:visionArtPrompt });
         if (vision.fallback || !vision.placements || vision.placements.length !== batch.length) {
           arranged.push(...batch);
@@ -536,6 +537,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     if (evaluation.status === 'too-long' && !window.confirm(
       'Your cover title has ' + evaluation.words + ' words (' + evaluation.characters +
       ' characters). It may be difficult to read at Etsy thumbnail size. Generate anyway?')) return;
+    if (compositionMode === 'ai-first') return generateAiFirstConcept();
     const lettering = { ...currentLettering };
     setCostNotice(null);
     setWorking('generate');
@@ -731,6 +733,8 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     if (current?.status === 'approved' && !window.confirm('Rearrange this approved image? Save the updated JPG to reset approval.')) return;
     const localPlan = planListingPlacements(step, categorizedAssets, { assetIds: selectedAssetIds });
     if (!current?.backgroundUrl) {
+      if (compositionMode === 'ai-first' && current?.conceptUrl)
+        return setMessage('Build the clean-plate final JPG from this AI-first concept before requesting a placement revision.');
       setChanges(old => ({ ...old, [step]: localPlan }));
       setMessage('Starter layout arranged locally. Generate background to let AI Vision independently plan a Free Composition, or adjust it manually.');
       return;
@@ -739,7 +743,8 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     setMessage('AI Vision is arranging the selected original PNGs around the actual lettering...');
     try {
       const answer = await arrangeWithAI(current.backgroundUrl, positions,
-        current.finalReview?.improvements.join('; ') || '', promptDraft!.layoutPrompt);
+        current.finalReview?.improvements.join('; ') || '', promptDraft!.layoutPrompt,
+        compositionMode === 'ai-first' ? current.conceptUrl : undefined);
       setChanges(old => ({ ...old, [step]: answer.placements }));
       setMessage(answer.warning
         ? answer.warning + ' Review the updated preview; retry Auto Arrange for any fallback objects.'
@@ -945,11 +950,14 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
               disabled={!!working}
               onChange={e => setCompositionModes(old => ({...old,[String(step)]:e.target.value as ListingCompositionMode}))}>
               <option value="free">Free Composition — OpenAI chooses sizes and positions (Main Cover default)</option>
+              {!(step >= 8 && step <= 12) && <option value="ai-first">AI-First Composition — generate a full concept from original collection references</option>}
               <option value="structured">Structured — preserve my white-canvas arrangement</option>
             </select>
-            <small>{compositionMode === 'free'
-              ? 'AI Vision acts as the art director after the background is generated: it can resize, move, rotate, overlap or partially crop any selected ORIGINAL clipart. White-canvas positions are inspiration only, NOT a constraint. Clipart selection and identity remain unchanged.'
-              : 'PaletteIQ preserves the composition you created on the white canvas. You can still choose optional AI Vision refinement or Auto Arrange.'}</small>
+            <small>{compositionMode === 'ai-first'
+              ? 'AI-First: PaletteIQ sends numbered contact sheets made from COLLECTION originals, never your white-canvas positions or a ZIP. OpenAI creates a complete visual concept. You review it, then remove temporary AI clipart and assemble a new final JPG from original source PNGs.'
+              : compositionMode === 'free'
+                ? 'AI Vision acts as the art director after the background is generated: it can resize, move, rotate, overlap or partially crop any selected ORIGINAL clipart. White-canvas positions are inspiration only, NOT a constraint. Clipart selection and identity remain unchanged.'
+                : 'PaletteIQ preserves the composition you created on the white canvas. You can still choose optional AI Vision refinement or Auto Arrange.'}</small>
             <small>Choose how many ORIGINAL collection assets appear in this listing image. Main Cover defaults to {DEFAULT_MAIN_COVER_CLIPART_COUNT} with two large focal illustrations, several medium ones and smaller accents. You can choose any count up to the collection size.</small>
             <label className="input-label" htmlFor="listing-clipart-count">NUMBER OF CLIPARTS (1–{assets.length})</label>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1049,7 +1057,9 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
               {promptsReady ? 'Reset / refresh both OpenAI prompts' : 'Prepare OpenAI prompts (no generation cost)'}
             </button>
             {!promptsReady && <small role="status" style={{ color:'#96501f' }}>Prompts have not been prepared for the current collection selection and settings. Refresh them before generating; any previous draft for this image remains saved in this session.</small>}
-            <label className="input-label" htmlFor="listing-background-prompt">OPENAI IMAGE GENERATION — BACKGROUND &amp; TYPOGRAPHY PROMPT</label>
+            <label className="input-label" htmlFor="listing-background-prompt">{compositionMode === 'ai-first'
+              ? 'OPENAI IMAGE EDIT — FULL CREATIVE CONCEPT PROMPT'
+              : 'OPENAI IMAGE GENERATION — BACKGROUND & TYPOGRAPHY PROMPT'}</label>
             <textarea id="listing-background-prompt" aria-label="Editable OpenAI background and typography prompt"
               rows={10} maxLength={24000} spellCheck={false}
               value={promptsReady ? promptDraft!.backgroundPrompt : ''}
@@ -1057,7 +1067,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
               disabled={!!working || !promptsReady}
               placeholder="Click Prepare OpenAI prompts to see the exact text that will be sent to the image-generation API."
               style={{ width:'100%', boxSizing:'border-box', resize:'vertical', fontFamily:'inherit', fontSize:12, lineHeight:1.55 }}/>
-            <small style={{ color:'#75695e' }}>This entire text is sent unchanged as the image-generation prompt. You may rewrite or remove any artistic recommendations, including font and layout preferences. Exact title/subtitle words and source-art authenticity remain your responsibility to review.</small>
+            <small style={{ color:'#75695e' }}>This text is sent unchanged as the {compositionMode === 'ai-first' ? 'full concept image-edit prompt with collection reference boards' : 'background image-generation prompt'}. You can freely change typography, layout and artistic direction. Check every generated word and illustration.</small>
             <label className="input-label" htmlFor="listing-vision-prompt">OPENAI VISION — ORIGINAL CLIPART COMPOSITION PROMPT</label>
             <textarea id="listing-vision-prompt" aria-label="Editable OpenAI Vision composition prompt"
               rows={8} maxLength={12000} spellCheck={false}
@@ -1066,11 +1076,13 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
               disabled={!!working || !promptsReady}
               placeholder="Click Prepare OpenAI prompts to see and edit Vision's artistic composition instructions."
               style={{ width:'100%', boxSizing:'border-box', resize:'vertical', fontFamily:'inherit', fontSize:12, lineHeight:1.55 }}/>
-            <small style={{ color:'#75695e' }}>This is the exact editable Vision art-direction text. PaletteIQ appends the mandatory output JSON schema, selected original asset IDs, existing batch positions, background image and reference contact sheets so no asset identity is lost. Each Vision batch uses your edited instructions.</small>
+            <small style={{ color:'#75695e' }}>Vision receives your edited art direction plus exact asset IDs and reference contact sheets. AI-First also sends the full concept and cleaned typography plate for comparison; PaletteIQ assembles the final JPG from actual originals only.</small>
           </section>
           <button type="button" className="primary-btn" onClick={() => void generate()} disabled={!loaded || !assets.length || !!working || !precedingApproved || !promptsReady}>
             {working === 'generate' ? <LoaderCircle className="spin" size={16}/> : <Sparkles size={16}/>}
-            {current?.backgroundUrl ? 'Revise Image ' + String(step).padStart(2,'0') + ' (AI background)' : step === 1 ? 'Start /new-listing — Generate Main Cover' : 'Generate Image ' + String(step).padStart(2,'0')}
+            {compositionMode === 'ai-first'
+              ? 'Generate AI-First Full Concept (paid OpenAI image edit)'
+              : current?.backgroundUrl ? 'Revise Image ' + String(step).padStart(2,'0') + ' (AI background)' : step === 1 ? 'Start /new-listing — Generate Main Cover' : 'Generate Image ' + String(step).padStart(2,'0')}
           </button>
           {!precedingApproved && <small style={{ color: '#94502e' }}>Approve the earlier images in order before generating this image.</small>}
           {(step === 3 || step === 5) && <button className="outline-btn" type="button" onClick={() => void categorize()} disabled={!!working}>Analyze collection categories (optional)</button>}
