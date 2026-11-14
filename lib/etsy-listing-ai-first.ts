@@ -78,30 +78,15 @@ export function aiFirstConceptPrompt(input: CreativeInput): string {
     'Do not invent unrelated clipart or replace supplied characters with newly imagined variations.',
     'You may select any number of actual source assets, resize, rotate, position and repeat EXISTING source PNGs where artistically appropriate. No fixed grid or mandatory size uniformity.',
     'Treat originals as flexible independent illustrations, not an existing design to preserve.',
-    'Original PNG pixels must remain exact in the final composite. DO NOT redraw, imitate or regenerate source artwork.',
+    'The selected clipart are VISUAL REFERENCES for the image model to integrate creatively into ONE finished thumbnail. Stay as faithful as possible to the original artwork, recognizable subjects, colors, expressions and details. A generative image model may reinterpret or redraw them; pixel-exact copying is not guaranteed.',
     'The numbered contact sheets are visual previews of the same originals that PaletteIQ packages as a user-downloadable ZIP. ZIP is NOT itself a visual model input. Never assume position/size from contact-sheet cells.',
     input.revisionNotes?.trim() ? '**ADDITIONAL USER REQUEST**: '+input.revisionNotes.trim().slice(0,800) : '',
     '',
-    '**TECHNICAL AI ART DIRECTION OUTPUT**',
-    'Do NOT render a new image in this Vision step. Instead return JSON with "chosenIndices" (1-based numbers of REAL referenced originals) and "creativeBrief" (a cohesive premium visual art direction).',
-    'Choose any count of real referenced objects, never fabricate asset indices. A separate image model will generate only the background and lettering; PaletteIQ will composite the exact original PNGs.',
+    '**FINAL IMAGE GENERATION**',
+    'Generate the complete finished 1024 × 1024 Etsy cover directly as ONE cohesive image: illustrated collage, artistic typography, background and badge together. This is NOT a layout JSON request, an empty typography plate or a contact sheet.',
+    'The attached visual reference boards are an unordered collection of artwork; numbers and cell boundaries are for identification only. Ignore the source board geometry. Select and arrange elements freely, with dramatically varied scale and attractive spacing.',
+    'Use only objects depicted in the reference boards as the visual subject vocabulary; do not add unrelated characters or falsely claim more available items than the collection contains.',
+    'Maintain exact wording for title, subtitle and badge. Make all lettering readable at Etsy search thumbnail size.',
   ].filter(Boolean).join('\n');
 }
 
-/** This is the ONLY prompt allowed to reach the image generation endpoint. */
-export function aiFirstBackgroundPrompt(input: {
-  userDirection: string; creativeBrief: string; title: string; subtitle: string; badge: string;
-}): string {
-  return [
-    'Create a 1024×1024 square premium Etsy thumbnail BACKGROUND AND ARTISTIC TYPOGRAPHY ONLY.',
-    'ABSOLUTE PRODUCT ARTWORK RULE: DO NOT draw, recreate, trace, hallucinate, regenerate, imitate or include ANY standalone illustrated clipart, character, animal, flower, plant, ornament, object, icon, silhouette, sticker, or placeholder art. All such PNG illustrations will be placed separately by PaletteIQ from their ORIGINAL collection image files.',
-    'You are free to creatively design the typography and nonfigurative graphic background, with no required font, font size, text position, background style or color recipe.',
-    'Use the following creative-director brief (informed by the authentic source clipart): ' + input.creativeBrief,
-    'Treat the original user prompt as ART DIRECTION, not permission to generate the described illustrative objects. Render the actual clipart subjects ZERO times. USER ART DIRECTION: ' + JSON.stringify(input.userDirection.slice(0,10000)),
-    'Include EXACT MAIN TITLE: ' + JSON.stringify(input.title),
-    'Include EXACT SUBTITLE: ' + JSON.stringify(input.subtitle),
-    'Include EXACT BADGE (empty means omit): ' + JSON.stringify(input.badge),
-    'Render no extra words. Arrange the writing intentionally and leave room around it for a freely composed collage of original PNG images. No artwork may overlap the complete word shapes.',
-    'Only lettering, nonfigurative shapes, abstract color and texture are allowed. Return a SINGLE square illustration-free background image.'
-  ].join('\n');
-}
