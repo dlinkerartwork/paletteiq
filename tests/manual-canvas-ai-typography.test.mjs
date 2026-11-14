@@ -69,7 +69,8 @@ test('QC review still adjusts exact originals and restores badge text after appr
 test('Badge text is overlaid exactly, never guessed by an image model', () => {
   assert.match(editor, /const badgeOverlay = \(zone: ThumbnailBox, copy: string\)/);
   assert.match(editor, /\.\.\.newText\(copy\.trim\(\)\)/);
-  assert.match(editor, /badge: '',/);
+  assert.match(editor, /badge: hasLettering \? badge : ''/);
+  assert.match(api, /EXACT BADGE CONTENT PROVIDED BY USER/);
   assert.match(api, /NO BADGE TEXT:/);
 });
 
