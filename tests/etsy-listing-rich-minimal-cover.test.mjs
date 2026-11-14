@@ -64,8 +64,8 @@ test('small art-first typography and quiet theme-matched background are default 
   assert.match(api,/BACKGROUND STYLE — PLAIN/);
   assert.match(api,/BACKGROUND STYLE — SOFT TEXTURE/);
   assert.match(api,/no strong frames, layered geometries, golden swirls or large decoration/);
-  assert.match(api,/Do not enlarge the heading merely to fill empty space/);
-  assert.match(api,/two large focal originals, 4 medium supporting originals/);
+  assert.match(api,/Never enlarge the heading merely to fill empty space/);
+  assert.match(api,/2 large focal originals, 4 medium supporting originals/);
   assert.match(api,/The actual collection images are NOT provided to you/);
   assert.match(api,/Do NOT generate clipart/);
   assert.match(api,/input\.backgroundStyle \?\? 'minimal'/);
