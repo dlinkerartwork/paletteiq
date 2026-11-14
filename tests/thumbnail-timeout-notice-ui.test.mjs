@@ -5,6 +5,12 @@ import { readFileSync } from 'node:fs';
 const notice = readFileSync(new URL('../components/auto-dismiss-notice.tsx', import.meta.url), 'utf8');
 const page = readFileSync(new URL('../app/page.tsx', import.meta.url), 'utf8');
 const designer = readFileSync(new URL('../components/thumbnail-designer.tsx', import.meta.url), 'utf8');
+const screens = [
+  '../components/image-production.tsx',
+  '../components/multi-collection-production.tsx',
+  '../components/etsy-listing-image-studio.tsx',
+  '../components/studio-settings.tsx'
+].map(path => readFileSync(new URL(path, import.meta.url), 'utf8'));
 const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
 
 test('main and thumbnail notifications float at top and dismiss automatically in ten seconds', () => {
@@ -16,6 +22,10 @@ test('main and thumbnail notifications float at top and dismiss automatically in
   assert.match(notice, /role="status"/);
   assert.match(page, /<AutoDismissNotice message=\{message\} onClose=\{\(\) => setMessage\(''\)\} \/>/);
   assert.match(designer, /<AutoDismissNotice message=\{message\} onClose=\{\(\) => setMessage\(''\)\} \/>/);
+  for (const screen of screens) {
+    assert.match(screen, /<AutoDismissNotice message=/);
+    assert.doesNotMatch(screen, /className="notice/);
+  }
   assert.match(css, /\.floating-top-notice \{ position:fixed; top:88px/);
   assert.match(css, /z-index:2000/);
 });
