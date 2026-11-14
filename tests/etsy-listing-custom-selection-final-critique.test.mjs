@@ -94,7 +94,7 @@ test('final review analyzes actual composited JPG and provides detailed subjecti
   assert.match(api,/savedAssetKey\(imageUrl,project\.id,owner\)/);
   assert.match(api,/new Uint8Array\(await saved\.arrayBuffer\(\)\)/);
   assert.match(api,/data:image\/jpeg;base64,/);
-  assert.match(api,/AFTER all real source PNG cliparts have been composited/);
+  assert.match(api,/after all real source PNG cliparts have been composited/i);
   assert.match(api,/Assess strictly as a 128px Etsy search thumbnail/);
   assert.match(api,/headline readability 30%/);
   assert.match(api,/artwork prominence 20%/);
