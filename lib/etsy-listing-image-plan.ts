@@ -35,15 +35,20 @@ export function defaultListingCompositionMode(number: number): ListingCompositio
 /** Images may bleed beyond the canvas; final JPG crops the overflow at export.
  * Other listing pages (especially product mockups) keep their safe-area bounds.
  */
+export function listingAllowsBleed(number: number): boolean {
+  // Mockups require accurate artwork on the physical product surface.
+  // Every other listing design can use clipped, editorial collage composition.
+  return number < 8 || number > 12;
+}
 export function validListingPlacement(p: ListingPlacement, number: number): boolean {
   if (!p || typeof p.assetId !== 'string' ||
       ![p.x,p.y,p.width,p.height,p.rotation ?? 0].every(n => typeof n === 'number' && Number.isFinite(n)) ||
       p.width < 1 || p.height < 1 || Math.abs(p.rotation ?? 0) > 180) return false;
-  if (number === 1) return p.x >= -100 && p.y >= -100 &&
+  if (listingAllowsBleed(number)) return p.x >= -100 && p.y >= -100 &&
     p.x < 100 && p.y < 100 && p.width <= 200 && p.height <= 200 &&
     p.x + p.width > 0 && p.y + p.height > 0;
   return p.x >= 0 && p.y >= 0 && p.x <= 100 && p.y <= 100 &&
-    p.width <= 100 && p.height <= 100;
+    p.width <= 100 && p.height <= 100 && p.x + p.width <= 100 && p.y + p.height <= 100;
 }
 
 export type ListingFinalReview = {
