@@ -1180,7 +1180,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           {selected && <>
             <label className="input-label">REPLACE WITH ORIGINAL COLLECTION ASSET</label>
             <select value={selected.assetId} disabled={!!working} onChange={e => move('assetId', e.target.value)}>
-              {assets.map(a => <option key={a.id} value={a.id} disabled={compositionMode !== 'ai-first' && positions.some(p => p.assetId === a.id && p.assetId !== selected.assetId)}>{a.name}</option>)}
+              {assets.map(a => <option key={a.id} value={a.id} disabled={positions.some(p => p.assetId === a.id && p.assetId !== selected.assetId)}>{a.name}</option>)}
             </select>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 8 }}>
               {(['x','y','width','height'] as const).map(field => <label key={field} style={{ fontSize: 12, display: 'grid', gap: 3 }}>{field.toUpperCase()} (%)
