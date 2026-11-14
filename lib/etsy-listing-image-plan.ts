@@ -29,11 +29,46 @@ export type ListingImageRecord = {
 };
 export type ListingImageKind = typeof LISTING_IMAGE_SPECS[number]['kind'];
 
+/** Remove exact duplicates, different signed URLs for the same image, and
+ * obviously equivalent clipart names. Never invent a replacement asset.
+ * Visually similar assets with genuinely different subjects or variants remain.
+ */
 export function originalAssets(assets: ListingAsset[]): ListingAsset[] {
   const urls = new Set<string>();
+  const ids = new Set<string>();
+  const normalizedNames: string[][] = [];
+  const identity = (value: string) => {
+    try {
+      const url = new URL(value, 'https://paletteiq.local');
+      // Query parameters can carry the ONLY asset identity (assetId/imageId).
+      // Never collapse the entire /api/assets collection into a single URL.
+      const stable = ['assetId','imageId','characterId','id','key'].map(key =>
+        url.searchParams.has(key) ? key+'='+url.searchParams.get(key) : '').filter(Boolean);
+      return url.origin + url.pathname +
+        (stable.length ? '?' + stable.join('&') :
+          (url.search ? '?' + [...url.searchParams.entries()]
+            .filter(([key]) => !['token','expires','signature','cache','t'].includes(key))
+            .sort(([a],[b]) => a.localeCompare(b)).map(([k,v])=>k+'='+v).join('&') : ''));
+    } catch { return value.split('?')[0]; }
+  };
+  const words = (value: string) => value.toLowerCase()
+    .replace(/\b(?:copy|duplicate|version|final|png|clipart)\b/g,' ')
+    .replace(/\(\d+\)|\bcopy\s*\d+\b/g,' ')
+    .replace(/[^a-z0-9]+/g,' ').trim().split(/\s+/).filter(Boolean).sort();
   return assets.filter(asset => {
-    if (!asset.id || !asset.imageUrl || urls.has(asset.imageUrl)) return false;
-    urls.add(asset.imageUrl);
+    if (!asset.id || !asset.imageUrl || ids.has(asset.id)) return false;
+    const urlKey = identity(asset.imageUrl);
+    if (urls.has(urlKey)) return false;
+    const tokens = words(asset.name || '');
+    const nameDuplicate = tokens.length >= 2 && normalizedNames.some(other => {
+      const intersection = tokens.filter(token => other.includes(token)).length;
+      const union = new Set([...tokens,...other]).size;
+      return other.length >= 2 && union > 0 &&
+        intersection / union >= (Math.min(tokens.length,other.length) >= 4 ? .90 : 1);
+    });
+    if (nameDuplicate) return false;
+    urls.add(urlKey); ids.add(asset.id);
+    if (tokens.length) normalizedNames.push(tokens);
     return true;
   });
 }

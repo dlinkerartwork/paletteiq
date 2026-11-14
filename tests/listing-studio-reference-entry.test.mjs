@@ -18,8 +18,9 @@ test('Reference & Assets selections flow to AI background generation', () => {
   assert.match(studio, /action: 'generate', projectId, number: step, model: config\.imageModel, quality/);
   assert.match(studio, /settings: config \?/);
   assert.match(route, /artPrompt\(input.number, project, count, input.settings, input.referenceDesign\)/);
-  assert.match(route, /settings\?\.backgroundStyle/);
-  assert.match(route, /settings\?\.coverStyle/);
+  assert.doesNotMatch(route, /settings\?\.backgroundStyle/);
+  assert.doesNotMatch(route, /settings\?\.coverStyle/);
+  assert.match(route, /STRICT TEXT SAFETY/);
 });
 test('Thumbnails remain separate, and drafts preserve original collection PNGs', () => {
   assert.match(page, /tab === 'thumbnails' && <ThumbnailDesigner/);

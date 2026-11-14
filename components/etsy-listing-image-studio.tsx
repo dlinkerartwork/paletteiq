@@ -9,6 +9,7 @@ import {
   LISTING_IMAGE_SPECS, LISTING_WIDTH, LISTING_HEIGHT, originalAssets,
   planListingPlacements, listingFilename, type ListingAsset, type ListingImageRecord, type ListingPlacement
 } from '@/lib/etsy-listing-image-plan';
+import { fitListingPlacementsBelowText, isListingPlacementTextSafe, duplicateListingAssetIds } from '@/lib/listing-text-safe';
 
 type Props = {
   projectId: string;
@@ -159,16 +160,8 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
 
   const categorizedAssets = useMemo(() => assets.map(a => ({ ...a, category: categories[a.id] || a.category })), [assets, categories]);
   const initialPlacements = useCallback((number: number) => {
-    const planned = planListingPlacements(number, categorizedAssets);
-    if (!config || ![1,4,7,15].includes(number)) return planned;
-    return planned.map((p, i) => {
-      const factor = config.hierarchy === 'dramatic' ? (i < 3 ? 1.12 : 0.95) :
-        config.hierarchy === 'soft' ? 0.92 : 1;
-      const width = clamp(p.width * factor, 2, 100), height = clamp(p.height * factor, 2, 100);
-      return { ...p, x: clamp(p.x + (p.width - width) / 2, 0, 100 - width),
-        y: clamp(p.y + (p.height - height) / 2, 23, 100 - height), width, height };
-    });
-  }, [categorizedAssets, config]);
+    return fitListingPlacementsBelowText(planListingPlacements(number, categorizedAssets));
+  }, [categorizedAssets]);
   const current = records.find(item => item.number === step);
   const positions = changes[step] || current?.placements || initialPlacements(step);
   const selected = positions[selectedIndex] || positions[0];
@@ -229,6 +222,9 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
   };
   const renderAndSave = async (background: string, layout: ListingPlacement[], info: string) => {
     setWorking('render'); setMessage('Compositing ' + layout.length + ' exact original clipart images at 1024 × 1024 px...');
+    if (!layout.length || duplicateListingAssetIds(layout).length ||
+        !layout.every(p => isListingPlacementTextSafe(p)))
+      throw Error('One or more original PNGs overlap the protected title/subtitle area, or repeat an asset. Adjust the layout before saving.');
     const file = await compose(background, layout, assets);
     setMessage('Saving JPG preview to the collection in safe upload chunks...');
     const renderedImageUrl = await upload(projectId, step, file, (done, total) => setMessage('Uploading original-asset JPG: ' + done + '/' + total + ' parts...'));
@@ -248,7 +244,9 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
     if (current?.status === 'approved' && !window.confirm('Regenerate an approved image? Its approval will be reset to Draft.')) return;
     setWorking('generate'); setMessage('Generating artistic background + exact typography with OpenAI (no clipart regeneration)...');
     try {
-      let effectivePositions = positions;
+      let effectivePositions = fitListingPlacementsBelowText(positions);
+      if (duplicateListingAssetIds(effectivePositions).length)
+        throw Error('Duplicate clipart is selected. Replace repeated artwork with distinct collection PNGs.');
       if ((step === 3 || step === 5) && !current?.placements && !changes[step] &&
           !Object.keys(categories).length && !assets.some(a => a.category || a.subtheme || a.group)) {
         setMessage('Organizing the collection into honest categories before designing...');
@@ -260,7 +258,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
           for (const group of groupResult.groups || []) for (const id of group.ids) map[id] = group.name;
           if (new Set(Object.values(map)).size >= 2) {
             setCategories(map);
-            effectivePositions = planListingPlacements(step, assets.map(a => ({ ...a, category: map[a.id] || a.category })));
+            effectivePositions = fitListingPlacementsBelowText(planListingPlacements(step, assets.map(a => ({ ...a, category: map[a.id] || a.category }))));
           }
         } catch { /* Continue with a neutral collection gallery rather than invent categories. */ }
       }
@@ -272,7 +270,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               projectId, imageUrl: config.referenceImage, provider: config.analysisProvider,
-              model: config.analysisModel, count: Math.min(assets.length, 12), referenceStyle: config.referenceStyle
+              model: config.analysisModel, count: Math.min(assets.length, 12), referenceStyle: 'similar'
             })
           });
           styleTokens = refResult.layout;
@@ -293,7 +291,10 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
         setMessage('AI Vision is finding typography-safe original artwork slots on the actual generated background...');
         try {
           const vision = await send({ action: 'layout', projectId, number: step, backgroundUrl: response.backgroundUrl, placements: effectivePositions, settings: config ? { ...config, referenceImage: undefined } : undefined });
-          if (vision.placements?.length === effectivePositions.length) suggested = vision.placements;
+          if (vision.placements?.length === effectivePositions.length) {
+            suggested = fitListingPlacementsBelowText(vision.placements);
+            if (!suggested.length) throw Error('Vision positions could not be kept outside the text zone.');
+          }
           layoutWarning = vision.fallback || '';
         } catch { layoutWarning = 'Vision placement unavailable; original image placements retained.'; }
       }
@@ -333,7 +334,8 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
       const list = [...(prev[step] || current?.placements || initialPlacements(step))];
       const target = list[selectedIndex];
       if (!target) return prev;
-      list[selectedIndex] = { ...target, [field]: field === 'assetId' ? value : clamp(Number(value), field === 'rotation' ? -30 : field === 'width' || field === 'height' ? 2 : 0, field === 'rotation' ? 30 : 100) };
+      if (field === 'assetId' && list.some((p,i) => i !== selectedIndex && p.assetId === value)) return prev;
+      list[selectedIndex] = { ...target, [field]: field === 'assetId' ? value : clamp(Number(value), field === 'rotation' ? -15 : field === 'width' || field === 'height' ? 2 : 0, field === 'rotation' ? 15 : 100) };
       return { ...prev, [step]: list };
     });
   };
@@ -370,34 +372,12 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
             {visionModels[config.analysisProvider].map(m => <option key={m.id} value={m.id}>{m.name} ({m.id})</option>)}
           </select>
         </label>
-        <label style={{ display: 'grid', gap: 5 }}><span className="input-label">TYPOGRAPHY</span>
-          <select value="ai-artwork" disabled><option value="ai-artwork">AI artistic lettering</option></select>
-        </label>
-        <label style={{ display: 'grid', gap: 5 }}><span className="input-label">COVER ART STYLE</span>
-          <select value={config.coverStyle} disabled={!!working || settingsBusy} onChange={e => changeConfig('coverStyle', e.target.value as ListingStudioConfig['coverStyle'])}>
-            <option value="editorial">Premium editorial</option><option value="boutique">Modern boutique</option><option value="storybook">Storybook</option><option value="modern">Modern Etsy</option><option value="watercolor">Artistic watercolor</option>
-          </select>
-        </label>
-        <label style={{ display: 'grid', gap: 5 }}><span className="input-label">BACKGROUND STYLE</span>
-          <select value={config.backgroundStyle} disabled={!!working || settingsBusy} onChange={e => changeConfig('backgroundStyle', e.target.value as ListingStudioConfig['backgroundStyle'])}>
-            <option value="watercolor">Watercolor</option><option value="paper">Luxury paper</option><option value="gradient">Gradient</option><option value="botanical">Abstract botanical</option><option value="vintage">Vintage</option>
-          </select>
-        </label>
-        <label style={{ display: 'grid', gap: 5 }}><span className="input-label">DESIGN BOLDNESS</span>
-          <select value={config.boldness} disabled={!!working || settingsBusy} onChange={e => changeConfig('boldness', e.target.value as ListingStudioConfig['boldness'])}>
-            <option value="soft">Soft</option><option value="balanced">Balanced</option><option value="bold">Bold</option>
-          </select>
-        </label>
-        <label style={{ display: 'grid', gap: 5 }}><span className="input-label">CLIPART HIERARCHY</span>
-          <select value={config.hierarchy} disabled={!!working || settingsBusy} onChange={e => changeConfig('hierarchy', e.target.value as ListingStudioConfig['hierarchy'])}>
-            <option value="soft">Soft</option><option value="medium">Medium</option><option value="dramatic">Dramatic</option>
-          </select>
-        </label>
-        <label style={{ display: 'grid', gap: 5 }}><span className="input-label">DECORATION INTENSITY</span>
-          <select value={config.intensity} disabled={!!working || settingsBusy} onChange={e => changeConfig('intensity', e.target.value as ListingStudioConfig['intensity'])}>
-            <option value="soft">Soft</option><option value="balanced">Balanced</option><option value="vibrant">Vibrant</option>
-          </select>
-        </label>
+
+
+
+
+
+
         <label style={{ display: 'grid', gap: 5 }}><span className="input-label">CUSTOM MAIN TITLE</span>
           <input maxLength={75} value={config.headline || ''} disabled={!!working || settingsBusy} placeholder={subtheme || theme || name} onChange={e => changeConfig('headline', e.target.value)}/>
         </label>
@@ -410,11 +390,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
             {references.map((src,i) => <option value={src} key={src}>Etsy reference {i + 1}</option>)}
           </select>
         </label>
-        <label style={{ display: 'grid', gap: 5 }}><span className="input-label">REFERENCE INTERPRETATION</span>
-          <select value={config.referenceStyle} disabled={!!working || settingsBusy} onChange={e => changeConfig('referenceStyle', e.target.value as ListingStudioConfig['referenceStyle'])}>
-            <option value="similar">Similar composition</option><option value="creative">Creative interpretation</option><option value="palette">Palette only</option>
-          </select>
-        </label>
+
       </div>
       <label style={{ display: 'grid', gap: 6 }}><span className="input-label">UPLOAD DESIGN REFERENCE (OPTIONAL)</span>
         <input type="file" accept="image/jpeg,image/png,image/webp" disabled={!!working || settingsBusy} onChange={e => { void uploadReference(e.target.files?.[0]); e.target.value = ''; }}/>
@@ -430,7 +406,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
     <div className="panel" style={{ padding: 20 }}>
       <h2>Etsy Listing Image Studio</h2>
       <p className="sub">15-image workflow • 1024 × 1024 px • square 1:1 • OpenAI artistic lettering • exact original collection clipart. Configure Reference & Assets above; existing legacy thumbnail projects stay intact.</p>
-      {config && <p className="sub">Style: {config.coverStyle} · {config.backgroundStyle} · {config.boldness} · {config.hierarchy} hierarchy · {config.intensity} decoration · {config.referenceImage ? 'Selected reference enabled' : 'No reference'}. These settings guide each generated listing image.</p>}
+      <p className="sub">Layout follows the chosen reference, available original artwork and protected headline area. {config.referenceImage ? 'Design reference selected.' : 'Automatic design direction.'}</p>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         <strong>{approved}/15 approved • {assets.length} original images available</strong>
         <button type="button" className="primary-btn" disabled={approved !== 15 || !!working} onClick={() => {
@@ -482,7 +458,8 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
           {(step === 3 || step === 5) && <button className="outline-btn" type="button" onClick={() => void categorize()} disabled={!!working}>Analyze collection categories (optional)</button>}
           <small style={{ color: '#74695e' }}>Only the graphic background, premium lettering and blank mockup environment are AI-generated. PaletteIQ composites original collection assets, preserving their identity. Generation uses paid API requests.</small>
           <hr style={{ width: '100%', border: 0, borderTop: '1px solid #eee4d9' }}/>
-          <strong>Original asset placement ({positions.length})</strong>
+          <strong>Original asset placement ({positions.length}) — text-safe, distinct originals</strong>
+          <small>Title/subtitle occupy the protected top 38% of this square. Art cannot overlap the text; repeated assets are unavailable in the replacement selector.</small>
           <label className="input-label">SELECT ARTWORK TO ADJUST</label>
           <select value={selectedIndex < positions.length ? selectedIndex : 0} disabled={!positions.length || !!working} onChange={e => setSelectedIndex(Number(e.target.value))}>
             {positions.map((p, i) => <option key={i} value={i}>{i + 1}. {assets.find(a => a.id === p.assetId)?.name || 'Original artwork'}</option>)}
@@ -490,7 +467,8 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
           {selected && <>
             <label className="input-label">REPLACE WITH ORIGINAL COLLECTION ASSET</label>
             <select value={selected.assetId} disabled={!!working} onChange={e => move('assetId', e.target.value)}>
-              {assets.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              {assets.map(a => <option key={a.id} value={a.id}
+                disabled={a.id !== selected.assetId && positions.some(p => p.assetId === a.id)}>{a.name}</option>)}
             </select>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 8 }}>
               {(['x','y','width','height'] as const).map(field => <label key={field} style={{ fontSize: 12, display: 'grid', gap: 3 }}>{field.toUpperCase()} (%)

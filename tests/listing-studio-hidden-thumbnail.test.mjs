@@ -19,8 +19,7 @@ test('Thumbnail Designer and Etsy Listing Image Studio are both visible, separat
 });
 
 test('all Reference & Assets controls are accessible from Listing Image Studio', () => {
-  for (const key of ['layoutMode','analysisProvider','analysisModel','coverStyle',
-      'backgroundStyle','boldness','hierarchy','intensity','headline','referenceImage','referenceStyle']) {
+  for (const key of ['layoutMode','analysisProvider','analysisModel','imageModel','headline','referenceImage']) {
     assert.ok(listing.includes("changeConfig('"+key+"'") ||
       listing.includes("analysisProvider: value") || listing.includes("analysisModel: value"),
       'Missing setting control: ' + key);
@@ -31,7 +30,9 @@ test('all Reference & Assets controls are accessible from Listing Image Studio',
   assert.match(page, /onConfigSave=\{saveListingImageSettings\}/);
   assert.match(page, /referenceImage: settings.referenceImage\?\.startsWith\('data:'\) \? undefined/);
   assert.match(listing, /createImageBitmap\(file\)/);
-  assert.match(listing, /AI artistic lettering/);
+  for (const removed of ['TYPOGRAPHY','COVER ART STYLE','BACKGROUND STYLE','DESIGN BOLDNESS',
+    'CLIPART HIERARCHY','DECORATION INTENSITY','REFERENCE INTERPRETATION'])
+    assert.ok(!listing.includes('>'+removed+'</span>'), removed+' should be hidden');
 });
 
 test('new collections can generate 15 listing images with valid default settings without legacy editor', () => {
