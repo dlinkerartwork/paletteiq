@@ -44,13 +44,17 @@ test('custom canvas generates graphics only, then Vision fits exact original PNG
   assert.match(method, /reserveBadgeZone: Boolean\(hasLettering && badge\)/);
 });
 
-test('reference-guided generation requires a selected reference and blocks paid generation on analysis failure', () => {
+test('reference-guided generation requires a reference and survives optional analysis timeout', () => {
   const method = editor.slice(editor.indexOf('  const generateCanvasArtwork = async () => {'),
     editor.indexOf('  // Create the background and artistic lettering FIRST'));
   assert.match(method, /layoutMode === 'ai' && !reference/);
-  assert.match(method, /Reference analysis failed; no paid background generated/);
+  assert.match(method, /Reference analysis unavailable/);
+  assert.match(method, /visual fidelity to the reference may be reduced/);
+  assert.match(method, /referenceSlots = imageLayers\.map/);
+  assert.match(method, /referenceDesign \|\|= \{/);
   assert.match(method, /result\.layout\.texts \|\| \[\]/);
   assert.match(method, /compositionGuide: result\.layout\.compositionGuide/);
+  assert.match(method, /setPackStatus\(referenceWarning \+ ' Continuing with background generation\.'/);
 });
 
 test('QC review still adjusts exact originals and restores badge text after approval', () => {
