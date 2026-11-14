@@ -171,13 +171,14 @@ function artPrompt(number: number, project: StoredProject, count: number, revisi
     'The text above is the COMPLETE allowed wording. No additional claims or marketing copy. Spell every requested character correctly.',
     listingCreativeSummary(direction),
     'Design typography for quick readability on a small Etsy search-result thumbnail: bold but friendly high-contrast custom lettering, artistically curved or hand-painted where appropriate, with restrained supporting text.',
-    'Place the exact requested main title and subtitle within the upper 24% of the FINAL 1:1 square canvas, and optional badge in a visually balanced non-overlapping position. The original artwork occupies most of the remaining region; keep mobile readability.',
+    'Compose the exact requested lettering NATURALLY, following the visual hierarchy and available square space. The main title must be easily readable at Etsy thumbnail size and the subtitle should be reasonably legible. Do not force all text into a rigid 24% header or a hard no-overlap box. Use expressive curves, flowing hand-lettered forms and a balanced hierarchy.',
+    'PaletteIQ will overlay authentic collection clipart afterwards. Allow tasteful partial overlap around outer letter edges, swashes or nonessential decoration, while giving the central strokes of the main headline enough contrast and space to read. No generated imitation clipart or substitute objects.',
     'The actual collection images are NOT provided to you. PaletteIQ will composite the exact originals later. Do NOT generate clipart, animal/food/flower drawings, icons, logos, product print art, or stand-in illustrations.',
     'Only verified count of unique original images is ' + count + '. Never claim PNG, transparency, ZIP contents, DPI, license, print resolution, or asset dimensions without verified metadata.',
     'Use clean commercial visual hierarchy, artwork-first layout, consistent recognizable product identity and elegant foreground/background separation.',
     'No greeting cards, invitation cards, wedding stationery or card-based mockups by default. Those are NOT included in this workflow.',
     number === 1
-      ? 'MAIN COVER PRIORITY: outstanding mobile readability, clear spacious focal title and space for 6–12 large standout genuine illustrations below. No tiny collage or extraneous badges.'
+      ? 'MAIN COVER PRIORITY: make the title the strongest readable focal point at mobile size. Compose lettering as an integrated poster (not a tiny fixed top banner). Plan around a curated group of about 7 large authentic illustrations around the perimeter and lower half. Natural partial overlap with decorative parts of lettering is welcome; avoid burying entire headline words. No tiny collage or extraneous invented badges.'
       : number <= 5
         ? 'Show diversity and collection breadth, with elegant but varied composition. Never add imaginary items.'
         : number === 6 || number === 7 || number === 13
@@ -203,10 +204,10 @@ function artPrompt(number: number, project: StoredProject, count: number, revisi
     ...core,
     'Make ONLY nonfigurative commercial art-direction: light neutral paper, compatible abstract colored washes, decorative graphic shapes and the exact words given above. DO NOT draw themed objects or real products.',
     spec.kind === 'all' || spec.kind === 'all-grouped' || spec.kind === 'categories'
-      ? 'Below upper 23% keep the image mostly light and low contrast for a real full collection gallery; avoid a dense decorated background that clashes with small original assets.'
+      ? 'Provide a light, legible graphic hierarchy and adaptable negative space for the full collection gallery. Text can follow a natural position, not a fixed upper strip; avoid a dense decorated background that clashes with small originals.'
       : spec.kind === 'information'
-        ? 'Below title area reserve broad uncluttered space for genuine original clipart and readable verified information; use restrained ornamentation.'
-        : 'Below title area leave carefully balanced negative space for the authentic source illustrations, with abstract texture at the outer perimeter.',
+        ? 'Reserve useful uncluttered space for genuine clipart and verified information, without a hard rectangular no-overlap zone; use restrained ornamentation.'
+        : 'Balance natural negative space around the requested lettering with soft abstract texture at the perimeter. Original source illustrations will be placed later and may overlap minor lettering flourishes.',
   ].join('\n');
 }
 
@@ -264,11 +265,11 @@ export async function POST(request: Request) {
               'You are an expert graphic designer positioning EXISTING ORIGINAL PNG LAYERS on an AI-generated empty listing design. NEVER draw or regenerate clipart.',
               'Inspect the supplied BACKGROUND IMAGE PIXELS to locate the already-rendered artistic typography and unobstructed blank printable space.',
               'Final export is a 1:1 SQUARE canvas (1024x1024), exactly matching the supplied 1024x1024 background pixels. No crop is applied. Return x/y/width/height as percentages of the FULL SQUARE canvas.',
-              'The title and subtitle must remain unobstructed, usually in the upper 23% of the final canvas.',
-              isMockup ? 'This is a realistic BLANK PRODUCT MOCKUP. All supplied original asset layers MUST fit on the blank flat printable area of the product and not float on table/background. Account for actual blank surface position in visible pixels. Do not cover straps, hands, folds, shadows or the product edge.' : 'Use intentional size hierarchy and negative space. For many gallery items keep original grid, adjust only to avoid title, maintain layout clarity.',
+              'Read the ACTUAL title, subtitle and badge positions from the background pixels; do not assume a fixed text zone. Position genuine PNG layers naturally around the poster. Partial overlap near outer edges, swashes and decorative lettering is welcome, but do not obscure central strokes or whole words of the main title. Keep the subtitle reasonably readable at small thumbnail size. Prefer visual hierarchy over a rigid zero-overlap layout.',
+              isMockup ? 'This is a realistic BLANK PRODUCT MOCKUP. All supplied original asset layers MUST fit on the blank flat printable area of the product and not float on table/background. Account for actual blank surface position in visible pixels. Do not cover straps, hands, folds, shadows or the product edge.' : 'Use an attractive varied hierarchy with natural scale, spacing and partial overlap when it looks like an intentional professional composition. For gallery items preserve the source IDs and approximate grid, while considering the actual text legibility seen in the image.',
               'Return ONLY JSON: {"placements":[{"assetId":"source-id","x":30,"y":40,"width":18,"height":22,"rotation":0}],"unsafe":false,"notes":""}.',
               'Return each listed assetId EXACTLY ONCE and NO new IDs. Coordinate ranges 0–100. Retain approximate proportions of existing placement slots; never infer an object shape or invent an asset from its name.',
-              'If a safe printable area does not exist, set unsafe=true and return current proposed placements unchanged. Values must be numbers.',
+              'For mockups, if a usable printable surface is missing, set unsafe=true and retain the original plan. For other listing designs, do not treat partial text overlap as unsafe by itself. Numbers only.',
               'Current original-layer plan:',JSON.stringify(descriptor)
             ].join('\n')},
             {type:'input_image',image_url:'data:image/png;base64,'+base64}
@@ -286,8 +287,8 @@ export async function POST(request: Request) {
         if (!p || !ids.has(p.assetId) || seen.has(p.assetId)) return false;
         seen.add(p.assetId);
         return [p.x,p.y,p.width,p.height,p.rotation ?? 0].every(n=>typeof n==='number' && Number.isFinite(n)) &&
-          p.x>=0 && p.y>=23 && p.width>=2 && p.height>=2 &&
-          p.x+p.width<=100 && p.y+p.height<=98 && Math.abs(p.rotation??0)<=15;
+          p.x>=0 && p.y>=0 && p.width>=2 && p.height>=2 &&
+          p.x+p.width<=100 && p.y+p.height<=100 && Math.abs(p.rotation??0)<=30;
       });
       if (!correct) return Response.json({placements:fallback, fallback:'Vision could not verify a safe layout. Review and adjust the original asset positions.'});
       return Response.json({placements:candidates, note:sanitizedText(parsed.notes||'',180)});
