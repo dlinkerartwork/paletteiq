@@ -10,7 +10,7 @@ import EtsyListingLayoutCanvas from '@/components/etsy-listing-layout-canvas';
 import { evaluateListingCoverTitle, suggestListingCoverCopy } from '@/lib/etsy-listing-cover-copy';
 import {
   LISTING_IMAGE_SPECS, LISTING_WIDTH, LISTING_HEIGHT, originalAssets,
-  planListingPlacements, curatedListingHighlights, DEFAULT_MAIN_COVER_CLIPART_COUNT, listingFilename, listingImageTextDefaults, isSquareListingApproved, type ListingImageText, type ListingFinalReview, type ListingAsset, type ListingImageRecord, type ListingPlacement
+  planListingPlacements, curatedListingHighlights, DEFAULT_MAIN_COVER_CLIPART_COUNT, defaultListingCompositionMode, listingFilename, listingImageTextDefaults, isSquareListingApproved, type ListingCompositionMode, type ListingImageText, type ListingFinalReview, type ListingAsset, type ListingImageRecord, type ListingPlacement
 } from '@/lib/etsy-listing-image-plan';
 
 type Props = {
@@ -28,7 +28,7 @@ type Props = {
   characters: ListingAsset[];
   onSaved?: (images: ListingImageRecord[]) => void;
 };
-type ListResponse = { images?: ListingImageRecord[]; preLayouts?: Record<string, ListingPlacement[]>; saved?: boolean; backgroundUrl?: string; placements?: ListingPlacement[]; finalReview?: ListingFinalReview | null; fallback?: string; reviewWarning?: string; costEstimate?: ImageGenerationCostEstimate | null; warning?: string; deleted?: boolean; error?: string };
+type ListResponse = { images?: ListingImageRecord[]; preLayouts?: Record<string, ListingPlacement[]>; compositionModes?: Record<string, ListingCompositionMode>; saved?: boolean; backgroundUrl?: string; placements?: ListingPlacement[]; finalReview?: ListingFinalReview | null; fallback?: string; reviewWarning?: string; costEstimate?: ImageGenerationCostEstimate | null; warning?: string; deleted?: boolean; error?: string };
 const apiUrl = '/api/listing-image-studio';
 const styleApiUrl = '/api/listing-style-analysis';
 type StyleResponse = { profile?: ListingVisualStyleProfile | null; cached?: boolean; error?: string };
@@ -195,6 +195,8 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   const [availableModels, setAvailableModels] = useState<Array<{id: string; name: string}>>([]);
   const [changes, setChanges] = useState<Record<number, ListingPlacement[]>>({});
   const [preLayouts, setPreLayouts] = useState<Record<string, ListingPlacement[]>>({});
+  const [compositionModes, setCompositionModes] = useState<Record<string, ListingCompositionMode>>({});
+  const [savedCompositionModes, setSavedCompositionModes] = useState<Record<string, ListingCompositionMode>>({});
   const [allowVisionRefinement, setAllowVisionRefinement] = useState(false);
   const [notes, setNotes] = useState<Record<number, string>>({});
   const [letteringChanges, setLetteringChanges] = useState<Record<number, ListingImageText>>({});
@@ -227,7 +229,9 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     name, theme, subtheme, style, seoTitle, primaryKeyword, collectionSize:assets.length
   }), [name,theme,subtheme,style,seoTitle,primaryKeyword,assets.length]);
   const titleAdvice = evaluateListingCoverTitle(currentLettering.title);
-  const preLayoutSaved = JSON.stringify(preLayouts[String(step)] || []) === JSON.stringify(positions);
+  const compositionMode: ListingCompositionMode = compositionModes[String(step)] ?? defaultListingCompositionMode(step);
+  const preLayoutSaved = JSON.stringify(preLayouts[String(step)] || []) === JSON.stringify(positions) &&
+    (savedCompositionModes[String(step)] ?? defaultListingCompositionMode(step)) === compositionMode;
   const visibleAssetChoices = useMemo(() => categorizedAssets.filter(asset =>
     !assetSearch.trim() || (asset.name + ' ' + (asset.category || '')).toLowerCase().includes(assetSearch.trim().toLowerCase())),
     [categorizedAssets, assetSearch]);
@@ -242,6 +246,8 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
         const images = response.images || [];
         setRecords(images);
         setPreLayouts(response.preLayouts || {});
+        setCompositionModes(response.compositionModes || {});
+        setSavedCompositionModes(response.compositionModes || {});
         // Resume the first unapproved image on return/reload, instead of always
         // restarting visually at step 01 (approved JPGs are never regenerated).
         setStep(LISTING_IMAGE_SPECS.find(s => !images.some(r => r.number === s.number && isSquareListingApproved(r)))?.number || 15);
@@ -332,9 +338,10 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   };
 
   const savePreLayout = async (layout: ListingPlacement[] = positions) => {
-    const result = await send({ action:'prelayout', projectId, number:step, placements:layout });
+    const result = await send({ action:'prelayout', projectId, number:step, placements:layout, compositionMode });
     if (!result.saved || !result.preLayouts) throw Error('Server did not confirm the pre-layout save');
     setPreLayouts(result.preLayouts);
+    if (result.compositionModes) setSavedCompositionModes(result.compositionModes);
     return result;
   };
   const saveWhiteCanvasLayout = async () => {
@@ -426,9 +433,9 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
         } catch { /* Continue with a neutral collection gallery rather than invent categories. */ }
       }
       await savePreLayout(effectivePositions);
-      setMessage('Generating the AI graphic background and artistic typography using the saved white canvas composition...');
+      setMessage(compositionMode === 'free' ? 'Generating free-composition background and artistic lettering; original clipart positions will be designed independently by AI Vision...' : 'Generating AI background and lettering using your structured white-canvas composition...');
       const response = await send({ action: 'generate', projectId, number: step, model, quality,
-        featuredCount: effectivePositions.length, placements: effectivePositions, textScale, backgroundStyle,
+        featuredCount: effectivePositions.length, placements: effectivePositions, textScale, backgroundStyle, compositionMode,
         title: lettering.title, subtitle: lettering.subtitle, badge: lettering.badge,
         revisionNotes: (notes[step] ?? current?.notes ?? '').trim() });
       if (!response.backgroundUrl) throw Error('OpenAI did not return the background');
@@ -436,16 +443,20 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       setCostNotice({ step, model, quality, estimate: response.costEstimate ?? null });
       let suggested = effectivePositions;
       let layoutWarning = '';
-      if (allowVisionRefinement && effectivePositions.length <= 24) {
-        setMessage('AI Vision is arranging original artwork around the real lettering with natural partial overlap...');
+      if (compositionMode === 'free' || allowVisionRefinement) {
+        setMessage('OpenAI Vision is designing original artwork positions, sizes, layer hierarchy and tasteful edge bleed...');
         try {
-          const vision = await send({ action: 'layout', projectId, number: step, backgroundUrl: response.backgroundUrl, placements: effectivePositions });
+          const artworkContactSheet = compositionMode === 'free'
+            ? await createArtworkContactSheet(effectivePositions, assets) : undefined;
+          const vision = await send({ action: 'layout', projectId, number: step,
+            backgroundUrl: response.backgroundUrl, placements: effectivePositions,
+            compositionMode, artworkContactSheet });
           if (vision.placements?.length === effectivePositions.length) suggested = vision.placements;
           layoutWarning = vision.fallback || '';
-        } catch { layoutWarning = 'Vision placement unavailable; original image placements retained.'; }
+        } catch { layoutWarning = 'AI Vision composition unavailable; your editable original selections were retained.'; }
       }
-      // Preserve the user-created pre-layout. AI Vision may refine it ONLY when
-      // the user has explicitly enabled that option before generation.
+      // Free Mode uses an independent AI layout; Structured Mode retains the
+      // white pre-layout unless the user explicitly enables AI refinement.
       // The paid AI background is recorded before JPG transfer so a failed
       // upload can be retried without generating and paying for the AI again.
       // An empty renderedImageUrl intentionally invalidates prior approved pixels.
@@ -579,11 +590,9 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     if (working) return;
     if (current?.status === 'approved' && !window.confirm('Rearrange this approved image? Save the updated JPG to reset approval.')) return;
     const localPlan = planListingPlacements(step, categorizedAssets, { assetIds: selectedAssetIds });
-    if (!current?.backgroundUrl || positions.length > 24) {
+    if (!current?.backgroundUrl) {
       setChanges(old => ({ ...old, [step]: localPlan }));
-      setMessage(current?.backgroundUrl
-        ? 'Auto arranged with a local grid/perimeter layout (Vision supports up to 24 assets). Apply layout & save JPG to preview the result.'
-        : 'Starter layout arranged locally; AI Vision can refine it during image generation for up to 24 assets.');
+      setMessage('Starter layout arranged locally. Generate background to let AI Vision independently plan a Free Composition, or adjust it manually.');
       return;
     }
     setWorking('layout');
@@ -591,11 +600,13 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     try {
       const answer = await send({
         action:'layout', projectId, number:step, backgroundUrl:current.backgroundUrl,
-        placements:positions, critiqueFeedback: current.finalReview?.improvements.join('; ') || ''
+        placements:positions, compositionMode,
+        artworkContactSheet: compositionMode === 'free' ? await createArtworkContactSheet(positions, assets) : undefined,
+        critiqueFeedback: current.finalReview?.improvements.join('; ') || ''
       });
       setChanges(old => ({ ...old, [step]: answer.placements?.length === positions.length ? answer.placements : localPlan }));
       setMessage(answer.fallback
-        ? answer.fallback + ' Apply layout & save JPG to preview the local arrangement.'
+        ? answer.fallback + ' Adjust manually or retry Auto Arrange; apply and save JPG to preview.'
         : 'AI Vision rearranged ' + positions.length + ' originals. Apply layout & save JPG (no image-generation cost), then review the final composition.');
     } catch (error) { setMessage('Auto Arrange unavailable: ' + String(error)); }
     finally { setWorking(''); }
@@ -839,7 +850,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
               <button type="button" className="outline-btn" disabled={!!working || !selected || positions.length <= 1}
                 onClick={() => selected && toggleArtwork(selected.assetId, false)}>Remove Selected Clipart</button>
             </div>
-            <small>With an existing AI background, change clipart count/selection, Auto Arrange, then click Apply layout &amp; save JPG — no new image-generation charge. AI Vision handles up to 24 placements; larger selections use local arrangement.</small>
+            <small>Change clipart count/selection, then use Auto Arrange or adjust directly. In Free Mode OpenAI Vision can reposition every selected original clipart, without enforcing PaletteIQ's initial slots. Apply layout &amp; save JPG without another image-generation charge.</small>
             {step === 1 && positions.length > 14 && <small role="alert" style={{ color: '#9f581b' }}>More than 14 cover elements may reduce readability at Etsy search size. Adjust hero/medium/accent sizes and review the final critique before approval.</small>}
           </div>
           <strong>Original asset placement ({positions.length})</strong>
