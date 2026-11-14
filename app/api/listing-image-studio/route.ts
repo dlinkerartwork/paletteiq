@@ -148,6 +148,11 @@ function artPrompt(number: number, project: StoredProject, count: number, settin
   const centralHero = isCentralHero(number,Boolean(settings?.hasReference || settings?.referenceImage));
   const referenceComposition = sanitizedText(referenceDesign?.compositionGuide || '',450);
   const centralZone = heroTextZone(referenceDesign);
+  const referenceArtworkSlots = (referenceDesign?.slots || []).slice(0,12)
+    .filter(slot => [slot.x,slot.y,slot.width,slot.height].every(Number.isFinite) &&
+      slot.width > 2 && slot.height > 2)
+    .map(slot => ({x:Math.round(slot.x),y:Math.round(slot.y),
+      width:Math.round(slot.width),height:Math.round(slot.height)}));
   const core = [
     'Create a premium conversion-focused Etsy digital clipart listing IMAGE BACKGROUND with exact ARTISTIC TYPOGRAPHY.',
     'Square 1:1 composition. The final JPG and generated background are both 1024 x 1024 pixels. Keep all critical lettering within the central safe area.',
@@ -161,6 +166,8 @@ function artPrompt(number: number, project: StoredProject, count: number, settin
     'Design is determined automatically by the reference image, actual theme and purpose of this slide, not by disabled manual typography/cover/background/boldness/hierarchy/intensity controls.',
     'Verified reference analysis GRAPHIC STYLE ONLY (not product depiction): motif=' + motif + ', lettering=' + lettering + ', palette mood=' + mood + '.',
     referenceComposition ? 'MATCH THIS REFERENCE SPATIAL COMPOSITION (not its depicted objects or wording): ' + referenceComposition : '',
+    centralHero && referenceArtworkSlots.length ? 'REFERENCE ARTWORK OCCUPANCY / NEGATIVE-SPACE PLAN: keep these locations clear for ORIGINAL PNG LAYERS THAT WILL BE ADDED AFTER IMAGE GENERATION: ' + JSON.stringify(referenceArtworkSlots) + '. These are EMPTY placement zones; DO NOT paint objects into them.' : '',
+    centralHero ? 'For lengthy collection titles, form an elegant multi-level center lockup: emphasize the first short meaningful phrase as the visual hero, arrange all remaining exact title words in smaller supporting lines, preserving spelling, and keep everything inside the central title safe zone.' : '',
     'Use the selected reference to guide design geometry, lettering scale, badge shape and palette, but keep the result original. Do not force watercolor corner washes, colored torn-paper patches, circular rings or multicolor corner gradients unless the reference specifically calls for them.',
     'Avoid the default repeated cream-center / turquoise-and-orange watercolor-corner motif. For each listing slide, design a distinct nonfigurative graphic structure matched to its purpose, while preserving collection coherence.',
     'Do not add large saturated pigment to any of the four corners. Background must not overpower the original clipart. Typography remains the primary generated graphic.'
