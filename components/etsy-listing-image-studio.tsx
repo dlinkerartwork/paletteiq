@@ -506,14 +506,8 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     setWorking('prompt');
     setMessage('Preparing the exact OpenAI background prompt and Vision art-direction text (no paid generation)...');
     try {
-      // Source-style analysis is cached server-side. Fetch before preparing
-      // the prompt so the text matches what the actual generation would use.
-      try { await ensureSourceStyle(); }
-      catch (error) {
-        setStyleWarning('Visual style could not be sampled: ' +
-          (error instanceof Error ? error.message : String(error)) +
-          '. Using saved collection theme and style instead.');
-      }
+      // No OpenAI calls here: use already-cached source style when available.
+      // Generating a preview must never silently incur a Vision API fee.
       const response = await send({
         action:'preview-prompt', projectId, number:step, featuredCount:positions.length,
         placements:positions, textScale, backgroundStyle, compositionMode,
@@ -1048,7 +1042,10 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
             <strong>OpenAI prompt editor — review before sending</strong>
             <small style={{ color:'#75695e' }}>Prepare the real server-generated prompts at no image-generation cost. Edit freely before clicking Generate or Auto Arrange. PaletteIQ will still paste ONLY your original clipart files.</small>
             <button type="button" className="outline-btn" disabled={!!working || !positions.length}
-              onClick={() => void prepareOpenAiPrompts()}>
+              onClick={() => {
+                if (promptsReady && !window.confirm('Replace your edited OpenAI prompt drafts with fresh defaults?')) return;
+                void prepareOpenAiPrompts();
+              }}>
               {promptsReady ? 'Reset / refresh both OpenAI prompts' : 'Prepare OpenAI prompts (no generation cost)'}
             </button>
             {!promptsReady && <small role="status" style={{ color:'#96501f' }}>Prompts have not been prepared for the current collection selection and settings. Refresh them before generating; any previous draft for this image remains saved in this session.</small>}
