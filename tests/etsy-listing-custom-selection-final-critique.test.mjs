@@ -99,7 +99,7 @@ test('final review analyzes actual composited JPG and provides detailed subjecti
   assert.match(api,/headline readability 30%/);
   assert.match(api,/artwork prominence 20%/);
   assert.match(api,/score:rate\(parsed\.score\)/);
-  assert.match(api,/review\.analyzedImageUrl/);
+  assert.match(api,/serverReview\.analyzedImageUrl/);
   assert.match(api,/current image|saved JPG changed during review/i);
   assert.match(api,/if \(input\.action === 'critique'\)/);
   assert.match(api,/if \(serverReview && serverReview\.analyzedImageUrl === normalized\.renderedImageUrl\)/);
