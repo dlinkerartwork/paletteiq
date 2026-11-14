@@ -10,7 +10,7 @@ const studio=readFileSync(new URL('../app/api/studio/route.ts',import.meta.url),
 
 test('title length advisory warns, but never silently rewrites the full Etsy SEO Title', () => {
   assert.equal(evaluateListingCoverTitle('Botanical Clipart').status,'good');
-  assert.equal(evaluateListingCoverTitle('Beautiful Botanical Watercolor Floral Clipart Collection').status,'warning');
+  assert.equal(evaluateListingCoverTitle('Botanical Watercolor Floral Clipart Art Pack').status,'warning');
   assert.equal(evaluateListingCoverTitle('The Most Beautiful Vintage Botanical Watercolor Floral Clipart Bundle For Digital Designers').status,'too-long');
   assert.equal(evaluateListingCoverTitle('').status,'warning');
   assert.match(ui,/data-listing-title-length=\{titleAdvice\.status\}/);
