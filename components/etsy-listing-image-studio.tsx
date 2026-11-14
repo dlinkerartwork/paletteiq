@@ -609,6 +609,28 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           </div>}
           {current?.renderedImageUrl && (current.width !== LISTING_WIDTH || current.height !== LISTING_HEIGHT) && <p role="alert" className="notice">This saved image was produced by the previous 4:3 workflow. It is preserved for reference; regenerate the AI background, or re-render its background as 1024 × 1024 before approving the square edition.</p>}
           {current?.reviewWarning && <p role="alert" style={{ border: '1px solid #d48c48', borderRadius: 8, padding: 10, color: '#7b431b', background: '#fff6e9' }}>Manual quality review required: {current.reviewWarning}. Approval requires your explicit confirmation.</p>}
+          {current?.finalReview && <div data-final-design-critique="true" style={{ border: '1px solid #e2d6c7', borderRadius: 10, background: '#faf9f4', padding: 13, marginTop: 12, display: 'grid', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+              <strong>AI Final Design Critique (after clipart compositing)</strong>
+              <span style={{ fontWeight: 750, color: current.finalReview.score >= 8.5 ? '#247046' : '#9c4c29', fontSize: 20 }}>
+                {current.finalReview.score.toFixed(1)}/10
+              </span>
+            </div>
+            <small>Subjective visual assessment of the saved JPG. Goal ≥8.5, not an automatic guarantee of 10/10.</small>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 6, fontSize: 12 }}>
+              <span>Headline readability: {current.finalReview.titleReadability.toFixed(1)}/10</span>
+              <span>Art prominence: {current.finalReview.artworkProminence.toFixed(1)}/10</span>
+              <span>Balance: {current.finalReview.visualBalance.toFixed(1)}/10</span>
+              <span>Style harmony: {current.finalReview.styleHarmony.toFixed(1)}/10</span>
+            </div>
+            {current.finalReview.strengths.length > 0 && <div style={{ fontSize: 12 }}><strong>What works:</strong><ul>{current.finalReview.strengths.map((v,i)=><li key={i}>{v}</li>)}</ul></div>}
+            {current.finalReview.improvements.length > 0 && <div style={{ fontSize: 12 }}><strong>Suggestions for a stronger cover:</strong><ol>{current.finalReview.improvements.map((v,i)=><li key={i}>{v}</li>)}</ol></div>}
+            <button type="button" className="outline-btn" disabled={!!working}
+              onClick={()=>void recheckFinalQuality()}>Recheck Final Quality (Vision API cost)</button>
+            <small>Adjust source PNG positions/number, choose Auto Arrange (uses feedback above), then re-render the final JPG without paying image-generation fees. AI cannot edit the original PNG artwork.</small>
+          </div>}
+          {current?.renderedImageUrl && !current.finalReview && <button type="button" className="outline-btn" disabled={!!working}
+            style={{ marginTop: 8 }} onClick={()=>void recheckFinalQuality()}>Analyze final JPG quality (Vision API cost)</button>}
           {(spec.kind === 'mockup') && <p className="sub">Application example: {listingMockupScene(step, artDirection.family)?.name}. Mockup is a demonstration, not included in the sold collection. Inspect printable placement: the photograph is AI-generated, while the featured clipart is composited from its original file.</p>}
         </div>
         <div style={{ display: 'grid', alignContent: 'start', gap: 10 }}>
@@ -650,6 +672,11 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
             </button>
             {letteringDirty && <small role="alert" style={{ color: '#a04c22' }}>Title, Subtitle or Badge has changed since this background was generated. Click Regenerate AI background + lettering to apply the new text. A layout-only re-render cannot change AI lettering.</small>}
           </div>
+          <label style={{ display: 'flex', gap: 9, alignItems: 'center', fontSize: 12, color: '#564d43' }}>
+            <input type="checkbox" aria-label="Automatically critique final JPG" checked={autoFinalCritique}
+              disabled={!!working} onChange={e=>setAutoFinalCritique(e.target.checked)}/>
+            Automatically critique the FINAL composited JPG (recommended, additional paid Vision API request)
+          </label>
           <button type="button" className="primary-btn" onClick={() => void generate()} disabled={!loaded || !assets.length || !!working || !precedingApproved}>
             {working === 'generate' ? <LoaderCircle className="spin" size={16}/> : <Sparkles size={16}/>}
             {current?.backgroundUrl ? 'Revise Image ' + String(step).padStart(2,'0') + ' (AI background)' : step === 1 ? 'Start /new-listing — Generate Main Cover' : 'Generate Image ' + String(step).padStart(2,'0')}
