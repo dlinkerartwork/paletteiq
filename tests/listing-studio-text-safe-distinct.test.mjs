@@ -58,5 +58,8 @@ test('all seven experimental selectors are absent from Listing Image Studio',()=
   assert.match(studio,/disabled=\{a\.id !== selected\.assetId && positions\.some/);
   assert.match(route,/REFERENCE-DRIVEN TYPOGRAPHY/);
   assert.match(route,/Text may appear at the top, center, bottom, sides/);
-  assert.match(route,/Clipart must be distinct and stay outside every protected reference text area/);
+  // Visual-quality findings are now saved as review warnings, not fatal errors.
+  assert.match(route,/reviewWarnings\.push\('Some original clipart appears more than once/);
+  assert.match(route,/reviewWarnings\.push\('Some clipart may overlap or extend into text areas/);
+  assert.doesNotMatch(route,/throw Error\('Clipart must be distinct and stay outside every protected reference text area/);
 });
