@@ -11,7 +11,7 @@ import { currentListingVisualStyle, listingStyleDirection, type ListingVisualSty
 import { estimateListingImageGenerationCost, type GeneratedImageUsage } from '@/lib/etsy-listing-image-cost';
 import {
   LISTING_IMAGE_SPECS, LISTING_HEIGHT, LISTING_WIDTH, listingFilename, listingTitle,
-  originalAssets, isSquareListingApproved, listingImageTextDefaults, type ListingImageText, type ListingImageRecord, type ListingPlacement, type ListingAsset, type ListingImageStatus
+  originalAssets, isSquareListingApproved, listingImageTextDefaults, type ListingFinalReview, type ListingImageText, type ListingImageRecord, type ListingPlacement, type ListingAsset, type ListingImageStatus
 } from '@/lib/etsy-listing-image-plan';
 
 const bad = (message: string, status = 400) => Response.json({ error: message }, { status });
@@ -22,6 +22,7 @@ type StoredProject = {
   id: string; name: string; theme?: string; subtheme?: string; palette?: string; style?: string; texture?: string;
   listing?: { title?: string; primaryKeyword?: string };
   characters?: ListingAsset[]; listingImages?: ListingImageRecord[]; listingVisualStyle?: ListingVisualStyleProfile;
+  selectedArtworkCount?: number; // Transient generation-only prompt hint, never persisted.
 };
 const sanitizedText = (s: string, limit: number) => s.replace(/[<>\r\n]/g, ' ').trim().slice(0, limit);
 const normalizedImages = (project: StoredProject) => Array.isArray(project.listingImages)
@@ -64,7 +65,10 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
   const title = typeof value.title === 'string' ? sanitizedText(value.title, 140) : previous?.title;
   const subtitle = typeof value.subtitle === 'string' ? sanitizedText(value.subtitle, 140) : previous?.subtitle;
   const badge = typeof value.badge === 'string' ? sanitizedText(value.badge, 60) : previous?.badge;
-  return { number: value.number, status, backgroundUrl, renderedImageUrl, placements, width, height, title, subtitle, badge, notes: sanitizedText(value.notes || '', 800),
+  const finalReview = value.finalReview && value.finalReview.analyzedImageUrl === renderedImageUrl
+    ? value.finalReview
+    : previous?.renderedImageUrl === renderedImageUrl ? previous?.finalReview : undefined;
+  return { number: value.number, status, backgroundUrl, renderedImageUrl, placements, width, height, title, subtitle, badge, finalReview, notes: sanitizedText(value.notes || '', 800),
     reviewWarning: typeof value.reviewWarning === 'string' ? sanitizedText(value.reviewWarning, 280) : '',
     updatedAt: Date.now() };
 }
@@ -144,9 +148,10 @@ export async function GET(request: Request) {
 }
 
 type Input = {
-  action?: 'generate' | 'save' | 'layout' | 'reject'; projectId?: string; number?: number;
+  action?: 'generate' | 'save' | 'layout' | 'reject' | 'critique'; projectId?: string; number?: number;
   image?: ListingImageRecord; model?: string; quality?: string;
   backgroundUrl?: string; placements?: ListingPlacement[]; revisionNotes?: string;
+  featuredCount?: number; critiqueFeedback?: string;
   title?: string; subtitle?: string; badge?: string;
 };
 /**
@@ -179,6 +184,8 @@ function artPrompt(number: number, project: StoredProject, count: number, revisi
     'CREATIVE FREEDOM: Design a fresh premium Etsy layout with bespoke expressive lettering and nonfigurative graphic decoration. Innovate freely in composition, layering, balance and hierarchy, while matching the OBSERVED source-art medium, softness, palette, texture and mood when an analyzed profile exists.',
     'The collection theme guides the SUBJECT of the merchandising message, but is not permission to draw themed subjects. Original clipart will be composited later in exact original PNG pixels by PaletteIQ.',
     'Design typography for quick readability on a small Etsy search-result thumbnail: bold but friendly high-contrast custom lettering, artistically curved or hand-painted where appropriate, with restrained supporting text.',
+    'MERCHANDISING HIERARCHY: original collection artwork is the product and must remain prominent; no generic giant text wall. Keep a clear headline and smaller supporting subtitle. If both are long, prioritize visual clarity rather than inflating every word. Never add extra words or repeat the provided title in tiny ornamental lettering.',
+    'Reduce ornamental noise. Use restrained background detailing and only the decorative accents needed to frame the source artwork, letting the collection illustration style carry the appeal.',
     'Compose the exact requested lettering NATURALLY, following the visual hierarchy and available square space. The main title must be easily readable at Etsy thumbnail size and the subtitle should be reasonably legible. Do not force all text into a rigid 24% header or a hard no-overlap box. Use expressive curves, flowing hand-lettered forms and a balanced hierarchy.',
     'PaletteIQ will overlay authentic collection clipart afterwards. Allow tasteful partial overlap around outer letter edges, swashes or nonessential decoration, while giving the central strokes of the main headline enough contrast and space to read. No generated imitation clipart or substitute objects.',
     'The actual collection images are NOT provided to you. PaletteIQ will composite the exact originals later. Do NOT generate clipart, animal/food/flower drawings, icons, logos, product print art, or stand-in illustrations.',
@@ -186,7 +193,7 @@ function artPrompt(number: number, project: StoredProject, count: number, revisi
     'Use clean commercial visual hierarchy, artwork-first layout, consistent recognizable product identity and elegant foreground/background separation.',
     'No greeting cards, invitation cards, wedding stationery or card-based mockups by default. Those are NOT included in this workflow.',
     number === 1
-      ? 'MAIN COVER PRIORITY: make the title the strongest readable focal point at mobile size. Compose lettering as an integrated poster (not a tiny fixed top banner). Plan around a curated group of about 7 large authentic illustrations around the perimeter and lower half. Natural partial overlap with decorative parts of lettering is welcome; avoid burying entire headline words. No tiny collage or extraneous invented badges.'
+      ? 'MAIN COVER PRIORITY: make the title clearly readable at mobile size while letting the authentic source illustrations dominate. Plan the outer and lower perimeter around exactly ' + (project.selectedArtworkCount || 7) + ' user-selected genuine clipart layers, which PaletteIQ will insert after you create this background. Natural partial overlap with decorative lettering is welcome, never obscure whole headline words. Do not add extra text, fake clipart or excessive ornaments.'
       : number <= 5
         ? 'Show diversity and collection breadth, with elegant but varied composition. Never add imaginary items.'
         : number === 6 || number === 7 || number === 13
@@ -278,6 +285,7 @@ export async function POST(request: Request) {
               'Return ONLY JSON: {"placements":[{"assetId":"source-id","x":30,"y":40,"width":18,"height":22,"rotation":0}],"unsafe":false,"notes":""}.',
               'Return each listed assetId EXACTLY ONCE and NO new IDs. Coordinate ranges 0–100. Retain approximate proportions of existing placement slots; never infer an object shape or invent an asset from its name.',
               'For mockups, if a usable printable surface is missing, set unsafe=true and retain the original plan. For other listing designs, do not treat partial text overlap as unsafe by itself. Numbers only.',
+              input.critiqueFeedback ? 'FINAL-COMPOSITION REVIEW FEEDBACK to improve the last result: ' + JSON.stringify(sanitizedText(input.critiqueFeedback,500)) : 'No previous final critique.',
               'Current original-layer plan:',JSON.stringify(descriptor)
             ].join('\n')},
             {type:'input_image',image_url:'data:image/png;base64,'+base64}
@@ -327,7 +335,12 @@ export async function POST(request: Request) {
     subtitle: typeof input.subtitle === 'string' ? sanitizedText(input.subtitle, 140) : defaults.subtitle.slice(0, 140),
     badge: typeof input.badge === 'string' ? sanitizedText(input.badge, 60) : ''
   };
-  const prompt = artPrompt(input.number, project, count, typeof input.revisionNotes === 'string' ? input.revisionNotes : '', text);
+  if (input.featuredCount !== undefined &&
+      (!Number.isInteger(input.featuredCount) || input.featuredCount < 1 || input.featuredCount > count))
+    return bad('Choose a clipart count between 1 and the number of available originals.');
+  const prompt = artPrompt(input.number,
+    { ...project, selectedArtworkCount: input.featuredCount },
+    count, typeof input.revisionNotes === 'string' ? input.revisionNotes : '', text);
   try {
     const response = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
