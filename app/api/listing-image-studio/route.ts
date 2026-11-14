@@ -210,7 +210,7 @@ export async function GET(request: Request) {
   if (!stored) return bad('Collection not found', 404);
   const project = JSON.parse(stored.data) as StoredProject;
   const images = normalizedImages(project);
-  if (url.searchParams.get('export') !== '1') return Response.json({ images, preLayouts: project.listingPreLayouts || {} });
+  if (url.searchParams.get('export') !== '1') return Response.json({ images, preLayouts: project.listingPreLayouts || {}, compositionModes: project.listingCompositionModes || {} });
   const selected = LISTING_IMAGE_SPECS.map(spec => images.find(item => item.number === spec.number));
   if (selected.some(item => !isSquareListingApproved(item)))
     return bad('Approve all 15 square 1024 × 1024 JPG listing images before exporting. Legacy 4:3 images are not eligible.', 409);
@@ -363,18 +363,17 @@ export async function POST(request: Request) {
     const valid = new Set(originalAssets(project.characters || []).map(asset => asset.id));
     const placements = input.placements;
     if (!Array.isArray(placements) || !placements.length || placements.length > 300 ||
-        placements.some(p => !p || !valid.has(p.assetId) ||
-          typeof p.assetId !== 'string' ||
-          ![p.x,p.y,p.width,p.height,p.rotation ?? 0].every(v => typeof v === 'number' && Number.isFinite(v)) ||
-          p.x < 0 || p.y < 0 || p.x > 100 || p.y > 100 ||
-          p.width < 1 || p.height < 1 || p.width > 100 || p.height > 100 ||
-          Math.abs(p.rotation ?? 0) > 180) ||
-        new Set(placements.map(p => p.assetId)).size !== placements.length)
+        placements.some(p => !p || !valid.has(p.assetId) || !validListingPlacement(p, input.number)) ||
+        new Set(placements.map(p => p.assetId)).size !== placements.length ||
+        (input.compositionMode !== undefined && !['free','structured'].includes(input.compositionMode)))
       return bad('Select one or more unique original cliparts with valid canvas coordinates.');
     project.listingPreLayouts = { ...(project.listingPreLayouts || {}), [String(input.number)]: placements };
+    if (input.compositionMode) project.listingCompositionModes = {
+      ...(project.listingCompositionModes || {}), [String(input.number)]: input.compositionMode
+    };
     await getDb().update(projects).set({data: JSON.stringify(project), updatedAt: Date.now()})
       .where(and(eq(projects.id,project.id),eq(projects.owner,user.userId)));
-    return Response.json({ saved: true, preLayouts: project.listingPreLayouts });
+    return Response.json({ saved: true, preLayouts: project.listingPreLayouts, compositionModes: project.listingCompositionModes || {} });
   }
   if (input.action === 'save') {
     if (!input.image || input.image.number !== input.number) return bad('Invalid image record');
@@ -477,18 +476,18 @@ export async function POST(request: Request) {
       (!Number.isInteger(input.featuredCount) || input.featuredCount < 1 || input.featuredCount > count))
     return bad('Choose a clipart count between 1 and the number of available originals.');
   const preLayout = input.placements;
+  if (input.compositionMode !== undefined && !['free','structured'].includes(input.compositionMode))
+    return bad('Invalid composition mode');
   if (preLayout !== undefined && (
     !Array.isArray(preLayout) || !preLayout.length || preLayout.length > 300 ||
     preLayout.some(p => !p || typeof p.assetId !== 'string' ||
       !originalAssets(project.characters || []).some(a => a.id === p.assetId) ||
-      ![p.x,p.y,p.width,p.height,p.rotation ?? 0].every(v => typeof v === 'number' && Number.isFinite(v)) ||
-      p.x < 0 || p.y < 0 || p.x > 100 || p.y > 100 ||
-      p.width <= 0 || p.height <= 0 || p.width > 100 || p.height > 100 || Math.abs(p.rotation ?? 0) > 180) ||
+      !validListingPlacement(p, input.number)) ||
     new Set(preLayout.map(p => p.assetId)).size !== preLayout.length))
     return bad('Invalid pre-layout: select valid original collection artwork and arrange it on the white canvas.');
   const prompt = artPrompt(input.number,
     { ...project, selectedArtworkCount: input.featuredCount },
-    count, typeof input.revisionNotes === 'string' ? input.revisionNotes : '', text, preLayout, input.textScale ?? 'compact', input.backgroundStyle ?? 'minimal');
+    count, typeof input.revisionNotes === 'string' ? input.revisionNotes : '', text, preLayout, input.textScale ?? 'compact', input.backgroundStyle ?? 'minimal', input.compositionMode ?? defaultListingCompositionMode(input.number));
   try {
     const response = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
