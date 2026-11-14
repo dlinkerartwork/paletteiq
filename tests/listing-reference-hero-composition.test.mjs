@@ -84,4 +84,6 @@ test('prompt never forces center or top when a reference is selected',()=>{
  const image=studio.indexOf('>OPENAI BACKGROUND GENERATION MODEL</span>');
  assert.ok(provider>0 && provider<vision && vision<image);
  assert.ok(vision-provider<1100,'Vision Model should be directly adjacent to Vision Provider');
+ assert.match(studio,/className="listing-vision-pair"/);
+ assert.match(studio,/gridTemplateColumns:'repeat\(2,minmax\(0,1fr\)\)'/);
 });
