@@ -397,7 +397,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
   const placeOriginalsOverBackground = async (
     slide: PackSlide, imageUrl: string, fallback: ThumbnailElement[],
     available: Character[], hierarchy: ClipartHierarchy, coverStyle: typeof packCoverStyle,
-    referenceHints: Array<{x:number;y:number;width:number;height:number;rotation?:number}> = []
+    referenceHints: Array<{x:number;y:number;width:number;height:number;rotation?:number}> = [], referenceGuide = ''
   ): Promise<{ elements: ThumbnailElement[]; usedFallback: boolean }> => {
     const imageElements = fallback.filter(e => e.type === 'image' && e.characterId);
     if (!imageElements.length) return { elements: fallback, usedFallback: true };
@@ -420,7 +420,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
             return { id: e.characterId, name: character?.name || e.characterId };
           }),
           hierarchy, coverStyle,
-          referenceCompositionGuide: (referenceDesign?.compositionGuide || '').slice(0, 450),
+          referenceCompositionGuide: referenceGuide.slice(0, 450),
           suggestedSlots: imageElements.map((e,i) => ({
             characterId: e.characterId,
             x: referenceHints[i]?.x ?? e.x, y: referenceHints[i]?.y ?? e.y,
