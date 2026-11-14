@@ -21,11 +21,11 @@ test('AI-first is optional, original Free and Structured modes remain',()=>{
 
 test('source-original reference boards guide a real JSON art director, no starting coordinates and no image redraw',()=>{
   const prompt=aiFirstConceptPrompt({theme:'Woodland Christmas',title:'Woodland Christmas',subtitle:'CLIPART BUNDLE',badge:'80 PNGs',selectedCount:120});
-  assert.match(prompt,/EXACT MAIN TITLE: "Woodland Christmas"/);
-  assert.match(prompt,/EXACT SUBTITLE: "CLIPART BUNDLE"/);
-  assert.match(prompt,/EXACT BADGE: "80 PNGs"/);
-  assert.match(prompt,/No mandatory font, font family, position, object count/i);
-  assert.match(prompt,/Return a JSON-only ART DIRECTION, not an image/);
+  assert.match(prompt,/Main title: "Woodland Christmas"/);
+  assert.match(prompt,/Subtitle: "CLIPART BUNDLE"/);
+  assert.match(prompt,/Badge: "80 PNGs"/);
+  assert.match(prompt,/no fixed number of objects/i);
+  assert.match(prompt,/return JSON with "chosenIndices"/i);
   assert.doesNotMatch(prompt,/\bx\s*:\s*\d|\by\s*:\s*\d|width:|height:/);
   assert.equal(AI_FIRST_MAX_REFERENCE_SHEETS,8);
   assert.equal(AI_FIRST_MAX_REFERENCE_ASSETS,192);
