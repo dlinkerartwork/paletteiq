@@ -1482,7 +1482,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           <label className="input-label">BACKGROUND STYLE</label>
           <ThumbnailStylePreviewSelect label="Custom canvas background style" kind="background" value={backgroundStyle} options={BACKGROUND_EXAMPLES}
             disabled={aiBusy} onChange={value => setBackgroundStyle(value as typeof backgroundStyle)}/>
-          <button type="button" className="primary-btn" disabled={aiBusy || Boolean(backgroundRetryId) || !design.elements.some(e => e.type === 'image')} onClick={() => void generateCanvasArtwork()}>
+          <button type="button" className="primary-btn" disabled={aiBusy || Boolean(backgroundRetryId) || (!design.elements.some(e => e.type === 'image') && !(layoutMode === 'ai' && characters.some(c => c.imageUrl)))} onClick={() => void generateCanvasArtwork()}>
             <WandSparkles size={15}/> {aiBusy ? 'Generating AI artwork...' : 'Generate AI Background & Typography'}
           </button>
           {packStatus && <small role="status">{packStatus}</small>}
