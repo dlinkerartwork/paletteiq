@@ -61,7 +61,7 @@ test('AI free composition does NOT force previous PaletteIQ coordinates into the
   assert.match(api,/preLayout\?\.length/);
   assert.match(api,/STRUCTURED COMPOSITION: honor user-arranged WHITE CANVAS positions/);
   assert.match(api,/compositionMode \?\? defaultListingCompositionMode\(input\.number\)/);
-  assert.match(api,/input\.compositionMode !== undefined && !\['free','structured'\]/);
+  assert.match(api,/input\.compositionMode !== undefined && !\['free','structured','ai-first'\]/);
   assert.match(ui,/featuredCount: effectivePositions\.length, placements: effectivePositions, textScale, backgroundStyle, compositionMode/);
 });
 
