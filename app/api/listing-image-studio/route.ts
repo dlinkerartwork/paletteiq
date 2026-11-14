@@ -239,7 +239,7 @@ export async function GET(request: Request) {
 }
 
 type Input = {
-  action?: 'generate' | 'preview-prompt' | 'generate-concept' | 'clean-concept' | 'save' | 'layout' | 'reject' | 'critique' | 'prelayout'; projectId?: string; number?: number;
+  action?: 'generate' | 'preview-prompt' | 'generate-concept' | 'save' | 'layout' | 'reject' | 'critique' | 'prelayout'; projectId?: string; number?: number;
   image?: ListingImageRecord; model?: string; quality?: string;
   backgroundUrl?: string; conceptUrl?: string; placements?: ListingPlacement[]; revisionNotes?: string;
   selectedAssetIds?: string[]; sampledAssetIds?: string[]; referenceSheets?: string[];
