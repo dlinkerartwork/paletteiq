@@ -10,6 +10,7 @@ type Props = {
   onSelect: (index: number) => void;
   onChange: (positions: ListingPlacement[]) => void;
   backgroundUrl?: string;
+  allowBleed?: boolean;
   disabled?: boolean;
 };
 type DragData = {
@@ -24,7 +25,7 @@ const normalizeAngle = (angle: number) => ((angle + 180) % 360 + 360) % 360 - 18
  * Only source image URLs are drawn: never AI-generated replacement clipart.
  */
 export default function EtsyListingLayoutCanvas({
-  assets,placements,selectedIndex,onSelect,onChange,backgroundUrl,disabled=false
+  assets,placements,selectedIndex,onSelect,onChange,backgroundUrl,allowBleed=false,disabled=false
 }:Props) {
   const drag = useRef<DragData|null>(null);
   const assetMap = new Map(assets.map(a => [a.id,a]));
@@ -49,11 +50,13 @@ export default function EtsyListingLayoutCanvas({
     const dx=100*(event.clientX-d.startX)/d.rect.width;
     const dy=100*(event.clientY-d.startY)/d.rect.height;
     const value=d.mode==='rotate'
-      ? {...d.item, rotation:Math.round(normalizeAngle((d.item.rotation||0) +
+      ? {...d.item,rotation:Math.round(normalizeAngle((d.item.rotation||0)+
           Math.atan2(event.clientY-d.centerY,event.clientX-d.centerX)*180/Math.PI-d.startAngle))}
       : d.mode==='resize'
-        ? {...d.item,width:clamp(d.item.width+dx,2,100),height:clamp(d.item.height+dy,2,100)}
-        : {...d.item,x:clamp(d.item.x+dx,0,100),y:clamp(d.item.y+dy,0,100)};
+        ? {...d.item,width:clamp(d.item.width+dx,2,allowBleed?200:100),
+          height:clamp(d.item.height+dy,2,allowBleed?200:100)}
+        : {...d.item,x:clamp(d.item.x+dx,allowBleed?-100:0,allowBleed?99:100),
+          y:clamp(d.item.y+dy,allowBleed?-100:0,allowBleed?99:100)};
     onChange(placements.map((item,i)=>i===d.index?value:item));
   };
   const finish = (event:React.PointerEvent<HTMLDivElement>) => {
@@ -116,7 +119,7 @@ export default function EtsyListingLayoutCanvas({
         </div>}
       </div>
       <small style={{display:'block',marginTop:6,color:'#74695f'}}>
-        Drag original clipart to move, use the orange corner to resize, and drag the teal ⟳ handle to rotate (up to ±180°). Numeric placement controls also allow precise rotation. No AI call for canvas editing.
+        Drag original clipart to move, use the orange corner to resize, and drag the teal ⟳ handle to rotate (up to ±180°). {allowBleed ? 'Objects may move partly outside this square; the final JPG naturally crops overflow.' : 'Keep objects inside the product composition.'} No AI call for canvas editing.
       </small>
     </div>
   );
