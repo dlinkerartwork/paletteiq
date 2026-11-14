@@ -117,5 +117,7 @@ test('quality recommendations are shown but the user can approve deliberately',(
   assert.match(ui,/const recheckFinalQuality = async \(\)/);
   assert.match(ui,/action: 'critique', projectId, number: step/);
   assert.match(ui,/if \(autoFinalCritique\)/);
+  assert.match(ui,/Use AI Suggestions as Revision Notes/);
+  assert.match(ui,/Final Vision critique unavailable; inspect the result manually/);
   assert.match(ui,/Additional paid Vision API request|additional paid Vision API request/);
 });
