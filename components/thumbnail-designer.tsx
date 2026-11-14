@@ -399,7 +399,8 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
   const placeOriginalsOverBackground = async (
     slide: PackSlide, imageUrl: string, fallback: ThumbnailElement[],
     available: Character[], hierarchy: ClipartHierarchy, coverStyle: typeof packCoverStyle,
-    referenceHints: Array<{x:number;y:number;width:number;height:number;rotation?:number}> = [], referenceGuide = ''
+    referenceHints: Array<{x:number;y:number;width:number;height:number;rotation?:number}> = [],
+    referenceGuide = '', referenceImageUrl = ''
   ): Promise<{ elements: ThumbnailElement[]; usedFallback: boolean }> => {
     const imageElements = fallback.filter(e => e.type === 'image' && e.characterId);
     if (!imageElements.length) return { elements: fallback, usedFallback: true };
@@ -435,6 +436,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           }),
           hierarchy, coverStyle,
           referenceCompositionGuide: referenceGuide.slice(0, 450),
+          referenceImageUrl,
           suggestedSlots: imageElements.map((e,i) => ({
             characterId: e.characterId,
             x: referenceHints[i]?.x ?? e.x, y: referenceHints[i]?.y ?? e.y,
@@ -452,7 +454,16 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
       const selected = result.slots
         .map(slot => {
           const element = imageElements.find(e => e.characterId === slot.characterId);
-          return element ? { ...element, ...slot, source: 'original' as const } : null;
+          if (!element) return null;
+          // The compositor draws the selected original PNG inside its bounding box.
+          // Keep each layer's width:height ratio when adapting Vision's proposed slot.
+          const scale = Math.min(slot.width / Math.max(element.width, .01),
+            slot.height / Math.max(element.height, .01));
+          const width = element.width * scale, height = element.height * scale;
+          return {
+            ...element, x:slot.x+(slot.width-width)/2, y:slot.y+(slot.height-height)/2,
+            width, height, rotation:slot.rotation, source:'original' as const
+          };
         })
         .filter(element => element !== null) as ThumbnailElement[];
       if (selected.length < expectedMin) throw Error('Vision returned insufficient valid original PNGs');
@@ -675,7 +686,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           };
           const placement = await placeOriginalsOverBackground(
             guidedSlide, result.imageUrl, exactLayers, characters,
-            packHierarchy, 'editorial', referenceSlots, referenceDesign?.compositionGuide || ''
+            packHierarchy, 'editorial', referenceSlots, referenceDesign?.compositionGuide || '', reference
           );
           positioned = placement.elements;
           usedFallback = placement.usedFallback;
@@ -988,7 +999,8 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
       setMessage('AI Vision inspecting saved background and adjusting original PNG positions...');
       const result = await placeOriginalsOverBackground(
         slide, target.backgroundImageUrl, originals, available,
-        target.packHierarchy || packHierarchy, 'editorial', [], target.referenceDesign?.compositionGuide || ''
+        target.packHierarchy || packHierarchy, 'editorial', [], target.referenceDesign?.compositionGuide || '',
+        reference || target.referenceUrl || ''
       );
       const next = latestDesignsRef.current.map(d => d.id === target.id ? {
         ...d, elements: [...result.elements, ...(d.packSlideKey === 'custom-canvas' && d.packAiTypographyEnabled !== false
@@ -1023,7 +1035,8 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         };
         const placement = slide
           ? await placeOriginalsOverBackground(slide,target.rejectedBackgroundUrl,original,characters,
-              target.packHierarchy || 'dramatic','editorial',[],target.referenceDesign?.compositionGuide || '')
+              target.packHierarchy || 'dramatic','editorial',[],target.referenceDesign?.compositionGuide || '',
+              reference || target.referenceUrl || '')
           : { elements:original, usedFallback:true };
         const badgeLayers = target.packAiTypographyEnabled !== false
           ? badgeOverlay(zone,target.packBadge || '') : [];
