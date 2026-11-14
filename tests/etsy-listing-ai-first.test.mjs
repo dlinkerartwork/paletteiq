@@ -1,79 +1,96 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import {
-  AI_FIRST_MAX_REFERENCE_SHEETS, AI_FIRST_MAX_REFERENCE_ASSETS,
-  aiFirstSampleIndices, aiFirstConceptPrompt, aiFirstCleanPlatePrompt
+import {readFileSync} from 'node:fs';
+import {AI_FIRST_MAX_REFERENCE_SHEETS, AI_FIRST_MAX_REFERENCE_ASSETS,
+  aiFirstSampleIndices, aiFirstConceptPrompt, aiFirstBackgroundPrompt
 } from '../lib/etsy-listing-ai-first.ts';
-import { planListingPlacements, validListingPlacement } from '../lib/etsy-listing-image-plan.ts';
+import {planListingPlacements, validListingPlacement} from '../lib/etsy-listing-image-plan.ts';
 
 const api=readFileSync(new URL('../app/api/listing-image-studio/route.ts',import.meta.url),'utf8');
 const ui=readFileSync(new URL('../components/etsy-listing-image-studio.tsx',import.meta.url),'utf8');
 const plan=readFileSync(new URL('../lib/etsy-listing-image-plan.ts',import.meta.url),'utf8');
 
-test('AI-first is opt-in and leaves both old composition modes available',()=>{
+test('AI-first is optional, original Free and Structured modes remain',()=>{
   assert.match(plan,/ListingCompositionMode = 'free' \| 'structured' \| 'ai-first'/);
   assert.match(ui,/<option value="ai-first">AI-First Composition/);
   assert.match(ui,/<option value="free">Free Composition/);
   assert.match(ui,/<option value="structured">Structured/);
-  assert.match(api,/input\.action === 'generate-concept' \|\| input\.action === 'clean-concept'/);
-  assert.match(api,/mode === 'ai-first'/);
+  assert.match(api,/if \(input\.action === 'generate-concept'\)/);
+  assert.doesNotMatch(api,/input\.action === 'clean-concept'/);
 });
 
-test('the visual concept is built with source reference image edits, NEVER pre-layout coordinates or raw ZIP',()=>{
-  const prompt=aiFirstConceptPrompt({theme:'Cottage Flowers',title:'Spring Flowers',subtitle:'Watercolor Botanical',badge:'80 Flowers',selectedCount:120});
-  assert.match(prompt,/full-cover concept image|FULL premium thumbnail CONCEPT/i);
-  assert.match(prompt,/MAIN TITLE: "Spring Flowers"/);
-  assert.match(prompt,/SUBTITLE: "Watercolor Botanical"/);
-  assert.match(prompt,/BADGE \(empty means do not draw one\): "80 Flowers"/);
-  assert.match(prompt,/No prescribed grid, fonts, hero count/);
-  assert.doesNotMatch(prompt,/\bx\s*:\s*[0-9]|\by\s*:\s*[0-9]|width:|height:/);
+test('source-original reference boards guide a real JSON art director, no starting coordinates and no image redraw',()=>{
+  const prompt=aiFirstConceptPrompt({theme:'Woodland Christmas',title:'Woodland Christmas',subtitle:'CLIPART BUNDLE',badge:'80 PNGs',selectedCount:120});
+  assert.match(prompt,/EXACT MAIN TITLE: "Woodland Christmas"/);
+  assert.match(prompt,/EXACT SUBTITLE: "CLIPART BUNDLE"/);
+  assert.match(prompt,/EXACT BADGE: "80 PNGs"/);
+  assert.match(prompt,/No mandatory font, font family, position, object count/i);
+  assert.match(prompt,/Return a JSON-only ART DIRECTION, not an image/);
+  assert.doesNotMatch(prompt,/\bx\s*:\s*\d|\by\s*:\s*\d|width:|height:/);
   assert.equal(AI_FIRST_MAX_REFERENCE_SHEETS,8);
   assert.equal(AI_FIRST_MAX_REFERENCE_ASSETS,192);
-  const sampled=aiFirstSampleIndices(120);
-  assert.equal(sampled.length,120);
-  assert.deepEqual(sampled,[...Array(120).keys()]);
-  const many=aiFirstSampleIndices(1500);
-  assert.equal(many.length,192);
-  assert.ok(many[0]>0 && many.at(-1)<1500);
-  assert.equal(new Set(many).size,many.length);
-  assert.match(api,/https:\/\/api\.openai\.com\/v1\/images\/edits/);
-  assert.match(api,/form\.append\('image\[\]'/);
-  assert.match(api,/selectedAssetIds/);
-  assert.match(api,/referenceSheets/);
-  assert.match(ui,/aiFirstSampleIndices\(positions\.length\)/);
-  assert.match(ui,/createArtworkContactSheets\(sample, assets\)/);
-  assert.match(ui,/selectedAssetIds:positions\.map\(p=>p\.assetId\)/);
-  assert.match(ui,/backgroundPrompt:promptDraft!\.backgroundPrompt/);
+  assert.deepEqual(aiFirstSampleIndices(120),Array.from({length:120},(_,i)=>i));
+  const sampled=aiFirstSampleIndices(1500);
+  assert.equal(sampled.length,192);
+  assert.equal(new Set(sampled).size,192);
+  assert.match(ui,/createArtworkContactSheets\(sample,assets\)/);
+  assert.match(ui,/sampledAssetIds:sample\.map\(p=>p\.assetId\)/);
+  assert.match(api,/chosenIndices/);
+  assert.match(api,/const chosenIds=\[\.\.\.new Set/);
+  assert.match(api,/https:\/\/api\.openai\.com\/v1\/responses/);
+  assert.doesNotMatch(api,/https:\/\/api\.openai\.com\/v1\/images\/edits/);
 });
 
-test('concept is separated from typography plate and final JPG composes ONLY original PNGs',()=>{
-  const p=aiFirstCleanPlatePrompt('Fresh Flowers','Watercolor Blooms','');
-  assert.match(p,/REMOVE EVERY standalone illustrated clipart object/);
-  assert.match(p,/Preserve these exact requested words/);
-  assert.match(p,/MAIN TITLE: "Fresh Flowers"/);
-  assert.match(p,/Do not add replacement illustrations/);
-  assert.match(api,/conceptUrl\?: string/);
-  assert.match(api,/const conceptReference =|let conceptReference/);
-  assert.match(api,/conceptReference \? \[\{type:'input_image',image_url:conceptReference\}\]/);
-  assert.match(api,/clean-concept/);
-  assert.match(api,/storeListingPng\(user\.userId,input\.projectId,cleaned\.bytes\)/);
-  assert.match(ui,/data-ai-first-concept-preview="true"/);
-  assert.match(ui,/generateAiFirstConcept/);
+test('image generation receives ONLY text, no source artwork, creates no characters or placeholders',()=>{
+  const prompt=aiFirstBackgroundPrompt({
+    userDirection:'Rich organic collage with many woodland animals, artistic fonts and room for original art',
+    creativeBrief:'Storybook warmth with a forest green and red title, beautiful asymmetry and breathing room',
+    title:'Woodland Christmas',subtitle:'CLIPART BUNDLE',badge:'80 PNGs'
+  });
+  assert.match(prompt,/ABSOLUTE PRODUCT ARTWORK RULE/);
+  assert.match(prompt,/DO NOT draw, recreate, trace, hallucinate, regenerate, imitate or include ANY standalone illustrated clipart/);
+  assert.match(prompt,/Include EXACT MAIN TITLE: "Woodland Christmas"/);
+  assert.match(prompt,/Include EXACT SUBTITLE: "CLIPART BUNDLE"/);
+  assert.match(prompt,/Include EXACT BADGE \(empty means omit\): "80 PNGs"/);
+  assert.match(prompt,/no required font, font size, text position, background style/);
+  assert.match(api,/const backgroundPrompt=aiFirstBackgroundPrompt/);
+  assert.match(api,/fetch\('https:\/\/api\.openai\.com\/v1\/images\/generations'/);
+  assert.match(api,/body:JSON\.stringify\(\{model,prompt:backgroundPrompt,size:'1024x1024'/);
+  assert.match(api,/backgroundUrl=await storeListingPng/);
+  assert.doesNotMatch(api,/form\.append\('image\[\]'/);
+});
+
+test('final JPG is composed with exact source PNGs chosen by Vision, permitting original repetition',()=>{
+  assert.match(ui,/data-ai-first-background-preview="true"/);
   assert.match(ui,/finalizeAiFirstConcept/);
-  assert.match(ui,/const cleaned = await send\(/);
-  assert.match(ui,/await arrangeWithAI\(cleaned\.backgroundUrl,positions/);
-  assert.match(ui,/await renderAndSave\(cleaned\.backgroundUrl,arranged\.placements/);
+  assert.match(ui,/sourcePositions=compositionMode === 'ai-first'/);
+  assert.match(ui,/current\.selectedSourceIds/);
+  assert.match(ui,/current\.creativeBrief/);
+  assert.match(ui,/const arranged=await arrangeWithAI\(current\.backgroundUrl,shortlisted/);
+  assert.match(ui,/await renderAndSave\(current\.backgroundUrl,arranged\.placements/);
   assert.match(ui,/const file = await compose\(background, layout, assets\)/);
-  assert.match(api,/rejected\.conceptUrl/);
+  assert.match(ui,/ctx\.drawImage\(image, bounds\.sx, bounds\.sy/);
+  assert.match(api,/mode !== 'ai-first' && seen\.has\(p\.assetId\)/);
+  assert.match(api,/mode === 'ai-first'\s*\? candidates\.length >= fallback\.length/);
+  assert.match(api,/selectedSourceIds/);
+  assert.match(api,/creativeBrief/);
+  assert.doesNotMatch(ui,/AI-drawn placeholders|temporary AI-drawn placeholders/);
 });
 
-test('AI-first reference cap samples only creative vision, NOT the number of originals pasted into final JPG',()=>{
-  const source=Array.from({length:400},(_,i)=>({id:'id-'+i,name:'Original '+i,imageUrl:'/a/'+i+'.png'}));
-  const placements=planListingPlacements(1,source,{count:400});
+test('user only needs original clipart and title, subtitle, badge; no fixed lettering/background choices',()=>{
+  assert.doesNotMatch(ui,/ARTISTIC LETTERING SIZE/);
+  assert.doesNotMatch(ui,/BACKGROUND STYLE \(THEME-MATCHED\)/);
+  assert.doesNotMatch(ui,/listing-lettering-scale|listing-background-style/);
+  assert.doesNotMatch(ui,/setTextScale|setBackgroundStyle/);
+  assert.match(ui,/id="listing-image-title"/);
+  assert.match(ui,/id="listing-image-subtitle"/);
+  assert.match(ui,/id="listing-image-badge"/);
+  assert.match(ui,/id="listing-background-prompt"/);
+  assert.match(ui,/id="listing-vision-prompt"/);
+  assert.match(ui,/compositionMode === 'ai-first'[\s\S]*?count:assets\.length/);
+  const sources=Array.from({length:400},(_,i)=>({id:'id-'+i,name:'Original '+i,imageUrl:'/a/'+i+'.png'}));
+  const placements=planListingPlacements(1,sources,{count:400});
   assert.equal(placements.length,400);
-  assert.equal(new Set(placements.map(p=>p.assetId)).size,400);
   assert.ok(placements.every(p=>validListingPlacement(p,1)));
   assert.match(ui,/for \(let offset = 0; offset < initial\.length; offset \+= batchSize\)/);
-  assert.match(ui,/All selected originals remain eligible|ALL selected originals remain eligible/);
 });
