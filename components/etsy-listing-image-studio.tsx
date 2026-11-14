@@ -146,6 +146,52 @@ function cropDraw(ctx: CanvasRenderingContext2D, image: HTMLImageElement) {
   const sw = LISTING_WIDTH / scale, sh = LISTING_HEIGHT / scale;
   ctx.drawImage(image, (image.naturalWidth - sw) / 2, (image.naturalHeight - sh) / 2, sw, sh, 0, 0, LISTING_WIDTH, LISTING_HEIGHT);
 }
+/**
+ * Draw thumbnails of SELECTED ORIGINAL PNG pixels, never AI reconstructions.
+ * Contact sheets are VISION references only: OpenAI proposes coordinates and
+ * sizes while PaletteIQ composites unchanged source image pixels afterwards.
+ * The ordinal in each cell corresponds exactly to the ID list in the prompt.
+ */
+async function createArtworkContactSheets(
+  placements: ListingPlacement[], assets: ListingAsset[]
+): Promise<string[]> {
+  const byId = new Map(assets.map(asset => [asset.id,asset]));
+  const sheets: string[] = [];
+  const perSheet = 64, columns = 8, cell = 128;
+  for (let offset=0;offset<placements.length;offset+=perSheet) {
+    const slice = placements.slice(offset,offset+perSheet);
+    const canvas=document.createElement('canvas');
+    canvas.width=columns*cell;
+    canvas.height=Math.ceil(slice.length/columns)*cell;
+    const ctx=canvas.getContext('2d');
+    if (!ctx) throw Error('Canvas unavailable for original artwork inspection');
+    ctx.fillStyle='#fffefd';
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    const loaded = await Promise.all(slice.map(async placement => {
+      const url=byId.get(placement.assetId)?.imageUrl;
+      if (!url) return null;
+      try { return await imageFromUrl(url); } catch { return null; }
+    }));
+    loaded.forEach((image,index) => {
+      const x=(index%columns)*cell, y=Math.floor(index/columns)*cell;
+      ctx.strokeStyle='#e0ddd7';ctx.strokeRect(x,y,cell,cell);
+      if(image){
+        const bounds=imageBounds(image);
+        const scale=Math.min(108/bounds.sw,108/bounds.sh);
+        const w=bounds.sw*scale,h=bounds.sh*scale;
+        ctx.drawImage(image,bounds.sx,bounds.sy,bounds.sw,bounds.sh,
+          x+(cell-w)/2,y+(cell-h)/2+5,w,h);
+      }
+      ctx.fillStyle='#fffefd';ctx.fillRect(x+3,y+3,33,21);
+      ctx.fillStyle='#293c2c';ctx.font='bold 16px Arial,sans-serif';
+      ctx.fillText(String(offset+index+1),x+7,y+19);
+    });
+    // JPEG is limited in payload size; real PNG originals remain unaffected.
+    sheets.push(canvas.toDataURL('image/jpeg',0.66));
+  }
+  return sheets;
+}
+
 async function compose(backgroundUrl: string, placements: ListingPlacement[], assets: ListingAsset[]): Promise<Blob> {
   const canvas = document.createElement('canvas');
   canvas.width = LISTING_WIDTH; canvas.height = LISTING_HEIGHT;
@@ -446,11 +492,11 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       if (compositionMode === 'free' || allowVisionRefinement) {
         setMessage('OpenAI Vision is designing original artwork positions, sizes, layer hierarchy and tasteful edge bleed...');
         try {
-          const artworkContactSheet = compositionMode === 'free'
-            ? await createArtworkContactSheet(effectivePositions, assets) : undefined;
+          const artworkContactSheets = compositionMode === 'free'
+            ? await createArtworkContactSheets(effectivePositions, assets) : undefined;
           const vision = await send({ action: 'layout', projectId, number: step,
             backgroundUrl: response.backgroundUrl, placements: effectivePositions,
-            compositionMode, artworkContactSheet });
+            compositionMode, artworkContactSheets });
           if (vision.placements?.length === effectivePositions.length) suggested = vision.placements;
           layoutWarning = vision.fallback || '';
         } catch { layoutWarning = 'AI Vision composition unavailable; your editable original selections were retained.'; }
@@ -601,7 +647,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       const answer = await send({
         action:'layout', projectId, number:step, backgroundUrl:current.backgroundUrl,
         placements:positions, compositionMode,
-        artworkContactSheet: compositionMode === 'free' ? await createArtworkContactSheet(positions, assets) : undefined,
+        artworkContactSheets: compositionMode === 'free' ? await createArtworkContactSheets(positions, assets) : undefined,
         critiqueFeedback: current.finalReview?.improvements.join('; ') || ''
       });
       setChanges(old => ({ ...old, [step]: answer.placements?.length === positions.length ? answer.placements : localPlan }));
