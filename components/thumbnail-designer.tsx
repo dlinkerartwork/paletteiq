@@ -1593,8 +1593,6 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         <label className="input-label">AI DECORATIVE BACKGROUND (OPENAI)</label>
         <label className="input-label">BACKGROUND STYLE</label>
         <select aria-label="Background style" value={backgroundStyle} disabled={backgroundGenerating} onChange={event => setBackgroundStyle(event.target.value as typeof backgroundStyle)}><option value="watercolor">Artistic watercolor washes</option><option value="paper">Luxury textured paper</option><option value="gradient">Premium colorful gradient</option><option value="botanical">Abstract botanical motifs</option><option value="vintage">Vintage decorative texture</option></select>
-        <label className="input-label">DECORATION INTENSITY</label>
-        <select aria-label="Background decoration intensity" value={backgroundIntensity} disabled={backgroundGenerating} onChange={event => setBackgroundIntensity(event.target.value as typeof backgroundIntensity)}><option value="soft">Soft — visible pastel details</option><option value="balanced">Balanced — recommended</option><option value="vibrant">Vibrant — stronger colors</option></select>
         <button className="outline-btn" type="button" disabled={backgroundGenerating || aiBusy} onClick={() => void generateReferenceBackground()}><WandSparkles size={15}/> {backgroundGenerating ? 'Generating background...' : 'Generate background (no clipart or text)'}</button>
         <small>Generate visible decorative textures and color variations. Original clipart and typography stay on top as independent layers. Generating again may incur API charges.</small>
         <label className="input-label">BACKGROUND IMAGE (LOCAL PNG/JPG)</label>
