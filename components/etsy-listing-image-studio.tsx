@@ -474,6 +474,15 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
             <a className="outline-btn" href={current.renderedImageUrl} download={fileName(step)}><Download size={15}/> Download JPG</a>
             <span className="sub">{LISTING_WIDTH} × {LISTING_HEIGHT} • {current.status === 'approved' ? 'Approved' : 'Awaiting approval'}</span>
           </div>}
+          {!!current?.renderedImageUrl && !!current.reviewWarnings?.length && (
+            <div role="status" style={{padding:12,marginTop:10,background:'#fff7ed',border:'1px solid #f5c28b',borderRadius:8,color:'#784421'}}>
+              <strong>Draft saved — suggested revisions</strong>
+              <ul style={{margin:'6px 0 0',paddingLeft:18}}>
+                {current.reviewWarnings.map((warning,i)=><li key={i}>{warning}</li>)}
+              </ul>
+              <small>You can keep this draft, adjust the layout without another AI generation, or click Needs revision.</small>
+            </div>
+          )}
           {(spec.kind === 'mockup') && <p className="sub">Mockup is a demonstration, not included in the sold collection. Inspect printable placement: the photograph is AI-generated, while the featured clipart is composited from its original file.</p>}
         </div>
         <div style={{ display: 'grid', alignContent: 'start', gap: 10 }}>
@@ -489,8 +498,8 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
           {(step === 3 || step === 5) && <button className="outline-btn" type="button" onClick={() => void categorize()} disabled={!!working}>Analyze collection categories (optional)</button>}
           <small style={{ color: '#74695e' }}>Only the graphic background, premium lettering and blank mockup environment are AI-generated. PaletteIQ composites original collection assets, preserving their identity. Generation uses paid API requests.</small>
           <hr style={{ width: '100%', border: 0, borderTop: '1px solid #eee4d9' }}/>
-          <strong>Original asset placement ({positions.length}) — text-safe, distinct originals</strong>
-          <small>{(step === 1 || step === 15) && config.referenceImage ? 'Reference selected: the detected title zones and original artwork positions determine the composition.' : 'Gallery: lettering stays in a protected top band.'} Text and clipart may not overlap; repeated assets are unavailable.</small>
+          <strong>Original asset placement ({positions.length}) — review before approval</strong>
+          <small>{(step === 1 || step === 15) && config.referenceImage ? 'Reference selected: the detected title zones and original artwork positions determine the composition.' : 'Gallery: lettering stays in a protected top band.'} Clipart and text collisions or repeated art will be flagged for review, not block draft saving.</small>
           <label className="input-label">SELECT ARTWORK TO ADJUST</label>
           <select value={selectedIndex < positions.length ? selectedIndex : 0} disabled={!positions.length || !!working} onChange={e => setSelectedIndex(Number(e.target.value))}>
             {positions.map((p, i) => <option key={i} value={i}>{i + 1}. {assets.find(a => a.id === p.assetId)?.name || 'Original artwork'}</option>)}
