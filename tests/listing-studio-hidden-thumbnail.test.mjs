@@ -20,8 +20,10 @@ test('restore original PR18 listing studio without the later Reference & Assets 
   assert.match(studio, /<h2>Etsy Clipart Listing Studio<\/h2>/);
   assert.match(studio, /OPENAI ARTISTIC BACKGROUND MODEL/);
   assert.match(studio, /BACKGROUND QUALITY/);
-  assert.match(studio, /const \[quality, setQuality\] = useState<'low' \| 'medium' \| 'high'>\('medium'\)/);
-  assert.match(studio, /const \[model, setModel\] = useState\('gpt-image-1-mini'\)/);
+  // Studio still exposes both controls, but their defaults now follow saved Settings.
+  assert.match(page, /defaultImageModel=\{preferences\.model\} defaultImageQuality=\{preferences\.quality\}/);
+  assert.match(studio, /const \[quality, setQuality\] = useState<'low' \| 'medium' \| 'high'>\(\(\) =>/);
+  assert.match(studio, /const \[model, setModel\] = useState\(\(\) =>/);
   assert.doesNotMatch(studio, /<h2>Reference & Assets — Listing Image Studio<\/h2>/);
   assert.doesNotMatch(studio, /onConfigSave|config: initialConfig|settingsDirty|initialPlacements|changeConfig/);
   assert.doesNotMatch(page, /onConfigSave=\{saveListingImageSettings\}|listingStudioSessionSettings/);
