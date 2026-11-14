@@ -12,7 +12,7 @@ import {
   originalAssets, type ListingImageRecord, type ListingPlacement, type ListingAsset, type ListingImageStatus
 } from '@/lib/etsy-listing-image-plan';
 import { duplicateListingAssetIds } from '@/lib/listing-text-safe';
-import { fitListingPlacementsToReference, isListingPlacementSafe, isCentralHero, heroTextZone, type ListingReferenceLayout } from '@/lib/listing-reference-composition';
+import { fitListingPlacementsToReference, isListingPlacementSafe, isCentralHero, heroTextZone, referenceTextZones, type ListingReferenceLayout } from '@/lib/listing-reference-composition';
 
 const bad = (message: string, status = 400) => Response.json({ error: message }, { status });
 const bucket = () => nativeAssetBucket() ?? env.BUCKET;
@@ -145,9 +145,10 @@ function artPrompt(number: number, project: StoredProject, count: number, settin
   const motif = ['blush-brush-ring','split-panel','paper-collage','soft-wash','minimal-lines','central-medallion','retro-signage','perimeter-collage'].includes(referenceDesign?.graphicMotif || '') ? referenceDesign?.graphicMotif : 'none';
   const lettering = ['script-serif','editorial-serif','modern-display','hand-lettered'].includes(referenceDesign?.letteringStyle || '') ? referenceDesign?.letteringStyle : 'artistic brush script and editorial serif';
   const mood = ['blush-sage','earthy-warm','forest-cream','pastel','vibrant'].includes(referenceDesign?.paletteMood || '') ? referenceDesign?.paletteMood : 'collection colors';
-  const centralHero = isCentralHero(number,Boolean(settings?.hasReference || settings?.referenceImage));
+  const referenceDriven = Boolean(settings?.hasReference || settings?.referenceImage) && spec.kind !== 'mockup';
   const referenceComposition = sanitizedText(referenceDesign?.compositionGuide || '',850);
-  const centralZone = heroTextZone(referenceDesign);
+  const detectedTextZones = referenceTextZones(referenceDesign);
+  const textPlacement = detectedTextZones.length ? JSON.stringify(detectedTextZones) : 'unavailable; choose typography location from the layout and graphic structure of the reference, not a preset';
   const referenceArtworkSlots = (referenceDesign?.slots || []).slice(0,12)
     .filter(slot => [slot.x,slot.y,slot.width,slot.height].every(Number.isFinite) &&
       slot.width > 2 && slot.height > 2)
@@ -159,15 +160,16 @@ function artPrompt(number: number, project: StoredProject, count: number, settin
     'Render the exact main title: ' + JSON.stringify(title) + '. Render the exact subtitle: ' + JSON.stringify(subtitle) + '. No other writing, numerals, file specifications, licensing or marketing claims.',
     'Typography: expressive premium artisanal brush-script plus clear editorial serif, refined and striking at Etsy mobile thumbnail size. Lettering must be correctly spelled and legible.',
     'Visual continuity comes from the actual collection palette and selected reference, not a hardcoded watercolor template: ' + JSON.stringify(palette) + '. Use restrained decorative color and plenty of clean readable space.',
-    centralHero ? ('REFERENCE-LED CENTRAL HERO COMPOSITION: place the expressive main title and subtitle TOGETHER inside a generous central medallion at x=' + centralZone.x + '-' + (centralZone.x+centralZone.width) + '%, y=' + centralZone.y + '-' + (centralZone.y+centralZone.height) + '%. Text must not leave the medallion. Lettering may stack to fit a long collection title. Surround the medallion with open peripheral space for LARGER original PNG artwork: top, left and right sides, and bottom. NO assets in the middle title space. THIS IS NOT A TOP-HEADING GRID.' ) : 'STRICT GALLERY TEXT SAFETY: title and subtitle stay within the TOP 30 PERCENT of the square, and y=30-38% remains empty whitespace. The original clipart grid starts BELOW 38%.',
+    referenceDriven ? 'REFERENCE-DRIVEN TYPOGRAPHY: match the exact spatial distribution and hierarchy of the user-selected reference image. Detected typography zones (percent of the 1024 square): ' + textPlacement + '. Text may appear at the top, center, bottom, sides, or multiple locations. NEVER enforce a universal top-title or central-medallion layout. Keep each letter readable and allow original PNG assets to occupy the other regions.' : 'NO REFERENCE SELECTED: use a readable top headline and a separate original-artwork area below it.',
+
     'The actual digital clipart collection is NOT provided to you; original PNG assets will be composited later by PaletteIQ. Do not invent or paint any clipart artwork, characters, food, floral illustrations, miniature icons, badges depicting objects, or product substitutes.',
     'Do not claim asset dimensions, DPI, license terms, digital file formats or asset counts other than the exact verified subtitle supplied.',
     'Consistent tasteful professional photography/graphic design, high-key natural lighting, spacious graphic hierarchy.',
     'Design is determined automatically by the reference image, actual theme and purpose of this slide, not by disabled manual typography/cover/background/boldness/hierarchy/intensity controls.',
     'Verified reference analysis GRAPHIC STYLE ONLY (not product depiction): motif=' + motif + ', lettering=' + lettering + ', palette mood=' + mood + '.',
     referenceComposition ? 'MATCH THIS REFERENCE SPATIAL COMPOSITION (not its depicted objects or wording): ' + referenceComposition : '',
-    centralHero && referenceArtworkSlots.length ? 'REFERENCE ARTWORK OCCUPANCY / NEGATIVE-SPACE PLAN: keep these locations clear for ORIGINAL PNG LAYERS THAT WILL BE ADDED AFTER IMAGE GENERATION: ' + JSON.stringify(referenceArtworkSlots) + '. These are EMPTY placement zones; DO NOT paint objects into them.' : '',
-    centralHero ? 'For lengthy collection titles, form an elegant multi-level center lockup: emphasize the first short meaningful phrase as the visual hero, arrange all remaining exact title words in smaller supporting lines, preserving spelling, and keep everything inside the central title safe zone.' : '',
+    referenceDriven && referenceArtworkSlots.length ? 'REFERENCE ARTWORK OCCUPANCY / NEGATIVE-SPACE PLAN: keep these locations clear for ORIGINAL PNG LAYERS THAT WILL BE ADDED AFTER IMAGE GENERATION: ' + JSON.stringify(referenceArtworkSlots) + '. These are EMPTY placement zones; DO NOT paint objects into them.' : '',
+    referenceDriven ? 'For long titles, preserve every exact user-supplied word and adapt typography size and line breaks to the detected reference headline zones; do not invent a central title if the reference places it elsewhere.' : '',
     'Use the selected reference to guide design geometry, lettering scale, badge shape and palette, but keep the result original. Do not force watercolor corner washes, colored torn-paper patches, circular rings or multicolor corner gradients unless the reference specifically calls for them.',
     'Avoid the default repeated cream-center / turquoise-and-orange watercolor-corner motif. For each listing slide, design a distinct nonfigurative graphic structure matched to its purpose, while preserving collection coherence.',
     'Do not add large saturated pigment to any of the four corners. Background must not overpower the original clipart. Typography remains the primary generated graphic.'
@@ -184,10 +186,12 @@ function artPrompt(number: number, project: StoredProject, count: number, settin
   return [
     ...core,
     'Create ONLY a decorative NONFIGURATIVE graphic background and the requested exact title and subtitle. No photographs, product objects, illustrated figures, patterns depicting products, animals, plants, food, icons or silhouettes.',
-    centralHero ? 'HERO COVER ART DIRECTION: build a large, visually commanding CENTRAL title lockup or central sign shape, and leave spacious surrounding perimeter positions for oversized, different-sized original clipart. The reference may have artwork visually framing the letters from all four sides; imitate the composition rhythm, NOT any actual object, vehicle or food. Prefer central title hierarchy plus bold clipart placement, NOT a top title above two rows of tiny art.' : spec.kind === 'all' || spec.kind === 'all-grouped' || spec.kind === 'categories'
-      ? 'Reserve y=0-38% for artistic typography and clear separation. From y=38-99% keep a calm unillustrated area for a dense grid of distinct original PNGs; never place text or miniature images there.'
-      : spec.kind === 'information' ? 'Keep lower two thirds very clean and light for clear informational overlays and the original artworks.' :
-      'Keep the artwork area beneath the title open and calm, using the selected reference\'s actual composition language. Do not add automatic corner pigment or watercolor borders.',
+    referenceDriven ? 'REFERENCE COMPOSITION HAS PRIORITY: position nonfigurative design and title treatment to match the chosen reference. Leave original-PNG slots empty for later compositing and allow varied subject sizes. Do not impose a title-at-top grid, central badge or border motif unless the reference actually has them.' :
+      spec.kind === 'all' || spec.kind === 'all-grouped' || spec.kind === 'categories'
+        ? 'Without a reference, protect the top headline and leave the lower artwork area open.'
+        : spec.kind === 'information' ? 'Keep sufficient empty space for informational overlays and original artwork.' :
+          'Keep a calm background with clear separations between lettering and the original artwork.',
+
     'Design direction: ' + spec.purpose
   ].join('\n');
 }
@@ -226,7 +230,7 @@ export async function POST(request: Request) {
     const keyOpenAi = await userCredential(user.userId, 'openai') || (env as unknown as Record<string,string|undefined>).OPENAI_API_KEY;
     if (!keyOpenAi) return bad('Configure OpenAI API key for Vision positioning', 503);
     const isMockup = input.number >= 8 && input.number <= 12;
-    const hero = isCentralHero(input.number,Boolean(input.settings?.hasReference));
+    const hero = Boolean(input.settings?.hasReference) && !isMockup;
     const safeFallback = fitListingPlacementsToReference(input.number,fallback,hero,input.referenceDesign);
     const descriptor = fallback.map(p => ({ id:p.assetId, name:valid.get(p.assetId), x:p.x, y:p.y, width:p.width, height:p.height }));
     try {
@@ -239,8 +243,9 @@ export async function POST(request: Request) {
               'You are an expert graphic designer positioning EXISTING ORIGINAL PNG LAYERS on an AI-generated empty listing design. NEVER draw or regenerate clipart.',
               'Inspect the supplied BACKGROUND IMAGE PIXELS to locate the already-rendered artistic typography and unobstructed blank printable space.',
               'The supplied generated background and the final JPG are both exact 1:1 square at 1024x1024. Return position percentages relative to this square; there is no aspect-ratio crop.',
-              hero ? 'CENTERED REFERENCE HERO: the generated image has a large typographic centerpiece at x=25-75%, y=24-78%, and the selected ORIGINAL PNGs must FRAME IT from the top, left, right and bottom, not in a uniform grid beneath. Use strongly varied artwork sizes, with a few large hero assets and smaller supporting details. Zero overlap with the actual text glyphs. Keep all PNGs inside the canvas and never create or redraw objects.' : 'GALLERY TEXT SAFETY: title/subtitle are protected at y=0-38%; every original PNG must stay BELOW y=38%, even if some pixels in that band appear blank. No overlap with text, including rotated objects.',
-              isMockup ? 'This is a realistic BLANK PRODUCT MOCKUP. All supplied original asset layers MUST fit on the blank flat printable area of the product and not float on table/background. Account for actual blank surface position in visible pixels. Do not cover straps, hands, folds, shadows or the product edge.' : hero ? 'Reference image shows an art-directed product-cover collage with the title in the middle, surrounded by larger originals: match that spatial hierarchy, never copy reference subjects.' : 'Use intentional size hierarchy and negative space. For catalogue pages preserve legible gallery organization.',
+              hero ? 'REFERENCE-GUIDED TYPOGRAPHY SAFETY: protect each detected text rectangle from reference analysis at its ACTUAL x/y coordinates, wherever located in the 1024 square. Reference text zones: '+JSON.stringify(referenceTextZones(input.referenceDesign))+'. The generated background may have lettering in different regions; inspect its pixels too. Resize and position only the supplied originals around all actual text. NEVER force all clipart under the first 38% or around a central medallion.' : 'Without a reference, protect the generated title text (normally at the top) and keep every original PNG clear of its letters.',
+
+              isMockup ? 'This is a realistic BLANK PRODUCT MOCKUP. All supplied original asset layers MUST fit on the blank flat printable area of the product and not float on table/background. Account for actual blank surface position in visible pixels. Do not cover straps, hands, folds, shadows or the product edge.' : hero ? 'Match the chosen reference actual spatial hierarchy, including title and art positions wherever they occur. Never duplicate or draw reference subjects.' : 'Use intentional size hierarchy and negative space. For catalogue pages preserve legible gallery organization.',
               input.referenceDesign?.compositionGuide ? 'Reference graphical composition guide: ' + sanitizedText(input.referenceDesign.compositionGuide,850) : '',
               'Return ONLY JSON: {"placements":[{"assetId":"source-id","x":30,"y":40,"width":18,"height":22,"rotation":0}],"unsafe":false,"notes":""}.',
               'Return each listed assetId EXACTLY ONCE and NO new IDs. Coordinate ranges 0–100. Retain approximate proportions of existing placement slots; never infer an object shape or invent an asset from its name.',
