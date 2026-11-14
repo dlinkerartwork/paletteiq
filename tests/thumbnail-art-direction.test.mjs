@@ -160,12 +160,14 @@ test('Vision analyzes the exact persisted background, not a generic pre-generati
   assert.match(designer, /backgroundImageUrl: imageUrl/);
   assert.match(designer, /AI Vision analyzing generated background and positioning original clipart/);
 });
-test('Hero cover prompt includes the requested cream medallion, blush ring and editorial lettering', () => {
+test('Hero medallion and blush-ring art direction are optional and applied only to matching references', () => {
   assert.match(generator, /const heroReferenceStyle = \[/);
   assert.match(generator, /large soft cream central medallion panel/);
   assert.match(generator, /blush watercolor circular brush ring/);
   assert.match(generator, /Do NOT create illustrations, icons, mini food drawings/);
-  assert.match(generator, /isHeroCover \? \['HERO ART DIRECTION PRIORITY:'/);
+  assert.match(generator, /isHeroCover && !referenceComposition && reference\?\.graphicMotif === 'blush-brush-ring'/);
+  assert.match(generator, /HERO ART DIRECTION PRIORITY/);
+  assert.match(generator, /Do not apply pink brush rings, torn paper corners or colorful corner washes by default/);
 });
 
 test('Manual approval runs background-first Vision for custom canvas and original asset layers', () => {
