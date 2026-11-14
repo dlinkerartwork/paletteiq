@@ -9,10 +9,10 @@ const client = readFileSync(new URL('../components/etsy-listing-image-studio.tsx
 const pricing = readFileSync(new URL('../lib/etsy-listing-image-cost.ts', import.meta.url), 'utf8');
 
 test('OpenAI Vision arranges actual clipart around visible lettering naturally without rigid exclusion or AI redraw', () => {
-  assert.match(backend, /Use actual title\/subtitle\/badge locations and colors on the generated background/);
-  assert.match(backend, /tasteful overlap near swashes, letter edges and decorations is encouraged/);
-  assert.match(backend, /Protect essential full word shapes/);
-  assert.match(backend, /FREE COMPOSITION: Disregard ALL suggested x\/y\/width\/height/);
+  assert.match(backend, /Preserve all visible title, subtitle and badge words/);
+  assert.match(backend, /Do not place an opaque original over ANY essential letter shapes/);
+  assert.match(backend, /Preserve the ENTIRE main title, subtitle and badge/);
+  assert.match(backend, /FREE COMPOSITION: Ignore PaletteIQ starter geometry completely/);
   assert.match(backend, /validListingPlacement\(p,input\.number!\)/);
   assert.match(backend, /isMockup \|\| \(p\.x\+p\.width<=100 && p\.y\+p\.height<=100\)/);
   assert.doesNotMatch(backend, /The title and subtitle must remain unobstructed, usually in the upper 23%/);
