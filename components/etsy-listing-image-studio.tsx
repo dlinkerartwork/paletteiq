@@ -537,6 +537,44 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
    * references / provides the creative brief. The image generator sees TEXT
    * ONLY and produces typography/background with ZERO illustrated subjects.
    */
+  /**
+   * Package EXACT selected original image bytes and the user's editable
+   * prompt into a download ZIP. The AI API sees the same source IDs through
+   * contact sheet image inputs: OpenAI does not visually decode ZIP files.
+   */
+  const downloadAiFirstSourceZip = async () => {
+    if(working||!positions.length)return;
+    setWorking('source-zip');
+    setMessage('Packaging selected original clipart PNGs/JPGs and the current creative prompt into a source ZIP...');
+    try{
+      const response=await fetch(apiUrl,{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action:'source-zip',projectId,number:step,
+          selectedAssetIds:[...new Set(positions.map(p=>p.assetId))],
+          title:currentLettering.title,subtitle:currentLettering.subtitle,badge:currentLettering.badge,
+          backgroundPrompt:promptsReady?promptDraft!.backgroundPrompt:''
+        })
+      });
+      if(!response.ok){
+        const body=await response.json().catch(()=>null) as {error?:string}|null;
+        throw Error(body?.error||'ZIP export failed (HTTP '+response.status+')');
+      }
+      const blob=await response.blob();
+      if(!blob.size)throw Error('The original source ZIP was empty');
+      const url=URL.createObjectURL(blob);
+      try{
+        const a=document.createElement('a');
+        a.href=url;
+        a.download=(name||'paletteiq-collection').replace(/[^a-zA-Z0-9-_ ]/g,'').replace(/\s+/g,'-').slice(0,64)+'-original-clipart-source.zip';
+        document.body.appendChild(a);a.click();a.remove();
+      }finally{window.setTimeout(()=>URL.revokeObjectURL(url),60000);}
+      setMessage('Downloaded '+new Set(positions.map(p=>p.assetId)).size+
+        ' selected original artwork files in a ZIP, with the edited prompt and source manifest. OpenAI Vision will receive the same sources as numbered images (ZIP itself is not a visual API input).');
+    }catch(error){
+      setMessage('Original source ZIP failed: '+(error instanceof Error?error.message:String(error)));
+    }finally{setWorking('');}
+  };
+
   const generateAiFirstConcept = async () => {
     if (!promptsReady || working) return;
     setWorking('concept');
@@ -1043,7 +1081,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
               <option value="structured">Structured — preserve my white-canvas arrangement</option>
             </select>
             <small>{compositionMode === 'ai-first'
-              ? 'AI-First: OpenAI Vision sees numbered contact sheets from the original collection, chooses its source PNGs and directs the design, without receiving starter coordinates. The image model creates ONLY typography and background; PaletteIQ composites the original clipart. No AI redraw or cleanup is needed.'
+              ? 'AI-First: Choose original clipart, optionally download the exact selected-source ZIP with its editable prompt and manifest. OpenAI Vision receives matching numbered reference images (the API cannot visually unpack ZIP input). It chooses the original PNG assets and freely directs their composition; the image generator draws typography/background ONLY, never replacement clipart.'
               : compositionMode === 'free'
                 ? 'AI Vision acts as the art director after the background is generated: it can resize, move, rotate, overlap or partially crop any selected ORIGINAL clipart. White-canvas positions are inspiration only, NOT a constraint. Clipart selection and identity remain unchanged.'
                 : 'PaletteIQ preserves the composition you created on the white canvas. You can still choose optional AI Vision refinement or Auto Arrange.'}</small>
@@ -1058,6 +1096,11 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
                 disabled={!assets.length || !!working} onChange={e => changeArtworkCount(Number(e.target.value))}
                 style={{ width: 105, flexShrink: 0 }}/>
               <button type="button" className="outline-btn" disabled={!!working || !assets.length} onClick={autoSelectArtwork}>Auto Select ({positions.length})</button>
+              {compositionMode === 'ai-first' && <button type="button" className="outline-btn"
+                disabled={!!working || !positions.length}
+                onClick={() => void downloadAiFirstSourceZip()}>
+                <Download size={15}/> Download selected source ZIP ({new Set(positions.map(p=>p.assetId)).size} originals)
+              </button>}
               {compositionMode === 'ai-first' && <button type="button" className="outline-btn"
                 disabled={!!working || !assets.length}
                 onClick={() => {
@@ -1175,7 +1218,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
               disabled={!!working || !promptsReady}
               placeholder="Click Prepare OpenAI prompts to review the art direction sent to OpenAI."
               style={{ width:'100%', boxSizing:'border-box', resize:'vertical', fontFamily:'inherit', fontSize:12, lineHeight:1.55 }}/>
-            <small style={{ color:'#75695e' }}>This text is sent unchanged to {compositionMode === 'ai-first' ? 'OpenAI Vision with authentic clipart reference boards (not to the image generator)' : 'the image-generation model'}. Your creative preferences are respected; technical instructions still forbid generated clipart in the final image.</small>
+            <small style={{ color:'#75695e' }}>This text is sent unchanged to {compositionMode === 'ai-first' ? 'OpenAI Vision together with authentic visual references from the selected clipart ZIP source set' : 'the image-generation model'}. Review and edit it before paid requests; technical instructions still forbid generated clipart in the final image.</small>
             <label className="input-label" htmlFor="listing-vision-prompt">OPENAI VISION — ORIGINAL CLIPART COMPOSITION PROMPT</label>
             <textarea id="listing-vision-prompt" aria-label="Editable OpenAI Vision composition prompt"
               rows={8} maxLength={12000} spellCheck={false}
