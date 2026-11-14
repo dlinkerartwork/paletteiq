@@ -212,6 +212,8 @@ export async function POST(request: Request) {
     const keyOpenAi = await userCredential(user.userId, 'openai') || (env as unknown as Record<string,string|undefined>).OPENAI_API_KEY;
     if (!keyOpenAi) return bad('Configure OpenAI API key for Vision positioning', 503);
     const isMockup = input.number >= 8 && input.number <= 12;
+    const hero = isCentralHero(input.number,Boolean(input.settings?.hasReference));
+    const safeFallback = fitListingPlacementsToReference(input.number,fallback,hero,input.referenceDesign);
     const descriptor = fallback.map(p => ({ id:p.assetId, name:valid.get(p.assetId), x:p.x, y:p.y, width:p.width, height:p.height }));
     try {
       const response = await fetch('https://api.openai.com/v1/responses', {
@@ -223,8 +225,9 @@ export async function POST(request: Request) {
               'You are an expert graphic designer positioning EXISTING ORIGINAL PNG LAYERS on an AI-generated empty listing design. NEVER draw or regenerate clipart.',
               'Inspect the supplied BACKGROUND IMAGE PIXELS to locate the already-rendered artistic typography and unobstructed blank printable space.',
               'The supplied generated background and the final JPG are both exact 1:1 square at 1024x1024. Return position percentages relative to this square; there is no aspect-ratio crop.',
-              'STRICT: title/subtitle occupy a protected TOP band y=0-38% of the square. Every original clipart must stay BELOW y=38%, even if Vision thinks a character can overlap blank pixels within the lettering zone. No text/clipart collision, including rotated artwork. Do not return duplicate or near-identical assets.',
-              isMockup ? 'This is a realistic BLANK PRODUCT MOCKUP. All supplied original asset layers MUST fit on the blank flat printable area of the product and not float on table/background. Account for actual blank surface position in visible pixels. Do not cover straps, hands, folds, shadows or the product edge.' : 'Use intentional size hierarchy and negative space. For many gallery items keep original grid, adjust only to avoid title, maintain layout clarity.',
+              hero ? 'CENTERED REFERENCE HERO: the generated image has a large typographic centerpiece at x=25-75%, y=24-78%, and the selected ORIGINAL PNGs must FRAME IT from the top, left, right and bottom, not in a uniform grid beneath. Use strongly varied artwork sizes, with a few large hero assets and smaller supporting details. Zero overlap with the actual text glyphs. Keep all PNGs inside the canvas and never create or redraw objects.' : 'GALLERY TEXT SAFETY: title/subtitle are protected at y=0-38%; every original PNG must stay BELOW y=38%, even if some pixels in that band appear blank. No overlap with text, including rotated objects.',
+              isMockup ? 'This is a realistic BLANK PRODUCT MOCKUP. All supplied original asset layers MUST fit on the blank flat printable area of the product and not float on table/background. Account for actual blank surface position in visible pixels. Do not cover straps, hands, folds, shadows or the product edge.' : hero ? 'Reference image shows an art-directed product-cover collage with the title in the middle, surrounded by larger originals: match that spatial hierarchy, never copy reference subjects.' : 'Use intentional size hierarchy and negative space. For catalogue pages preserve legible gallery organization.',
+              input.referenceDesign?.compositionGuide ? 'Reference graphical composition guide: ' + sanitizedText(input.referenceDesign.compositionGuide,450) : '',
               'Return ONLY JSON: {"placements":[{"assetId":"source-id","x":30,"y":40,"width":18,"height":22,"rotation":0}],"unsafe":false,"notes":""}.',
               'Return each listed assetId EXACTLY ONCE and NO new IDs. Coordinate ranges 0–100. Retain approximate proportions of existing placement slots; never infer an object shape or invent an asset from its name.',
               'If a safe printable area does not exist, set unsafe=true and return current proposed placements unchanged. Values must be numbers.',
@@ -234,7 +237,7 @@ export async function POST(request: Request) {
           ]}],text:{format:{type:'json_object'}}
         }), signal:AbortSignal.timeout(60000)
       });
-      if (!response.ok) return Response.json({placements:fitListingPlacementsBelowText(fallback), fallback:'Vision layout unavailable; typography-safe original positioning retained.'});
+      if (!response.ok) return Response.json({placements:safeFallback, fallback:'Vision layout unavailable; reference-aware safe original positioning retained.'});
       const answer = await response.json() as {output?:Array<{content?:Array<{text?:string}>}>};
       const raw = answer.output?.flatMap(a=>a.content||[]).map(c=>c.text||'').join('') || '{}';
       const parsed = JSON.parse(raw) as {placements?:ListingPlacement[]; unsafe?:boolean; notes?:string};
@@ -245,16 +248,16 @@ export async function POST(request: Request) {
         if (!p || !ids.has(p.assetId) || seen.has(p.assetId)) return false;
         seen.add(p.assetId);
         return [p.x,p.y,p.width,p.height,p.rotation ?? 0].every(n=>typeof n==='number' && Number.isFinite(n)) &&
-          p.x>=0 && p.y>=23 && p.width>=2 && p.height>=2 &&
-          p.x+p.width<=100 && p.y+p.height<=98 && Math.abs(p.rotation??0)<=15;
+          p.x>=0 && p.y>=0 && p.width>=2 && p.height>=2 &&
+          p.x+p.width<=100 && p.y+p.height<=100 && Math.abs(p.rotation??0)<=15;
       });
-      if (!correct) return Response.json({placements:fitListingPlacementsBelowText(fallback), fallback:'Vision could not verify a safe layout. Retained a typography-safe original PNG layout.'});
-      const safe = fitListingPlacementsBelowText(candidates);
+      if (!correct) return Response.json({placements:safeFallback, fallback:'Vision could not verify a safe layout. Retained a reference-safe original PNG layout.'});
+      const safe = fitListingPlacementsToReference(input.number,candidates,hero,input.referenceDesign);
       if (safe.length !== fallback.length || duplicateListingAssetIds(safe).length)
-        return Response.json({placements:fitListingPlacementsBelowText(fallback), fallback:'Vision returned unsafe or duplicated clipart positions. Used a safe original layout.'});
+        return Response.json({placements:safeFallback, fallback:'Vision returned unsafe or duplicated clipart positions. Used a safe original layout.'});
       return Response.json({placements:safe, note:sanitizedText(parsed.notes||'',180)});
     } catch {
-      return Response.json({placements:fitListingPlacementsBelowText(fallback), fallback:'Vision layout timed out; typography-safe original positioning retained.'});
+      return Response.json({placements:safeFallback, fallback:'Vision layout timed out; reference-safe original positioning retained.'});
     }
   }
   if (input.action !== 'generate') return bad('Unknown listing image action');
