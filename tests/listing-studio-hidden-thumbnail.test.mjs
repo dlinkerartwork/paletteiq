@@ -1,13 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { DEFAULT_LISTING_STUDIO_CONFIG } from '../lib/listing-studio-config.ts';
 
 const page = readFileSync(new URL('../app/page.tsx', import.meta.url), 'utf8');
-const listing = readFileSync(new URL('../components/etsy-listing-image-studio.tsx', import.meta.url), 'utf8');
-const config = readFileSync(new URL('../lib/listing-studio-config.ts', import.meta.url), 'utf8');
+const studio = readFileSync(new URL('../components/etsy-listing-image-studio.tsx', import.meta.url), 'utf8');
+const route = readFileSync(new URL('../app/api/listing-image-studio/route.ts', import.meta.url), 'utf8');
 
-test('Thumbnail Designer and Etsy Listing Image Studio are both visible, separate pipeline steps', () => {
+test('Thumbnail Designer and original 15-image Listing Studio remain separately accessible', () => {
   const steps = page.match(/const steps = (\[[^\n]+\]);/)?.[1] || '';
   assert.ok(steps.includes("'thumbnails'"));
   assert.ok(steps.includes("'listing-images'"));
@@ -15,30 +14,37 @@ test('Thumbnail Designer and Etsy Listing Image Studio are both visible, separat
   assert.match(page, /tab === 'thumbnails' && <ThumbnailDesigner/);
   assert.match(page, /tab === 'listing-images' && <EtsyListingImageStudio/);
   assert.match(page, /restored.tab && validTabs.includes\(restored.tab\)/);
-  assert.doesNotMatch(page, /requested === 'thumbnails' \? 'listing-images'/);
 });
 
-test('all Reference & Assets controls are accessible from Listing Image Studio', () => {
-  for (const key of ['layoutMode','analysisProvider','analysisModel','coverStyle',
-      'backgroundStyle','boldness','hierarchy','intensity','headline','referenceImage','referenceStyle']) {
-    assert.ok(listing.includes("changeConfig('"+key+"'") ||
-      listing.includes("analysisProvider: value") || listing.includes("analysisModel: value"),
-      'Missing setting control: ' + key);
-  }
-  assert.match(listing, /Save listing design settings/);
-  assert.match(listing, /settingsDirty\) return setMessage/);
-  assert.match(listing, /onConfigSave\(config\)/);
-  assert.match(page, /onConfigSave=\{saveListingImageSettings\}/);
-  assert.match(page, /referenceImage: settings.referenceImage\?\.startsWith\('data:'\) \? undefined/);
-  assert.match(listing, /createImageBitmap\(file\)/);
-  assert.match(listing, /AI artistic lettering/);
+test('restore original PR18 listing studio without the later Reference & Assets configuration panel', () => {
+  assert.match(studio, /<h2>Etsy Listing Image Studio<\/h2>/);
+  assert.match(studio, /OPENAI ARTISTIC BACKGROUND MODEL/);
+  assert.match(studio, /BACKGROUND QUALITY/);
+  assert.match(studio, /const \[quality, setQuality\] = useState<'low' \| 'medium' \| 'high'>\('medium'\)/);
+  assert.match(studio, /const \[model, setModel\] = useState\('gpt-image-1-mini'\)/);
+  assert.doesNotMatch(studio, /<h2>Reference & Assets — Listing Image Studio<\/h2>/);
+  assert.doesNotMatch(studio, /onConfigSave|config: initialConfig|settingsDirty|initialPlacements|changeConfig/);
+  assert.doesNotMatch(page, /onConfigSave=\{saveListingImageSettings\}|listingStudioSessionSettings/);
+  assert.doesNotMatch(route, /settings\?\.coverStyle|settings\?\.backgroundStyle|input\.settings|referenceDesign\?:/);
 });
 
-test('new collections can generate 15 listing images with valid default settings without legacy editor', () => {
-  assert.equal(DEFAULT_LISTING_STUDIO_CONFIG.imageModel, 'gpt-image-1-mini');
-  assert.equal(DEFAULT_LISTING_STUDIO_CONFIG.typography, 'ai-artwork');
-  assert.equal(DEFAULT_LISTING_STUDIO_CONFIG.layoutMode, 'ai');
-  assert.match(listing, /DEFAULT_LISTING_STUDIO_CONFIG/);
-  assert.match(listing, /LISTING_IMAGE_SPECS\.map/);
-  assert.match(config, /DEFAULT_LISTING_STUDIO_CONFIG/);
+test('original sequence requires review/approval per image and retains 15-image JPG ZIP export', () => {
+  assert.match(studio, /const precedingApproved = LISTING_IMAGE_SPECS\.slice\(0, step - 1\)/);
+  assert.match(studio, /if \(!precedingApproved\)/);
+  assert.match(studio, /const review = async \(status: 'approved' \| 'needs_revision'\)/);
+  assert.match(studio, /if \(status === 'approved' && step < 15\)/);
+  assert.match(studio, /Apply layout & save JPG/);
+  assert.match(studio, /Export 15 approved JPGs as ZIP/);
+  assert.match(studio, /aspectRatio: '4 \/ 3'/);
+  assert.match(studio, /const file = await compose\(background, layout, assets\)/);
+  assert.match(route, /Approve all 15 rendered listing images before exporting/);
+});
+
+test('revert keeps safe upload and paid background retry fixes, including original project data', () => {
+  assert.match(studio, /uploadListingJpg\(projectId, fileName\(number\), blob, fetch, onProgress\)/);
+  assert.match(studio, /Retry save JPG \(no AI cost\)/);
+  assert.match(studio, /await saveRecord\(\{\s*number: step, status: 'draft', backgroundUrl: response\.backgroundUrl/);
+  assert.match(route, /value\.renderedImageUrl !== undefined \? value\.renderedImageUrl/);
+  assert.match(page, /listingImages\?: ListingImageRecord\[\]/);
+  assert.match(page, /listingStudioSettings\?: ListingStudioConfig/);
 });
