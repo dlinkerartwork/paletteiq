@@ -935,7 +935,9 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
       }
       const next = latestDesignsRef.current.map(d => d.id === target.id
         ? { ...d, backgroundImageUrl: result.imageUrl, aiImagePrompt: result.prompt, elements: [
-            ...positioned, ...d.elements.filter(e => e.type === 'text')
+            ...positioned, ...(d.packSlideKey === 'custom-canvas' && d.packAiTypographyEnabled !== false
+              ? badgeOverlay(d.packTextZone || {x:22,y:30,width:56,height:34}, d.packBadge || '')
+              : d.elements.filter(e => e.type === 'text'))
           ], rejectedBackgroundUrl: undefined, rejectedBackgroundReason: undefined,
           generationError: visionFallback ? 'Vision placement unavailable; previous original PNG layout kept.' : undefined,
           updatedAt: Date.now() } : d);
@@ -972,7 +974,9 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         target.packHierarchy || packHierarchy, 'editorial', [], target.referenceDesign?.compositionGuide || ''
       );
       const next = latestDesignsRef.current.map(d => d.id === target.id ? {
-        ...d, elements: [...result.elements, ...d.elements.filter(e => e.type === 'text')],
+        ...d, elements: [...result.elements, ...(d.packSlideKey === 'custom-canvas' && d.packAiTypographyEnabled !== false
+          ? badgeOverlay(d.packTextZone || {x:22,y:30,width:56,height:34}, d.packBadge || '')
+          : d.elements.filter(e => e.type === 'text'))],
         generationError: result.usedFallback ? 'AI Vision layout unavailable; original positions retained.' : undefined,
         updatedAt: Date.now()
       } : d);
