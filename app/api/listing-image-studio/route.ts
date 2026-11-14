@@ -443,12 +443,24 @@ export async function POST(request: Request) {
         return bad('Original artwork is missing from storage: '+asset.name,409);
       refs.push({asset,key:ref.key,name:sourceZipFilename(i,asset,ref.extension)});
     }
+    for (const [field,max] of [['title',140],['subtitle',140],['badge',60],['backgroundPrompt',24000]] as const) {
+      const candidate=input[field];
+      if(candidate!==undefined && (typeof candidate!=='string'||candidate.length>max))
+        return bad('Invalid source ZIP '+field+'; maximum '+max+' characters');
+    }
     const title=typeof input.title==='string'?sanitizedText(input.title,140):'';
     const subtitle=typeof input.subtitle==='string'?sanitizedText(input.subtitle,140):'';
     const badge=typeof input.badge==='string'?sanitizedText(input.badge,60):'';
+    const creativePrompt=input.backgroundPrompt?.trim() || aiFirstConceptPrompt({
+      theme:project.subtheme||project.theme||project.name,
+      title,subtitle,badge,
+      style:project.style,palette:project.palette,texture:project.texture,
+      sourceAssets:refs.map(({asset})=>({name:asset.name,category:asset.category})),
+      selectedCount:refs.length
+    });
     const manifest=selectedSourceManifest({
       theme:project.subtheme||project.theme||project.name,title,subtitle,badge,
-      prompt:typeof input.backgroundPrompt==='string'?input.backgroundPrompt.slice(0,24000):'',
+      prompt:creativePrompt,
       assets:refs.map(({asset,name})=>({assetId:asset.id,name:asset.name,category:asset.category,file:name}))
     });
     const meta=JSON.stringify(manifest,null,2);
