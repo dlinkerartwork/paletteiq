@@ -142,11 +142,11 @@ function artPrompt(number: number, project: StoredProject, count: number, settin
   const palette = sanitizedText(project.palette || 'warm ivory, forest green, muted earthy accents', 180);
   // Only allow known style tokens from the Reference & Assets UI. Never treat
   // arbitrary uploaded reference pixels as clipart or additional product art.
-  const motif = ['blush-brush-ring','split-panel','paper-collage','soft-wash','minimal-lines'].includes(referenceDesign?.graphicMotif || '') ? referenceDesign?.graphicMotif : 'none';
+  const motif = ['blush-brush-ring','split-panel','paper-collage','soft-wash','minimal-lines','central-medallion','retro-signage','perimeter-collage'].includes(referenceDesign?.graphicMotif || '') ? referenceDesign?.graphicMotif : 'none';
   const lettering = ['script-serif','editorial-serif','modern-display','hand-lettered'].includes(referenceDesign?.letteringStyle || '') ? referenceDesign?.letteringStyle : 'artistic brush script and editorial serif';
   const mood = ['blush-sage','earthy-warm','forest-cream','pastel','vibrant'].includes(referenceDesign?.paletteMood || '') ? referenceDesign?.paletteMood : 'collection colors';
   const centralHero = isCentralHero(number,Boolean(settings?.hasReference || settings?.referenceImage));
-  const referenceComposition = sanitizedText(referenceDesign?.compositionGuide || '',450);
+  const referenceComposition = sanitizedText(referenceDesign?.compositionGuide || '',850);
   const centralZone = heroTextZone(referenceDesign);
   const referenceArtworkSlots = (referenceDesign?.slots || []).slice(0,12)
     .filter(slot => [slot.x,slot.y,slot.width,slot.height].every(Number.isFinite) &&
@@ -241,7 +241,7 @@ export async function POST(request: Request) {
               'The supplied generated background and the final JPG are both exact 1:1 square at 1024x1024. Return position percentages relative to this square; there is no aspect-ratio crop.',
               hero ? 'CENTERED REFERENCE HERO: the generated image has a large typographic centerpiece at x=25-75%, y=24-78%, and the selected ORIGINAL PNGs must FRAME IT from the top, left, right and bottom, not in a uniform grid beneath. Use strongly varied artwork sizes, with a few large hero assets and smaller supporting details. Zero overlap with the actual text glyphs. Keep all PNGs inside the canvas and never create or redraw objects.' : 'GALLERY TEXT SAFETY: title/subtitle are protected at y=0-38%; every original PNG must stay BELOW y=38%, even if some pixels in that band appear blank. No overlap with text, including rotated objects.',
               isMockup ? 'This is a realistic BLANK PRODUCT MOCKUP. All supplied original asset layers MUST fit on the blank flat printable area of the product and not float on table/background. Account for actual blank surface position in visible pixels. Do not cover straps, hands, folds, shadows or the product edge.' : hero ? 'Reference image shows an art-directed product-cover collage with the title in the middle, surrounded by larger originals: match that spatial hierarchy, never copy reference subjects.' : 'Use intentional size hierarchy and negative space. For catalogue pages preserve legible gallery organization.',
-              input.referenceDesign?.compositionGuide ? 'Reference graphical composition guide: ' + sanitizedText(input.referenceDesign.compositionGuide,450) : '',
+              input.referenceDesign?.compositionGuide ? 'Reference graphical composition guide: ' + sanitizedText(input.referenceDesign.compositionGuide,850) : '',
               'Return ONLY JSON: {"placements":[{"assetId":"source-id","x":30,"y":40,"width":18,"height":22,"rotation":0}],"unsafe":false,"notes":""}.',
               'Return each listed assetId EXACTLY ONCE and NO new IDs. Coordinate ranges 0–100. Retain approximate proportions of existing placement slots; never infer an object shape or invent an asset from its name.',
               'If a safe printable area does not exist, set unsafe=true and return current proposed placements unchanged. Values must be numbers.',
