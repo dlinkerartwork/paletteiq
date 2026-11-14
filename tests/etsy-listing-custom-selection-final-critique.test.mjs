@@ -22,7 +22,7 @@ test('every listing stage permits a user-chosen count of original assets, not a 
     assert.equal(new Set(planListingPlacements(spec.number,images,{count:17}).map(p=>p.assetId)).size,17);
     assert.equal(planListingPlacements(spec.number,images,{count:120}).length,120);
   }
-  assert.equal(planListingPlacements(1,images).length,7,'default remains 7 for existing users');
+  assert.equal(planListingPlacements(1,images).length,12,'new art-first cover defaults to 12; saved individual pre-layouts remain untouched');
   assert.equal(planListingPlacements(2,images).length,120,'bundle overview still includes every original by default');
   assert.equal(planListingPlacements(3,images).length,120,'complete collection still includes every original by default');
   assert.equal(planListingPlacements(15,images).length,9,'finale default is unchanged');
@@ -82,7 +82,7 @@ test('Auto Arrange uses actual background Vision, with larger-count fallback and
 test('generator respects user count, does not redraw images and prioritizes coherent handmade creative typography',()=>{
   assert.match(api,/featuredCount\?: number/);
   assert.match(api,/selectedArtworkCount: input\.featuredCount/);
-  assert.match(api,/project\.selectedArtworkCount \|\| 7/);
+  assert.match(api,/project\.selectedArtworkCount \|\| DEFAULT_MAIN_COVER_CLIPART_COUNT/);
   assert.match(api,/MERCHANDISING HIERARCHY/);
   assert.match(api,/original collection artwork is the product and must remain prominent/);
   assert.match(api,/Never claim PNG, transparency/);
