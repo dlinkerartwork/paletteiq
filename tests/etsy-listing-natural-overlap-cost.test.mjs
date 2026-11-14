@@ -76,14 +76,20 @@ test('reported provider token usage generates a nonzero estimate including input
   assert.doesNotMatch(pricing,/0\.00,\s*medium:\s*0\.00/);
 });
 
-test('show clearly labeled estimated image cost in success and error notifications; exclude Vision and QC', () => {
+test('estimated image cost is a separate dismissible floating notice, never embedded in workflow status', () => {
   assert.match(backend, /estimateListingImageGenerationCost\(model, quality as 'low' \| 'medium' \| 'high', result\.usage\)/);
   assert.match(backend, /costEstimate \}/);
-  assert.match(client, /response\.costEstimate\.usd\.toFixed\(5\)/);
-  assert.match(client, /Estimated OpenAI image cost/);
-  assert.match(client, /Additional Vision\/QC API charges not included; actual billing may differ/);
-  assert.match(client, /published square-image output estimate; prompt tokens excluded/);
-  assert.match(client, /imageCostNotice \? ' ' \+ imageCostNotice : ''/);
-  assert.match(client, /Image ' \+ String\(step\)\.padStart\(2, '0'\) \+ ' saved as draft\. ' \+ imageCostNotice/);
+  assert.match(client, /setCostNotice\(\{ step, model, quality, estimate: response\.costEstimate \?\? null \}\)/);
+  assert.match(client, /data-listing-floating-cost="true"/);
+  assert.match(client, /role="status" aria-live="polite" aria-label="Estimated image generation cost"/);
+  assert.match(client, /aria-label="Dismiss image cost notice"/);
+  assert.match(client, /onClick=\{\(\) => setCostNotice\(null\)\}/);
+  assert.match(client, /position: 'fixed', bottom: 20, right: 20, zIndex: 1100/);
+  assert.match(client, /costNotice\.estimate\.usd\.toFixed\(5\)/);
+  assert.match(client, /Published square-image output estimate; prompt tokens not included/);
+  assert.match(client, /Additional Vision \(style\/layout\), QC and other API requests are not included/);
+  assert.match(client, /This is not the final OpenAI invoice/);
+  assert.doesNotMatch(client, /imageCostNotice/);
+  assert.doesNotMatch(client, /setMessage\([^;]*Estimated OpenAI image cost/);
   assert.match(pricing, /NEVER the official invoice/);
 });
