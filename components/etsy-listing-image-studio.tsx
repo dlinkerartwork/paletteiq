@@ -10,7 +10,7 @@ import EtsyListingLayoutCanvas from '@/components/etsy-listing-layout-canvas';
 import { evaluateListingCoverTitle, suggestListingCoverCopy } from '@/lib/etsy-listing-cover-copy';
 import {
   LISTING_IMAGE_SPECS, LISTING_WIDTH, LISTING_HEIGHT, originalAssets,
-  planListingPlacements, curatedListingHighlights, listingFilename, listingImageTextDefaults, isSquareListingApproved, type ListingImageText, type ListingFinalReview, type ListingAsset, type ListingImageRecord, type ListingPlacement
+  planListingPlacements, curatedListingHighlights, DEFAULT_MAIN_COVER_CLIPART_COUNT, listingFilename, listingImageTextDefaults, isSquareListingApproved, type ListingImageText, type ListingFinalReview, type ListingAsset, type ListingImageRecord, type ListingPlacement
 } from '@/lib/etsy-listing-image-plan';
 
 type Props = {
@@ -191,6 +191,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   const [model, setModel] = useState(() =>
     /^gpt-image-[a-z0-9.-]{1,80}$/.test(defaultImageModel) ? defaultImageModel : 'gpt-image-1-mini');
   const [textScale, setTextScale] = useState<'compact' | 'balanced' | 'statement'>('compact');
+  const [backgroundStyle, setBackgroundStyle] = useState<'plain' | 'minimal' | 'soft-texture'>('minimal');
   const [availableModels, setAvailableModels] = useState<Array<{id: string; name: string}>>([]);
   const [changes, setChanges] = useState<Record<number, ListingPlacement[]>>({});
   const [preLayouts, setPreLayouts] = useState<Record<string, ListingPlacement[]>>({});
@@ -427,7 +428,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       await savePreLayout(effectivePositions);
       setMessage('Generating the AI graphic background and artistic typography using the saved white canvas composition...');
       const response = await send({ action: 'generate', projectId, number: step, model, quality,
-        featuredCount: effectivePositions.length, placements: effectivePositions, textScale,
+        featuredCount: effectivePositions.length, placements: effectivePositions, textScale, backgroundStyle,
         title: lettering.title, subtitle: lettering.subtitle, badge: lettering.badge,
         revisionNotes: (notes[step] ?? current?.notes ?? '').trim() });
       if (!response.backgroundUrl) throw Error('OpenAI did not return the background');
@@ -726,11 +727,20 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
               <select id="listing-lettering-scale" aria-label="Artistic lettering size"
                 value={textScale} disabled={!!working}
                 onChange={e => setTextScale(e.target.value as typeof textScale)}>
-                <option value="compact">Compact — smaller title, more artwork (recommended)</option>
+                <option value="compact">Compact — extra-small title, artwork first (recommended)</option>
                 <option value="balanced">Balanced — moderate title</option>
                 <option value="statement">Statement — larger expressive lettering</option>
               </select>
               <small style={{color:'#75695e'}}>Lettering size guides the AI for the next background generation; it cannot resize text already baked into an existing background JPG.</small>
+              <label className="input-label" htmlFor="listing-background-style">BACKGROUND STYLE (THEME-MATCHED)</label>
+              <select id="listing-background-style" aria-label="Listing background style"
+                value={backgroundStyle} disabled={!!working}
+                onChange={e => setBackgroundStyle(e.target.value as typeof backgroundStyle)}>
+                <option value="minimal">Minimal — light, almost plain (recommended)</option>
+                <option value="plain">Plain — clean neutral/theme color</option>
+                <option value="soft-texture">Soft texture — faint matching paper/wash</option>
+              </select>
+              <small style={{color:'#75695e'}}>AI keeps the background quiet and consistent with the source clipart theme; the original illustrations provide the decoration. Changes take effect on the next AI background generation.</small>
             </div>
           </section>
           <div style={{ border: '1px solid #eadfce', borderRadius: 10, padding: 12, display: 'grid', gap: 9 }}>
@@ -780,13 +790,31 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           </div>
           <div style={{ border: '1px solid #eadfce', padding: 12, borderRadius: 10, display: 'grid', gap: 9 }}>
             <strong>Original clipart selection — Image {String(step).padStart(2,'0')}</strong>
-            <small>Choose how many ORIGINAL collection assets appear in this listing image. Main Cover defaults to 7, but you can use any count up to the collection size. Larger covers may reduce title readability; check the final critique.</small>
+            <small>Choose how many ORIGINAL collection assets appear in this listing image. Main Cover defaults to {DEFAULT_MAIN_COVER_CLIPART_COUNT} with two large focal illustrations, several medium ones and smaller accents. You can choose any count up to the collection size.</small>
             <label className="input-label" htmlFor="listing-clipart-count">NUMBER OF CLIPARTS (1–{assets.length})</label>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <input id="listing-clipart-count" aria-label="Number of listing cliparts" type="number" min={1} max={assets.length} step={1} value={positions.length}
                 disabled={!assets.length || !!working} onChange={e => changeArtworkCount(Number(e.target.value))}
                 style={{ width: 105, flexShrink: 0 }}/>
               <button type="button" className="outline-btn" disabled={!!working || !assets.length} onClick={autoSelectArtwork}>Auto Select ({positions.length})</button>
+              {step === 1 && <button type="button" className="outline-btn"
+                disabled={!assets.length || !!working}
+                onClick={() => {
+                  if ((current?.backgroundUrl || preLayouts[String(step)] || changes[step]) &&
+                      !window.confirm('Replace the current Main Cover placement with the recommended ' +
+                        Math.min(DEFAULT_MAIN_COVER_CLIPART_COUNT, assets.length) +
+                        '-clipart art-first composition? This will not regenerate or delete the AI background.')) return;
+                  const richLayout = planListingPlacements(1, categorizedAssets, {
+                    count: Math.min(DEFAULT_MAIN_COVER_CLIPART_COUNT, assets.length)
+                  });
+                  setChanges(old => ({ ...old, [step]: richLayout }));
+                  setSelectedIndex(0);
+                  setMessage('Recommended Main Cover: ' + richLayout.length +
+                    ' original cliparts with large heroes, medium supports, and small accents. ' +
+                    (current?.backgroundUrl
+                      ? 'Click Apply layout & save JPG to update the existing background without another image generation.'
+                      : 'Adjust the white canvas, save pre-layout and generate when ready.'));
+                }}>Recommended {Math.min(DEFAULT_MAIN_COVER_CLIPART_COUNT, assets.length)}-Clipart Cover</button>}
               <button type="button" className="outline-btn" disabled={!!working} aria-expanded={showAssetPicker}
                 onClick={() => setShowAssetPicker(value => !value)}>{showAssetPicker ? 'Hide Clipart Picker' : 'Select Cliparts'}</button>
             </div>
@@ -812,7 +840,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
                 onClick={() => selected && toggleArtwork(selected.assetId, false)}>Remove Selected Clipart</button>
             </div>
             <small>With an existing AI background, change clipart count/selection, Auto Arrange, then click Apply layout &amp; save JPG — no new image-generation charge. AI Vision handles up to 24 placements; larger selections use local arrangement.</small>
-            {step === 1 && positions.length > 12 && <small role="alert" style={{ color: '#9f581b' }}>More than 12 cover elements may make the headline difficult to read at Etsy search size. Consider fewer standout artworks or use the final critique before approval.</small>}
+            {step === 1 && positions.length > 14 && <small role="alert" style={{ color: '#9f581b' }}>More than 14 cover elements may reduce readability at Etsy search size. Adjust hero/medium/accent sizes and review the final critique before approval.</small>}
           </div>
           <strong>Original asset placement ({positions.length})</strong>
           <label className="input-label">SELECT ARTWORK TO ADJUST</label>
