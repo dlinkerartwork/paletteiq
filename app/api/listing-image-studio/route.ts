@@ -125,7 +125,7 @@ const blankScene: Record<number, string> = {
   11: 'Premium realistic overhead photograph of ONE kraft cardboard gift box with a large blank white rectangular paper label, flat to camera, in the lower middle; center label from around 40%-61% horizontal and 46%-74% vertical. All surfaces unprinted and free of illustrations.',
   12: 'Premium realistic overhead flat-lay scrapbook spread on handmade paper with a large clean blank cream craft page in the lower middle. Leave 34%-69% horizontal and 42%-80% vertical clear for exact transparent artwork to be overlaid. No drawings, stickers, animals, flowers or printed pictures in the mockup.'
 };
-function artPrompt(number: number, project: StoredProject, count: number, settings?: Partial<ListingStudioConfig>, referenceDesign?: Input['referenceDesign']): string {
+function artPrompt(number: number, project: StoredProject, count: number, settings?: Partial<ListingStudioConfig> & { hasReference?: boolean }, referenceDesign?: Input['referenceDesign']): string {
   const spec = LISTING_IMAGE_SPECS[number - 1];
   const title = number === 1 && settings?.headline ? sanitizedText(settings.headline, 75) : listingTitle(number, project.subtheme || project.theme || project.name);
   const subtitle = number === 6 || number === 13 ? count + ' original digital clipart illustrations'
