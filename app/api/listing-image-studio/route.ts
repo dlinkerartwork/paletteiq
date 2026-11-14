@@ -55,6 +55,12 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
     throw Error('One or more clipart files are missing, duplicated or disallowed; refresh the collection before saving.');
   const compositionMode = value.compositionMode ?? previous?.compositionMode ?? 'top-gallery';
   const heroReference = compositionMode === 'hero-center' || compositionMode === 'reference-guided';
+  const rawZones = value.protectedTextZones ?? previous?.protectedTextZones;
+  const protectedTextZones = heroReference && Array.isArray(rawZones)
+    ? rawZones.slice(0,20).filter(z => z && [z.x,z.y,z.width,z.height].every(Number.isFinite) &&
+      z.x >= 0 && z.y >= 0 && z.width > 0 && z.height > 0 &&
+      z.x+z.width <= 100 && z.y+z.height <= 100)
+    : undefined;
   const rawZone = value.protectedTextZone || previous?.protectedTextZone;
   const protectedTextZone = heroReference && rawZone &&
     [rawZone.x,rawZone.y,rawZone.width,rawZone.height].every(Number.isFinite) &&
@@ -62,7 +68,8 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
     rawZone.x+rawZone.width <= 85 && rawZone.y+rawZone.height <= 90
     ? rawZone : heroReference ? heroTextZone() : undefined;
   if (value.renderedImageUrl && (duplicateListingAssetIds(placements).length ||
-      !placements.every(p => isListingPlacementSafe(p,value.number,heroReference,undefined,protectedTextZone))))
+      !placements.every(p => isListingPlacementSafe(p,value.number,heroReference,
+        protectedTextZones?.length ? {texts:protectedTextZones} : undefined,protectedTextZone))))
     throw Error('Clipart must be distinct and stay below the protected title/subtitle area before saving.');
   const status: ListingImageStatus = value.status === 'approved' || value.status === 'needs_revision' ? value.status : 'draft';
   // An explicitly empty renderedImageUrl invalidates an older render when a
@@ -73,7 +80,7 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
   if (backgroundUrl && !savedAssetKey(backgroundUrl, project.id, 'owner-placeholder')) throw Error('Invalid AI background reference');
   if (status === 'approved' && (!renderedImageUrl || !placements.length)) throw Error('Render an image with original collection artwork before approval');
   return { number: value.number, status, backgroundUrl, renderedImageUrl, placements,
-    compositionMode, protectedTextZone,
+    compositionMode, protectedTextZone, protectedTextZones,
     notes: sanitizedText(value.notes || '', 800), updatedAt: Date.now() };
 }
 async function updateImage(project: StoredProject, number: number, patch: ListingImageRecord, owner: string) {
