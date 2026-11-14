@@ -31,7 +31,7 @@ test('new per-image inputs default exactly to saved Etsy SEO title and primary k
 test('every generate sends editable exact wording to the server and persists it per step',()=>{
   assert.match(client,/title: lettering\.title, subtitle: lettering\.subtitle, badge: lettering\.badge/);
   assert.match(client,/title: lettering\.title, subtitle: lettering\.subtitle,\s+badge: lettering\.badge/);
-  assert.match(backend,/text: ListingImageText/);
+  assert.match(backend,/text\?: ListingImageText/);
   assert.match(backend,/title: typeof input\.title === 'string' \? sanitizedText\(input\.title, 140\)/);
   assert.match(backend,/subtitle: typeof input\.subtitle === 'string' \? sanitizedText\(input\.subtitle, 140\)/);
   assert.match(backend,/badge: typeof input\.badge === 'string' \? sanitizedText\(input\.badge, 60\)/);
