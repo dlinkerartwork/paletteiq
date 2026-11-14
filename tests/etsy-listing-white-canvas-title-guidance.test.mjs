@@ -17,7 +17,7 @@ test('title length advisory warns, but never silently rewrites the full Etsy SEO
   assert.match(ui,/evaluateListingCoverTitle\(currentLettering\.title\)/);
   assert.match(ui,/evaluation\.status === 'too-long' && !window\.confirm/);
   assert.match(ui,/titleAdvice\.message/);
-  assert.match(ui,/SEO Title from Etsy Listing Draft/);
+  assert.match(ui,/Default Title = SEO Title, Subtitle = Primary Keyword from Etsy Listing Draft/);
 });
 
 test('cost-free suggestions reflect the actual collection SEO, keyword, theme and supported item count', () => {
@@ -78,7 +78,7 @@ test('generation honors chosen pre-layout; Vision cannot secretly rearrange clip
   assert.match(api,/Invalid pre-layout/);
   assert.match(ui,/placements: effectivePositions/);
   assert.match(ui,/allowVisionRefinement && effectivePositions\.length <= 24/);
-  assert.match(ui,/setAllowVisionRefinement\(false\)/);
+  assert.match(ui,/\[allowVisionRefinement, setAllowVisionRefinement\] = useState\(false\)/);
   assert.match(ui,/aria-label="Let AI Vision refine pre-layout"/);
   assert.match(ui,/The current white-canvas pre-layout is saved before paid generation/);
   assert.match(ui,/const file = await compose\(background, layout, assets\)/);
