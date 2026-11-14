@@ -85,6 +85,8 @@ export async function POST(req: Request) {
       // Preserve them when other tabs save an older collection snapshot.
       const savedLayouts = (old as { listingPreLayouts?: Record<string, unknown> }).listingPreLayouts;
       if (savedLayouts) (incoming as typeof incoming & { listingPreLayouts?: Record<string, unknown> }).listingPreLayouts = savedLayouts;
+      const savedCompositionModes = (old as { listingCompositionModes?: Record<string, unknown> }).listingCompositionModes;
+      if (savedCompositionModes) (incoming as typeof incoming & { listingCompositionModes?: Record<string, unknown> }).listingCompositionModes = savedCompositionModes;
       // Listing Image Studio persists individual approved images independently. A stale
       // browser save must never overwrite those saved results or the review decisions.
       if (Array.isArray((old as { listingImages?: unknown[] }).listingImages)) incoming.listingImages = (old as { listingImages: unknown[] }).listingImages;
