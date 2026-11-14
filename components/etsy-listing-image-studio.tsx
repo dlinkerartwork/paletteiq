@@ -191,6 +191,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [assetSearch, setAssetSearch] = useState('');
   const [showAssetPicker, setShowAssetPicker] = useState(false);
+  const [autoFinalCritique, setAutoFinalCritique] = useState(true);
   const [categories, setCategories] = useState<Record<string,string>>({});
   const [inspection, setInspection] = useState<CollectionInspection | null>(null);
   const [styleProfile, setStyleProfile] = useState<ListingVisualStyleProfile | null>(null);
@@ -308,7 +309,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     const result = await send({ action: 'save', projectId, number: step, image });
     receive(result.images || []);
   };
-  const renderAndSave = async (background: string, layout: ListingPlacement[], info: string, reviewWarning = '', lettering: ListingImageText = currentLettering) => {
+  const renderAndSave = async (background: string, layout: ListingPlacement[], info: string, reviewWarning = '', lettering: ListingImageText = currentLettering): Promise<ListingFinalReview | null> => {
     setWorking('render'); setMessage('Compositing ' + layout.length + ' exact original collection clipart images at 1024 × 1024 px...');
     const file = await compose(background, layout, assets);
     setMessage('Saving JPG preview to the collection in safe upload chunks...');
@@ -320,7 +321,28 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     };
     await saveRecord(image);
     setChanges(old => { const next = { ...old }; delete next[step]; return next; });
-    setMessage('Image ' + String(step).padStart(2, '0') + ' saved as a draft. ' + (reviewWarning ? 'Background flagged for visual review: ' + reviewWarning : 'Review the actual pixels, spelling and crop before approving.'));
+    let finalReview: ListingFinalReview | null = null;
+    let critiqueProblem = '';
+    if (autoFinalCritique) {
+      setWorking('critique');
+      setMessage('Evaluating the FINAL composited JPG for covered lettering, artwork prominence and composition...');
+      try {
+        const critique = await send({ action: 'critique', projectId, number: step });
+        if (critique.finalReview) {
+          finalReview = critique.finalReview;
+          if (critique.images) receive(critique.images);
+        } else critiqueProblem = ' Vision did not return a quality score.';
+      } catch (error) {
+        critiqueProblem = ' Final composition critique unavailable (' +
+          (error instanceof Error ? error.message : String(error)) +
+          '); the JPG is still saved.';
+      }
+    }
+    setMessage('Image ' + String(step).padStart(2, '0') + ' saved as draft. ' +
+      (finalReview ? 'Final visual score ' + finalReview.score.toFixed(1) +
+        '/10 (subjective). ' + (finalReview.improvements[0] || 'Inspect readability before approval.') : '') +
+      (reviewWarning ? ' Background QC: ' + reviewWarning : '') + critiqueProblem);
+    return finalReview;
   };
   const generate = async () => {
     if (working) return;
@@ -359,6 +381,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       }
       setMessage('Generating the AI graphic background and artistic typography...');
       const response = await send({ action: 'generate', projectId, number: step, model, quality,
+        featuredCount: effectivePositions.length,
         title: lettering.title, subtitle: lettering.subtitle, badge: lettering.badge,
         revisionNotes: (notes[step] ?? current?.notes ?? '').trim() });
       if (!response.backgroundUrl) throw Error('OpenAI did not return the background');
@@ -383,9 +406,10 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
         title: lettering.title, subtitle: lettering.subtitle, badge: lettering.badge,
         notes: notes[step] || current?.notes || '', reviewWarning: response.reviewWarning || '', updatedAt: Date.now()
       });
-      await renderAndSave(response.backgroundUrl, suggested, notes[step] || current?.notes || '', response.reviewWarning || '', lettering);
+      const scored = await renderAndSave(response.backgroundUrl, suggested, notes[step] || current?.notes || '', response.reviewWarning || '', lettering);
       setMessage('Image ' + String(step).padStart(2, '0') + ' saved as draft.' +
-        (layoutWarning ? ' Layout note: ' + layoutWarning : ' Review lettering legibility and clipart overlap before approving.') + styleFallback);
+        (scored ? ' Final design critique: ' + scored.score.toFixed(1) + '/10. ' + (scored.improvements[0] || '') : '') +
+        (layoutWarning ? ' Layout note: ' + layoutWarning : ' Check original clipart placement.') + styleFallback);
     } catch (error) { setMessage('Generation failed: ' + (error instanceof Error ? error.message : String(error))); }
     finally { setWorking(''); }
   };
@@ -398,10 +422,27 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     catch (error) { setMessage('Could not save revised image: ' + (error instanceof Error ? error.message : String(error))); }
     finally { setWorking(''); }
   };
+  const recheckFinalQuality = async () => {
+    if (!current?.renderedImageUrl || working) return;
+    setWorking('critique');
+    setMessage('Reviewing the actual final composited JPG (paid Vision request)...');
+    try {
+      const answer = await send({ action: 'critique', projectId, number: step });
+      if (!answer.finalReview) throw Error('No final review received');
+      if (answer.images) receive(answer.images);
+      setMessage('Final composition score: ' + answer.finalReview.score.toFixed(1) +
+        '/10. ' + (answer.finalReview.improvements.join(' • ') || 'Review the actual thumbnail visually.'));
+    } catch (error) { setMessage('Final critique unavailable: ' + String(error)); }
+    finally { setWorking(''); }
+  };
+
   const review = async (status: 'approved' | 'needs_revision') => {
     if (!current?.renderedImageUrl || working) return;
     if (status === 'approved' && (current.width !== LISTING_WIDTH || current.height !== LISTING_HEIGHT))
       return setMessage('Render a new 1024 × 1024 square JPG before approval. Your older 4:3 image remains saved.');
+    if (status === 'approved' && current.finalReview && current.finalReview.score < 8.5 &&
+      !window.confirm('Final design critique scored this JPG ' + current.finalReview.score + '/10. Suggested improvement: ' +
+        (current.finalReview.improvements[0] || 'Check text and visual balance') + '\nApprove anyway?')) return;
     if (status === 'approved' && current.reviewWarning &&
         !window.confirm('Automatic review flagged a possible issue:\n' + current.reviewWarning + '\n\nHave you carefully checked the artwork, mockup, text and verified facts and want to approve this JPG anyway?')) return;
     if (letteringDirty) return setMessage('Title, Subtitle, or Badge changed. Regenerate the AI artwork before approving the new text.');
