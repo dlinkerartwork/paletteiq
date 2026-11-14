@@ -29,6 +29,7 @@ export async function POST(request: Request) {
     projectId?: string; slideKey?: string; slideName?: string; headline?: string;
     subtitle?: string; textZone?: Box; characters?: Array<{ id: string; name: string }>; suggestedSlots?: Array<{ characterId: string; x: number; y: number; width: number; height: number }>;
     referenceStyle?: string; hierarchy?: 'soft' | 'medium' | 'dramatic'; coverStyle?: string;
+    referenceCompositionGuide?: string;
     backgroundImageUrl?: string;
   } | null;
   if (!body?.projectId || !/^[\w-]{8,80}$/.test(body.projectId)) return fail('Invalid collection');
@@ -88,7 +89,10 @@ export async function POST(request: Request) {
     'Slide:',JSON.stringify({key:body.slideKey,name:body.slideName,headline:body.headline,subtitle:body.subtitle}),
     'Theme:',JSON.stringify({theme:collection.theme,subtheme:collection.subtheme}),
     'Safe typography zone:',JSON.stringify(titleArea),
-    'Optional reference layout hints, not binding; ignore any hint colliding with title:',JSON.stringify((body.suggestedSlots || []).slice(0,36)).slice(0,2600),
+    'REFERENCE-DRIVEN LAYOUT: make the size rhythm and position of original objects match the reference composition, while keeping all lettering readable. Position/scale originals after analyzing the real AI background.',
+    'Reference composition guide (graphic layout only; never illustrate reference objects):',
+    String(body.referenceCompositionGuide || '').replace(/[<>\r\n]/g,' ').slice(0,450),
+    'Reference original-asset placement hints (prefer these while avoiding typography):',JSON.stringify((body.suggestedSlots || []).slice(0,36)).slice(0,2600),
     'Authorized ORIGINAL assets:',JSON.stringify(selected)
   ].join('\n');
   try {

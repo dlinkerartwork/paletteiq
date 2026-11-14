@@ -168,10 +168,14 @@ test('Hero cover prompt includes the requested cream medallion, blush ring and e
   assert.match(generator, /isHeroCover \? \['HERO ART DIRECTION PRIORITY:'/);
 });
 
-test('Manual approval also runs background-first Vision before applying original layers', () => {
+test('Manual approval runs background-first Vision for custom canvas and original asset layers', () => {
   const part = designer.slice(designer.indexOf('const approveReviewedBackground'),designer.indexOf('const onReferenceUpload'));
   assert.match(part, /if \(target\.packSlideKey === 'custom-canvas'\)/);
-  assert.match(part, /hand-arranged slots with AI Vision coordinates/);
+  const custom = part.slice(part.indexOf("if (target.packSlideKey === 'custom-canvas')"), part.indexOf("setMessage('AI Vision analyzing approved background"));
+  assert.match(custom, /await placeOriginalsOverBackground/);
+  assert.match(custom, /badgeOverlay\(zone,target\.packBadge \|\| ''\)/);
+  assert.match(custom, /source: 'original' as const/);
+  assert.ok(custom.indexOf('await placeOriginalsOverBackground') < custom.indexOf('backgroundImageUrl:d.rejectedBackgroundUrl'));
   const legacy = part.slice(part.indexOf("setMessage('AI Vision analyzing approved background"));
   assert.match(legacy, /await placeOriginalsOverBackground/);
   assert.ok(legacy.indexOf('await placeOriginalsOverBackground') < legacy.indexOf('backgroundImageUrl: d.rejectedBackgroundUrl'));
@@ -202,8 +206,19 @@ test('Optional reference layout timeout does not abort paid thumbnail generation
 
 test('Vision client performs local fitting, even when planner produced a layout', () => {
   assert.match(designer, /import \{ fitClipartAroundTypography/);
-  assert.match(designer, /const safeFallback = fit\(imageElements, \[slide\.textZone\], \[\]\)/);
+  assert.match(designer, /const safeFallback = fit\(hintedOriginals, \[slide\.textZone\], \[\]\)/);
   assert.match(designer, /result\.detectedSubtitleZone/);
   assert.match(designer, /const fitted = fit\(selected,/);
   assert.match(planner, /minScale:body\.hierarchy/);
+});
+
+test('Reference image controls background, typography and original PNG geometry', () => {
+  assert.match(designer, /compositionGuide: result\.layout\.compositionGuide/);
+  assert.match(designer, /referenceSlots = result\.layout\.slots \|\| \[\]/);
+  assert.match(designer, /referenceHints\[i\]\?\.x \?\? e\.x/);
+  assert.match(designer, /const scale = Math\.max\(\.45, Math\.min\(2\.5/);
+  assert.match(designer, /await placeOriginalsOverBackground\(/);
+  assert.match(planner, /referenceCompositionGuide\?: string/);
+  assert.match(planner, /REFERENCE-DRIVEN LAYOUT/);
+  assert.match(generator, /REFERENCE COMPOSITION HAS PRIORITY OVER DEFAULT ABSTRACT DECORATION/);
 });

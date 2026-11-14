@@ -25,7 +25,7 @@ export type ThumbnailDesign = {
   backgroundOpacity?: number; // 0..1; applies to the full backdrop composite, never to original PNG layers.
   packAiTypographyEnabled?: boolean; packLetteringStyle?: 'auto' | 'arched' | 'flowing' | 'stacked' | 'hand-painted';
   packHierarchy?: ClipartHierarchy; packBoldness?: 'soft' | 'balanced' | 'bold'; packCoverStyle?: 'editorial' | 'boutique' | 'storybook' | 'modern' | 'watercolor';
-  referenceDesign?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string };
+  referenceDesign?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string; compositionGuide?: string };
 };
 type Character = { id: string; name: string; imageUrl?: string; upscaledImageUrl?: string; category?: string; subtheme?: string; group?: string };
 export type ThumbnailSaveControls = { save: () => Promise<void>; hasUnsaved: () => boolean };
@@ -396,7 +396,8 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
   // never receives original PNGs and never draws their substitutes.
   const placeOriginalsOverBackground = async (
     slide: PackSlide, imageUrl: string, fallback: ThumbnailElement[],
-    available: Character[], hierarchy: ClipartHierarchy, coverStyle: typeof packCoverStyle
+    available: Character[], hierarchy: ClipartHierarchy, coverStyle: typeof packCoverStyle,
+    referenceHints: Array<{x:number;y:number;width:number;height:number;rotation?:number}> = [], referenceGuide = ''
   ): Promise<{ elements: ThumbnailElement[]; usedFallback: boolean }> => {
     const imageElements = fallback.filter(e => e.type === 'image' && e.characterId);
     if (!imageElements.length) return { elements: fallback, usedFallback: true };
@@ -407,7 +408,19 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         minScale: hierarchy === 'soft' ? .75 : hierarchy === 'medium' ? .65 : .55
       });
     // Safe fallback must never paint original clipart over the known typography area.
-    const safeFallback = fit(imageElements, [slide.textZone], []);
+    const hintedOriginals = referenceHints.length ? imageElements.map((item,i) => {
+      const hint = referenceHints[i];
+      if (!hint || ![hint.x,hint.y,hint.width,hint.height].every(Number.isFinite) ||
+        hint.width <= 0 || hint.height <= 0) return item;
+      // Resize the ORIGINAL PNG layer uniformly; drawing remains contain/alpha compositing.
+      const scale = Math.max(.45, Math.min(2.5,
+        Math.min(hint.width / Math.max(item.width,1), hint.height / Math.max(item.height,1))));
+      const width = item.width * scale, height = item.height * scale;
+      return { ...item, width, height,
+        x: hint.x + (hint.width - width)/2, y: hint.y + (hint.height - height)/2,
+        rotation: Math.max(-10,Math.min(10,hint.rotation || 0)) };
+    }) : imageElements;
+    const safeFallback = fit(hintedOriginals, [slide.textZone], []);
     try {
       const response = await fetch('/api/thumbnail-art-direction', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -419,8 +432,11 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
             return { id: e.characterId, name: character?.name || e.characterId };
           }),
           hierarchy, coverStyle,
-          suggestedSlots: imageElements.map(e => ({
-            characterId: e.characterId, x: e.x, y: e.y, width: e.width, height: e.height
+          referenceCompositionGuide: referenceGuide.slice(0, 450),
+          suggestedSlots: imageElements.map((e,i) => ({
+            characterId: e.characterId,
+            x: referenceHints[i]?.x ?? e.x, y: referenceHints[i]?.y ?? e.y,
+            width: referenceHints[i]?.width ?? e.width, height: referenceHints[i]?.height ?? e.height
           }))
         })
       });
@@ -484,35 +500,51 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     ...(previewHasText ? [
       'Main title (omit when blank): ' + JSON.stringify(previewHeading),
       'Subtitle (omit when blank): ' + JSON.stringify(previewSubtitle),
-      'Badge (omit when blank): ' + JSON.stringify(previewBadge),
-      'Artistic lettering direction: ' + (design?.packLetteringStyle || 'auto') + '. Use fluid hand-drawn expressive lettering; arched, curved, flowing or layered title layouts are welcome when readable.'
+      'Exact editable badge overlay (never AI-generated; omit when blank): ' + JSON.stringify(previewBadge),
+      'Typography follows the reference image layout, with readable exact title and subtitle. Badge text is composed by PaletteIQ as a separate, precise original layer.'
     ] : ['ZERO TYPOGRAPHY: no titles, subtitles, badges, symbols resembling letters, or decorative words.']),
     ...(previewHasText ? ['Typography safe zone: ' + JSON.stringify(design?.packTextZone || { x: 22, y: 30, width: 56, height: 34 })] : []),
     'Image provider/model: ' + imageProvider + ' / ' + (imageProvider === 'gemini' ? geminiImageModel : imageModel),
-    'Style: ' + packCoverStyle + ', ' + backgroundStyle + ', ' + backgroundIntensity + ', boldness ' + packBoldness,
+    'Background material: ' + backgroundStyle + '. Follow the supplied reference layout, typographic hierarchy and graphic treatment. Experimental cover, boldness and decoration presets are disabled.',
     'Reference template: ' + (reference ? 'selected (style cues only)' : 'none') + ', interpretation ' + referenceStyle,
-    'Original assets may deliberately overlap the artistic text as foreground PNG layers or extend beyond the canvas and will be CROPPED by the final canvas edge.',
+    'Position and proportionally resize original collection PNGs according to the reference composition and the generated background. Keep title, subtitle and badge legible; artwork may overlap other artwork.',
     'Only the VISIBLE portions of these manually positioned PNG rectangles are reserved on canvas; their pixels and identities are NEVER sent to the image provider:',
     JSON.stringify((design?.elements || []).filter(e => e.type === 'image')
       .map(e => ({ x: Math.max(0,e.x), y: Math.max(0,e.y),
         width: Math.max(0,Math.min(100,e.x+e.width)-Math.max(0,e.x)),
         height: Math.max(0,Math.min(100,e.y+e.height)-Math.max(0,e.y)) }))
       .filter(e=>e.width>0&&e.height>0), null, 2),
-    'PaletteIQ composites exact original collection PNGs with the user-authored coordinates; crop at canvas borders.'
+    'PaletteIQ composites exact original collection PNGs with AI Vision-fitted positions, preserving PNG proportions and transparency.'
   ].join('\n\n');
+
+  // Exact badge copy is rendered as an editable layer, not entrusted to AI lettering.
+  const badgeOverlay = (zone: ThumbnailBox, copy: string): ThumbnailElement[] => {
+    if (!copy.trim()) return [];
+    return [{ ...newText(copy.trim()), id: id(),
+      x: zone.x + zone.width*.18, y: zone.y + zone.height*.80,
+      width: zone.width*.64, height: Math.max(5,zone.height*.16),
+      fontFamily: 'Montserrat', fontSize: 53, fontWeight: 'bold', color: '#294735',
+      rotation: 0, curve: 0 }];
+  };
 
   // User-directed workflow: layout is authored ON the current canvas. The AI
   // receives only empty rectangles + exact text, never the original PNG pixels.
   // Unlike the legacy pack generator, this must never overwrite manual positions.
   const generateCanvasArtwork = async () => {
     if (!design || aiBusy || backgroundRetryId) return;
+    if (layoutMode === 'ai' && !reference) { setMessage('Select or upload a reference image before reference-guided generation.'); return; }
     const source = design;
-    const imageLayers = source.elements.filter(e => e.type === 'image' && e.characterId && assetMap.get(e.characterId)?.imageUrl);
-    if (!imageLayers.length) { setMessage('Add original clipart from Reference & Assets to the canvas first.'); return; }
-    if (imageLayers.length !== source.elements.filter(e => e.type === 'image').length) {
+    const originalLayers = source.elements.filter(e => e.type === 'image');
+    if (originalLayers.some(e => !e.characterId || !assetMap.get(e.characterId)?.imageUrl)) {
       setMessage('An image layer has no original collection PNG. Replace it before generating.'); return;
     }
-    const zone = source.packTextZone || { x: 22, y: 30, width: 56, height: 34 };
+    const imageLayers = originalLayers.length
+      ? originalLayers
+      : layoutMode === 'ai'
+        ? filterThemeCharacters(title,characters).filter(c => c.imageUrl).slice(0,9).map((c,i)=>newImage(c,i,'original'))
+        : [];
+    if (!imageLayers.length) { setMessage('No usable original collection PNGs; add assets or choose reference-guided mode.'); return; }
+    let zone = source.packTextZone || { x: 22, y: 30, width: 56, height: 34 };
     // Deliberate bleed beyond the canvas is allowed. Only the visible area is
     // composited and reserved; the full source PNG is never resized or redrawn.
     const hasVisibleAsset = imageLayers.some(e =>
@@ -523,6 +555,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     const subtitle = (source.packSubtitle ?? seoDefaults.subtitle).trim();
     const badge = (source.packBadge ?? '').trim();
     const hasLettering = enabled && Boolean(heading || subtitle || badge);
+    const needsAiLettering = enabled && Boolean(heading || subtitle);
     if (hasLettering && ([zone.x, zone.y, zone.width, zone.height].some(n => !Number.isFinite(n)) ||
       zone.x < 0 || zone.y < 0 || zone.width < 10 || zone.height < 10 ||
       zone.x + zone.width > 100 || zone.y + zone.height > 100)) {
@@ -540,6 +573,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     setPackStatus('Analyzing the selected graphic reference and preserving manual artwork placement...');
     try {
       let referenceDesign = source.referenceDesign;
+      let referenceSlots: Array<{x:number;y:number;width:number;height:number;rotation?:number}> = [];
       if (reference) {
         try {
           const response = await fetch('/api/thumbnail-layout', {
@@ -549,30 +583,45 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
               referenceStyle, count: Math.min(imageLayers.length, 24)
             })
           });
-          const result = await readApiJson<{ layout?: ThumbnailDesign['referenceDesign']; error?: string }>(
+          const result = await readApiJson<{ layout?: ThumbnailDesign['referenceDesign'] & {slots?: typeof referenceSlots; texts?: Array<{x:number;y:number;width:number;height:number}>}; error?: string }>(
             response, 'Reference analysis');
-          if (result.layout) referenceDesign = {
-            graphicMotif: result.layout.graphicMotif,
-            letteringStyle: result.layout.letteringStyle,
-            paletteMood: result.layout.paletteMood
-          };
+          if (result.layout) {
+            referenceSlots = result.layout.slots || [];
+            if (layoutMode === 'ai' && !referenceSlots.length) throw Error('Reference analysis did not return clipart placement regions.');
+            if (layoutMode === 'ai') {
+              const textBoxes = (result.layout.texts || []).slice(0,3).filter(t =>
+                [t.x,t.y,t.width,t.height].every(Number.isFinite) && t.width > 0 && t.height > 0);
+              if (textBoxes.length) {
+                const x = Math.max(0,Math.min(...textBoxes.map(t=>t.x)));
+                const y = Math.max(0,Math.min(...textBoxes.map(t=>t.y)));
+                const right = Math.min(100,Math.max(...textBoxes.map(t=>t.x+t.width)));
+                const bottom = Math.min(100,Math.max(...textBoxes.map(t=>t.y+t.height)));
+                if (right-x >= 20 && right-x <= 85 && bottom-y >= 15 && bottom-y <= 80)
+                  zone = {x,y,width:right-x,height:bottom-y};
+              }
+            }
+            referenceDesign = { graphicMotif: result.layout.graphicMotif,
+              letteringStyle: result.layout.letteringStyle, paletteMood: result.layout.paletteMood,
+              compositionGuide: result.layout.compositionGuide };
+          }
         } catch (error) {
-          setPackStatus('Reference analysis unavailable; using your selected art preferences without repositioning clipart. ' +
-            (error instanceof Error ? error.message.slice(0, 100) : ''));
+          if (layoutMode === 'ai') throw Error('Reference analysis failed; no paid background generated: ' +
+            (error instanceof Error ? error.message.slice(0, 150) : String(error)));
+          setPackStatus('Reference analysis unavailable; keeping manual layout.');
         }
       }
       setPackStatus('Creating AI ' + (hasLettering ? 'background and artistic lettering' : 'background with no typography') + '. Original collection PNGs stay in place...');
       const imageModelChoice = imageProvider === 'gemini' ? geminiImageModel : imageModel;
       const requestBody = {
         projectId, provider: imageProvider, model: imageModelChoice, quality: packQuality,
-        mode: hasLettering ? 'background-with-typography' as const : 'background-only' as const,
+        mode: needsAiLettering ? 'background-with-typography' as const : 'background-only' as const,
         width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE,
-        headline: hasLettering ? heading : '', subtitle: hasLettering ? subtitle : '', badge: hasLettering ? badge : '',
-        letteringStyle: source.packLetteringStyle || 'auto',
+        headline: hasLettering ? heading : '', subtitle: hasLettering ? subtitle : '', badge: '',
+        letteringStyle: 'auto' as const,
         slideName: 'Custom Canvas Artwork',
-        backgroundStyle, backgroundIntensity, designBoldness: packBoldness,
-        coverStyle: packCoverStyle, referenceDesign,
-        textZone: zone,
+        backgroundStyle, backgroundIntensity: 'soft' as const, designBoldness: 'balanced' as const,
+        coverStyle: 'editorial' as const, referenceDesign,
+        textZone: zone, reserveBadgeZone: Boolean(hasLettering && badge),
         // Image rectangles may intersect the text zone intentionally.
         // Exact source files, their contents, character names, and reference
         // images are never part of the generation request.
@@ -580,9 +629,10 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           x: e.x, y: e.y, width: e.width, height: e.height })),
         designBriefSettings: {
           ...currentBriefSettings(), scope: 'single' as const, slide: 'Custom Canvas Artwork',
+          boldness: 'balanced', coverStyle: 'editorial', intensity: 'soft',
           headline: hasLettering ? heading : '', subtitle: hasLettering ? subtitle : '',
-          badge: hasLettering ? badge : '',
-          typography: hasLettering ? 'ai-artwork' as const : 'editable' as const,
+          badge: '',
+          typography: needsAiLettering ? 'ai-artwork' as const : 'editable' as const,
           textDisabled: !hasLettering,
           imageModel: imageModelChoice
         }
@@ -597,15 +647,35 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
       if (!result.imageUrl) throw Error('AI did not return a background image.');
       await loadForExport(result.imageUrl);
       const currentDesign = latestDesignsRef.current.find(d => d.id === source.id) || source;
-      const exactLayers = currentDesign.elements.filter(e => e.type === 'image')
+      const exactLayers = (currentDesign.elements.some(e => e.type === 'image')
+        ? currentDesign.elements.filter(e => e.type === 'image') : imageLayers)
         .map(e => ({ ...e, source: 'original' as const }));
+      let positioned: ThumbnailElement[] = exactLayers;
+      let usedFallback = false;
+      if (!result.qcRejected && layoutMode === 'ai') {
+        setPackStatus('AI Vision arranging original clipart around the actual background and reference typography...');
+        const baseSlide = buildPack('complete-10', title, characters)[0];
+        if (baseSlide) {
+          const guidedSlide: PackSlide = {
+            ...baseSlide, key: 'custom-canvas', name: 'Reference-guided canvas',
+            headline: heading, subtitle, textZone: zone, limit: exactLayers.length
+          };
+          const placement = await placeOriginalsOverBackground(
+            guidedSlide, result.imageUrl, exactLayers, characters,
+            packHierarchy, 'editorial', referenceSlots, referenceDesign?.compositionGuide || ''
+          );
+          positioned = placement.elements;
+          usedFallback = placement.usedFallback;
+        }
+      }
+      const badgeTextLayers = hasLettering ? badgeOverlay(zone,badge) : [];
       const common: Partial<ThumbnailDesign> = {
         originalAssetsOnly: true, packSlideKey: 'custom-canvas',
-        packTypography: hasLettering ? 'ai-artwork' : 'editable', packHeadline: heading, packSubtitle: subtitle,
+        packTypography: needsAiLettering ? 'ai-artwork' : 'editable', packHeadline: heading, packSubtitle: subtitle,
         packBadge: badge, packTextZone: zone, packAiTypographyEnabled: enabled,
-        packLetteringStyle: source.packLetteringStyle || 'auto',
+        packLetteringStyle: 'auto',
         packImageProvider: imageProvider, packImageModel: imageModelChoice,
-        packBoldness, packHierarchy, packCoverStyle, referenceDesign,
+        packBoldness: 'balanced', packHierarchy, packCoverStyle: 'editorial', referenceDesign,
         referenceUrl: reference.startsWith('https://') ? reference : undefined,
         aiImagePrompt: result.prompt, aiImageUrl: undefined,
         renderedImageUrl: undefined, upscaledImageUrl: undefined,
@@ -618,16 +688,17 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
               generationError: 'Background requires review before use: ' + (result.qcReason || ''),
               // Keep the current background until explicitly approved.
               elements: exactLayers }
-          : { ...d, ...common, elements: exactLayers,
+          : { ...d, ...common, elements: [...positioned, ...badgeTextLayers],
               backgroundImageUrl: result.imageUrl, rejectedBackgroundUrl: undefined,
-              rejectedBackgroundReason: undefined, generationError: undefined }
+              rejectedBackgroundReason: undefined,
+              generationError: usedFallback ? 'AI Vision used reference-guided safe fallback positions.' : undefined }
         : d);
       latestDesignsRef.current = next;
       onChange(next);
       if (!result.qcRejected) setShowTypographyGuide(false);
       setMessage(result.qcRejected
         ? 'New AI background was flagged for review. Inspect it and explicitly approve it before composition; original clipart positions are preserved.'
-        : (hasLettering ? 'Artistic title, subtitle and optional badge applied.' : 'Text-free background applied.') + ' Manual clipart positions (including cropped edges) are unchanged. Save the design to persist.');
+        : (hasLettering ? 'Background, exact badge text and typography applied.' : 'Text-free background applied.') + (layoutMode === 'ai' ? ' Original PNGs were fitted to reference and background.' : ' Manual PNG positions preserved.') + ' Save the design to persist.');
       setPackStatus('');
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -818,13 +889,17 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           model: imageModel.startsWith('gpt-image-') ? imageModel : 'gpt-image-1-mini',
           quality: packQuality, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE,
           mode: artistic ? 'background-with-typography' : 'background-only',
-          backgroundStyle, backgroundIntensity,
+          backgroundStyle, backgroundIntensity: target.packSlideKey === 'custom-canvas' ? 'soft' : backgroundIntensity,
+          reserveBadgeZone: target.packSlideKey === 'custom-canvas' && Boolean(target.packBadge),
+          badge: '', letteringStyle: 'auto',
           headline: target.packHeadline || title,
           subtitle: target.packSubtitle || 'Digital Clipart Collection',
           slideName: target.name,
-          designBoldness: target.packBoldness || packBoldness, coverStyle: target.packCoverStyle || packCoverStyle,
+          designBoldness: target.packSlideKey === 'custom-canvas' ? 'balanced' : (target.packBoldness || packBoldness),
+          coverStyle: target.packSlideKey === 'custom-canvas' ? 'editorial' : (target.packCoverStyle || packCoverStyle),
           referenceDesign: target.referenceDesign,
-          designBriefSettings: { ...currentBriefSettings(), headline: target.packHeadline || title, subtitle: target.packSubtitle || 'CLIPART COLLECTION', slide: target.name },
+          designBriefSettings: { ...currentBriefSettings(), headline: target.packHeadline || title, subtitle: target.packSubtitle || 'CLIPART COLLECTION', slide: target.name,
+            ...(target.packSlideKey === 'custom-canvas' ? {boldness:'balanced',coverStyle:'editorial',intensity:'soft',badge:''} : {}) },
           textZone: target.packTextZone || { x: 22, y: 31, width: 56, height: 38 },
           layout: imageLayers.map(e => ({ type: 'image', x: e.x, y: e.y, width: e.width, height: e.height }))
         })
@@ -846,7 +921,8 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
       const savedSlides = buildPack('complete-10', title, allAvailable);
       const matchedSlide = savedSlides.find(candidate => candidate.key === target.packSlideKey ||
         target.name.toLowerCase().includes(candidate.name.toLowerCase())) || savedSlides[0];
-      const slide = matchedSlide && { ...matchedSlide, headline: target.packHeadline || matchedSlide.headline,
+      const slide = matchedSlide && { ...matchedSlide, key: target.packSlideKey === 'custom-canvas' ? 'custom-canvas' : matchedSlide.key,
+        headline: target.packHeadline || matchedSlide.headline,
         subtitle: target.packSubtitle || matchedSlide.subtitle, textZone: target.packTextZone || matchedSlide.textZone };
       let positioned = imageLayers;
       let visionFallback = true;
@@ -861,7 +937,9 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
       }
       const next = latestDesignsRef.current.map(d => d.id === target.id
         ? { ...d, backgroundImageUrl: result.imageUrl, aiImagePrompt: result.prompt, elements: [
-            ...positioned, ...d.elements.filter(e => e.type === 'text')
+            ...positioned, ...(d.packSlideKey === 'custom-canvas' && d.packAiTypographyEnabled !== false
+              ? badgeOverlay(d.packTextZone || {x:22,y:30,width:56,height:34}, d.packBadge || '')
+              : d.elements.filter(e => e.type === 'text'))
           ], rejectedBackgroundUrl: undefined, rejectedBackgroundReason: undefined,
           generationError: visionFallback ? 'Vision placement unavailable; previous original PNG layout kept.' : undefined,
           updatedAt: Date.now() } : d);
@@ -887,17 +965,20 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
       const slides = buildPack('complete-10', title, available);
       const matchedSlide = slides.find(item => item.key === target.packSlideKey ||
         target.name.toLowerCase().includes(item.name.toLowerCase())) || slides[0];
-      const slide = matchedSlide && { ...matchedSlide, headline: target.packHeadline || matchedSlide.headline,
+      const slide = matchedSlide && { ...matchedSlide, key: target.packSlideKey === 'custom-canvas' ? 'custom-canvas' : matchedSlide.key,
+        headline: target.packHeadline || matchedSlide.headline,
         subtitle: target.packSubtitle || matchedSlide.subtitle, textZone: target.packTextZone || matchedSlide.textZone };
       if (!slide) throw Error('No collection layout available');
       const originals = target.elements.filter(e => e.type === 'image');
       setMessage('AI Vision inspecting saved background and adjusting original PNG positions...');
       const result = await placeOriginalsOverBackground(
         slide, target.backgroundImageUrl, originals, available,
-        target.packHierarchy || packHierarchy, target.packCoverStyle || packCoverStyle
+        target.packHierarchy || packHierarchy, 'editorial', [], target.referenceDesign?.compositionGuide || ''
       );
       const next = latestDesignsRef.current.map(d => d.id === target.id ? {
-        ...d, elements: [...result.elements, ...d.elements.filter(e => e.type === 'text')],
+        ...d, elements: [...result.elements, ...(d.packSlideKey === 'custom-canvas' && d.packAiTypographyEnabled !== false
+          ? badgeOverlay(d.packTextZone || {x:22,y:30,width:56,height:34}, d.packBadge || '')
+          : d.elements.filter(e => e.type === 'text'))],
         generationError: result.usedFallback ? 'AI Vision layout unavailable; original positions retained.' : undefined,
         updatedAt: Date.now()
       } : d);
@@ -917,17 +998,30 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     setBackgroundRetryId(target.id);
     try {
       if (target.packSlideKey === 'custom-canvas') {
+        const original = target.elements.filter(e => e.type === 'image').map(e => ({ ...e, source: 'original' as const }));
+        const zone = target.packTextZone || { x:22, y:30, width:56, height:34 };
+        const baseSlide = buildPack('complete-10',title,characters)[0];
+        const slide: PackSlide | undefined = baseSlide && {
+          ...baseSlide, key:'custom-canvas', name:'Reference-guided canvas',
+          headline:target.packHeadline || '', subtitle:target.packSubtitle || '', textZone:zone,
+          limit:original.length
+        };
+        const placement = slide
+          ? await placeOriginalsOverBackground(slide,target.rejectedBackgroundUrl,original,characters,
+              target.packHierarchy || 'dramatic','editorial',[],target.referenceDesign?.compositionGuide || '')
+          : { elements:original, usedFallback:true };
+        const badgeLayers = target.packAiTypographyEnabled !== false
+          ? badgeOverlay(zone,target.packBadge || '') : [];
         const next = latestDesignsRef.current.map(d => d.id === target.id ? {
-          ...d, backgroundImageUrl: d.rejectedBackgroundUrl,
-          rejectedBackgroundUrl: undefined, rejectedBackgroundReason: undefined,
-          generationError: undefined, updatedAt: Date.now(),
-          // Never replace the hand-arranged slots with AI Vision coordinates.
-          elements: d.elements.filter(e => e.type === 'image').map(e => ({ ...e, source: 'original' as const }))
+          ...d, backgroundImageUrl:d.rejectedBackgroundUrl,
+          rejectedBackgroundUrl:undefined, rejectedBackgroundReason:undefined,
+          generationError:placement.usedFallback ? 'Reference-guided safe layout used.' : undefined,
+          updatedAt:Date.now(), elements:[...placement.elements,...badgeLayers]
         } : d);
         latestDesignsRef.current = next;
         onChange(next);
         setShowTypographyGuide(false);
-        setMessage('Reviewed AI lettering and background applied without moving any original collection PNGs.');
+        setMessage('Reviewed background applied. Vision-fitted original PNGs and exact badge text are editable.');
         return;
       }
       setMessage('AI Vision analyzing approved background before overlaying original collection PNGs...');
@@ -935,12 +1029,13 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
       const candidates = buildPack('complete-10', title, available);
       const matchedSlide = candidates.find(item => item.key === target.packSlideKey ||
         target.name.toLowerCase().includes(item.name.toLowerCase())) || candidates[0];
-      const slide = matchedSlide && { ...matchedSlide, headline: target.packHeadline || matchedSlide.headline,
+      const slide = matchedSlide && { ...matchedSlide, key: target.packSlideKey === 'custom-canvas' ? 'custom-canvas' : matchedSlide.key,
+        headline: target.packHeadline || matchedSlide.headline,
         subtitle: target.packSubtitle || matchedSlide.subtitle, textZone: target.packTextZone || matchedSlide.textZone };
       const imageLayers = target.elements.filter(e => e.type === 'image');
       const placement = slide
         ? await placeOriginalsOverBackground(slide, target.rejectedBackgroundUrl, imageLayers, available,
-            target.packHierarchy || packHierarchy, target.packCoverStyle || packCoverStyle)
+            target.packHierarchy || packHierarchy, 'editorial', [], target.referenceDesign?.compositionGuide || '')
         : { elements: imageLayers, usedFallback: true };
       const next = latestDesignsRef.current.map(d => d.id === target.id ? {
         ...d, backgroundImageUrl: d.rejectedBackgroundUrl,
@@ -971,7 +1066,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     try {
       const response = await fetch('/api/thumbnail-ai-image', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId, provider: 'openai', model: imageModel.startsWith('gpt-image-') ? imageModel : 'gpt-image-1-mini', quality: packQuality, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, mode: 'background-only', backgroundStyle, backgroundIntensity,
+        body: JSON.stringify({ projectId, provider: 'openai', model: imageModel.startsWith('gpt-image-') ? imageModel : 'gpt-image-1-mini', quality: packQuality, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, mode: 'background-only', backgroundStyle, backgroundIntensity: 'soft',
           designBriefSettings: { ...currentBriefSettings(), typography: 'editable', headline: design.packHeadline || title, subtitle: design.packSubtitle || 'CLIPART COLLECTION', slide: design.name },
           layout: design.elements.map(e => ({ type: e.type, x: e.x, y: e.y, width: e.width, height: e.height })) })
       });
@@ -1330,7 +1425,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         <h3>Reference & assets</h3>
         <label className="input-label">LAYOUT MODE</label>
         <select value={layoutMode} onChange={e => setLayoutMode(e.target.value as 'ai' | 'manual')}><option value="ai">AI + manual</option><option value="manual">Manual only</option></select>
-        <small>Arrange original clipart on the canvas first. AI generates a background and elegant typography around YOUR placed artwork; PaletteIQ does not reposition or redraw the PNGs.</small>
+        <small>Choose a design reference to guide background, typography and asset layout. AI Vision may reposition and proportionally resize ORIGINAL collection PNG layers after generation; manual editing remains available.</small>
         <label className="input-label">REFERENCE ANALYSIS PROVIDER</label>
         <select value={provider} disabled={aiBusy} onChange={e => { const next = e.target.value as 'openai' | 'gemini'; setProvider(next); setModel(next === 'openai' ? aiDefaults.openaiModel : aiDefaults.geminiModel); }}>
           <option value="openai">OpenAI Vision</option><option value="gemini">Google Gemini Vision</option>
@@ -1353,7 +1448,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         <select aria-label="Reference interpretation" value={referenceStyle} disabled={aiBusy} onChange={e => setReferenceStyle(e.target.value as 'creative' | 'similar' | 'palette')}>
           <option value="creative">Creative adaptation</option><option value="similar">Similar layout / aesthetic</option><option value="palette">Palette and mood only</option>
         </select>
-        <small>AI Vision extracts only layout styling and typographic direction from the reference, not its product images, text, or brand. User-placed clipart positions stay fixed.</small>
+        <small>AI Vision extracts the reference composition, color treatment and typographic hierarchy. It then repositions/resizes original collection PNGs; reference product illustrations are never regenerated.</small>
         <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 12, display: 'grid', gap: 9 }}>
           <strong>Background &amp; AI Typography</strong>
           <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, fontWeight: 600 }}>
@@ -1369,9 +1464,6 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           <input aria-label="Canvas subtitle" maxLength={140} value={design.packSubtitle ?? seoDefaults.subtitle} disabled={aiBusy || !typographyEnabled} onChange={e => mutate({ packSubtitle: e.target.value, renderedImageUrl: undefined })}/>
           <label className="input-label">BADGE TEXT (OPTIONAL)</label>
           <input aria-label="Canvas badge text" maxLength={60} placeholder="Leave empty for no badge" value={design.packBadge ?? ''} disabled={aiBusy || !typographyEnabled} onChange={e => mutate({ packBadge: e.target.value, renderedImageUrl: undefined })}/>
-          <label className="input-label">ARTISTIC LETTERING COMPOSITION</label>
-          <ThumbnailStylePreviewSelect label="Artistic lettering composition" kind="lettering" value={design.packLetteringStyle || 'auto'} options={LETTERING_EXAMPLES}
-            disabled={aiBusy || !typographyEnabled} onChange={value => mutate({ packLetteringStyle: value as NonNullable<ThumbnailDesign['packLetteringStyle']>, renderedImageUrl: undefined })}/>
           <strong>Typography safe area</strong>
           <small>{typographyEnabled ? 'Typography guide is only a composition aid. Clipart may overlap text intentionally or extend beyond canvas edges. PNGs remain above AI lettering, so verify that important words stay legible.' : 'Typography is disabled; this area is ignored during background generation.'}</small>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 6 }}>
@@ -1400,23 +1492,14 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           <select aria-label="Custom canvas background quality" value={packQuality} disabled={aiBusy} onChange={e => setPackQuality(e.target.value as typeof packQuality)}>
             <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
           </select>
-          <label className="input-label">COVER ART STYLE</label>
-          <ThumbnailStylePreviewSelect label="Custom canvas cover style" kind="cover" value={packCoverStyle} options={COVER_EXAMPLES}
-            disabled={aiBusy} onChange={value => setPackCoverStyle(value as typeof packCoverStyle)}/>
-          <label className="input-label">TYPOGRAPHY BOLDNESS</label>
-          <ThumbnailStylePreviewSelect label="Custom canvas typography boldness" kind="boldness" value={packBoldness} options={BOLDNESS_EXAMPLES}
-            disabled={aiBusy} onChange={value => setPackBoldness(value as typeof packBoldness)}/>
           <label className="input-label">BACKGROUND STYLE</label>
           <ThumbnailStylePreviewSelect label="Custom canvas background style" kind="background" value={backgroundStyle} options={BACKGROUND_EXAMPLES}
             disabled={aiBusy} onChange={value => setBackgroundStyle(value as typeof backgroundStyle)}/>
-          <label className="input-label">BACKGROUND DECORATION</label>
-          <ThumbnailStylePreviewSelect label="Custom canvas decoration intensity" kind="decoration" value={backgroundIntensity} options={DECORATION_EXAMPLES}
-            disabled={aiBusy} onChange={value => setBackgroundIntensity(value as typeof backgroundIntensity)}/>
-          <button type="button" className="primary-btn" disabled={aiBusy || Boolean(backgroundRetryId) || !design.elements.some(e => e.type === 'image')} onClick={() => void generateCanvasArtwork()}>
+          <button type="button" className="primary-btn" disabled={aiBusy || Boolean(backgroundRetryId) || (!design.elements.some(e => e.type === 'image') && !(layoutMode === 'ai' && characters.some(c => c.imageUrl)))} onClick={() => void generateCanvasArtwork()}>
             <WandSparkles size={15}/> {aiBusy ? 'Generating AI artwork...' : 'Generate AI Background & Typography'}
           </button>
           {packStatus && <small role="status">{packStatus}</small>}
-          <small>Artistic lettering can be curved, arched, flowing, or hand-painted rather than rigid font typesetting. Disable the checkbox for a background with no text. Clipart is clipped naturally at the canvas edge. Changing lettering requires another AI generation; verify spelling before use. API charges apply.</small>
+          <small>Background, lettering and original-PNG placement now follow the chosen reference image. The four experimental art-style controls are temporarily disabled. Badge text is a precise editable overlay. API charges apply.</small>
         </div>
         <h3>Characters</h3>
         <div style={{ maxHeight: 400, overflowY: 'auto', display: 'grid', gap: 8 }}>
@@ -1530,8 +1613,6 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         <label className="input-label">AI DECORATIVE BACKGROUND (OPENAI)</label>
         <label className="input-label">BACKGROUND STYLE</label>
         <select aria-label="Background style" value={backgroundStyle} disabled={backgroundGenerating} onChange={event => setBackgroundStyle(event.target.value as typeof backgroundStyle)}><option value="watercolor">Artistic watercolor washes</option><option value="paper">Luxury textured paper</option><option value="gradient">Premium colorful gradient</option><option value="botanical">Abstract botanical motifs</option><option value="vintage">Vintage decorative texture</option></select>
-        <label className="input-label">DECORATION INTENSITY</label>
-        <select aria-label="Background decoration intensity" value={backgroundIntensity} disabled={backgroundGenerating} onChange={event => setBackgroundIntensity(event.target.value as typeof backgroundIntensity)}><option value="soft">Soft — visible pastel details</option><option value="balanced">Balanced — recommended</option><option value="vibrant">Vibrant — stronger colors</option></select>
         <button className="outline-btn" type="button" disabled={backgroundGenerating || aiBusy} onClick={() => void generateReferenceBackground()}><WandSparkles size={15}/> {backgroundGenerating ? 'Generating background...' : 'Generate background (no clipart or text)'}</button>
         <small>Generate visible decorative textures and color variations. Original clipart and typography stay on top as independent layers. Generating again may incur API charges.</small>
         <label className="input-label">BACKGROUND IMAGE (LOCAL PNG/JPG)</label>

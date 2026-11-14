@@ -9,7 +9,7 @@ import { userCredential, userGeminiKeys } from '@/lib/credentials';
 import { nativeAssetBucket } from '@/lib/native-bridge';
 
 type LayoutItem = { type: 'image' | 'text'; x: number; y: number; width: number; height: number; text?: string };
-type RequestBody = { projectId?: string; provider?: string; model?: string; quality?: string; width?: number; height?: number; layout?: LayoutItem[]; includeTitle?: boolean; mode?: 'full-thumbnail' | 'background-only' | 'background-with-typography'; headline?: string; subtitle?: string; badge?: string; letteringStyle?: 'auto' | 'arched' | 'flowing' | 'stacked' | 'hand-painted'; slideName?: string; artDirection?: string; textZone?: { x: number; y: number; width: number; height: number }; backgroundStyle?: 'watercolor' | 'paper' | 'gradient' | 'botanical' | 'vintage'; backgroundIntensity?: 'soft' | 'balanced' | 'vibrant'; designBoldness?: 'soft' | 'balanced' | 'bold'; coverStyle?: 'editorial' | 'boutique' | 'storybook' | 'modern' | 'watercolor'; referenceDesign?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string }; designBriefSettings?: ThumbnailBriefSettings };
+type RequestBody = { projectId?: string; provider?: string; model?: string; quality?: string; width?: number; height?: number; layout?: LayoutItem[]; includeTitle?: boolean; mode?: 'full-thumbnail' | 'background-only' | 'background-with-typography'; headline?: string; subtitle?: string; badge?: string; letteringStyle?: 'auto' | 'arched' | 'flowing' | 'stacked' | 'hand-painted'; slideName?: string; artDirection?: string; reserveBadgeZone?: boolean; textZone?: { x: number; y: number; width: number; height: number }; backgroundStyle?: 'watercolor' | 'paper' | 'gradient' | 'botanical' | 'vintage'; backgroundIntensity?: 'soft' | 'balanced' | 'vibrant'; designBoldness?: 'soft' | 'balanced' | 'bold'; coverStyle?: 'editorial' | 'boutique' | 'storybook' | 'modern' | 'watercolor'; referenceDesign?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string; compositionGuide?: string }; designBriefSettings?: ThumbnailBriefSettings };
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 const bucket = () => nativeAssetBucket() ?? env.BUCKET;
 
@@ -129,10 +129,13 @@ export async function POST(req: Request) {
     'pastel': 'Soft powder pastel pink, muted sage, ivory and dusty peach with very low contrast backgrounds.',
     'vibrant': 'Distinct but tasteful editorial accents with ivory background and deep ink lettering.'
   };
+  const referenceComposition = typeof reference?.compositionGuide === 'string'
+    ? reference.compositionGuide.replace(/[<>\r\n]/g, ' ').slice(0,450) : '';
   const referenceGuide = [
     graphicMotifs[reference?.graphicMotif || ''] || '',
     letteringStyles[reference?.letteringStyle || ''] || '',
-    paletteMoods[reference?.paletteMood || ''] || ''
+    paletteMoods[reference?.paletteMood || ''] || '',
+    referenceComposition ? 'Follow this reference-derived NONFIGURATIVE graphic composition and typography: ' + referenceComposition : ''
   ].filter(Boolean).join(' ');
   const graphicDirection = [
     // Reference style deliberately outranks generic cover style when available.
@@ -160,7 +163,7 @@ export async function POST(req: Request) {
       artisticStyles[letteringStyle],
       input.headline?.trim() ? 'EXACT MAIN TITLE: ' + JSON.stringify(safeText(input.headline)) + '.' : 'NO MAIN TITLE: leave title blank.',
       input.subtitle?.trim() ? 'EXACT SUBTITLE: ' + JSON.stringify(safeText(input.subtitle)) + '.' : 'NO SUBTITLE: leave subtitle blank.',
-      input.badge?.trim() ? 'EXACT BADGE LETTERING: ' + JSON.stringify(safeText(input.badge)) + ' in a tasteful abstract ornamental badge.' : 'NO BADGE: do not invent a badge or extra label.',
+      input.reserveBadgeZone ? 'NO BADGE TEXT: Reserve the LOWER 20 PERCENT of the title typography-safe rectangle as quiet, empty space for an exact badge layer added by PaletteIQ.' : 'NO BADGE: do not invent a badge or extra label.',
       'Arched, curved, flowing, gently waved, offset, or layered typography is welcome when suitable; the title can split across lines with visual rhythm. Use balanced size contrasts, beautiful shapes and premium watercolor/editorial styling.',
       'Prioritize legibility on Etsy search thumbnails: keep the lettering within the designated text-safe area, retain correct wording, spelling and punctuation, avoid obscuring the original clipart slots.',
       'Do not add ANY other words, quantity, DPI, fake watermark or marketing claims.',
@@ -206,6 +209,7 @@ export async function POST(req: Request) {
       'Visible areas where original PNG assets will later be composited. Some original images deliberately extend BEYOND the canvas: preserve their visible slots and allow natural crop at the final canvas edge. Leave these slots free of competing decoration; never fill them with substitutes:', JSON.stringify(visibleLayout),
       'Exact original PNGs may intentionally OVERLAP the lettering after compositing, including over the headline or subtitle. The user owns the positions. Do not relocate text or block generation merely because a foreground PNG intersects the typography area; allow artistic layering and keep the remaining exposed letters legible. NEVER draw substitute objects.',
       'Premium design mood (follow reference graphic style when provided):', graphicDirection,
+      ...(referenceComposition ? ['REFERENCE COMPOSITION HAS PRIORITY OVER DEFAULT ABSTRACT DECORATION: ' + referenceComposition] : []),
       ...(designBrief ? ['REFERENCE & ASSETS SETTINGS (graphic art direction ONLY; never synthesize objects):', designBrief] : []),
       ...(isHeroCover ? ['HERO ART DIRECTION PRIORITY:', heroReferenceStyle] : []),
       'If a blush brush-ring reference is provided, DO NOT substitute red-orange geometric blobs. Keep the watercolor ring delicate and the central typography visually expressive.',

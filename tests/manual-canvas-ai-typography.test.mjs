@@ -27,34 +27,45 @@ test('Reference & Assets uses a manual canvas workflow instead of showing either
   assert.match(editor, /Reserved AI typography zone/);
 });
 
-test('generation sends only original image coordinates, preserving manually created layers', () => {
+test('custom canvas generates graphics only, then Vision fits exact original PNGs to the reference', () => {
   const method = editor.slice(editor.indexOf('  const generateCanvasArtwork = async () => {'),
     editor.indexOf('  // Create the background and artistic lettering FIRST'));
-  assert.match(method, /const imageLayers = source\.elements\.filter/);
+  assert.match(method, /const originalLayers = source\.elements\.filter/);
+  assert.match(method, /filterThemeCharacters\(title,characters\)/);
+  assert.match(method, /slice\(0,9\)\.map\(\(c,i\)=>newImage\(c,i,'original'\)\)/);
   assert.match(method, /assetMap\.get\(e\.characterId\)\?\.imageUrl/);
   assert.match(method, /layout: imageLayers\.map\(e => \(\{ type: 'image' as const/);
-  assert.match(method, /background-with-typography/);
-  assert.match(method, /packSlideKey: 'custom-canvas'/);
+  assert.match(method, /mode: needsAiLettering \? 'background-with-typography'/);
+  assert.match(method, /referenceSlots = result\.layout\.slots \|\| \[\]/);
+  assert.match(method, /referenceDesign = \{ graphicMotif: result\.layout\.graphicMotif/);
+  assert.match(method, /await placeOriginalsOverBackground\(/);
+  assert.match(method, /elements: \[\.\.\.positioned, \.\.\.badgeTextLayers\]/);
   assert.match(method, /source: 'original' as const/);
-  assert.match(method, /const exactLayers = currentDesign\.elements\.filter/);
-  assert.doesNotMatch(method, /placeOriginalsOverBackground/);
-  assert.doesNotMatch(method, /overlapsType/);
-  assert.match(method, /Intentional image\/text overlap is supported/);
-  assert.match(method, /textZone: zone/);
-  assert.match(method, /badge,/);
+  assert.match(method, /reserveBadgeZone: Boolean\(hasLettering && badge\)/);
 });
 
-test('reference analysis uses style cues but never substitutes model-selected original artwork', () => {
+test('reference-guided generation requires a selected reference and blocks paid generation on analysis failure', () => {
   const method = editor.slice(editor.indexOf('  const generateCanvasArtwork = async () => {'),
     editor.indexOf('  // Create the background and artistic lettering FIRST'));
-  assert.match(method, /if \(result\.layout\) referenceDesign/);
-  assert.doesNotMatch(method, /result\.layout\.slots/);
+  assert.match(method, /layoutMode === 'ai' && !reference/);
+  assert.match(method, /Reference analysis failed; no paid background generated/);
+  assert.match(method, /result\.layout\.texts \|\| \[\]/);
+  assert.match(method, /compositionGuide: result\.layout\.compositionGuide/);
 });
 
-test('flagged background review cannot automatically reposition a custom canvas', () => {
-  assert.match(editor, /if \(target\.packSlideKey === 'custom-canvas'\) \{/);
-  assert.match(editor, /no AI re-layout is applied/);
-  assert.match(editor, /source: 'original' as const/);
+test('QC review still adjusts exact originals and restores badge text after approval', () => {
+  const review = editor.slice(editor.indexOf('  const approveReviewedBackground = async'),editor.indexOf('  const onReferenceUpload'));
+  assert.match(review, /target\.packSlideKey === 'custom-canvas'/);
+  assert.match(review, /await placeOriginalsOverBackground/);
+  assert.match(review, /badgeOverlay\(zone,target\.packBadge \|\| ''\)/);
+  assert.match(review, /source: 'original' as const/);
+});
+
+test('Badge text is overlaid exactly, never guessed by an image model', () => {
+  assert.match(editor, /const badgeOverlay = \(zone: ThumbnailBox, copy: string\)/);
+  assert.match(editor, /\.\.\.newText\(copy\.trim\(\)\)/);
+  assert.match(editor, /badge: '',/);
+  assert.match(api, /NO BADGE TEXT:/);
 });
 
 test('AI image backend accepts optional badge and honors absence of badges', () => {
@@ -63,4 +74,11 @@ test('AI image backend accepts optional badge and honors absence of badges', () 
   assert.match(api, /NO BADGE: do not invent a badge/);
   assert.match(api, /\(input\.badge \|\| ''\)\.length > 60/);
   assert.doesNotMatch(api, /mode !== 'full-thumbnail' && input\.provider !== 'openai'/);
+});
+
+test('empty canvas can generate an exact-asset reference-based composition', () => {
+  assert.match(editor, /layoutMode === 'ai' && characters\.some\(c => c\.imageUrl\)/);
+  assert.match(editor, /currentDesign\.elements\.some\(e => e\.type === 'image'\)/);
+  assert.match(editor, /: imageLayers\)/);
+  assert.match(editor, /const badgeTextLayers = hasLettering \? badgeOverlay\(zone,badge\) : \[\]/);
 });
