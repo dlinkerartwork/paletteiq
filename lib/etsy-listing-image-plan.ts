@@ -28,7 +28,7 @@ export type ListingImageStatus = 'draft' | 'approved' | 'needs_revision';
 export type ListingAsset = { id: string; name: string; imageUrl?: string; category?: string; subtheme?: string; group?: string };
 export type ListingPlacement = { assetId: string; x: number; y: number; width: number; height: number; rotation?: number };
 /** Main Cover defaults to AI-led free composition; other stages remain structured. */
-export type ListingCompositionMode = 'free' | 'structured';
+export type ListingCompositionMode = 'free' | 'structured' | 'ai-first';
 export function defaultListingCompositionMode(number: number): ListingCompositionMode {
   return number === 1 ? 'free' : 'structured';
 }
@@ -57,7 +57,7 @@ export type ListingFinalReview = {
   improvements: string[]; analyzedImageUrl: string; analyzedAt: number;
 };
 export type ListingImageRecord = {
-  number: number; status: ListingImageStatus; backgroundUrl?: string; renderedImageUrl?: string;
+  number: number; status: ListingImageStatus; backgroundUrl?: string; conceptUrl?: string; renderedImageUrl?: string;
   placements?: ListingPlacement[]; notes?: string; reviewWarning?: string;
   title?: string; subtitle?: string; badge?: string; // Exact user-approved AI lettering per image.
   finalReview?: ListingFinalReview; // Vision critique of FINAL composited JPG, not background alone.
