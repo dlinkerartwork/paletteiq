@@ -534,11 +534,16 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     if (!design || aiBusy || backgroundRetryId) return;
     if (layoutMode === 'ai' && !reference) { setMessage('Select or upload a reference image before reference-guided generation.'); return; }
     const source = design;
-    const imageLayers = source.elements.filter(e => e.type === 'image' && e.characterId && assetMap.get(e.characterId)?.imageUrl);
-    if (!imageLayers.length) { setMessage('Add original clipart from Reference & Assets to the canvas first.'); return; }
-    if (imageLayers.length !== source.elements.filter(e => e.type === 'image').length) {
+    const originalLayers = source.elements.filter(e => e.type === 'image');
+    if (originalLayers.some(e => !e.characterId || !assetMap.get(e.characterId)?.imageUrl)) {
       setMessage('An image layer has no original collection PNG. Replace it before generating.'); return;
     }
+    const imageLayers = originalLayers.length
+      ? originalLayers
+      : layoutMode === 'ai'
+        ? filterThemeCharacters(title,characters).filter(c => c.imageUrl).slice(0,9).map((c,i)=>newImage(c,i,'original'))
+        : [];
+    if (!imageLayers.length) { setMessage('No usable original collection PNGs; add assets or choose reference-guided mode.'); return; }
     let zone = source.packTextZone || { x: 22, y: 30, width: 56, height: 34 };
     // Deliberate bleed beyond the canvas is allowed. Only the visible area is
     // composited and reserved; the full source PNG is never resized or redrawn.
@@ -640,7 +645,8 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
       if (!result.imageUrl) throw Error('AI did not return a background image.');
       await loadForExport(result.imageUrl);
       const currentDesign = latestDesignsRef.current.find(d => d.id === source.id) || source;
-      const exactLayers = currentDesign.elements.filter(e => e.type === 'image')
+      const exactLayers = (currentDesign.elements.some(e => e.type === 'image')
+        ? currentDesign.elements.filter(e => e.type === 'image') : imageLayers)
         .map(e => ({ ...e, source: 'original' as const }));
       let positioned = exactLayers;
       let usedFallback = false;
