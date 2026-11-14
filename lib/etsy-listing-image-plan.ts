@@ -28,7 +28,7 @@ export type ListingImageRecord = {
   placements?: ListingPlacement[]; compositionMode?: 'hero-center' | 'reference-guided' | 'top-gallery';
   protectedTextZone?: {x:number;y:number;width:number;height:number};
   protectedTextZones?: Array<{x:number;y:number;width:number;height:number}>;
-  notes?: string; updatedAt: number;
+  reviewWarnings?: string[]; notes?: string; updatedAt: number;
 };
 export type ListingImageKind = typeof LISTING_IMAGE_SPECS[number]['kind'];
 
