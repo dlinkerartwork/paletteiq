@@ -1029,7 +1029,15 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
             <label className="input-label" htmlFor="listing-composition-mode">COMPOSITION MODE</label>
             <select id="listing-composition-mode" aria-label="Listing composition mode" value={compositionMode}
               disabled={!!working}
-              onChange={e => setCompositionModes(old => ({...old,[String(step)]:e.target.value as ListingCompositionMode}))}>
+              onChange={e => {
+                const mode=e.target.value as ListingCompositionMode;
+                setCompositionModes(old => ({...old,[String(step)]:mode}));
+                if(mode === 'ai-first' && !current?.backgroundUrl){
+                  setChanges(old => ({...old,[step]:planListingPlacements(step,categorizedAssets,{count:assets.length})}));
+                  setSelectedIndex(0);
+                  setMessage('AI-First now offers the entire original collection to OpenAI as candidate artwork. OpenAI chooses the final selection and composition. You may narrow the source pool before preparing prompts.');
+                }
+              }}>
               <option value="free">Free Composition — OpenAI chooses sizes and positions (Main Cover default)</option>
               {!(step >= 8 && step <= 12) && <option value="ai-first">AI-First Composition — generate a full concept from original collection references</option>}
               <option value="structured">Structured — preserve my white-canvas arrangement</option>
@@ -1039,14 +1047,25 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
               : compositionMode === 'free'
                 ? 'AI Vision acts as the art director after the background is generated: it can resize, move, rotate, overlap or partially crop any selected ORIGINAL clipart. White-canvas positions are inspiration only, NOT a constraint. Clipart selection and identity remain unchanged.'
                 : 'PaletteIQ preserves the composition you created on the white canvas. You can still choose optional AI Vision refinement or Auto Arrange.'}</small>
-            <small>Choose how many ORIGINAL collection assets appear in this listing image. Main Cover defaults to {DEFAULT_MAIN_COVER_CLIPART_COUNT} with two large focal illustrations, several medium ones and smaller accents. You can choose any count up to the collection size.</small>
-            <label className="input-label" htmlFor="listing-clipart-count">NUMBER OF CLIPARTS (1–{assets.length})</label>
+            <small>{compositionMode === 'ai-first'
+              ? 'These originals are the SOURCE POOL, not fixed canvas objects. OpenAI chooses which files to feature and how many; it can repeat an original PNG without creating a new character. No placement slots are sent to OpenAI.'
+              : 'Choose how many ORIGINAL collection assets appear in this listing image. Main Cover defaults to '+DEFAULT_MAIN_COVER_CLIPART_COUNT+' but you can choose any count up to your collection size.'}</small>
+            <label className="input-label" htmlFor="listing-clipart-count">{compositionMode === 'ai-first'
+              ? 'ELIGIBLE ORIGINAL CLIPART SOURCES'
+              : 'NUMBER OF CLIPARTS'} (1–{assets.length})</label>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <input id="listing-clipart-count" aria-label="Number of listing cliparts" type="number" min={1} max={assets.length} step={1} value={positions.length}
                 disabled={!assets.length || !!working} onChange={e => changeArtworkCount(Number(e.target.value))}
                 style={{ width: 105, flexShrink: 0 }}/>
               <button type="button" className="outline-btn" disabled={!!working || !assets.length} onClick={autoSelectArtwork}>Auto Select ({positions.length})</button>
-              {step === 1 && <button type="button" className="outline-btn"
+              {compositionMode === 'ai-first' && <button type="button" className="outline-btn"
+                disabled={!!working || !assets.length}
+                onClick={() => {
+                  setChanges(old => ({...old,[step]:planListingPlacements(step,categorizedAssets,{count:assets.length})}));
+                  setSelectedIndex(0);
+                  setMessage('All '+assets.length+' original collection assets are eligible. OpenAI decides which to feature in its final thumbnail.');
+                }}>Use Entire Collection as Sources</button>}
+              {step === 1 && compositionMode !== 'ai-first' && <button type="button" className="outline-btn"
                 disabled={!assets.length || !!working}
                 onClick={() => {
                   if ((current?.backgroundUrl || preLayouts[String(step)] || changes[step]) &&
@@ -1080,13 +1099,21 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
                 </label>)}
                 {!visibleAssetChoices.length && <small>No matching original clipart.</small>}
               </div>
-              <small>Checked: {positions.length} / {assets.length}. Each selected original appears once; adding or removing clipart does not redraw the source.</small>
+              <small>{compositionMode === 'ai-first'
+                ? 'Source pool: '+new Set(positions.map(p=>p.assetId)).size+' of '+assets.length+' original PNGs; Vision chooses the final count. Reusing originals in the final layout is allowed.'
+                : 'Checked: '+positions.length+' / '+assets.length+'. Each selected original appears once.'} Originals are never redrawn.</small>
             </div>}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button type="button" className="outline-btn" disabled={!!working || !positions.length}
                 onClick={() => void autoArrangeArtwork()}>Auto Arrange ({positions.length})</button>
               <button type="button" className="outline-btn" disabled={!!working || !selected || positions.length <= 1}
-                onClick={() => selected && toggleArtwork(selected.assetId, false)}>Remove Selected Clipart</button>
+                onClick={() => {
+                  if(!selected)return;
+                  if(compositionMode === 'ai-first' && current?.renderedImageUrl){
+                    setChanges(old => ({...old,[step]:positions.filter((_,i)=>i!==selectedIndex)}));
+                    setSelectedIndex(0);
+                  }else toggleArtwork(selected.assetId,false);
+                }}>Remove Selected Clipart</button>
             </div>
             <small>Change clipart count/selection, then use Auto Arrange or adjust directly. In Free Mode OpenAI Vision can reposition every selected original clipart, without enforcing PaletteIQ's initial slots. Apply layout &amp; save JPG without another image-generation charge.</small>
             <small>There is no preset maximum number of canvas objects. You can select every distinct original in the collection; larger selections are composed by AI Vision in batches. Very dense covers may need a manual readability check.</small>
@@ -1100,7 +1127,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           {selected && <>
             <label className="input-label">REPLACE WITH ORIGINAL COLLECTION ASSET</label>
             <select value={selected.assetId} disabled={!!working} onChange={e => move('assetId', e.target.value)}>
-              {assets.map(a => <option key={a.id} value={a.id} disabled={positions.some(p => p.assetId === a.id && p.assetId !== selected.assetId)}>{a.name}</option>)}
+              {assets.map(a => <option key={a.id} value={a.id} disabled={compositionMode !== 'ai-first' && positions.some(p => p.assetId === a.id && p.assetId !== selected.assetId)}>{a.name}</option>)}
             </select>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 8 }}>
               {(['x','y','width','height'] as const).map(field => <label key={field} style={{ fontSize: 12, display: 'grid', gap: 3 }}>{field.toUpperCase()} (%)
