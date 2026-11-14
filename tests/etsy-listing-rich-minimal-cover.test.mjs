@@ -56,9 +56,9 @@ test('manual count and exact selection override the new cover default without cl
 
 test('small art-first typography and quiet theme-matched background are default and user overridable',()=>{
   assert.match(api,/TYPOGRAPHY SCALE — COMPACT \(default\)/);
-  assert.match(api,/about 14–16% of canvas height/);
-  assert.match(api,/subtitle only about 3–5%/);
-  assert.match(api,/combined lettering generally below 24%/);
+  assert.match(api,/about 10–13% of canvas height/);
+  assert.match(api,/subtitle only about 2–4%/);
+  assert.match(api,/combined lettering generally below 19%/);
   assert.match(api,/backgroundStyle: 'plain' \| 'minimal' \| 'soft-texture' = 'minimal'/);
   assert.match(api,/BACKGROUND STYLE — MINIMAL \(default\)/);
   assert.match(api,/BACKGROUND STYLE — PLAIN/);
