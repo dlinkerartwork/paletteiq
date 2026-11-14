@@ -31,7 +31,7 @@ test('custom canvas generates graphics only, then Vision fits exact original PNG
   const method = editor.slice(editor.indexOf('  const generateCanvasArtwork = async () => {'),
     editor.indexOf('  // Create the background and artistic lettering FIRST'));
   assert.match(method, /const originalLayers = source\.elements\.filter/);
-  assert.match(method, /filterThemeCharacters\(title,characters\)/);
+  assert.doesNotMatch(method, /filterThemeCharacters\(title,characters\)/);
   assert.match(method, /const imageLayers = originalLayers/);
   assert.doesNotMatch(method, /filterThemeCharacters\(title,characters\).*slice\(0,9\)/);
   assert.match(method, /assetMap\.get\(e\.characterId\)\?\.imageUrl/);
