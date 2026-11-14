@@ -21,9 +21,8 @@ test('source collection art dominates thumbnail: prompt uses scaled compact arti
   assert.match(backend,/user-selected genuine original layers/);
   assert.match(backend,/No generated imitation clipart or substitute objects/);
   assert.match(backend,/if \(input\.textScale !== undefined && !\['compact','balanced','statement'\]\.includes\(input\.textScale\)\)/);
-  assert.match(ui,/<option value="compact">Compact — extra-small title, artwork first \(recommended\)<\/option>/);
-  assert.match(ui,/const \[textScale, setTextScale\] = useState<'compact' \| 'balanced' \| 'statement'>\('compact'\)/);
-  assert.match(ui,/placements: effectivePositions, textScale/);
+  assert.doesNotMatch(ui,/ARTISTIC LETTERING SIZE|setTextScale|listing-lettering-scale/);
+  assert.match(ui,/placements: effectivePositions, compositionMode/);
 });
 
 test('Studio image model and quality default to SAVED Settings, not static hardcoded choices',()=>{
@@ -44,8 +43,8 @@ test('Advanced AI settings are always visible, including model quality and lette
   assert.match(ui,/<strong style=\{\{ fontSize: 13 \}\}>Advanced AI settings \(optional\)<\/strong>/);
   assert.match(ui,/OPENAI ARTISTIC BACKGROUND MODEL/);
   assert.match(ui,/BACKGROUND QUALITY/);
-  assert.match(ui,/ARTISTIC LETTERING SIZE/);
-  assert.match(ui,/onChange=\{e => setTextScale\(e\.target\.value as typeof textScale\)\}/);
+  assert.doesNotMatch(ui,/ARTISTIC LETTERING SIZE|BACKGROUND STYLE \(THEME-MATCHED\)/);
+  assert.match(ui,/OpenAI chooses the lettering style, font/);
   assert.doesNotMatch(ui,/<summary[^>]*>Advanced AI settings \(optional\)<\/summary>/);
 });
 
