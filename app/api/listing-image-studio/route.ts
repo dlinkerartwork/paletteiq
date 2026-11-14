@@ -9,7 +9,7 @@ import { zipStream, type ZipEntry } from '@/lib/zip-stream';
 import { listingCreativeDirection, listingCreativeSummary, listingMockupScene } from '@/lib/etsy-listing-creative-direction';
 import { currentListingVisualStyle, listingStyleDirection, type ListingVisualStyleProfile } from '@/lib/etsy-listing-visual-style';
 import { estimateListingImageGenerationCost, type GeneratedImageUsage } from '@/lib/etsy-listing-image-cost';
-import { aiFirstConceptPrompt, aiFirstCleanPlatePrompt, AI_FIRST_MAX_REFERENCE_SHEETS } from '@/lib/etsy-listing-ai-first';
+import { aiFirstConceptPrompt, aiFirstBackgroundPrompt, AI_FIRST_MAX_REFERENCE_SHEETS, AI_FIRST_MAX_REFERENCE_ASSETS } from '@/lib/etsy-listing-ai-first';
 import {
   LISTING_IMAGE_SPECS, LISTING_HEIGHT, LISTING_WIDTH, listingFilename, listingTitle,
   originalAssets, isSquareListingApproved, validListingPlacement, defaultListingCompositionMode, listingImageTextDefaults, DEFAULT_MAIN_COVER_CLIPART_COUNT, type ListingCompositionMode, type ListingFinalReview, type ListingImageText, type ListingImageRecord, type ListingPlacement, type ListingAsset, type ListingImageStatus
@@ -63,13 +63,18 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
   const height = value.height ?? previous?.height;
   if (status === 'approved' && (!renderedImageUrl || !placements.length || width !== LISTING_WIDTH || height !== LISTING_HEIGHT))
     throw Error('Save a 1024 × 1024 JPG using original collection artwork before approval. Legacy 4:3 renders must be remade.');
+  const selectedSourceIds = Array.isArray(value.selectedSourceIds)
+    ? [...new Set(value.selectedSourceIds.filter(id => allowed.has(id)))].slice(0,allowed.size)
+    : previous?.selectedSourceIds;
+  const creativeBrief = typeof value.creativeBrief === 'string'
+    ? sanitizedText(value.creativeBrief,2200) : previous?.creativeBrief;
   const title = typeof value.title === 'string' ? sanitizedText(value.title, 140) : previous?.title;
   const subtitle = typeof value.subtitle === 'string' ? sanitizedText(value.subtitle, 140) : previous?.subtitle;
   const badge = typeof value.badge === 'string' ? sanitizedText(value.badge, 60) : previous?.badge;
   // Client-provided ratings are never trusted. A score is server-owned and
   // remains valid only while the EXACT reviewed JPG URL is unchanged.
   const finalReview = previous?.renderedImageUrl === renderedImageUrl ? previous?.finalReview : undefined;
-  return { number: value.number, status, backgroundUrl, conceptUrl, renderedImageUrl, placements, width, height, title, subtitle, badge, finalReview, notes: sanitizedText(value.notes || '', 800),
+  return { number: value.number, status, backgroundUrl, conceptUrl, renderedImageUrl, placements, selectedSourceIds, creativeBrief, width, height, title, subtitle, badge, finalReview, notes: sanitizedText(value.notes || '', 800),
     reviewWarning: typeof value.reviewWarning === 'string' ? sanitizedText(value.reviewWarning, 280) : '',
     updatedAt: Date.now() };
 }
@@ -237,7 +242,8 @@ type Input = {
   action?: 'generate' | 'preview-prompt' | 'generate-concept' | 'clean-concept' | 'save' | 'layout' | 'reject' | 'critique' | 'prelayout'; projectId?: string; number?: number;
   image?: ListingImageRecord; model?: string; quality?: string;
   backgroundUrl?: string; conceptUrl?: string; placements?: ListingPlacement[]; revisionNotes?: string;
-  selectedAssetIds?: string[]; referenceSheets?: string[];
+  selectedAssetIds?: string[]; sampledAssetIds?: string[]; referenceSheets?: string[];
+  creativeBrief?: string;
   featuredCount?: number; critiqueFeedback?: string; textScale?: 'compact' | 'balanced' | 'statement'; backgroundStyle?: 'plain' | 'minimal' | 'soft-texture';
   compositionMode?: ListingCompositionMode; artworkContactSheets?: string[];
   existingPlacements?: ListingPlacement[]; totalSelected?: number;
@@ -383,40 +389,6 @@ function defaultVisionArtDirection(mode: ListingCompositionMode, number: number)
  * arbitrary JSON URLs. Reference JPEG contact sheets are built client-side
  * from collection originals without any placement geometry.
  */
-async function editImageFromReferences(
-  key: string, model: string, quality: string, prompt: string,
-  inputs: Array<{ bytes: Uint8Array; name: string; mime: 'image/png' | 'image/jpeg' }>
-): Promise<{ bytes: Uint8Array; costEstimate: ReturnType<typeof estimateListingImageGenerationCost> }> {
-  const form = new FormData();
-  form.append('model', model);
-  form.append('quality', quality);
-  form.append('size', '1024x1024');
-  form.append('output_format', 'png');
-  form.append('prompt', prompt);
-  for (const item of inputs) {
-    // Each image[] part is a real JPEG/PNG file and only source-board images
-    // and/or the saved concept reach the API; never raw ZIP or user paths.
-    form.append('image[]', new Blob([new Uint8Array(item.bytes)], {type:item.mime}), item.name);
-  }
-  const response = await fetch('https://api.openai.com/v1/images/edits', {
-    method: 'POST',
-    headers: { Authorization: 'Bearer ' + key },
-    body: form,
-    signal: AbortSignal.timeout(180000)
-  });
-  if (!response.ok) throw Error('OpenAI image edit HTTP ' + response.status + ': ' +
-    (await response.text()).slice(0, 180));
-  const generated = await response.json() as { data?: Array<{ b64_json?: string }>; usage?: GeneratedImageUsage };
-  const b64 = generated.data?.[0]?.b64_json || '';
-  if (!b64 || b64.length > 28_000_000) throw Error('OpenAI did not return a usable edited PNG');
-  const bytes = Uint8Array.from(atob(b64), ch => ch.charCodeAt(0));
-  if (bytes.length < 8 || bytes.length > 20_000_000 ||
-      bytes[0] !== 137 || bytes[1] !== 80 || bytes[2] !== 78 || bytes[3] !== 71)
-    throw Error('OpenAI image edit did not return a valid PNG');
-  return {bytes, costEstimate:estimateListingImageGenerationCost(
-    model, quality as 'low'|'medium'|'high', generated.usage)};
-}
-
 async function storeListingPng(owner: string, projectId: string, bytes: Uint8Array): Promise<string> {
   const storage = bucket();
   if (!storage) throw Error('Image storage is unavailable');
@@ -473,65 +445,101 @@ export async function POST(request: Request) {
       return Response.json({ images });
     } catch (error) { return bad(error instanceof Error ? error.message : 'Could not save listing image'); }
   }
-  if (input.action === 'generate-concept' || input.action === 'clean-concept') {
+  if (input.action === 'generate-concept') {
+    // AI-First never sends original reference pixels to an IMAGE generator.
+    // Vision reads contact sheets and produces a JSON creative brief + source IDs;
+    // a separate text-to-image call draws typography/background ONLY.
     if (input.number >= 8 && input.number <= 12)
-      return bad('AI-first is supported on artwork listing pages, not product mockups.');
-    const model = input.model || 'gpt-image-1-mini';
-    const quality = input.quality || 'medium';
+      return bad('AI-first is supported on artwork pages, not product mockups.');
+    const model=input.model || 'gpt-image-1-mini';
+    const quality=input.quality || 'medium';
     if (!/^gpt-image-[a-z0-9.-]{1,80}$/.test(model) || !['low','medium','high'].includes(quality))
-      return bad('Choose a valid image model and quality');
-    const key = await userCredential(user.userId,'openai') ||
+      return bad('Choose a valid OpenAI model and quality');
+    const openai=await userCredential(user.userId,'openai') ||
       (env as unknown as Record<string,string|undefined>).OPENAI_API_KEY;
-    if (!key) return bad('Configure OpenAI API key for AI-first image design',503);
-    const title = typeof input.title === 'string' ? sanitizedText(input.title,140) : '';
-    const subtitle = typeof input.subtitle === 'string' ? sanitizedText(input.subtitle,140) : '';
-    const badge = typeof input.badge === 'string' ? sanitizedText(input.badge,60) : '';
-    if (['title','subtitle','badge'].some(field =>
-      typeof input[field as 'title'|'subtitle'|'badge'] === 'string' &&
-      (input[field as 'title'|'subtitle'|'badge'] as string).length > (field === 'badge' ? 60 : 140)))
-      return bad('Text exceeds the allowed listing title/subtitle/badge length');
+    if(!openai) return bad('Configure an OpenAI API key',503);
+    const all=originalAssets(project.characters || []);
+    const allowed=new Set(all.map(a=>a.id));
+    const ids=input.selectedAssetIds, sampled=input.sampledAssetIds;
+    const sheets=input.referenceSheets;
+    if(!Array.isArray(ids)||!ids.length||ids.length>allowed.size||
+        ids.some(id=>typeof id!=='string'||!allowed.has(id)) ||
+        new Set(ids).size!==ids.length)
+      return bad('Choose collection originals for AI-first design');
+    if(!Array.isArray(sampled)||!sampled.length||sampled.length>AI_FIRST_MAX_REFERENCE_ASSETS||
+        sampled.some(id=>typeof id!=='string'||!allowed.has(id)||!ids.includes(id))||
+        new Set(sampled).size!==sampled.length)
+      return bad('Invalid numbered original contact-sheet reference IDs');
+    if(!Array.isArray(sheets)||sheets.length!==Math.ceil(sampled.length/24)||
+        sheets.length>AI_FIRST_MAX_REFERENCE_SHEETS||
+        sheets.some(sheet=>typeof sheet!=='string'||sheet.length>1_800_000||
+          !/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(sheet)))
+      return bad('Invalid contact-sheet image references',413);
+    if(typeof input.backgroundPrompt!=='string'||!input.backgroundPrompt.trim()||
+        input.backgroundPrompt.length>24000)
+      return bad('Review the art-direction prompt before generation');
+    const title=typeof input.title==='string'?sanitizedText(input.title,140):'';
+    const subtitle=typeof input.subtitle==='string'?sanitizedText(input.subtitle,140):'';
+    const badge=typeof input.badge==='string'?sanitizedText(input.badge,60):'';
+    if ((input.title?.length||0)>140||(input.subtitle?.length||0)>140||(input.badge?.length||0)>60)
+      return bad('Title, subtitle or badge exceeds the supported length');
     try {
-      if (input.action === 'generate-concept') {
-        const ids = input.selectedAssetIds;
-        const valid = new Set(originalAssets(project.characters || []).map(x=>x.id));
-        if (!Array.isArray(ids) || !ids.length || ids.length > valid.size ||
-            ids.some(id => typeof id !== 'string' || !valid.has(id)) ||
-            new Set(ids).size !== ids.length)
-          return bad('Select original collection assets before generating a concept');
-        const sheets = input.referenceSheets;
-        if (!Array.isArray(sheets) || !sheets.length ||
-            sheets.length > AI_FIRST_MAX_REFERENCE_SHEETS ||
-            sheets.some(sheet => typeof sheet !== 'string' || sheet.length > 1_800_000 ||
-              !/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(sheet)))
-          return bad('Invalid original clipart contact sheets',413);
-        if (typeof input.backgroundPrompt !== 'string' || !input.backgroundPrompt.trim() ||
-            input.backgroundPrompt.length > 24000)
-          return bad('Review the AI-first concept prompt before paid generation');
-        const refs = sheets.map((sheet,i) => ({
-          bytes:Uint8Array.from(atob(sheet.slice('data:image/jpeg;base64,'.length)),ch=>ch.charCodeAt(0)),
-          name:'original-reference-board-' + (i+1) + '.jpg',
-          mime:'image/jpeg' as const
-        }));
-        const edited = await editImageFromReferences(key,model,quality,input.backgroundPrompt,refs);
-        const conceptUrl = await storeListingPng(user.userId,input.projectId,edited.bytes);
-        return Response.json({conceptUrl,costEstimate:edited.costEstimate,
-          sampledSourceCount:Math.min(ids.length,sheets.length*24),selectedSourceCount:ids.length});
-      }
-      const conceptKey=savedAssetKey(input.conceptUrl || '',input.projectId,user.userId);
-      if (!conceptKey || !conceptKey.endsWith('.png')) return bad('Choose a saved AI-first concept first');
-      const concept=await bucket()?.get(conceptKey);
-      if (!concept) return bad('AI-first concept not found',404);
-      const bytes=new Uint8Array(await concept.arrayBuffer());
-      if (bytes.length>20_000_000) return bad('Concept image exceeds image edit limit',413);
-      const cleaned=await editImageFromReferences(key,model,quality,
-        aiFirstCleanPlatePrompt(title,subtitle,badge),
-        [{bytes,name:'ai-first-full-concept.png',mime:'image/png'}]);
-      const backgroundUrl=await storeListingPng(user.userId,input.projectId,cleaned.bytes);
-      return Response.json({backgroundUrl,costEstimate:cleaned.costEstimate,
-        reviewWarning:'AI-first clean plate was reconstructed by AI. Review for remaining placeholder illustrations or changed text before approving the final JPG.'});
-    } catch(error) {
-      return bad('AI-first image step failed: ' +
-        (error instanceof Error ? error.message : String(error)).slice(0,220),502);
+      const directionPrompt=[
+        input.backgroundPrompt,
+        'TECHNICAL TASK: Return ONLY JSON {"chosenIndices":[1,2],"creativeBrief":"..."} with exact 1-based indices from the attached numbered reference boards (1 through '+sampled.length+').',
+        'The boards are reference images of real source PNGs, not a starting canvas. YOU choose how many and which ORIGINAL source illustrations will feature. Do not invent assets or replace any with generated art.',
+        'Your creativeBrief must describe exceptionally attractive aesthetic art direction, free typography/background and how the originals should balance around the exact title, subtitle, badge. Do not choose a specific font unless the user asks. Nothing in this step draws an illustration.',
+        'ALL artwork is placed later from source PNG bytes by PaletteIQ. Image generation will create BACKGROUND AND TYPOGRAPHY ONLY. Never ask it to recreate the clipart.',
+        'Board ordinal -> actual asset ID map (no placement geometry): '+JSON.stringify(sampled.map((id,i)=>({index:i+1,assetId:id,name:all.find(a=>a.id===id)?.name||''})))
+      ].join('\n');
+      const vision=await fetch('https://api.openai.com/v1/responses',{
+        method:'POST',headers:{Authorization:'Bearer '+openai,'Content-Type':'application/json'},
+        body:JSON.stringify({model:'gpt-4.1-mini',
+          input:[{role:'user',content:[
+            {type:'input_text',text:directionPrompt},
+            ...sheets.map(image_url=>({type:'input_image',image_url}))
+          ]}],
+          text:{format:{type:'json_object'}}}),
+        signal:AbortSignal.timeout(120000)
+      });
+      if(!vision.ok) return bad('OpenAI source-art Vision failed (HTTP '+vision.status+')',502);
+      const v=await vision.json() as {output?:Array<{content?:Array<{text?:string}>}>};
+      const raw=v.output?.flatMap(x=>x.content||[]).map(x=>x.text||'').join('')||'{}';
+      const parsed=JSON.parse(raw) as {chosenIndices?:unknown;creativeBrief?:unknown};
+      if(!Array.isArray(parsed.chosenIndices)||!parsed.chosenIndices.length||
+          parsed.chosenIndices.some(index=>!Number.isInteger(index)||index<1||index>sampled.length)||
+          typeof parsed.creativeBrief!=='string'||!parsed.creativeBrief.trim())
+        return bad('OpenAI art director returned an incomplete source-asset plan; retry with revised prompt.',502);
+      // Stable de-duplication for the shortlist; artwork repetition is allowed in
+      // final Vision geometry where the same original PNG can appear twice.
+      const chosenIds=[...new Set((parsed.chosenIndices as number[]).map(index=>sampled[index-1]))];
+      const creativeBrief=sanitizedText(parsed.creativeBrief,2200);
+      const backgroundPrompt=aiFirstBackgroundPrompt({
+        userDirection:input.backgroundPrompt, creativeBrief,title,subtitle,badge
+      });
+      const generated=await fetch('https://api.openai.com/v1/images/generations',{
+        method:'POST',headers:{Authorization:'Bearer '+openai,'Content-Type':'application/json'},
+        body:JSON.stringify({model,prompt:backgroundPrompt,size:'1024x1024',quality,output_format:'png',n:1}),
+        signal:AbortSignal.timeout(120000)
+      });
+      if(!generated.ok) return bad('OpenAI typography background failed (HTTP '+generated.status+'): '+
+        (await generated.text()).slice(0,150),502);
+      const result=await generated.json() as {data?:Array<{b64_json?:string}>;usage?:GeneratedImageUsage};
+      const b64=result.data?.[0]?.b64_json||'';
+      if(!b64||b64.length>28_000_000) return bad('OpenAI did not return the background PNG',502);
+      const bytes=Uint8Array.from(atob(b64),char=>char.charCodeAt(0));
+      if(bytes.length<8||bytes.length>20_000_000||bytes[0]!==137||bytes[1]!==80||bytes[2]!==78||bytes[3]!==71)
+        return bad('OpenAI did not return a valid PNG background',502);
+      const backgroundUrl=await storeListingPng(user.userId,input.projectId,bytes);
+      return Response.json({
+        backgroundUrl, creativeBrief, selectedSourceIds:chosenIds, selectedSourceCount:ids.length,
+        sampledSourceCount:sampled.length,
+        reviewWarning:'AI-first background should contain typography and nonfigurative decoration only. Verify there are no invented clipart elements before approval.',
+        costEstimate:estimateListingImageGenerationCost(model,quality as 'low'|'medium'|'high',result.usage)
+      });
+    }catch(error){
+      return bad('AI-first art direction failed: '+
+        (error instanceof Error?error.message:String(error)).slice(0,220),502);
     }
   }
   if (input.action === 'layout') {
@@ -583,7 +591,8 @@ export async function POST(request: Request) {
       return bad('Vision art-direction prompt must contain 1–12000 characters.');
     const directions = [
       input.layoutPrompt !== undefined ? input.layoutPrompt : defaultVisionArtDirection(mode, input.number),
-      mode === 'ai-first' ? 'IMAGE ORDER: FIRST is the CLEAN typographic plate used for final compositing. SECOND is the separately generated FULL creative concept including placeholder illustrations. Use the second for artistic layout inspiration, but fit REAL source PNGs around the legible wording of the first. Do not redraw placeholders.' : '',
+      mode === 'ai-first' ? 'AI-FIRST: Only original PNGs selected by the art director are eligible. The image is a typography/background plate, NOT a concept containing generated characters. Compose with its real lettering and the genuine numbered contact sheets.' : '',
+      mode === 'ai-first' && input.creativeBrief ? 'ART DIRECTOR DESIGN BRIEF FROM ORIGINAL SOURCE CLIPART: '+sanitizedText(input.creativeBrief,2200) : '',
       'TECHNICAL COMPOSITING CONTRACT: Use ONLY exact source PNG asset IDs. Return finite x/y/width/height/rotation values as PERCENTAGES of the 1024×1024 square, never redraw or generate illustrations.',
       'Preserve all visible title, subtitle and badge words. Do not place an opaque original over ANY essential letter shapes. The background typography image and selected original contact-sheet thumbnails show the actual visual evidence.',
       free
@@ -605,19 +614,6 @@ export async function POST(request: Request) {
       'ACTUAL SELECTED ORIGINAL ASSETS IN ORDER: ' + JSON.stringify(descriptor)
     ];
     try {
-      let conceptReference: string | null = null;
-      if (mode === 'ai-first') {
-        const conceptKey = savedAssetKey(input.conceptUrl || '', input.projectId, user.userId);
-        if (!conceptKey || !conceptKey.endsWith('.png')) return bad('AI-first requires its saved concept image');
-        const concept = await bucket()?.get(conceptKey);
-        if (!concept) return bad('Saved AI-first concept was not found', 404);
-        const conceptBytes = new Uint8Array(await concept.arrayBuffer());
-        if (conceptBytes.length > 20_000_000) return bad('AI-first concept exceeds Vision size limit',413);
-        let conceptBinary='';
-        for(let k=0;k<conceptBytes.length;k+=8192)
-          conceptBinary += String.fromCharCode(...conceptBytes.subarray(k,k+8192));
-        conceptReference = 'data:image/png;base64,' + btoa(conceptBinary);
-      }
       const response = await fetch('https://api.openai.com/v1/responses', {
         method:'POST',
         headers:{Authorization:'Bearer '+keyOpenAi,'Content-Type':'application/json'},
@@ -626,7 +622,6 @@ export async function POST(request: Request) {
           input:[{role:'user',content:[
             {type:'input_text',text:directions.filter(Boolean).join('\n')},
             {type:'input_image',image_url:'data:image/png;base64,'+btoa(binary)},
-            ...(conceptReference ? [{type:'input_image',image_url:conceptReference}] : []),
             ...(free ? contactSheets.map(image_url => ({type:'input_image',image_url})) : [])
           ]}],
           text:{format:{type:'json_object'}}
