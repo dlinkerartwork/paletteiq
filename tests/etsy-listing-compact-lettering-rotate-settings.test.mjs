@@ -12,9 +12,9 @@ const settings=readFileSync(new URL('../components/studio-settings.tsx',import.m
 test('source collection art dominates thumbnail: prompt uses scaled compact artistic lettering by default',()=>{
   assert.match(backend,/textScale: 'compact' \| 'balanced' \| 'statement' = 'compact'/);
   assert.match(backend,/TYPOGRAPHY SCALE — COMPACT \(default\)/);
-  assert.match(backend,/ENTIRE main title block only about 14–16% of canvas height/);
-  assert.match(backend,/subtitle only about 3–5%/);
-  assert.match(backend,/combined lettering generally below 24%/);
+  assert.match(backend,/ENTIRE main title block only about 10–13% of canvas height/);
+  assert.match(backend,/subtitle only about 2–4%/);
+  assert.match(backend,/combined lettering generally below 19%/);
   assert.match(backend,/authentic original artwork must dominate/);
   assert.match(backend,/Do not make every line equally large/);
   assert.match(backend,/Optional badge must remain modest/);
