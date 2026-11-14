@@ -70,7 +70,7 @@ test('representative hero and best-element sets use diverse real collection IDs'
   assert.equal(new Set(hero.map(a=>a.id)).size,10);
   assert.equal(new Set(hero.map(a=>a.category)).size,4);
   assert.ok(hero.some(a=>Number(a.id.split('-')[1])>40));
-  assert.equal(planListingPlacements(1,assets).length,10);
+  assert.equal(planListingPlacements(1,assets).length,7);
   assert.equal(planListingPlacements(4,assets).length,8);
   assert.equal(planListingPlacements(15,assets).length,9);
   for(const step of [1,4,15]) {
@@ -108,7 +108,7 @@ test('QC warnings save paid backgrounds for manual review rather than silently r
   assert.match(route,/let reviewWarning = ''/);
   assert.match(route,/reviewWarning = 'Potential invented art or printed mockup/);
   assert.doesNotMatch(route,/return bad\('AI background contains possible invented art/);
-  assert.match(route,/return Response\.json\(\{ backgroundUrl, number: input\.number, width: LISTING_WIDTH, height: LISTING_HEIGHT, reviewWarning \}\)/);
+  assert.match(route,/return Response\.json\(\{ backgroundUrl, number: input\.number, width: LISTING_WIDTH, height: LISTING_HEIGHT, reviewWarning, costEstimate \}\)/);
   assert.match(studio,/reviewWarning: response\.reviewWarning \|\| ''/);
   assert.match(studio,/if \(status === 'approved' && current\.reviewWarning &&/);
   assert.match(studio,/Manual quality review required/);
