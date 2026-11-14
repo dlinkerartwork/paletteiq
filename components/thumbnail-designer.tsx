@@ -555,6 +555,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     const subtitle = (source.packSubtitle ?? seoDefaults.subtitle).trim();
     const badge = (source.packBadge ?? '').trim();
     const hasLettering = enabled && Boolean(heading || subtitle || badge);
+    const needsAiLettering = enabled && Boolean(heading || subtitle);
     if (hasLettering && ([zone.x, zone.y, zone.width, zone.height].some(n => !Number.isFinite(n)) ||
       zone.x < 0 || zone.y < 0 || zone.width < 10 || zone.height < 10 ||
       zone.x + zone.width > 100 || zone.y + zone.height > 100)) {
@@ -612,7 +613,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
       const imageModelChoice = imageProvider === 'gemini' ? geminiImageModel : imageModel;
       const requestBody = {
         projectId, provider: imageProvider, model: imageModelChoice, quality: packQuality,
-        mode: hasLettering ? 'background-with-typography' as const : 'background-only' as const,
+        mode: needsAiLettering ? 'background-with-typography' as const : 'background-only' as const,
         width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE,
         headline: hasLettering ? heading : '', subtitle: hasLettering ? subtitle : '', badge: '',
         letteringStyle: 'auto' as const,
@@ -630,7 +631,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           boldness: 'balanced', coverStyle: 'editorial', intensity: 'soft',
           headline: hasLettering ? heading : '', subtitle: hasLettering ? subtitle : '',
           badge: '',
-          typography: hasLettering ? 'ai-artwork' as const : 'editable' as const,
+          typography: needsAiLettering ? 'ai-artwork' as const : 'editable' as const,
           textDisabled: !hasLettering,
           imageModel: imageModelChoice
         }
@@ -669,7 +670,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
       const badgeTextLayers = hasLettering ? badgeOverlay(zone,badge) : [];
       const common: Partial<ThumbnailDesign> = {
         originalAssetsOnly: true, packSlideKey: 'custom-canvas',
-        packTypography: hasLettering ? 'ai-artwork' : 'editable', packHeadline: heading, packSubtitle: subtitle,
+        packTypography: needsAiLettering ? 'ai-artwork' : 'editable', packHeadline: heading, packSubtitle: subtitle,
         packBadge: badge, packTextZone: zone, packAiTypographyEnabled: enabled,
         packLetteringStyle: 'auto',
         packImageProvider: imageProvider, packImageModel: imageModelChoice,
