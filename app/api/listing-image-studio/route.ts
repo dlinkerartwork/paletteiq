@@ -231,12 +231,13 @@ export async function GET(request: Request) {
 }
 
 type Input = {
-  action?: 'generate' | 'save' | 'layout' | 'reject' | 'critique' | 'prelayout'; projectId?: string; number?: number;
+  action?: 'generate' | 'preview-prompt' | 'save' | 'layout' | 'reject' | 'critique' | 'prelayout'; projectId?: string; number?: number;
   image?: ListingImageRecord; model?: string; quality?: string;
   backgroundUrl?: string; placements?: ListingPlacement[]; revisionNotes?: string;
   featuredCount?: number; critiqueFeedback?: string; textScale?: 'compact' | 'balanced' | 'statement'; backgroundStyle?: 'plain' | 'minimal' | 'soft-texture';
   compositionMode?: ListingCompositionMode; artworkContactSheets?: string[];
   existingPlacements?: ListingPlacement[]; totalSelected?: number;
+  backgroundPrompt?: string; layoutPrompt?: string;
   title?: string; subtitle?: string; badge?: string;
 };
 /**
@@ -262,22 +263,32 @@ function artPrompt(number: number, project: StoredProject, count: number, revisi
     subtitle ? 'Render EXACT user-supplied SUBTITLE as readable artistic lettering: ' + JSON.stringify(subtitle) + '.' : 'No subtitle; do not invent extra supporting words.',
     badge ? 'Render this OPTIONAL BADGE as premium graphic typography with EXACT words: ' + JSON.stringify(badge) + '. Decorative outlines are permitted, but no illustrated objects.' : 'NO BADGE: do not invent a badge, sticker label or other words.',
     'The text above is the COMPLETE allowed wording. No additional claims or marketing copy. Spell every requested character correctly.',
-    listingCreativeSummary(direction),
+    compositionMode === 'free'
+      ? 'Collection identity: ' + JSON.stringify(direction.identity) + '; palette hints: ' + JSON.stringify(direction.palette) + '; texture hints: ' + JSON.stringify(direction.texture) + '. All typographic styling, font choices, colors and design decisions belong to the AI art director, not PaletteIQ.'
+      : listingCreativeSummary(direction),
     observed
       ? listingStyleDirection(observed)
       : 'No visual sample analysis of the real collection is available. Treat the stored collection style and theme as secondary descriptive hints, not visual evidence. Avoid imposing generic watercolor or retro aesthetics without support.',
     'CREATIVE FREEDOM: Design a fresh premium Etsy layout with bespoke expressive lettering, innovative balance and restrained nonfigurative details. Be imaginative with hierarchy but keep the BACKGROUND quiet and subordinate to the original clipart; match the OBSERVED source-art medium, softness, palette and mood when available.',
     'The collection theme guides the SUBJECT of the merchandising message, but is not permission to draw themed subjects. Original clipart will be composited later in exact original PNG pixels by PaletteIQ.',
     'TYPOGRAPHY COLOR REQUIREMENT: use TWO OR THREE DISTINCT harmonious lettering colors coordinated with the collection palette. Do NOT render all words, title, subtitle and badge in one color. Use a contrasting accent on one word or intentional letterforms of the main title, another readable color for the subtitle, and a complementary badge color when present. Maintain contrast on the quiet background.',
-    'Design typography for quick readability on a small Etsy search-result thumbnail: elegant compact bespoke lettering, artistically curved or hand-painted where appropriate, with restrained supporting text. Original artwork dominates both in area and contrast.',
+    compositionMode === 'free'
+      ? 'Choose any typography and layout you find beautiful and appropriate for the collection. NO prescribed font, font family, typeface, lettering treatment, color palette or text location. Make ALL supplied words readable and arrange them so the real clipart collage can surround rather than cover them.'
+      : 'Design typography for quick readability on a small Etsy search-result thumbnail: elegant compact bespoke lettering with restrained supporting text. Original artwork dominates both in area and contrast.',
     'MERCHANDISING HIERARCHY: original collection artwork is the product and must remain prominent; no generic giant text wall. Keep a clear headline and much smaller supporting subtitle. If both are long, prioritize visual clarity rather than inflating every word. Never add extra words or repeat the provided title in tiny ornamental lettering.',
-    textScale === 'compact'
+    compositionMode === 'free'
+      ? 'TYPOGRAPHY SIZE PREFERENCE — ' + textScale.toUpperCase() + ': Treat this as a preference only: compact means smaller, balanced means moderate, statement means more emphasis. You determine the best actual sizes and hierarchy for the artwork. There are no required percentages or fixed headline boxes. Keep the whole title readable, not hidden by pasted originals.'
+      : textScale === 'compact'
       ? 'TYPOGRAPHY SCALE — COMPACT (default): Make custom lettering refined, readable, and decidedly SMALL relative to the 1024 square. Aim for the ENTIRE main title block only about 10–13% of canvas height (INCLUDING all title lines), subtitle only about 2–4%, and combined lettering generally below 19%. Never enlarge the heading merely to fill empty space; the authentic original artwork must dominate. These are art-direction proportions, not a mandatory fixed position or box.'
       : textScale === 'balanced'
         ? 'TYPOGRAPHY SCALE — BALANCED: Main title group roughly 15–18% of canvas height at most, subtitle about 3–5%, combined typography below 24%. Keep source original artwork as the dominant product illustration.'
         : 'TYPOGRAPHY SCALE — STATEMENT: Expressive headline may use up to roughly 21–24% of canvas height, subtitle no more than 6%, but leave plenty of room for original clipart and never let text overpower the artwork.',
-    'Scale down the lettering intelligently when the title contains multiple words. Do not make every line equally large: one elegant compact headline with a smaller supporting subtitle is preferred. Avoid tall stacked lettering that fills the entire center from top to bottom.',
-    'Optional badge must remain modest (about 8–12% of canvas width) and separated enough from critical title letters to stay legible after real clipart is composited. Never create a larger competing badge than the actual source illustrations.',
+    compositionMode === 'free'
+      ? 'Let the title, subtitle and badge have an intentional hierarchy that harmonizes with the original art. You choose the type treatment and relative scale; never let important text be hidden by clipart.'
+      : 'Scale down the lettering intelligently when the title contains multiple words. Do not make every line equally large: one elegant compact headline with a smaller supporting subtitle is preferred. Avoid tall stacked lettering that fills the entire center from top to bottom.',
+    compositionMode === 'free'
+      ? 'If a badge is supplied, integrate it creatively without obscuring other lettering; do not invent extra words.'
+      : 'Optional badge must remain modest (about 8–12% of canvas width) and separated enough from critical title letters to stay legible after real clipart is composited. Never create a larger competing badge than the actual source illustrations.',
     'BACKGROUND RULE: the background must support, never compete with, the ORIGINAL clipart. It must remain theme-matched but plain/minimal, with no elaborate frames, geometric gold lines, busy swirls, heavy watercolor blobs, repeated motifs or fake illustrative flowers/vehicles. Reserve most visual contrast and rich details for the pasted originals.',
     number >= 8 && number <= 12
       ? 'MOCKUP EXCEPTION: retain a realistic uncluttered blank product environment; only the extra backdrop decorations should be minimal.'
@@ -288,23 +299,23 @@ function artPrompt(number: number, project: StoredProject, count: number, revisi
           : 'BACKGROUND STYLE — MINIMAL (default): a quiet clean white/cream/pale theme-aligned backdrop with only a whisper of paper texture or faint peripheral color accents. Keep about 90% visually simple; no strong frames, layered geometries, golden swirls or large decoration. The ORIGINAL clipart provides all the rich visual interest.',
     'MAIN IMAGE TEXT must stay subordinate to the real artwork. Use more whitespace, a strong readable headline and smaller subtitle; do not fill the entire central region with text.',
     compositionMode === 'free'
-      ? 'FREE ART DIRECTION: balance a visually rich variety of authentic large, medium and tiny illustrations after compositing. A few assets can crop naturally off the outer edge, much like a premium illustrated collage, while the main words remain readable. No rigid equal-sized grid, predetermined corner slots, or compulsory perimeter-only arrangements. The AI layout planner is empowered to change any suggested asset position and size completely.'
+      ? 'FREE ART DIRECTION: the AI layout planner makes independent artistic decisions for each selected original, using visual balance, negative space and clear lettering. Do not use the submitted white-canvas positions as constraints.'
       : 'STRUCTURED ART DIRECTION: keep the user chosen placement proportions with only requested refinements.',
     compositionMode === 'free'
-      ? 'FREE COMPOSITION MODE (MAIN COVER): Any positions from PaletteIQ are ONLY an optional selection sketch, never a placement constraint. An independent AI Vision art director will decide all clipart positions, rotations and radically varied scales AFTER the typography background is generated. Create an excellent flexible typographic poster with a clearly readable headline and subtitle, rich visually balanced layout and open regions for a dense collage of ' + (project.selectedArtworkCount || DEFAULT_MAIN_COVER_CLIPART_COUNT) + ' genuine original elements. Text colors MUST differ across title accent words and the supporting subtitle (e.g. forest green, warm burgundy and cream), maintaining contrast; monotone lettering is NOT acceptable. Let title/subtitle/badge align elegantly; do not enforce a fixed box or prohibit touching/overlapping artwork near letters.'
+      ? 'FREE COMPOSITION MODE (MAIN COVER): Any positions from PaletteIQ are ONLY an optional selection sketch, never a placement constraint. An independent AI Vision art director will decide all clipart positions, rotations and scales AFTER the typography background is generated. Design independently for ' + (project.selectedArtworkCount || DEFAULT_MAIN_COVER_CLIPART_COUNT) + ' genuine original elements; leave clean space around the full title, subtitle and badge so artwork will not cover their letters. Select harmonious multi-color lettering treatments freely rather than following fixed typeface or font rules.'
       : preLayout?.length
         ? 'STRUCTURED COMPOSITION: honor user-arranged WHITE CANVAS positions as a blueprint (do not draw the assets): ' +
           JSON.stringify(preLayout.map(p => ({x:p.x,y:p.y,width:p.width,height:p.height,rotation:p.rotation??0}))) +
           '. Coordinates are percentages of the final 1024 square. Preserve the user layout while keeping all words legible. Do not redraw any clipart.'
         : 'STRUCTURED COMPOSITION: no user pre-layout was supplied; compose flexibly with room for exact original artwork.',
-    'Compose the exact requested lettering NATURALLY, following the visual hierarchy and available square space. The main title must be easily readable at Etsy thumbnail size and the subtitle should be reasonably legible. Do not force all text into a rigid 24% header or a hard no-overlap box. Use expressive curves, flowing hand-lettered forms and a balanced hierarchy.',
-    'PaletteIQ will overlay authentic collection clipart afterwards. Allow tasteful partial overlap around outer letter edges, swashes or nonessential decoration, while giving the central strokes of the main headline enough contrast and space to read. No generated imitation clipart or substitute objects.',
+    'Compose the exact requested lettering with creative freedom. The title and subtitle must be easy to read at Etsy search size, with clear negative space. No fixed font, line stacking, alignment, text box or style is required.',
+    'PaletteIQ will overlay authentic clipart afterwards. Keep ALL letters and words visually unobstructed. Let original illustrations overlap or crop one another intentionally where beautiful, but not cover the headline, subtitle or badge. No generated imitation clipart or substitute objects.',
     'The actual collection images are NOT provided to you. PaletteIQ will composite the exact originals later. Do NOT generate clipart, animal/food/flower drawings, icons, logos, product print art, or stand-in illustrations.',
     'Only verified count of unique original images is ' + count + '. Never claim PNG, transparency, ZIP contents, DPI, license, print resolution, or asset dimensions without verified metadata.',
     'Use clean commercial visual hierarchy, artwork-first layout, consistent recognizable product identity and elegant foreground/background separation.',
     'No greeting cards, invitation cards, wedding stationery or card-based mockups by default. Those are NOT included in this workflow.',
     number === 1
-      ? 'MAIN COVER PRIORITY: authentic original clipart is the visual HERO, with about 2 large focal originals, 4 medium supporting originals, and smaller accents from a richer collage of exactly ' + (project.selectedArtworkCount || DEFAULT_MAIN_COVER_CLIPART_COUNT) + ' user-selected genuine layers. PaletteIQ places them afterwards; the image model must NOT draw any of these assets. Keep the headline comparatively small and legible, using the naturally available negative space rather than creating a giant centered typography poster. Avoid heavy ornament, invented text, or artificial frames.'
+      ? 'MAIN COVER PRIORITY: art-direct an exceptional premium cover celebrating exactly ' + (project.selectedArtworkCount || DEFAULT_MAIN_COVER_CLIPART_COUNT) + ' user-selected genuine original layers. Choose typography, visual grouping, scale and composition without a prescribed number of hero pieces or geometric arrangement. PaletteIQ pastes the original artwork afterwards; keep every title word unobstructed and do not draw any clipart.'
       : number <= 5
         ? 'Show diversity and collection breadth, with elegant but varied composition. Never add imaginary items.'
         : number === 6 || number === 7 || number === 13
@@ -335,6 +346,25 @@ function artPrompt(number: number, project: StoredProject, count: number, revisi
         ? 'Reserve useful uncluttered space for genuine clipart and verified information, without a hard rectangular no-overlap zone; use restrained ornamentation.'
         : 'Balance generous negative space around modest artistic lettering and a barely textured, light theme-matched background. PaletteIQ overlays the more numerous original source illustrations later; leave room for varied hero, medium and accent layers.'
   ].join('\n');
+}
+
+/**
+ * Editable creative instructions for the OpenAI Vision step. Technical JSON
+ * schema, current source IDs and previously composed batches are appended
+ * by the server and are not user-editable, so real PNGs stay exact.
+ */
+function defaultVisionArtDirection(mode: ListingCompositionMode, number: number): string {
+  return [
+    'You are the art director for an exceptional Etsy illustration collection cover. Create a beautiful, intentional, visually coherent composition using the ACTUAL supplied original artwork and the visible background typography.',
+    'Observe the silhouettes, colors and visual weights of every original. Compose with strong artistic judgment: balanced asymmetry, a natural rhythm of large and small elements, comfortable breathing room, convincing groups and hierarchy. Choose the arrangement freely; no mandatory grid, center, perimeter, hero count, size percentages, object count, font or font style.',
+    'IMPORTANT: Preserve the ENTIRE main title, subtitle and badge. Do not place opaque artwork over letterforms, word interiors or other meaningful text. Readability must remain excellent even at Etsy search-result size. Leave clear space around typography, not flowers or objects across the words. Partial overlap is appropriate between compatible ARTWORK shapes, not across lettering.',
+    'Avoid random scattering, a line of huge overlapping illustrations, equal-size repetition, an unbalanced empty region or crowded center. Arrange the chosen real objects like a professionally art-directed collage where every element has a purpose. Natural edge cropping is welcome when it improves visual balance.',
+    mode === 'free' && !(number >= 8 && number <= 12)
+      ? 'FREE COMPOSITION: Ignore PaletteIQ starter geometry completely. Decide ALL x/y/width/height/rotation independently from the actual background and visible original assets. Use visually harmonious sizing and distribution for the full selected collection, including the smallest elements.'
+      : 'STRUCTURED COMPOSITION: Use the user-arranged original positions as a guide, adjusting only when it improves the layout without losing the intended structure.',
+    number >= 8 && number <= 12 ? 'For a product mockup, keep every original on the real, blank printable product area.' : '',
+    'Do not redraw, recolor, alter or invent an asset. Return placement geometry only; PaletteIQ will render unchanged original PNG image pixels.'
+  ].filter(Boolean).join('\n');
 }
 
 export async function POST(request: Request) {
@@ -427,20 +457,16 @@ export async function POST(request: Request) {
       return bad('Invalid previously arranged original artwork');
     const totalSelected = Number.isInteger(input.totalSelected) && (input.totalSelected || 0) >= fallback.length + existing.length
       ? input.totalSelected! : fallback.length + existing.length;
+    if (input.layoutPrompt !== undefined && (typeof input.layoutPrompt !== 'string' ||
+        !input.layoutPrompt.trim() || input.layoutPrompt.length > 12000))
+      return bad('Vision art-direction prompt must contain 1–12000 characters.');
     const directions = [
-      'You are an award-winning Etsy visual merchandiser, art director and composition planner.',
-      'You will REPOSITION AND RESIZE existing exact ORIGINAL PNG LAYERS. NEVER redraw, regenerate, modify, recolor or replace any image. PaletteIQ performs all compositing using the original stored image bytes.',
-      'Look at the supplied 1024×1024 SQUARE TYPOGRAPHY BACKGROUND. Return positions as percentages of the full square. Final image is clipped to the 1024 square bounds naturally.',
-      'Use actual title/subtitle/badge locations and colors on the generated background. Protect essential full word shapes so they are readable at 128px Etsy search size; tasteful overlap near swashes, letter edges and decorations is encouraged.',
+      input.layoutPrompt !== undefined ? input.layoutPrompt : defaultVisionArtDirection(mode, input.number),
+      'TECHNICAL COMPOSITING CONTRACT: Use ONLY exact source PNG asset IDs. Return finite x/y/width/height/rotation values as PERCENTAGES of the 1024×1024 square, never redraw or generate illustrations.',
+      'Preserve all visible title, subtitle and badge words. Do not place an opaque original over ANY essential letter shapes. The background typography image and selected original contact-sheet thumbnails show the actual visual evidence.',
       free
-        ? 'FREE COMPOSITION: Disregard ALL suggested x/y/width/height values from PaletteIQ. They are NOT constraints, only a list of selected assets. You are the LEAD ART DIRECTOR. Compose a lively dense professionally balanced illustrated cover like a rich editorial collage, avoiding uniform grids, repetitive equal sizes, or forced edge-only arrangement.'
-        : 'STRUCTURED COMPOSITION: Respect the user’s existing overall positions, size relationships, and rotations; refine only as needed for visual clarity.',
-      free
-        ? 'Use dramatically VARIED object sizes: 2–4 big hero elements (roughly 22–42% of canvas span), several medium supporting elements (12–25%), and many smaller accents (4–14%). You can overlap genuine objects, let some touch the words without obscuring them, and let selected objects BLEED slightly outside one or several edges. The actual original PNG pixels are not resized/repainted by AI: return only placement geometry.'
-        : 'Use attractive intentional scale hierarchy and nonuniform spacing without changing the customer-selected artwork identities.',
-      free
-        ? 'CANVAS BLEED IS ALLOWED for this Main Cover: x/y may be NEGATIVE (as low as -100) and x/y + width/height may exceed 100. Objects partially outside the final canvas crop naturally. All chosen assets must be at least partially visible. Size can be up to 200% of square for an intentional close-up, though most objects should remain much smaller.'
-        : 'Keep all layers within 0–100% canvas bounds; for product mockups, use only the actual flat printable product surface.',
+        ? 'CANVAS BLEED IS ALLOWED: x/y may be negative down to -100, x/y + width/height may exceed 100, and a box may measure up to 200. All selected assets must remain at least partially visible.'
+        : 'Keep all placements inside the 0–100% printable canvas bounds.',
       isMockup ? 'This is a realistic BLANK PRODUCT MOCKUP. Never place clipart outside the printable surface, on hands, background or product edges.' : '',
       contactSheets.length && free
         ? 'Following the BACKGROUND is a numbered contact sheet of ACTUAL original artwork, indexed 1..N matching THIS BATCH of asset descriptors. Use true silhouettes and colors to make a varied collage. These are reference samples ONLY: NEVER redraw the pictured objects.'
@@ -502,17 +528,18 @@ export async function POST(request: Request) {
         fallback:'AI Vision composition timed out or returned invalid coordinates; editable original positions were retained.'});
     }
   }
-  if (input.action !== 'generate') return bad('Unknown listing image action');
+  if (input.action !== 'generate' && input.action !== 'preview-prompt') return bad('Unknown listing image action');
+  const isPreview = input.action === 'preview-prompt';
   const storage = bucket();
-  if (!storage) return bad('Image storage is unavailable', 503);
+  if (!storage && !isPreview) return bad('Image storage is unavailable', 503);
   const count = originalAssets(project.characters || []).length;
   if (!count) return bad('Generate at least one collection image before creating a listing.');
   const model = input.model || 'gpt-image-1-mini';
   if (!/^gpt-image-[a-z0-9.-]{1,80}$/.test(model)) return bad('Choose an OpenAI image model');
   const quality = input.quality || 'medium';
   if (!['low', 'medium', 'high'].includes(quality)) return bad('Invalid image quality');
-  const key = await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
-  if (!key) return bad('Configure OpenAI API key in Settings', 503);
+  const key = isPreview ? null : (await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY);
+  if (!isPreview && !key) return bad('Configure OpenAI API key in Settings', 503);
   // Type and length validation happens BEFORE any paid image generation.
   for (const [key, limit] of [['title', 140], ['subtitle', 140], ['badge', 60]] as const) {
     const raw = input[key];
@@ -545,11 +572,19 @@ export async function POST(request: Request) {
   const prompt = artPrompt(input.number,
     { ...project, selectedArtworkCount: input.featuredCount },
     count, typeof input.revisionNotes === 'string' ? input.revisionNotes : '', text, preLayout, input.textScale ?? 'compact', input.backgroundStyle ?? 'minimal', input.compositionMode ?? defaultListingCompositionMode(input.number));
+  if (isPreview) return Response.json({
+    backgroundPrompt: prompt,
+    layoutPrompt: defaultVisionArtDirection(input.compositionMode ?? defaultListingCompositionMode(input.number), input.number)
+  });
+  if (input.backgroundPrompt !== undefined && (typeof input.backgroundPrompt !== 'string' ||
+      !input.backgroundPrompt.trim() || input.backgroundPrompt.length > 24000))
+    return bad('Background prompt must contain 1–24000 characters.');
+  const effectivePrompt = input.backgroundPrompt !== undefined ? input.backgroundPrompt : prompt;
   try {
     const response = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, prompt, size: '1024x1024', quality, output_format: 'png', n: 1 }),
+      body: JSON.stringify({ model, prompt: effectivePrompt, size: '1024x1024', quality, output_format: 'png', n: 1 }),
       signal: AbortSignal.timeout(120000)
     });
     if (!response.ok) return bad('AI background failed (HTTP ' + response.status + '): ' + (await response.text()).slice(0, 250), 502);
@@ -593,7 +628,7 @@ export async function POST(request: Request) {
       reviewWarning = 'AI background inspection unavailable. Visually check for invented clipart, text accuracy and mockup realism before approving.';
     }
     const assetId = crypto.randomUUID();
-    await storage.put('generated/' + user.userId + '/' + assetId + '.png', bytes);
+    await storage!.put('generated/' + user.userId + '/' + assetId + '.png', bytes);
     const backgroundUrl = '/api/thumbnail-background?projectId=' + encodeURIComponent(input.projectId) +
       '&assetId=' + assetId + '&format=png';
     return Response.json({ backgroundUrl, number: input.number, width: LISTING_WIDTH, height: LISTING_HEIGHT, reviewWarning, costEstimate });
