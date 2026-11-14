@@ -253,6 +253,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
   const stopPan = () => { panRef.current = null; };
   const dragRef = useRef<{ id: string; mode: 'move' | 'resize' | 'rotate'; x: number; y: number; original: ThumbnailElement; centerX?: number; centerY?: number; startAngle?: number } | null>(null);
   const design = designs.find(d => d.id === activeId) || designs[0];
+  const canvasImageCount = design?.elements.filter(e => e.type === 'image').length || 0;
   useEffect(() => {
     const viewport = canvasViewportRef.current;
     if (!viewport) return;
@@ -1449,7 +1450,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
       <p>Create a blank 1024 × 1024 canvas, choose the original collection clipart to include, and select a reference template. AI makes background and typography first; Vision arranges ONLY your chosen PNGs afterwards.</p>
       <button type="button" className="primary-btn" onClick={create}><Plus size={15}/> Create blank canvas</button>
     </div> :
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(190px, 245px) minmax(0, 1fr) minmax(245px, 290px)', gap: 12, alignItems: 'start' }}>
+    <div className="thumbnail-editor-columns" style={{ display: 'grid', gap: 14, alignItems: 'start', minWidth: 0 }}>
       <div className="panel" style={{ padding: 14, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0, gap: 12, alignContent: 'start', overflowX: 'hidden', maxHeight: 'min(82vh, 950px)', overflowY: 'auto', overscrollBehavior: 'contain' }}>
         <div role="tablist" aria-label="Thumbnail tools" style={{ display: 'flex', gap: 4 }} onKeyDown={event => {
           if (!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
@@ -1531,13 +1532,16 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           <select aria-label="Custom canvas background quality" value={packQuality} disabled={aiBusy} onChange={e => setPackQuality(e.target.value as typeof packQuality)}>
             <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
           </select>
-          <button type="button" className="primary-btn" disabled={aiBusy || Boolean(backgroundRetryId) || !design.elements.some(e => e.type === 'image')} onClick={() => void generateCanvasArtwork()}>
+          <div role="status" style={{ fontSize: 12, color: canvasImageCount ? '#276749' : '#a34b20', background: canvasImageCount ? '#eef8f1' : '#fff2e5', borderRadius: 8, padding: '8px 10px' }}>
+            {canvasImageCount ? canvasImageCount + ' original PNG selected on canvas · ready for layout analysis' : '0 original PNG selected · click a character below to add it to canvas before generating'}
+          </div>
+          <button type="button" className="primary-btn" disabled={aiBusy || Boolean(backgroundRetryId)} onClick={() => void generateCanvasArtwork()}>
             <WandSparkles size={15}/> {aiBusy ? 'Generating AI artwork...' : 'Generate AI Background & Typography'}
           </button>
           {packStatus && <small role="status">{packStatus}</small>}
           <small>Background and typography are designed from the selected reference. Vision inspects BOTH the reference and generated background, then rearranges ONLY the PNGs you placed in this canvas. Badge text is a precise editable overlay. API charges apply.</small>
         </div>
-        <h3>Characters — click to include in canvas ({design.elements.filter(e => e.type === 'image').length} selected)</h3>
+        <h3>Characters — click to include in canvas ({canvasImageCount} selected)</h3>
         <div style={{ maxHeight: 400, overflowY: 'auto', display: 'grid', gap: 8 }}>
           {characters.filter(c => c.imageUrl).map(c => <button type="button" key={c.id} onClick={() => add(newImage(c, design.elements.filter(e => e.type === 'image').length))} style={{ textAlign: 'left', display: 'flex', gap: 8, alignItems: 'center', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: 6 }}>
             <img src={c.imageUrl} alt="" style={{ width: 45, height: 45, objectFit: 'contain' }}/>
@@ -1549,7 +1553,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         </div>}
         {sideTab === 'generation' && <div id="thumbnail-generation-panel" role="tabpanel" aria-labelledby="thumbnail-generation-tab" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0, gap: 12 }}>
         <h3>Thumbnail Prompt</h3>
-        <small>Live brief derived from your Reference &amp; Assets inputs and actual original PNG layer rectangles. The AI generates only a background with title, subtitle and optional badge. PaletteIQ keeps your canvas layout unchanged.</small>
+        <small>Prompt follows Reference &amp; Assets. Only background and artistic title/subtitle are generated; exact original PNGs are repositioned and resized after the image returns. Badge is editable.</small>
         <label className="input-label">OPENAI BACKGROUND MODEL</label>
         <select aria-label="OpenAI thumbnail background model" disabled={aiBusy} value={imageModel} onChange={e => setImageModel(e.target.value)}>
           {!imageModels.some(m => m.id === imageModel) && <option value={imageModel}>{imageModel} (saved/default)</option>}
@@ -1558,10 +1562,11 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         <label className="input-label">PROMPT FROM REFERENCE & ASSETS</label>
         <textarea aria-label="Thumbnail design prompt preview" readOnly rows={15} value={manualCanvasPromptPreview} style={{ width: '100%', fontSize: 11, lineHeight: 1.35 }} />
         <button className="outline-btn" type="button" onClick={() => void navigator.clipboard.writeText(manualCanvasPromptPreview)}>Copy thumbnail prompt</button>
-        <button className="primary-btn" type="button" disabled={aiBusy || !design.elements.some(e => e.type === 'image')} onClick={() => void generateCanvasArtwork()}>
+        <div role="status" style={{ fontSize: 12 }}>{canvasImageCount} original PNG{canvasImageCount === 1 ? '' : 's'} selected. {canvasImageCount ? 'Ready to arrange with AI Vision.' : 'Select at least one from Characters in Reference & Assets.'}</div>
+        <button className="primary-btn" type="button" disabled={aiBusy || Boolean(backgroundRetryId)} onClick={() => void generateCanvasArtwork()}>
           <WandSparkles size={15}/> {aiBusy ? 'Generating...' : 'Generate AI Background & Typography from Canvas'}
         </button>
-        <small>AI image generation uses your chosen background quality in Reference & Assets. Your manual clipart positions and proportions are preserved. API charges apply.</small>
+        <small>AI image generation uses the selected reference and background quality. AI Vision then resizes and arranges only selected original PNGs. API charges apply.</small>
         </div>}
       </div>
       <div style={{ minWidth: 0, position: 'sticky', top: 12, alignSelf: 'start' }}>

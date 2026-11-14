@@ -87,7 +87,9 @@ test('user must select exact collection clipart before generating; no automatic 
   assert.match(method, /if \(!imageLayers\.length\)/);
   assert.match(method, /imageLayers\.length > 36/);
   assert.doesNotMatch(method, /slice\(0,9\)\.map\(\(c,i\)=>newImage/);
-  assert.match(editor, /disabled=\{aiBusy \|\| Boolean\(backgroundRetryId\) \|\| !design\.elements\.some/);
+  assert.match(editor, /disabled=\{aiBusy \|\| Boolean\(backgroundRetryId\)\}/);
+  assert.match(editor, /0 original PNG selected/);
+  assert.match(editor, /const canvasImageCount = design\?\.elements\.filter/);
   assert.match(editor, /const badgeTextLayers = hasLettering \? badgeOverlay\(zone,badge\) : \[\]/);
 });
 
@@ -98,4 +100,12 @@ test('final Vision layout preserves every selected original and follows both ref
   assert.match(editor, /if \(fitted\.length < imageElements\.length\)/);
   assert.match(editor, /const scale = Math\.min\(slot\.width/);
   assert.match(editor, /selected clipart could not fit safely/);
+});
+
+test('Generate action stays clickable for validation even if no PNG selected', () => {
+  const generator = editor.slice(editor.indexOf('const generateCanvasArtwork ='), editor.indexOf('// Create the background and artistic lettering FIRST'));
+  assert.match(generator, /if \(!imageLayers\.length\)/);
+  assert.match(generator, /Choose original clipart from the Characters list and add them to the canvas/);
+  assert.doesNotMatch(editor, /disabled=\{aiBusy \|\| Boolean\(backgroundRetryId\) \|\| !design\.elements\.some/);
+  assert.match(editor, /canvasImageCount \+ ' original PNG selected on canvas/);
 });
