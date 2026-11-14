@@ -500,7 +500,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     ...(previewHasText ? [
       'Main title (omit when blank): ' + JSON.stringify(previewHeading),
       'Subtitle (omit when blank): ' + JSON.stringify(previewSubtitle),
-      'Badge (omit when blank): ' + JSON.stringify(previewBadge),
+      'Exact editable badge overlay (never AI-generated; omit when blank): ' + JSON.stringify(previewBadge),
       'Typography follows the reference image layout, with readable exact title and subtitle. Badge text is composed by PaletteIQ as a separate, precise original layer.'
     ] : ['ZERO TYPOGRAPHY: no titles, subtitles, badges, symbols resembling letters, or decorative words.']),
     ...(previewHasText ? ['Typography safe zone: ' + JSON.stringify(design?.packTextZone || { x: 22, y: 30, width: 56, height: 34 })] : []),
@@ -587,6 +587,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
             response, 'Reference analysis');
           if (result.layout) {
             referenceSlots = result.layout.slots || [];
+            if (layoutMode === 'ai' && !referenceSlots.length) throw Error('Reference analysis did not return clipart placement regions.');
             if (layoutMode === 'ai') {
               const textBoxes = (result.layout.texts || []).slice(0,3).filter(t =>
                 [t.x,t.y,t.width,t.height].every(Number.isFinite) && t.width > 0 && t.height > 0);
