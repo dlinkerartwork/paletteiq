@@ -466,10 +466,12 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           };
         })
         .filter(element => element !== null) as ThumbnailElement[];
-      if (selected.length < expectedMin) throw Error('Vision returned insufficient valid original PNGs');
+      if (selected.length !== imageElements.length)
+        throw Error('Vision did not return every selected original PNG; use local reference-safe fitting instead');
       const fitted = fit(selected, [slide.textZone, ...(result.detectedTitleZone ? [result.detectedTitleZone] : [])],
         result.detectedSubtitleZone ? [result.detectedSubtitleZone] : []);
-      if (fitted.length < Math.min(expectedMin, safeFallback.length)) throw Error('Vision layout collides with typography after fitting');
+      if (fitted.length < imageElements.length)
+        throw Error('Vision positions could not fit every selected clipart without covering typography; use safe fallback');
       return { elements: fitted, usedFallback: false };
     } catch {
       // Background generation is paid. Never discard it because vision layout failed.
@@ -555,6 +557,10 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     const imageLayers = originalLayers;
     if (!imageLayers.length) {
       setMessage('Choose original clipart from the Characters list and add them to the canvas before generating.');
+      return;
+    }
+    if (imageLayers.length > 36) {
+      setMessage('AI Vision can arrange up to 36 selected original PNGs per thumbnail. Remove some canvas layers first.');
       return;
     }
     let zone = source.packTextZone || { x: 22, y: 30, width: 56, height: 34 };
@@ -715,7 +721,12 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           : { ...d, ...common, elements: [...positioned, ...badgeTextLayers],
               backgroundImageUrl: result.imageUrl, rejectedBackgroundUrl: undefined,
               rejectedBackgroundReason: undefined,
-              generationError: usedFallback ? 'AI Vision used reference-guided safe fallback positions.' : undefined }
+              generationError: usedFallback
+            ? ('AI Vision used safe fallback positions. ' +
+              (positioned.length < exactLayers.length
+                ? (exactLayers.length-positioned.length) + ' selected clipart could not fit safely; adjust them manually.'
+                : 'Please review the reference composition.'))
+            : undefined }
         : d);
       latestDesignsRef.current = next;
       onChange(next);
