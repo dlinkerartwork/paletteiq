@@ -1,7 +1,7 @@
 /**
  * AI-First thumbnail design. Contact sheets are source-asset INDEXES, not
- * layouts. Vision sees the real collection; image generation NEVER draws
- * product illustrations. Final assets are composited from original PNG bytes.
+ * layouts. In AI-First, the image model uses references to generate a full
+ * single-layer thumbnail. Source illustration details may be reinterpreted.
  */
 export const AI_FIRST_MAX_REFERENCE_SHEETS = 8;
 export const AI_FIRST_ASSETS_PER_SHEET = 24;
@@ -78,7 +78,7 @@ export function aiFirstConceptPrompt(input: CreativeInput): string {
     'Do not invent unrelated clipart or replace supplied characters with newly imagined variations.',
     'You may select any number of actual source assets, resize, rotate, position and repeat EXISTING source PNGs where artistically appropriate. No fixed grid or mandatory size uniformity.',
     'Treat originals as flexible independent illustrations, not an existing design to preserve.',
-    'The selected clipart are VISUAL REFERENCES for the image model to integrate creatively into ONE finished thumbnail. Stay as faithful as possible to the original artwork, recognizable subjects, colors, expressions and details. A generative image model may reinterpret or redraw them; pixel-exact copying is not guaranteed.',
+    'The selected clipart are VISUAL REFERENCES for the image model to integrate creatively into ONE finished thumbnail. Stay as faithful as possible to the original artwork, recognizable subjects, colors, expressions and details. A generative image model may reinterpret or redraw them; pixel-identical copying is not guaranteed.',
     'The numbered contact sheets are visual previews of the same originals that PaletteIQ packages as a user-downloadable ZIP. ZIP is NOT itself a visual model input. Never assume position/size from contact-sheet cells.',
     input.revisionNotes?.trim() ? '**ADDITIONAL USER REQUEST**: '+input.revisionNotes.trim().slice(0,800) : '',
     '',
