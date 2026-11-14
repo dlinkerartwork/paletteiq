@@ -322,9 +322,19 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     if (!precedingApproved) return setMessage('Approve all preceding listing images before generating this one.');
     if (current?.status === 'approved' && !window.confirm('Regenerate an approved image? Its approval will be reset to Draft.')) return;
     const lettering = { ...currentLettering };
-    let imageCostNotice = '';
-    setWorking('generate'); setMessage('Generating artistic background + exact typography with OpenAI (no clipart regeneration)...');
+    setCostNotice(null);
+    setWorking('generate');
+    setMessage('Preparing visual style direction from original collection clipart...');
     try {
+      let styleFallback = '';
+      try {
+        await ensureSourceStyle();
+      } catch (error) {
+        styleFallback = ' Collection style Vision unavailable: ' +
+          (error instanceof Error ? error.message : String(error)) +
+          '. Used saved theme/style description instead.';
+        setStyleWarning(styleFallback.trim());
+      }
       let effectivePositions = positions;
       if ((step === 3 || step === 5) && !current?.placements && !changes[step] &&
           !Object.keys(categories).length && !assets.some(a => a.category || a.subtheme || a.group)) {
@@ -346,18 +356,12 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
         title: lettering.title, subtitle: lettering.subtitle, badge: lettering.badge,
         revisionNotes: (notes[step] ?? current?.notes ?? '').trim() });
       if (!response.backgroundUrl) throw Error('OpenAI did not return the background');
-      imageCostNotice = response.costEstimate
-        ? 'Estimated OpenAI image cost (' + model + ', ' + quality + '): US$' +
-          response.costEstimate.usd.toFixed(5) +
-          (response.costEstimate.basis === 'reported-usage'
-            ? ' (based on reported image-generation tokens)'
-            : ' (published square-image output estimate; prompt tokens excluded)') +
-          '. Additional Vision/QC API charges not included; actual billing may differ.'
-        : 'Estimated image-generation cost unavailable for this model; actual billing and Vision/QC charges may differ.';
+      // Cost belongs to a separate dismissible floating notice, not workflow status.
+      setCostNotice({ step, model, quality, estimate: response.costEstimate ?? null });
       let suggested = effectivePositions;
       let layoutWarning = '';
       if (effectivePositions.length <= 24) {
-        setMessage('AI Vision is arranging original artwork around the real lettering with natural partial overlap... ' + imageCostNotice);
+        setMessage('AI Vision is arranging original artwork around the real lettering with natural partial overlap...');
         try {
           const vision = await send({ action: 'layout', projectId, number: step, backgroundUrl: response.backgroundUrl, placements: effectivePositions });
           if (vision.placements?.length === effectivePositions.length) suggested = vision.placements;
@@ -374,9 +378,9 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
         notes: notes[step] || current?.notes || '', reviewWarning: response.reviewWarning || '', updatedAt: Date.now()
       });
       await renderAndSave(response.backgroundUrl, suggested, notes[step] || current?.notes || '', response.reviewWarning || '', lettering);
-      setMessage('Image ' + String(step).padStart(2, '0') + ' saved as draft. ' + imageCostNotice +
-        (layoutWarning ? ' Layout note: ' + layoutWarning : ' Review lettering legibility and clipart overlap before approving.'));
-    } catch (error) { setMessage('Generation failed: ' + (error instanceof Error ? error.message : String(error)) + (imageCostNotice ? ' ' + imageCostNotice : '')); }
+      setMessage('Image ' + String(step).padStart(2, '0') + ' saved as draft.' +
+        (layoutWarning ? ' Layout note: ' + layoutWarning : ' Review lettering legibility and clipart overlap before approving.') + styleFallback);
+    } catch (error) { setMessage('Generation failed: ' + (error instanceof Error ? error.message : String(error))); }
     finally { setWorking(''); }
   };
   const rerender = async () => {
@@ -441,7 +445,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       ...previous, [step]: { ...currentLettering, [field]: value }
     }));
   };
-  const setPage = (number: number) => { setStep(number); setSelectedIndex(0); setMessage(''); };
+  const setPage = (number: number) => { setStep(number); setSelectedIndex(0); setMessage(''); setCostNotice(null); };
   const spec = LISTING_IMAGE_SPECS[step - 1];
 
   return <div style={{ display: 'grid', gap: 18 }}>
@@ -449,7 +453,13 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       <h2>Etsy Clipart Listing Studio</h2>
       <p className="sub">Etsy Clipart Listing Studio v1.1 • 15 separate JPGs • 1024 × 1024 px (1:1 square) • automatic art direction • exact originals from the selected PaletteIQ collection, not ZIP.</p>
       {inspection && <p className="sub">Original collection check: {assets.length} distinct source-image references; {inspection.checked}/{inspection.sampled} sampled images decoded{inspection.dimensionSummary ? ' (dimensions: ' + inspection.dimensionSummary + ')' : ''}; {inspection.transparent} show transparency in the sample{inspection.failed ? '; ' + inspection.failed + ' could not be inspected' : ''}. Counts exclude duplicate URLs. Other image formats, dimensions, DPI and licensing are not assumed.</p>}
-      <p className="sub">Creative direction: {artDirection.family} · {artDirection.palette} · AI artwork style follows the collection. {step === 1 ? 'Review the cover first to set the visual direction.' : 'Approved images remain saved; use the same visual language across the series.'}</p>
+      <p className="sub">Creative direction: {artDirection.family} · {artDirection.palette} · {styleProfile ? 'Visual style observed from ' + styleProfile.sampleCount + ' original clipart samples.' : 'Visual style will be checked against original clipart before generation.'} {step === 1 ? 'Review the cover first to set the visual direction.' : 'Approved images remain saved; use the same visual language across the series.'}</p>
+      {styleProfile && <div style={{ border: '1px solid #ddd7cc', background: '#faf9f5', borderRadius: 9, padding: '10px 12px', fontSize: 12 }}>
+        <strong>Observed original clipart style:</strong> {styleProfile.summary}
+        <small style={{ display: 'block', marginTop: 5, color: '#655c50' }}>Medium: {styleProfile.medium} · Palette: {styleProfile.palette} · Texture: {styleProfile.texture}. AI still creates its own background and lettering; original collection images are never redrawn.</small>
+      </div>}
+      {styleWarning && <p className="sub" role="status" style={{ color: '#a15a20' }}>{styleWarning}</p>}
+      {!styleProfile && <small className="sub">The first generation may run one additional paid OpenAI Vision analysis on downsized original clipart samples. Its result is cached and reused across the collection. Subsequent image costs are separate from this analysis.</small>}
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         <strong>{approved}/15 approved • {assets.length} original images available</strong>
         <button type="button" className="primary-btn" disabled={approved !== 15 || !!working} onClick={() => {
