@@ -24,21 +24,18 @@ export function isCentralHero(number: number, hasReference: boolean): boolean {
 }
 
 export function heroTextZone(layout?: ListingReferenceLayout): ListingTextZone {
-  const fallback = { x: 25, y: 24, width: 50, height: 54 };
+  // The protected center must leave practical perimeter bands on ALL FOUR sides.
+  // Reference text-box heights are often exaggerated by decorative badges;
+  // do not let an expansive vision union consume the bottom product-art band.
   const boxes = (layout?.texts || []).filter(t =>
-    [t.x,t.y,t.width,t.height].every(finite) && t.width > 0 && t.height > 0).slice(0,12);
-  if (!boxes.length) return fallback;
-  const x = Math.min(...boxes.map(t => t.x));
-  const right = Math.max(...boxes.map(t => t.x+t.width));
-  const y = Math.min(...boxes.map(t => t.y));
-  const bottom = Math.max(...boxes.map(t => t.y+t.height));
-  // Apply reference geometry only when it is genuinely a centrally placed title.
-  const cx = (x+right)/2, cy = (y+bottom)/2;
-  if (cx < 35 || cx > 65 || cy < 29 || cy > 74) return fallback;
-  return {
-    x: clamp(x-3,20,37), y: clamp(y-3,18,32),
-    width: clamp(right-x+6,44,63), height: clamp(bottom-y+6,38,61)
-  };
+    [t.x,t.y,t.width,t.height].every(finite) && t.width > 0 && t.height > 0);
+  const centerAligned = boxes.length && boxes.some(t => {
+    const cx=t.x+t.width/2, cy=t.y+t.height/2;
+    return cx >= 34 && cx <= 66 && cy >= 28 && cy <= 75;
+  });
+  // Whether the input is central or just a noisy estimate, keep the cover's
+  // central title lockup inside a fixed, reference-inspired safe region.
+  return centerAligned ? {x:25,y:23,width:50,height:55} : {x:25,y:24,width:50,height:54};
 }
 
 const intersects = (a: ListingTextZone, b: ListingTextZone) =>
