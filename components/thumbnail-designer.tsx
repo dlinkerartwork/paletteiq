@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import UpscaleCompare from '@/components/upscale-compare';
+import AutoDismissNotice from '@/components/auto-dismiss-notice';
 import { readApiJson } from '@/lib/listing-image-upload';
 import ThumbnailStylePreviewSelect, { type ThumbnailStyleOption } from '@/components/thumbnail-style-preview-select';
 import { thumbnailSeoDefaults, type ThumbnailSeoSource } from '@/lib/thumbnail-seo-defaults';
@@ -172,7 +173,8 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
   const [busy, setBusy] = useState(false);
   const [backgroundUploading, setBackgroundUploading] = useState(false);
   const [backgroundGenerating, setBackgroundGenerating] = useState(false);
-  const [backgroundStyle, setBackgroundStyle] = useState<'watercolor' | 'paper' | 'gradient' | 'botanical' | 'vintage'>('watercolor');
+  // Style selection is disabled: let analyzed reference determine the actual graphic treatment.
+  const backgroundStyle = 'paper' as const;
   const [backgroundIntensity, setBackgroundIntensity] = useState<'soft' | 'balanced' | 'vibrant'>('balanced');
   const [backgroundLoadError, setBackgroundLoadError] = useState('');
   const [history, setHistory] = useState<ThumbnailDesign[]>([]);
@@ -1404,7 +1406,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
       <button className="outline-btn" disabled={!design} type="button" onClick={removeDesign}><Trash2 size={15}/> Delete</button>
       <button className="primary-btn" disabled={!design || busy} type="button" onClick={() => void save()}>Save designs</button>
     </div>
-    {message && <p className="notice">{message}</p>}
+    <AutoDismissNotice message={message} onClose={() => setMessage('')} />
     {!design ? <div className="panel empty-state" style={{ display: 'grid', gap: 12, maxWidth: 520, margin: '20px auto', padding: 24 }}>
       <h2>Start with your own canvas</h2>
       <p>Create a blank 1024 × 1024 canvas, add exact original collection clipart from Reference &amp; Assets, then arrange and resize it yourself. Choose a reference template, enter a title, subtitle and optional badge, and let AI generate only the background and artistic lettering.</p>
@@ -1492,9 +1494,6 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           <select aria-label="Custom canvas background quality" value={packQuality} disabled={aiBusy} onChange={e => setPackQuality(e.target.value as typeof packQuality)}>
             <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
           </select>
-          <label className="input-label">BACKGROUND STYLE</label>
-          <ThumbnailStylePreviewSelect label="Custom canvas background style" kind="background" value={backgroundStyle} options={BACKGROUND_EXAMPLES}
-            disabled={aiBusy} onChange={value => setBackgroundStyle(value as typeof backgroundStyle)}/>
           <button type="button" className="primary-btn" disabled={aiBusy || Boolean(backgroundRetryId) || (!design.elements.some(e => e.type === 'image') && !(layoutMode === 'ai' && characters.some(c => c.imageUrl)))} onClick={() => void generateCanvasArtwork()}>
             <WandSparkles size={15}/> {aiBusy ? 'Generating AI artwork...' : 'Generate AI Background & Typography'}
           </button>
@@ -1611,8 +1610,6 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           onChange={e => mutate({ backgroundOpacity: Number(e.target.value) / 100, renderedImageUrl: undefined, upscaledImageUrl: undefined })}/>
         <small>0% = latar memudar putih, 100% = desain asli. PNG clipart dan teks editable tidak memudar. AI lettering yang menyatu dengan background ikut memudar karena masih satu gambar. Save, PNG, dan JPG memakai opacity yang sama.</small>
         <label className="input-label">AI DECORATIVE BACKGROUND (OPENAI)</label>
-        <label className="input-label">BACKGROUND STYLE</label>
-        <select aria-label="Background style" value={backgroundStyle} disabled={backgroundGenerating} onChange={event => setBackgroundStyle(event.target.value as typeof backgroundStyle)}><option value="watercolor">Artistic watercolor washes</option><option value="paper">Luxury textured paper</option><option value="gradient">Premium colorful gradient</option><option value="botanical">Abstract botanical motifs</option><option value="vintage">Vintage decorative texture</option></select>
         <button className="outline-btn" type="button" disabled={backgroundGenerating || aiBusy} onClick={() => void generateReferenceBackground()}><WandSparkles size={15}/> {backgroundGenerating ? 'Generating background...' : 'Generate background (no clipart or text)'}</button>
         <small>Generate visible decorative textures and color variations. Original clipart and typography stay on top as independent layers. Generating again may incur API charges.</small>
         <label className="input-label">BACKGROUND IMAGE (LOCAL PNG/JPG)</label>
