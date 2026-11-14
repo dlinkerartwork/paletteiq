@@ -7,6 +7,7 @@ import { userCredential } from '@/lib/credentials';
 import { nativeAssetBucket } from '@/lib/native-bridge';
 import { zipStream, type ZipEntry } from '@/lib/zip-stream';
 import { listingCreativeDirection, listingCreativeSummary, listingMockupScene } from '@/lib/etsy-listing-creative-direction';
+import { currentListingVisualStyle, listingStyleDirection, type ListingVisualStyleProfile } from '@/lib/etsy-listing-visual-style';
 import { estimateListingImageGenerationCost, type GeneratedImageUsage } from '@/lib/etsy-listing-image-cost';
 import {
   LISTING_IMAGE_SPECS, LISTING_HEIGHT, LISTING_WIDTH, listingFilename, listingTitle,
@@ -20,7 +21,7 @@ const validNumber = (n: unknown): n is number => typeof n === 'number' && Number
 type StoredProject = {
   id: string; name: string; theme?: string; subtheme?: string; palette?: string; style?: string; texture?: string;
   listing?: { title?: string; primaryKeyword?: string };
-  characters?: ListingAsset[]; listingImages?: ListingImageRecord[];
+  characters?: ListingAsset[]; listingImages?: ListingImageRecord[]; listingVisualStyle?: ListingVisualStyleProfile;
 };
 const sanitizedText = (s: string, limit: number) => s.replace(/[<>\r\n]/g, ' ').trim().slice(0, limit);
 const normalizedImages = (project: StoredProject) => Array.isArray(project.listingImages)
@@ -156,6 +157,7 @@ type Input = {
 function artPrompt(number: number, project: StoredProject, count: number, revisionNotes = '', text?: ListingImageText): string {
   const spec = LISTING_IMAGE_SPECS[number - 1];
   const direction = listingCreativeDirection(project);
+  const observed = currentListingVisualStyle(project.listingVisualStyle, project.characters || []);
   const defaults = listingImageTextDefaults(project.listing, direction.title);
   const title = text?.title ?? defaults.title;
   const subtitle = text?.subtitle ?? defaults.subtitle;
@@ -171,6 +173,11 @@ function artPrompt(number: number, project: StoredProject, count: number, revisi
     badge ? 'Render this OPTIONAL BADGE as premium graphic typography with EXACT words: ' + JSON.stringify(badge) + '. Decorative outlines are permitted, but no illustrated objects.' : 'NO BADGE: do not invent a badge, sticker label or other words.',
     'The text above is the COMPLETE allowed wording. No additional claims or marketing copy. Spell every requested character correctly.',
     listingCreativeSummary(direction),
+    observed
+      ? listingStyleDirection(observed)
+      : 'No visual sample analysis of the real collection is available. Treat the stored collection style and theme as secondary descriptive hints, not visual evidence. Avoid imposing generic watercolor or retro aesthetics without support.',
+    'CREATIVE FREEDOM: Design a fresh premium Etsy layout with bespoke expressive lettering and nonfigurative graphic decoration. Innovate freely in composition, layering, balance and hierarchy, while matching the OBSERVED source-art medium, softness, palette, texture and mood when an analyzed profile exists.',
+    'The collection theme guides the SUBJECT of the merchandising message, but is not permission to draw themed subjects. Original clipart will be composited later in exact original PNG pixels by PaletteIQ.',
     'Design typography for quick readability on a small Etsy search-result thumbnail: bold but friendly high-contrast custom lettering, artistically curved or hand-painted where appropriate, with restrained supporting text.',
     'Compose the exact requested lettering NATURALLY, following the visual hierarchy and available square space. The main title must be easily readable at Etsy thumbnail size and the subtitle should be reasonably legible. Do not force all text into a rigid 24% header or a hard no-overlap box. Use expressive curves, flowing hand-lettered forms and a balanced hierarchy.',
     'PaletteIQ will overlay authentic collection clipart afterwards. Allow tasteful partial overlap around outer letter edges, swashes or nonessential decoration, while giving the central strokes of the main headline enough contrast and space to read. No generated imitation clipart or substitute objects.',
