@@ -6,37 +6,26 @@ const designer = readFileSync(new URL('../components/thumbnail-designer.tsx', im
 const selector = readFileSync(new URL('../components/thumbnail-style-preview-select.tsx', import.meta.url), 'utf8');
 const generator = readFileSync(new URL('../app/api/thumbnail-ai-image/route.ts', import.meta.url), 'utf8');
 
-test('all five controls present examples for every selectable design style', () => {
-  for (const [kind, list, label] of [
-    ['lettering','LETTERING_EXAMPLES','Artistic lettering composition'],
-    ['cover','COVER_EXAMPLES','Custom canvas cover style'],
-    ['boldness','BOLDNESS_EXAMPLES','Custom canvas typography boldness'],
-    ['background','BACKGROUND_EXAMPLES','Custom canvas background style'],
-    ['decoration','DECORATION_EXAMPLES','Custom canvas decoration intensity']
-  ]) {
-    assert.ok(designer.includes('kind="'+kind+'"'),kind+' miniature missing');
-    assert.ok(designer.includes('options={'+list+'}'),kind+' options missing');
-    assert.ok(designer.includes('label="'+label+'"'),kind+' label missing');
-  }
-  assert.equal((designer.match(/<ThumbnailStylePreviewSelect /g) || []).length,5);
-  assert.match(selector,/<Miniature kind=\{kind\} variant=\{option\.value\}\/>/);
+test('experimental styling controls are hidden; only background material remains visible', () => {
+  assert.doesNotMatch(designer,/label="Artistic lettering composition"/);
+  assert.doesNotMatch(designer,/label="Custom canvas cover style"/);
+  assert.doesNotMatch(designer,/label="Custom canvas typography boldness"/);
+  assert.doesNotMatch(designer,/label="Custom canvas decoration intensity"/);
+  assert.doesNotMatch(designer,/aria-label="Background decoration intensity"/);
+  assert.match(designer,/label="Custom canvas background style"/);
+  assert.equal((designer.match(/<ThumbnailStylePreviewSelect /g) || []).length,1);
   assert.match(selector,/options\.map\(option =>/);
-  assert.match(selector,/aria-expanded=\{expanded\}/);
-  assert.match(selector,/role="listbox"/);
-  assert.match(selector,/role="option"/);
-  assert.match(selector,/CSS\/SVG/);
-  assert.doesNotMatch(selector,/fetch\(|imageUrl=|onGenerate|gpt-image|gemini-/);
 });
 
-test('manual overlapping clipart and typography does not block AI generation or move original coordinates', () => {
-  const manual = designer.slice(designer.indexOf('  const generateCanvasArtwork = async () => {'),
+test('AI mode fits existing originals to reference, while manual mode retains authored positions', () => {
+  const method = designer.slice(designer.indexOf('  const generateCanvasArtwork = async () => {'),
     designer.indexOf('  // Create the background and artistic lettering FIRST'));
-  assert.doesNotMatch(manual,/overlapsType|Move it or change the typography zone/);
-  assert.match(manual,/Intentional image\/text overlap is supported/);
-  assert.match(manual,/layout: imageLayers\.map/);
-  assert.match(manual,/source: 'original' as const/);
+  assert.match(method,/layoutMode === 'ai' && !reference/);
+  assert.match(method,/await placeOriginalsOverBackground/);
+  assert.match(method,/if \(!result\.qcRejected && layoutMode === 'ai'\)/);
+  assert.match(method,/layout: imageLayers\.map/);
+  assert.match(method,/source: 'original' as const/);
   assert.match(generator,/Exact original PNGs may intentionally OVERLAP the lettering/);
-  assert.match(designer,/zIndex: 1/);
   assert.match(designer,/opacity: e\.opacity \?\? 1, zIndex: 2/);
 });
 
@@ -54,10 +43,10 @@ test('background opacity defaults to 100%, is controlled and persisted independe
   assert.match(designer,/renderedImageUrl: undefined, upscaledImageUrl: undefined/);
 });
 
-test('visual selectors are local illustrative previews and their choices still drive generation', () => {
+test('hidden experimental style choices are neutralized in custom generation', () => {
   assert.match(selector,/Contoh ilustratif \(CSS\/SVG\)/);
-  assert.match(selector,/onChange\(option\.value\); setExpanded\(false\)/);
-  assert.match(designer,/backgroundStyle, backgroundIntensity, designBoldness: packBoldness/);
-  assert.match(designer,/coverStyle: packCoverStyle, referenceDesign/);
-  assert.match(designer,/letteringStyle: source\.packLetteringStyle \|\| 'auto'/);
+  assert.match(designer,/letteringStyle: 'auto' as const/);
+  assert.match(designer,/backgroundIntensity: 'soft' as const, designBoldness: 'balanced' as const/);
+  assert.match(designer,/coverStyle: 'editorial' as const, referenceDesign/);
+  assert.match(designer,/boldness: 'balanced', coverStyle: 'editorial', intensity: 'soft'/);
 });
