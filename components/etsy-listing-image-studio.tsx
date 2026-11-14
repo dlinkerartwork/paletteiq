@@ -905,7 +905,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
               Build final JPG with original PNGs (paid Vision placement)
             </button>
           </section>}
-          <section style={{ marginTop: current?.renderedImageUrl ? 16 : 0, display: 'grid', gap: 8 }}>
+          {(compositionMode !== 'ai-first' || !current?.backgroundUrl || !!current.renderedImageUrl) && <section style={{ marginTop: current?.renderedImageUrl ? 16 : 0, display: 'grid', gap: 8 }}>
             <strong>{current?.backgroundUrl ? 'Editable Original Clipart Layers (post-generate)' : 'White Canvas Pre-Layout — arrange before AI generation'}</strong>
             <EtsyListingLayoutCanvas
               assets={assets} placements={positions} selectedIndex={selectedIndex}
@@ -927,7 +927,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
             {current?.backgroundUrl && changes[step] && <small role="status" style={{ color:'#9a572a' }}>
               Unsaved placement changes are visible above. Click Apply layout &amp; save JPG to update the final thumbnail without AI background generation.
             </small>}
-          </section>
+          </section>}
           {current?.renderedImageUrl && <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
             <a className="outline-btn" href={current.renderedImageUrl} download={fileName(step)}><Download size={15}/> Download JPG</a>
             <span className="sub">{current.width || 'Legacy'} × {current.height || '4:3'} • {isSquareListingApproved(current) ? 'Approved square JPG' : 'Awaiting square approval'}</span>
