@@ -50,7 +50,7 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
     [p.x, p.y, p.width, p.height, p.rotation ?? 0].every(v => typeof v === 'number' && Number.isFinite(v)) &&
     p.x >= 0 && p.x <= 100 && p.y >= 0 && p.y <= 100 &&
     p.width > 0 && p.width <= 100 && p.height > 0 && p.height <= 100 &&
-    Math.abs(p.rotation ?? 0) <= 30
+    Math.abs(p.rotation ?? 0) <= 180
   ) : previous?.placements || [];
   const status: ListingImageStatus = value.status === 'approved' || value.status === 'needs_revision' ? value.status : 'draft';
   // An explicit empty render URL clears stale approved JPGs during regeneration.
@@ -237,7 +237,7 @@ type Input = {
   action?: 'generate' | 'save' | 'layout' | 'reject' | 'critique' | 'prelayout'; projectId?: string; number?: number;
   image?: ListingImageRecord; model?: string; quality?: string;
   backgroundUrl?: string; placements?: ListingPlacement[]; revisionNotes?: string;
-  featuredCount?: number; critiqueFeedback?: string;
+  featuredCount?: number; critiqueFeedback?: string; textScale?: 'compact' | 'balanced' | 'statement';
   title?: string; subtitle?: string; badge?: string;
 };
 /**
@@ -245,7 +245,7 @@ type Input = {
  * are composited by the client AFTER this call; the image model never receives
  * a copy of the PNGs and cannot replace or redraw them.
  */
-function artPrompt(number: number, project: StoredProject, count: number, revisionNotes = '', text?: ListingImageText, preLayout?: ListingPlacement[]): string {
+function artPrompt(number: number, project: StoredProject, count: number, revisionNotes = '', text?: ListingImageText, preLayout?: ListingPlacement[], textScale: 'compact' | 'balanced' | 'statement' = 'compact'): string {
   const spec = LISTING_IMAGE_SPECS[number - 1];
   const direction = listingCreativeDirection(project);
   const observed = currentListingVisualStyle(project.listingVisualStyle, project.characters || []);
@@ -270,7 +270,14 @@ function artPrompt(number: number, project: StoredProject, count: number, revisi
     'CREATIVE FREEDOM: Design a fresh premium Etsy layout with bespoke expressive lettering and nonfigurative graphic decoration. Innovate freely in composition, layering, balance and hierarchy, while matching the OBSERVED source-art medium, softness, palette, texture and mood when an analyzed profile exists.',
     'The collection theme guides the SUBJECT of the merchandising message, but is not permission to draw themed subjects. Original clipart will be composited later in exact original PNG pixels by PaletteIQ.',
     'Design typography for quick readability on a small Etsy search-result thumbnail: bold but friendly high-contrast custom lettering, artistically curved or hand-painted where appropriate, with restrained supporting text.',
-    'MERCHANDISING HIERARCHY: original collection artwork is the product and must remain prominent; no generic giant text wall. Keep a clear headline and smaller supporting subtitle. If both are long, prioritize visual clarity rather than inflating every word. Never add extra words or repeat the provided title in tiny ornamental lettering.',
+    'MERCHANDISING HIERARCHY: original collection artwork is the product and must remain prominent; no generic giant text wall. Keep a clear headline and much smaller supporting subtitle. If both are long, prioritize visual clarity rather than inflating every word. Never add extra words or repeat the provided title in tiny ornamental lettering.',
+    textScale === 'compact'
+      ? 'TYPOGRAPHY SCALE — COMPACT (default): Make custom lettering refined and SMALL relative to the whole 1024 square. Aim for total main title block HEIGHT no more than about 22% of canvas (including 2-line titles), supporting subtitle about 5–7%, and all text combined ideally below 33%. Keep title readable but NOT giant: original clipart should visually dominate this Etsy merchandise cover. Treat these percentages as art-direction targets, not a fixed location or box.'
+      : textScale === 'balanced'
+        ? 'TYPOGRAPHY SCALE — BALANCED: Main title group roughly 26–30% of canvas height at most, subtitle about 6–9%, total typography below 40%. Keep source original artwork as the dominant product illustration.'
+        : 'TYPOGRAPHY SCALE — STATEMENT: Expressive headline may use up to roughly 33% of canvas height, subtitle no more than 10%, but preserve generous visible room for original clipart and never let text overpower the source artwork.',
+    'Scale down the lettering intelligently when the title contains multiple words. Do not make every line equally large: one elegant compact headline with a smaller supporting subtitle is preferred. Avoid tall stacked lettering that fills the entire center from top to bottom.',
+    'Optional badge must remain modest (about 8–12% of canvas width) and separated enough from critical title letters to stay legible after real clipart is composited. Never create a larger competing badge than the actual source illustrations.',
     'Reduce ornamental noise. Use restrained background detailing and only the decorative accents needed to frame the source artwork, letting the collection illustration style carry the appeal.',
     preLayout?.length
       ? 'USER-ARRANGED WHITE CANVAS PRE-LAYOUT (spatial references ONLY; do not draw the assets): ' +
@@ -351,7 +358,7 @@ export async function POST(request: Request) {
           ![p.x,p.y,p.width,p.height,p.rotation ?? 0].every(v => typeof v === 'number' && Number.isFinite(v)) ||
           p.x < 0 || p.y < 0 || p.x > 100 || p.y > 100 ||
           p.width < 1 || p.height < 1 || p.width > 100 || p.height > 100 ||
-          Math.abs(p.rotation ?? 0) > 30) ||
+          Math.abs(p.rotation ?? 0) > 180) ||
         new Set(placements.map(p => p.assetId)).size !== placements.length)
       return bad('Select one or more unique original cliparts with valid canvas coordinates.');
     project.listingPreLayouts = { ...(project.listingPreLayouts || {}), [String(input.number)]: placements };
@@ -400,6 +407,7 @@ export async function POST(request: Request) {
               isMockup ? 'This is a realistic BLANK PRODUCT MOCKUP. All supplied original asset layers MUST fit on the blank flat printable area of the product and not float on table/background. Account for actual blank surface position in visible pixels. Do not cover straps, hands, folds, shadows or the product edge.' : 'Use an attractive varied hierarchy with natural scale, spacing and partial overlap when it looks like an intentional professional composition. For gallery items preserve the source IDs and approximate grid, while considering the actual text legibility seen in the image.',
               'Return ONLY JSON: {"placements":[{"assetId":"source-id","x":30,"y":40,"width":18,"height":22,"rotation":0}],"unsafe":false,"notes":""}.',
               'Return each listed assetId EXACTLY ONCE and NO new IDs. Coordinate ranges 0–100. Retain approximate proportions of existing placement slots; never infer an object shape or invent an asset from its name.',
+              'Keep existing intended asset rotations when practical. Individual cliparts may rotate -180 to +180 degrees, respecting the user input and never redrawing the original PNG.',
               'For mockups, if a usable printable surface is missing, set unsafe=true and retain the original plan. For other listing designs, do not treat partial text overlap as unsafe by itself. Numbers only.',
               input.critiqueFeedback ? 'FINAL-COMPOSITION REVIEW FEEDBACK to improve the last result: ' + JSON.stringify(sanitizedText(input.critiqueFeedback,500)) : 'No previous final critique.',
               'Current original-layer plan:',JSON.stringify(descriptor)
@@ -420,7 +428,7 @@ export async function POST(request: Request) {
         seen.add(p.assetId);
         return [p.x,p.y,p.width,p.height,p.rotation ?? 0].every(n=>typeof n==='number' && Number.isFinite(n)) &&
           p.x>=0 && p.y>=0 && p.width>=2 && p.height>=2 &&
-          p.x+p.width<=100 && p.y+p.height<=100 && Math.abs(p.rotation??0)<=30;
+          p.x+p.width<=100 && p.y+p.height<=100 && Math.abs(p.rotation??0)<=180;
       });
       if (!correct) return Response.json({placements:fallback, fallback:'Vision could not verify a safe layout. Review and adjust the original asset positions.'});
       return Response.json({placements:candidates, note:sanitizedText(parsed.notes||'',180)});
@@ -466,7 +474,7 @@ export async function POST(request: Request) {
     return bad('Invalid pre-layout: select valid original collection artwork and arrange it on the white canvas.');
   const prompt = artPrompt(input.number,
     { ...project, selectedArtworkCount: input.featuredCount },
-    count, typeof input.revisionNotes === 'string' ? input.revisionNotes : '', text, preLayout);
+    count, typeof input.revisionNotes === 'string' ? input.revisionNotes : '', text, preLayout, input.textScale ?? 'compact');
   try {
     const response = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
