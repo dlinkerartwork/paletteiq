@@ -49,6 +49,34 @@ export function listingFilename(number: number): string {
 export function listingCategory(asset: ListingAsset): string {
   return (asset.category || asset.group || asset.subtheme || '').trim().slice(0, 50);
 }
+/**
+ * A reproducible, varied selection for the cover, best details and finale.
+ * Spread across the collection and saved category groups; don't just display
+ * the first 10 entries (which may be near-duplicates of a single subtheme).
+ * Genuine visual attractiveness is assessed by the user's per-image review.
+ */
+export function curatedListingHighlights(source: ListingAsset[], limit = 10): ListingAsset[] {
+  const available = originalAssets(source);
+  const take = Math.min(Math.max(0, Math.floor(limit)), available.length);
+  if (take === 0) return [];
+  const result: ListingAsset[] = [];
+  const used = new Set<string>();
+  const add = (item: ListingAsset | undefined) => {
+    if (item && result.length < take && !used.has(item.id)) {
+      used.add(item.id);
+      result.push(item);
+    }
+  };
+  const grouped = new Map<string, ListingAsset[]>();
+  for (const item of available) {
+    const category = listingCategory(item);
+    if (category) grouped.set(category, [...(grouped.get(category) || []), item]);
+  }
+  for (const group of grouped.values()) add(group[Math.floor(group.length / 2)]);
+  for (let i = 0; i < take; i++) add(available[Math.min(available.length-1, Math.floor((i+0.5)*available.length/take))]);
+  for (const item of available) add(item);
+  return result;
+}
 export function planListingPlacements(number: number, source: ListingAsset[]): ListingPlacement[] {
   const available = originalAssets(source);
   if (!available.length) return [];
@@ -71,8 +99,8 @@ export function planListingPlacements(number: number, source: ListingAsset[]): L
       for (const group of distinct.slice(0, 6)) chosen.push(...group.slice(0, 3));
       selected = chosen;
     } else selected = available.slice(0, 18);
-  } else if (number === 1) selected = available.slice(0, 10);
-  else if (number === 4) selected = available.slice(0, 8);
+  } else if (number === 1) selected = curatedListingHighlights(available, 10);
+  else if (number === 4) selected = curatedListingHighlights(available, 8);
   else if (number === 6) selected = available.slice(0, 2);
   else if (number === 7) selected = available.slice(0, 3);
   else if (number === 8) selected = available.slice(0, 9);
@@ -80,7 +108,7 @@ export function planListingPlacements(number: number, source: ListingAsset[]): L
   else if (number === 12) selected = available.slice(0, 3);
   else if (number === 13) selected = available.slice(0, 5);
   else if (number === 14) selected = available.slice(0, 2);
-  else selected = available.slice(0, 9);
+  else selected = number === 15 ? curatedListingHighlights(available, 9) : available.slice(0, 9);
 
   const box = (asset: ListingAsset, x: number, y: number, width: number, height: number): ListingPlacement =>
     ({ assetId: asset.id, x, y, width, height, rotation: 0 });
