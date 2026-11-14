@@ -410,7 +410,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       setMessage('Image ' + String(step).padStart(2, '0') + ' saved as draft.' +
         (scored ? ' Final design critique: ' + scored.score.toFixed(1) + '/10. ' + (scored.improvements[0] || '') :
           autoFinalCritique ? ' Final Vision critique unavailable; inspect the result manually or use Recheck Final Quality.' : '') +
-        (layoutWarning ? ' Layout note: ' + layoutWarning : ' Check original clipart placement.' : '') + styleFallback);
+        (layoutWarning ? ' Layout note: ' + layoutWarning + ' Check original clipart placement.' : '') + styleFallback);
     } catch (error) { setMessage('Generation failed: ' + (error instanceof Error ? error.message : String(error))); }
     finally { setWorking(''); }
   };
