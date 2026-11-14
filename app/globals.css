@@ -421,3 +421,22 @@ h1,h2,.stat strong,.step b,.source-card strong,.asset-meta b { color:#302721; }
 @media(max-width:980px){.production-dashboard{grid-template-columns:minmax(0,1fr)}.production-activity{position:static;max-height:480px}}
 @media(max-width:760px){.sidebar-toggle{display:none}.sidebar-is-collapsed .sidebar{width:100%;min-width:0;padding:15px}.sidebar-is-collapsed .sidebar .brand>div:last-child,.sidebar-is-collapsed .sidebar-nav-label{display:inline}.sidebar-is-collapsed .sidebar nav button{padding:10px}.production-activity{max-height:420px}}
 @media(prefers-reduced-motion:reduce){.remote-activity-track.is-processing i{animation:none;width:100%}}
+
+/* Wider Etsy Thumbnail Designer tool palettes with a responsive canvas. */
+.thumbnail-editor-columns { grid-template-columns:minmax(300px,350px) minmax(300px,1fr) minmax(320px,380px); }
+.thumbnail-editor-columns > * { min-width:0; }
+@media (max-width:1450px) {
+  .thumbnail-editor-columns { grid-template-columns:minmax(280px,320px) minmax(260px,1fr) minmax(285px,330px); }
+}
+@media (max-width:1180px) {
+  .thumbnail-editor-columns { grid-template-columns:minmax(290px,1fr) minmax(290px,1fr); }
+  .thumbnail-editor-columns > :nth-child(1) { grid-column:1; grid-row:1; }
+  .thumbnail-editor-columns > :nth-child(2) { grid-column:1 / -1; grid-row:2; }
+  .thumbnail-editor-columns > :nth-child(3) { grid-column:2; grid-row:1; }
+}
+@media (max-width:760px) {
+  .thumbnail-editor-columns { grid-template-columns:minmax(0,1fr); }
+  .thumbnail-editor-columns > :nth-child(1),
+  .thumbnail-editor-columns > :nth-child(2),
+  .thumbnail-editor-columns > :nth-child(3) { grid-column:1; grid-row:auto; }
+}
