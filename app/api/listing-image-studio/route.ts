@@ -11,7 +11,8 @@ import {
   LISTING_IMAGE_SPECS, LISTING_HEIGHT, LISTING_WIDTH, listingFilename, listingTitle,
   originalAssets, type ListingImageRecord, type ListingPlacement, type ListingAsset, type ListingImageStatus
 } from '@/lib/etsy-listing-image-plan';
-import { fitListingPlacementsBelowText, isListingPlacementTextSafe, duplicateListingAssetIds } from '@/lib/listing-text-safe';
+import { duplicateListingAssetIds } from '@/lib/listing-text-safe';
+import { fitListingPlacementsToReference, isListingPlacementSafe, isCentralHero, heroTextZone, type ListingReferenceLayout } from '@/lib/listing-reference-composition';
 
 const bad = (message: string, status = 400) => Response.json({ error: message }, { status });
 const bucket = () => nativeAssetBucket() ?? env.BUCKET;
@@ -20,6 +21,7 @@ const validNumber = (n: unknown): n is number => typeof n === 'number' && Number
 type StoredProject = {
   id: string; name: string; theme?: string; subtheme?: string; palette?: string;
   characters?: ListingAsset[]; listingImages?: ListingImageRecord[];
+  listingStudioSettings?: { referenceImage?: string };
 };
 const sanitizedText = (s: string, limit: number) => s.replace(/[<>\r\n]/g, ' ').trim().slice(0, limit);
 const normalizedImages = (project: StoredProject) => Array.isArray(project.listingImages)
@@ -51,8 +53,9 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
   if (value.renderedImageUrl && Array.isArray(value.placements) &&
       placements.length !== value.placements.length)
     throw Error('One or more clipart files are missing, duplicated or disallowed; refresh the collection before saving.');
+  const heroReference = value.compositionMode === 'hero-center' || previous?.compositionMode === 'hero-center';
   if (value.renderedImageUrl && (duplicateListingAssetIds(placements).length ||
-      !placements.every(p => isListingPlacementTextSafe(p))))
+      !placements.every(p => isListingPlacementSafe(p,value.number,heroReference))))
     throw Error('Clipart must be distinct and stay below the protected title/subtitle area before saving.');
   const status: ListingImageStatus = value.status === 'approved' || value.status === 'needs_revision' ? value.status : 'draft';
   // An explicitly empty renderedImageUrl invalidates an older render when a
@@ -62,7 +65,9 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
   if (renderedImageUrl && !savedAssetKey(renderedImageUrl, project.id, 'owner-placeholder')) throw Error('Invalid composed image reference');
   if (backgroundUrl && !savedAssetKey(backgroundUrl, project.id, 'owner-placeholder')) throw Error('Invalid AI background reference');
   if (status === 'approved' && (!renderedImageUrl || !placements.length)) throw Error('Render an image with original collection artwork before approval');
-  return { number: value.number, status, backgroundUrl, renderedImageUrl, placements, notes: sanitizedText(value.notes || '', 800), updatedAt: Date.now() };
+  return { number: value.number, status, backgroundUrl, renderedImageUrl, placements,
+    compositionMode: value.compositionMode || previous?.compositionMode || 'top-gallery',
+    notes: sanitizedText(value.notes || '', 800), updatedAt: Date.now() };
 }
 async function updateImage(project: StoredProject, number: number, patch: ListingImageRecord, owner: string) {
   const existing = normalizedImages(project);
@@ -109,8 +114,9 @@ export async function GET(request: Request) {
 type Input = {
   action?: 'generate' | 'save' | 'layout'; projectId?: string; number?: number;
   image?: ListingImageRecord; model?: string; quality?: string;
-  backgroundUrl?: string; placements?: ListingPlacement[]; settings?: Partial<ListingStudioConfig>;
-  referenceDesign?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string };
+  backgroundUrl?: string; placements?: ListingPlacement[];
+  settings?: Partial<ListingStudioConfig> & { hasReference?: boolean };
+  referenceDesign?: ListingReferenceLayout;
 };
 const blankScene: Record<number, string> = {
   8: 'Premium realistic overhead flat-lay photograph of ONE blank, white sticker sheet on an elegant desk. The sticker sheet should have a broad clean unprinted center occupying 36%-66% horizontally and 38%-86% vertically, with soft natural shadows. Absolutely no stickers, illustrations or printed designs on the sheet.',
@@ -132,18 +138,22 @@ function artPrompt(number: number, project: StoredProject, count: number, settin
   const motif = ['blush-brush-ring','split-panel','paper-collage','soft-wash','minimal-lines'].includes(referenceDesign?.graphicMotif || '') ? referenceDesign?.graphicMotif : 'none';
   const lettering = ['script-serif','editorial-serif','modern-display','hand-lettered'].includes(referenceDesign?.letteringStyle || '') ? referenceDesign?.letteringStyle : 'artistic brush script and editorial serif';
   const mood = ['blush-sage','earthy-warm','forest-cream','pastel','vibrant'].includes(referenceDesign?.paletteMood || '') ? referenceDesign?.paletteMood : 'collection colors';
+  const centralHero = isCentralHero(number,Boolean(settings?.hasReference || settings?.referenceImage));
+  const referenceComposition = sanitizedText(referenceDesign?.compositionGuide || '',450);
+  const centralZone = heroTextZone(referenceDesign);
   const core = [
     'Create a premium conversion-focused Etsy digital clipart listing IMAGE BACKGROUND with exact ARTISTIC TYPOGRAPHY.',
     'Square 1:1 composition. The final JPG and generated background are both 1024 x 1024 pixels. Keep all critical lettering within the central safe area.',
     'Render the exact main title: ' + JSON.stringify(title) + '. Render the exact subtitle: ' + JSON.stringify(subtitle) + '. No other writing, numerals, file specifications, licensing or marketing claims.',
     'Typography: expressive premium artisanal brush-script plus clear editorial serif, refined and striking at Etsy mobile thumbnail size. Lettering must be correctly spelled and legible.',
     'Visual continuity comes from the actual collection palette and selected reference, not a hardcoded watercolor template: ' + JSON.stringify(palette) + '. Use restrained decorative color and plenty of clean readable space.',
-    'STRICT TEXT SAFETY: all title and subtitle letters must be entirely inside the TOP 30 PERCENT of the 1024x1024 square, with no text below y=30%. Reserve y=30-38% as empty whitespace for separation. Original clipart never overlaps a single letter. Do not put decorative copy or an extra caption below this text-only area.',
+    centralHero ? ('REFERENCE-LED CENTRAL HERO COMPOSITION: place the expressive main title and subtitle TOGETHER inside a generous central medallion at x=' + centralZone.x + '-' + (centralZone.x+centralZone.width) + '%, y=' + centralZone.y + '-' + (centralZone.y+centralZone.height) + '%. Text must not leave the medallion. Lettering may stack to fit a long collection title. Surround the medallion with open peripheral space for LARGER original PNG artwork: top, left and right sides, and bottom. NO assets in the middle title space. THIS IS NOT A TOP-HEADING GRID.' ) : 'STRICT GALLERY TEXT SAFETY: title and subtitle stay within the TOP 30 PERCENT of the square, and y=30-38% remains empty whitespace. The original clipart grid starts BELOW 38%.',
     'The actual digital clipart collection is NOT provided to you; original PNG assets will be composited later by PaletteIQ. Do not invent or paint any clipart artwork, characters, food, floral illustrations, miniature icons, badges depicting objects, or product substitutes.',
     'Do not claim asset dimensions, DPI, license terms, digital file formats or asset counts other than the exact verified subtitle supplied.',
     'Consistent tasteful professional photography/graphic design, high-key natural lighting, spacious graphic hierarchy.',
     'Design is determined automatically by the reference image, actual theme and purpose of this slide, not by disabled manual typography/cover/background/boldness/hierarchy/intensity controls.',
     'Verified reference analysis GRAPHIC STYLE ONLY (not product depiction): motif=' + motif + ', lettering=' + lettering + ', palette mood=' + mood + '.',
+    referenceComposition ? 'MATCH THIS REFERENCE SPATIAL COMPOSITION (not its depicted objects or wording): ' + referenceComposition : '',
     'Use the selected reference to guide design geometry, lettering scale, badge shape and palette, but keep the result original. Do not force watercolor corner washes, colored torn-paper patches, circular rings or multicolor corner gradients unless the reference specifically calls for them.',
     'Avoid the default repeated cream-center / turquoise-and-orange watercolor-corner motif. For each listing slide, design a distinct nonfigurative graphic structure matched to its purpose, while preserving collection coherence.',
     'Do not add large saturated pigment to any of the four corners. Background must not overpower the original clipart. Typography remains the primary generated graphic.'
@@ -160,7 +170,7 @@ function artPrompt(number: number, project: StoredProject, count: number, settin
   return [
     ...core,
     'Create ONLY a decorative NONFIGURATIVE graphic background and the requested exact title and subtitle. No photographs, product objects, illustrated figures, patterns depicting products, animals, plants, food, icons or silhouettes.',
-    spec.kind === 'all' || spec.kind === 'all-grouped' || spec.kind === 'categories'
+    centralHero ? 'HERO COVER ART DIRECTION: build a large, visually commanding CENTRAL title lockup or central sign shape, and leave spacious surrounding perimeter positions for oversized, different-sized original clipart. The reference may have artwork visually framing the letters from all four sides; imitate the composition rhythm, NOT any actual object, vehicle or food. Prefer central title hierarchy plus bold clipart placement, NOT a top title above two rows of tiny art.' : spec.kind === 'all' || spec.kind === 'all-grouped' || spec.kind === 'categories'
       ? 'Reserve y=0-38% for artistic typography and clear separation. From y=38-99% keep a calm unillustrated area for a dense grid of distinct original PNGs; never place text or miniature images there.'
       : spec.kind === 'information' ? 'Keep lower two thirds very clean and light for clear informational overlays and the original artworks.' :
       'Keep the artwork area beneath the title open and calm, using the selected reference\'s actual composition language. Do not add automatic corner pigment or watercolor borders.',
