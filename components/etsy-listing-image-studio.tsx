@@ -375,6 +375,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
             <option value="ai">AI + manual</option><option value="manual">Manual placement</option>
           </select>
         </label>
+        <div className="listing-vision-pair" style={{gridColumn:'1 / -1',display:'grid',gridTemplateColumns:'repeat(2,minmax(0,1fr))',gap:12,minWidth:0}}>
         <label style={{ display: 'grid', gap: 5 }}><span className="input-label">VISION PROVIDER</span>
           <select value={config.analysisProvider} disabled={!!working || settingsBusy} onChange={e => {
             const value = e.target.value as ListingStudioConfig['analysisProvider'];
@@ -388,6 +389,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
             {visionModels[config.analysisProvider].map(m => <option key={m.id} value={m.id}>{m.name} ({m.id})</option>)}
           </select>
         </label>
+        </div>
         <label style={{ display: 'grid', gap: 5 }}><span className="input-label">OPENAI BACKGROUND GENERATION MODEL</span>
           <select value={config.imageModel} disabled={!!working || settingsBusy} onChange={e => changeConfig('imageModel', e.target.value)}>
             {!availableModels.some(x => x.id === config.imageModel) && <option value={config.imageModel}>{config.imageModel}</option>}
