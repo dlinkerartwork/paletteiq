@@ -9,6 +9,7 @@ import { zipStream, type ZipEntry } from '@/lib/zip-stream';
 import { listingCreativeDirection, listingCreativeSummary, listingMockupScene } from '@/lib/etsy-listing-creative-direction';
 import { currentListingVisualStyle, listingStyleDirection, type ListingVisualStyleProfile } from '@/lib/etsy-listing-visual-style';
 import { estimateListingImageGenerationCost, type GeneratedImageUsage } from '@/lib/etsy-listing-image-cost';
+import { aiFirstConceptPrompt, aiFirstCleanPlatePrompt, AI_FIRST_MAX_REFERENCE_SHEETS } from '@/lib/etsy-listing-ai-first';
 import {
   LISTING_IMAGE_SPECS, LISTING_HEIGHT, LISTING_WIDTH, listingFilename, listingTitle,
   originalAssets, isSquareListingApproved, validListingPlacement, defaultListingCompositionMode, listingImageTextDefaults, DEFAULT_MAIN_COVER_CLIPART_COUNT, type ListingCompositionMode, type ListingFinalReview, type ListingImageText, type ListingImageRecord, type ListingPlacement, type ListingAsset, type ListingImageStatus
@@ -54,8 +55,10 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
   // Preserve this reliability fix while restoring the PR18 generation prompts.
   const renderedImageUrl = value.renderedImageUrl !== undefined ? value.renderedImageUrl : previous?.renderedImageUrl;
   const backgroundUrl = value.backgroundUrl !== undefined ? value.backgroundUrl : previous?.backgroundUrl;
+  const conceptUrl = value.conceptUrl !== undefined ? value.conceptUrl : previous?.conceptUrl;
   if (renderedImageUrl && !savedAssetKey(renderedImageUrl, project.id, 'owner-placeholder')) throw Error('Invalid composed image reference');
   if (backgroundUrl && !savedAssetKey(backgroundUrl, project.id, 'owner-placeholder')) throw Error('Invalid AI background reference');
+  if (conceptUrl && !savedAssetKey(conceptUrl, project.id, 'owner-placeholder')) throw Error('Invalid AI concept reference');
   const width = value.width ?? previous?.width;
   const height = value.height ?? previous?.height;
   if (status === 'approved' && (!renderedImageUrl || !placements.length || width !== LISTING_WIDTH || height !== LISTING_HEIGHT))
@@ -66,7 +69,7 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
   // Client-provided ratings are never trusted. A score is server-owned and
   // remains valid only while the EXACT reviewed JPG URL is unchanged.
   const finalReview = previous?.renderedImageUrl === renderedImageUrl ? previous?.finalReview : undefined;
-  return { number: value.number, status, backgroundUrl, renderedImageUrl, placements, width, height, title, subtitle, badge, finalReview, notes: sanitizedText(value.notes || '', 800),
+  return { number: value.number, status, backgroundUrl, conceptUrl, renderedImageUrl, placements, width, height, title, subtitle, badge, finalReview, notes: sanitizedText(value.notes || '', 800),
     reviewWarning: typeof value.reviewWarning === 'string' ? sanitizedText(value.reviewWarning, 280) : '',
     updatedAt: Date.now() };
 }
@@ -99,7 +102,7 @@ async function rejectImage(project: StoredProject, number: number, owner: string
 
   // Never delete an object referenced anywhere else in the saved collection.
   const stillInUse = JSON.stringify(project);
-  const urls = [rejected.backgroundUrl, rejected.renderedImageUrl]
+  const urls = [rejected.backgroundUrl, rejected.conceptUrl, rejected.renderedImageUrl]
     .filter((url): url is string => Boolean(url));
   const uniqueKeys = [...new Set(urls.filter(url => !stillInUse.includes(url))
     .map(url => savedAssetKey(url, project.id, owner)).filter((key): key is string => Boolean(key)))];
@@ -231,9 +234,10 @@ export async function GET(request: Request) {
 }
 
 type Input = {
-  action?: 'generate' | 'preview-prompt' | 'save' | 'layout' | 'reject' | 'critique' | 'prelayout'; projectId?: string; number?: number;
+  action?: 'generate' | 'preview-prompt' | 'generate-concept' | 'clean-concept' | 'save' | 'layout' | 'reject' | 'critique' | 'prelayout'; projectId?: string; number?: number;
   image?: ListingImageRecord; model?: string; quality?: string;
-  backgroundUrl?: string; placements?: ListingPlacement[]; revisionNotes?: string;
+  backgroundUrl?: string; conceptUrl?: string; placements?: ListingPlacement[]; revisionNotes?: string;
+  selectedAssetIds?: string[]; referenceSheets?: string[];
   featuredCount?: number; critiqueFeedback?: string; textScale?: 'compact' | 'balanced' | 'statement'; backgroundStyle?: 'plain' | 'minimal' | 'soft-texture';
   compositionMode?: ListingCompositionMode; artworkContactSheets?: string[];
   existingPlacements?: ListingPlacement[]; totalSelected?: number;
@@ -365,8 +369,8 @@ function defaultVisionArtDirection(mode: ListingCompositionMode, number: number)
     'Observe the silhouettes, colors and visual weights of every original. Compose with strong artistic judgment: balanced asymmetry, a natural rhythm of large and small elements, comfortable breathing room, convincing groups and hierarchy. Choose the arrangement freely; no mandatory grid, center, perimeter, hero count, size percentages, object count, font or font style.',
     'IMPORTANT: Preserve the ENTIRE main title, subtitle and badge. Do not place opaque artwork over letterforms, word interiors or other meaningful text. Readability must remain excellent even at Etsy search-result size. Leave clear space around typography, not flowers or objects across the words. Partial overlap is appropriate between compatible ARTWORK shapes, not across lettering.',
     'Avoid random scattering, a line of huge overlapping illustrations, equal-size repetition, an unbalanced empty region or crowded center. Arrange the chosen real objects like a professionally art-directed collage where every element has a purpose. Natural edge cropping is welcome when it improves visual balance.',
-    mode === 'free' && !(number >= 8 && number <= 12)
-      ? 'FREE COMPOSITION: Ignore PaletteIQ starter geometry completely. Decide ALL x/y/width/height/rotation independently from the actual background and visible original assets. Use visually harmonious sizing and distribution for the full selected collection, including the smallest elements.'
+    (mode === 'free' || mode === 'ai-first') && !(number >= 8 && number <= 12)
+      ? 'FREE COMPOSITION: Ignore PaletteIQ starter geometry completely. Decide ALL x/y/width/height/rotation independently from the actual background and visible original assets. Use visually harmonious sizing and distribution for the full selected collection, including the smallest elements. In AI-first mode follow the separately provided full-cover concept image as creative inspiration while fitting the source PNGs around the CLEAN typography plate.'
       : 'STRUCTURED COMPOSITION: Use the user-arranged original positions as a guide, adjusting only when it improves the layout without losing the intended structure.',
     number >= 8 && number <= 12 ? 'For a product mockup, keep every original on the real, blank printable product area.' : '',
     'Do not redraw, recolor, alter or invent an asset. Return placement geometry only; PaletteIQ will render unchanged original PNG image pixels.'
@@ -403,7 +407,7 @@ export async function POST(request: Request) {
     if (!Array.isArray(placements) || !placements.length || placements.length > originalAssets(project.characters || []).length ||
         placements.some(p => !p || !valid.has(p.assetId) || !validListingPlacement(p, input.number!)) ||
         new Set(placements.map(p => p.assetId)).size !== placements.length ||
-        (input.compositionMode !== undefined && !['free','structured'].includes(input.compositionMode)))
+        (input.compositionMode !== undefined && !['free','structured','ai-first'].includes(input.compositionMode)))
       return bad('Select one or more unique original cliparts with valid canvas coordinates.');
     project.listingPreLayouts = { ...(project.listingPreLayouts || {}), [String(input.number)]: placements };
     if (input.compositionMode) project.listingCompositionModes = {
@@ -422,7 +426,7 @@ export async function POST(request: Request) {
   }
   if (input.action === 'layout') {
     const mode: ListingCompositionMode = input.compositionMode ?? defaultListingCompositionMode(input.number);
-    if (!['free','structured'].includes(mode)) return bad('Invalid composition mode');
+    if (!['free','structured','ai-first'].includes(mode)) return bad('Invalid composition mode');
     const fallback = Array.isArray(input.placements) ? input.placements : [];
     const originals = originalAssets(project.characters || []);
     const valid = new Map(originals.map(asset => [asset.id, asset.name]));
@@ -442,7 +446,8 @@ export async function POST(request: Request) {
       (env as unknown as Record<string,string|undefined>).OPENAI_API_KEY;
     if (!keyOpenAi) return bad('Configure OpenAI API key for Vision positioning', 503);
     const isMockup = input.number >= 8 && input.number <= 12;
-    const free = mode === 'free' && !isMockup;
+    const free = (mode === 'free' || mode === 'ai-first') && !isMockup;
+    if (mode === 'ai-first' && isMockup) return bad('AI-first is available for artwork galleries, not product mockup steps.');
     // The source-contact sheet is a small preview of actual original assets,
     // not an image-generation input. The model may SEE, but NEVER DRAW, clipart.
     const contactSheets = input.artworkContactSheets || [];
@@ -468,6 +473,7 @@ export async function POST(request: Request) {
       return bad('Vision art-direction prompt must contain 1–12000 characters.');
     const directions = [
       input.layoutPrompt !== undefined ? input.layoutPrompt : defaultVisionArtDirection(mode, input.number),
+      mode === 'ai-first' ? 'IMAGE ORDER: FIRST is the CLEAN typographic plate used for final compositing. SECOND is the separately generated FULL creative concept including placeholder illustrations. Use the second for artistic layout inspiration, but fit REAL source PNGs around the legible wording of the first. Do not redraw placeholders.' : '',
       'TECHNICAL COMPOSITING CONTRACT: Use ONLY exact source PNG asset IDs. Return finite x/y/width/height/rotation values as PERCENTAGES of the 1024×1024 square, never redraw or generate illustrations.',
       'Preserve all visible title, subtitle and badge words. Do not place an opaque original over ANY essential letter shapes. The background typography image and selected original contact-sheet thumbnails show the actual visual evidence.',
       free
@@ -489,6 +495,19 @@ export async function POST(request: Request) {
       'ACTUAL SELECTED ORIGINAL ASSETS IN ORDER: ' + JSON.stringify(descriptor)
     ];
     try {
+      let conceptReference: string | null = null;
+      if (mode === 'ai-first') {
+        const conceptKey = savedAssetKey(input.conceptUrl || '', input.projectId, user.userId);
+        if (!conceptKey || !conceptKey.endsWith('.png')) return bad('AI-first requires its saved concept image');
+        const concept = await bucket()?.get(conceptKey);
+        if (!concept) return bad('Saved AI-first concept was not found', 404);
+        const conceptBytes = new Uint8Array(await concept.arrayBuffer());
+        if (conceptBytes.length > 20_000_000) return bad('AI-first concept exceeds Vision size limit',413);
+        let conceptBinary='';
+        for(let k=0;k<conceptBytes.length;k+=8192)
+          conceptBinary += String.fromCharCode(...conceptBytes.subarray(k,k+8192));
+        conceptReference = 'data:image/png;base64,' + btoa(conceptBinary);
+      }
       const response = await fetch('https://api.openai.com/v1/responses', {
         method:'POST',
         headers:{Authorization:'Bearer '+keyOpenAi,'Content-Type':'application/json'},
@@ -497,6 +516,7 @@ export async function POST(request: Request) {
           input:[{role:'user',content:[
             {type:'input_text',text:directions.filter(Boolean).join('\n')},
             {type:'input_image',image_url:'data:image/png;base64,'+btoa(binary)},
+            ...(conceptReference ? [{type:'input_image',image_url:conceptReference}] : []),
             ...(free ? contactSheets.map(image_url => ({type:'input_image',image_url})) : [])
           ]}],
           text:{format:{type:'json_object'}}
@@ -566,7 +586,7 @@ export async function POST(request: Request) {
       (!Number.isInteger(input.featuredCount) || input.featuredCount < 1 || input.featuredCount > count))
     return bad('Choose a clipart count between 1 and the number of available originals.');
   const preLayout = input.placements;
-  if (input.compositionMode !== undefined && !['free','structured'].includes(input.compositionMode))
+  if (input.compositionMode !== undefined && !['free','structured','ai-first'].includes(input.compositionMode))
     return bad('Invalid composition mode');
   if (preLayout !== undefined && (
     !Array.isArray(preLayout) || !preLayout.length || preLayout.length > originalAssets(project.characters || []).length ||
@@ -575,9 +595,14 @@ export async function POST(request: Request) {
       !validListingPlacement(p, input.number!)) ||
     new Set(preLayout.map(p => p.assetId)).size !== preLayout.length))
     return bad('Invalid pre-layout: select valid original collection artwork and arrange it on the white canvas.');
-  const prompt = artPrompt(input.number,
-    { ...project, selectedArtworkCount: input.featuredCount },
-    count, typeof input.revisionNotes === 'string' ? input.revisionNotes : '', text, preLayout, input.textScale ?? 'compact', input.backgroundStyle ?? 'minimal', input.compositionMode ?? defaultListingCompositionMode(input.number));
+  const mode = input.compositionMode ?? defaultListingCompositionMode(input.number);
+  const prompt = mode === 'ai-first'
+    ? aiFirstConceptPrompt({ theme: project.subtheme || project.theme || project.name, ...text,
+      selectedCount: input.featuredCount || count,
+      revisionNotes: typeof input.revisionNotes === 'string' ? input.revisionNotes : '' })
+    : artPrompt(input.number,
+      { ...project, selectedArtworkCount: input.featuredCount },
+      count, typeof input.revisionNotes === 'string' ? input.revisionNotes : '', text, preLayout, input.textScale ?? 'compact', input.backgroundStyle ?? 'minimal', mode);
   if (isPreview) return Response.json({
     backgroundPrompt: prompt,
     layoutPrompt: defaultVisionArtDirection(input.compositionMode ?? defaultListingCompositionMode(input.number), input.number)
