@@ -383,11 +383,14 @@ export async function POST(request: Request) {
     } catch (error) { return bad(error instanceof Error ? error.message : 'Could not save listing image'); }
   }
   if (input.action === 'layout') {
-    const fallback = (Array.isArray(input.placements) ? input.placements : []).slice(0, 24);
-    const valid = new Map(originalAssets(project.characters || []).map(asset => [asset.id, asset.name]));
-    if (!fallback.length || fallback.some(p => !p || !valid.has(p.assetId) ||
-      ![p.x,p.y,p.width,p.height].every(x => typeof x === 'number' && Number.isFinite(x)) ||
-      p.x < 0 || p.y < 0 || p.width <= 0 || p.height <= 0 || p.x + p.width > 101 || p.y + p.height > 101))
+    const mode: ListingCompositionMode = input.compositionMode ?? defaultListingCompositionMode(input.number);
+    if (!['free','structured'].includes(mode)) return bad('Invalid composition mode');
+    const fallback = Array.isArray(input.placements) ? input.placements : [];
+    const originals = originalAssets(project.characters || []);
+    const valid = new Map(originals.map(asset => [asset.id, asset.name]));
+    if (!fallback.length || fallback.length > 300 ||
+        fallback.some(p => !p || !valid.has(p.assetId) || !validListingPlacement(p,input.number)) ||
+        new Set(fallback.map(p=>p.assetId)).size !== fallback.length)
       return bad('Invalid original collection placement plan');
     const key = savedAssetKey(input.backgroundUrl || '', input.projectId, user.userId);
     if (!key || !key.endsWith('.png')) return bad('Invalid AI background');
@@ -397,52 +400,83 @@ export async function POST(request: Request) {
     if (bytes.length > 20_000_000) return bad('AI background exceeds Vision limit', 413);
     let binary = '';
     for (let i=0; i<bytes.length; i+=8192) binary += String.fromCharCode(...bytes.subarray(i,i+8192));
-    const base64 = btoa(binary);
-    const keyOpenAi = await userCredential(user.userId, 'openai') || (env as unknown as Record<string,string|undefined>).OPENAI_API_KEY;
+    const keyOpenAi = await userCredential(user.userId, 'openai') ||
+      (env as unknown as Record<string,string|undefined>).OPENAI_API_KEY;
     if (!keyOpenAi) return bad('Configure OpenAI API key for Vision positioning', 503);
     const isMockup = input.number >= 8 && input.number <= 12;
-    const descriptor = fallback.map(p => ({ id:p.assetId, name:valid.get(p.assetId), x:p.x, y:p.y, width:p.width, height:p.height }));
+    const free = mode === 'free' && !isMockup;
+    // The source-contact sheet is a small preview of actual original assets,
+    // not an image-generation input. The model may SEE, but NEVER DRAW, clipart.
+    const contactSheet = input.artworkContactSheet;
+    if (contactSheet !== undefined && (typeof contactSheet !== 'string' ||
+      contactSheet.length > 2_000_000 ||
+      !/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(contactSheet)))
+      return bad('Invalid original artwork contact sheet', 413);
+    const descriptor = fallback.map((p,index) => ({
+      index:index+1, assetId:p.assetId, name:valid.get(p.assetId),
+      x:p.x,y:p.y,width:p.width,height:p.height,rotation:p.rotation||0
+    }));
+    const directions = [
+      'You are an award-winning Etsy visual merchandiser, art director and composition planner.',
+      'You will REPOSITION AND RESIZE existing exact ORIGINAL PNG LAYERS. NEVER redraw, regenerate, modify, recolor or replace any image. PaletteIQ performs all compositing using the original stored image bytes.',
+      'Look at the supplied 1024×1024 SQUARE TYPOGRAPHY BACKGROUND. Return positions as percentages of the full square. Final image is clipped to the 1024 square bounds naturally.',
+      'Use actual title/subtitle/badge locations and colors on the generated background. Protect essential full word shapes so they are readable at 128px Etsy search size; tasteful overlap near swashes, letter edges and decorations is encouraged.',
+      free
+        ? 'FREE COMPOSITION: Disregard ALL suggested x/y/width/height values from PaletteIQ. They are NOT constraints, only a list of selected assets. You are the LEAD ART DIRECTOR. Compose a lively dense professionally balanced illustrated cover like a rich editorial collage, avoiding uniform grids, repetitive equal sizes, or forced edge-only arrangement.'
+        : 'STRUCTURED COMPOSITION: Respect the user’s existing overall positions, size relationships, and rotations; refine only as needed for visual clarity.',
+      free
+        ? 'Use dramatically VARIED object sizes: 2–4 big hero elements (roughly 22–42% of canvas span), several medium supporting elements (12–25%), and many smaller accents (4–14%). You can overlap genuine objects, let some touch the words without obscuring them, and let selected objects BLEED slightly outside one or several edges. The actual original PNG pixels are not resized/repainted by AI: return only placement geometry.'
+        : 'Use attractive intentional scale hierarchy and nonuniform spacing without changing the customer-selected artwork identities.',
+      free
+        ? 'CANVAS BLEED IS ALLOWED for this Main Cover: x/y may be NEGATIVE (as low as -100) and x/y + width/height may exceed 100. Objects partially outside the final canvas crop naturally. All chosen assets must be at least partially visible. Size can be up to 200% of square for an intentional close-up, though most objects should remain much smaller.'
+        : 'Keep all layers within 0–100% canvas bounds; for product mockups, use only the actual flat printable product surface.',
+      isMockup ? 'This is a realistic BLANK PRODUCT MOCKUP. Never place clipart outside the printable surface, on hands, background or product edges.' : '',
+      contactSheet && free
+        ? 'The SECOND image is a numbered contact sheet of ACTUAL source artwork thumbnails, in the same order as the numbered asset descriptors, up to its available sample count. Use the shape, orientation and visual weight of those real objects to plan the collage, not guessed artwork from names. The contact sheet is reference only; never redraw its subjects.'
+        : 'If original artwork previews are unavailable, infer cautiously from names; do not invent visual attributes.',
+      'RETURN JSON ONLY: {"placements":[{"assetId":"exact-source-id","x":-4,"y":22,"width":33,"height":38,"rotation":-7}],"unsafe":false,"notes":"..."}',
+      'Return each listed assetId EXACTLY ONCE, and NO fabricated or duplicate asset IDs. No missing selected originals. All placement values must be finite numeric coordinates and sizes.',
+      input.critiqueFeedback
+        ? 'PREVIOUS FINAL COMPOSITION REVIEW FEEDBACK: ' + JSON.stringify(sanitizedText(input.critiqueFeedback,500))
+        : 'No previous critique. Prioritize a genuinely legible title and distinct varied artwork hierarchy.',
+      'ACTUAL SELECTED ORIGINAL ASSETS IN ORDER: ' + JSON.stringify(descriptor)
+    ];
     try {
       const response = await fetch('https://api.openai.com/v1/responses', {
-        method:'POST', headers:{Authorization:'Bearer '+keyOpenAi,'Content-Type':'application/json'},
+        method:'POST',
+        headers:{Authorization:'Bearer '+keyOpenAi,'Content-Type':'application/json'},
         body:JSON.stringify({
           model:'gpt-4.1-mini',
           input:[{role:'user',content:[
-            {type:'input_text',text:[
-              'You are an expert graphic designer positioning EXISTING ORIGINAL PNG LAYERS on an AI-generated empty listing design. NEVER draw or regenerate clipart.',
-              'Inspect the supplied BACKGROUND IMAGE PIXELS to locate the already-rendered artistic typography and unobstructed blank printable space.',
-              'Final export is a 1:1 SQUARE canvas (1024x1024), exactly matching the supplied 1024x1024 background pixels. No crop is applied. Return x/y/width/height as percentages of the FULL SQUARE canvas.',
-              'Read the ACTUAL title, subtitle and badge positions from the background pixels; do not assume a fixed text zone. Position genuine PNG layers naturally around the poster. Partial overlap near outer edges, swashes and decorative lettering is welcome, but do not obscure central strokes or whole words of the main title. Keep the subtitle reasonably readable at small thumbnail size. Prefer visual hierarchy over a rigid zero-overlap layout.',
-              isMockup ? 'This is a realistic BLANK PRODUCT MOCKUP. All supplied original asset layers MUST fit on the blank flat printable area of the product and not float on table/background. Account for actual blank surface position in visible pixels. Do not cover straps, hands, folds, shadows or the product edge.' : 'Use an attractive varied hierarchy with natural scale, spacing and partial overlap when it looks like an intentional professional composition. For gallery items preserve the source IDs and approximate grid, while considering the actual text legibility seen in the image.',
-              'Return ONLY JSON: {"placements":[{"assetId":"source-id","x":30,"y":40,"width":18,"height":22,"rotation":0}],"unsafe":false,"notes":""}.',
-              'Return each listed assetId EXACTLY ONCE and NO new IDs. Coordinate ranges 0–100. Retain approximate proportions of existing placement slots; never infer an object shape or invent an asset from its name.',
-              'Keep existing intended asset rotations when practical. Individual cliparts may rotate -180 to +180 degrees, respecting the user input and never redrawing the original PNG.',
-              'For mockups, if a usable printable surface is missing, set unsafe=true and retain the original plan. For other listing designs, do not treat partial text overlap as unsafe by itself. Numbers only.',
-              input.critiqueFeedback ? 'FINAL-COMPOSITION REVIEW FEEDBACK to improve the last result: ' + JSON.stringify(sanitizedText(input.critiqueFeedback,500)) : 'No previous final critique.',
-              'Current original-layer plan:',JSON.stringify(descriptor)
-            ].join('\n')},
-            {type:'input_image',image_url:'data:image/png;base64,'+base64}
-          ]}],text:{format:{type:'json_object'}}
-        }), signal:AbortSignal.timeout(60000)
+            {type:'input_text',text:directions.filter(Boolean).join('\n')},
+            {type:'input_image',image_url:'data:image/png;base64,'+btoa(binary)},
+            ...(contactSheet && free ? [{type:'input_image',image_url:contactSheet}] : [])
+          ]}],
+          text:{format:{type:'json_object'}}
+        }),
+        signal:AbortSignal.timeout(90000)
       });
-      if (!response.ok) return Response.json({placements:fallback, fallback:'Vision layout unavailable; original asset-safe placement retained.'});
+      if (!response.ok) return Response.json({placements:fallback,
+        fallback:'AI Vision composition unavailable (HTTP '+response.status+'); original selected positions retained for manual editing.'});
       const answer = await response.json() as {output?:Array<{content?:Array<{text?:string}>}>};
       const raw = answer.output?.flatMap(a=>a.content||[]).map(c=>c.text||'').join('') || '{}';
       const parsed = JSON.parse(raw) as {placements?:ListingPlacement[]; unsafe?:boolean; notes?:string};
       const candidates = Array.isArray(parsed.placements) ? parsed.placements : [];
       const ids = new Set(fallback.map(p=>p.assetId));
       const seen = new Set<string>();
-      const correct = !parsed.unsafe && candidates.length === fallback.length && candidates.every(p => {
+      const correct = !parsed.unsafe && candidates.length === fallback.length && candidates.every(p=>{
         if (!p || !ids.has(p.assetId) || seen.has(p.assetId)) return false;
         seen.add(p.assetId);
-        return [p.x,p.y,p.width,p.height,p.rotation ?? 0].every(n=>typeof n==='number' && Number.isFinite(n)) &&
-          p.x>=0 && p.y>=0 && p.width>=2 && p.height>=2 &&
-          p.x+p.width<=100 && p.y+p.height<=100 && Math.abs(p.rotation??0)<=180;
+        return validListingPlacement(p,input.number) &&
+          (!isMockup || (p.x+p.width<=100 && p.y+p.height<=100)) &&
+          (free || (p.x+p.width<=100 && p.y+p.height<=100));
       });
-      if (!correct) return Response.json({placements:fallback, fallback:'Vision could not verify a safe layout. Review and adjust the original asset positions.'});
-      return Response.json({placements:candidates, note:sanitizedText(parsed.notes||'',180)});
+      if (!correct) return Response.json({placements:fallback,
+        fallback:'AI Vision could not return a complete valid composition. No source clipart was changed; adjust manually or retry Auto Arrange.'});
+      return Response.json({placements:candidates, note:sanitizedText(parsed.notes||'',180), compositionMode:mode});
     } catch {
-      return Response.json({placements:fallback, fallback:'Vision layout timed out; safe original placement plan retained.'});
+      return Response.json({placements:fallback,
+        fallback:'AI Vision composition timed out or returned invalid coordinates; editable original positions were retained.'});
     }
   }
   if (input.action !== 'generate') return bad('Unknown listing image action');
