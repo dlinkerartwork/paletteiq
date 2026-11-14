@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { thumbnailImagePrompt } from '@/lib/thumbnail-image-prompt';
+import { buildThumbnailDesignBrief, type ThumbnailBriefSettings } from '@/lib/thumbnail-design-brief';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '@/db';
 import { projects } from '@/db/schema';
@@ -8,7 +9,7 @@ import { userCredential, userGeminiKeys } from '@/lib/credentials';
 import { nativeAssetBucket } from '@/lib/native-bridge';
 
 type LayoutItem = { type: 'image' | 'text'; x: number; y: number; width: number; height: number; text?: string };
-type RequestBody = { projectId?: string; provider?: string; model?: string; quality?: string; width?: number; height?: number; layout?: LayoutItem[]; includeTitle?: boolean; mode?: 'full-thumbnail' | 'background-only' | 'background-with-typography'; headline?: string; subtitle?: string; slideName?: string; artDirection?: string; textZone?: { x: number; y: number; width: number; height: number }; backgroundStyle?: 'watercolor' | 'paper' | 'gradient' | 'botanical' | 'vintage'; backgroundIntensity?: 'soft' | 'balanced' | 'vibrant'; designBoldness?: 'soft' | 'balanced' | 'bold'; coverStyle?: 'editorial' | 'boutique' | 'storybook' | 'modern' | 'watercolor'; referenceDesign?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string } };
+type RequestBody = { projectId?: string; provider?: string; model?: string; quality?: string; width?: number; height?: number; layout?: LayoutItem[]; includeTitle?: boolean; mode?: 'full-thumbnail' | 'background-only' | 'background-with-typography'; headline?: string; subtitle?: string; badge?: string; letteringStyle?: 'auto' | 'arched' | 'flowing' | 'stacked' | 'hand-painted'; slideName?: string; artDirection?: string; textZone?: { x: number; y: number; width: number; height: number }; backgroundStyle?: 'watercolor' | 'paper' | 'gradient' | 'botanical' | 'vintage'; backgroundIntensity?: 'soft' | 'balanced' | 'vibrant'; designBoldness?: 'soft' | 'balanced' | 'bold'; coverStyle?: 'editorial' | 'boutique' | 'storybook' | 'modern' | 'watercolor'; referenceDesign?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string }; designBriefSettings?: ThumbnailBriefSettings };
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 const bucket = () => nativeAssetBucket() ?? env.BUCKET;
 
@@ -21,8 +22,8 @@ export async function POST(req: Request) {
   if (input.includeTitle !== undefined && typeof input.includeTitle !== 'boolean') return bad('includeTitle must be a boolean');
   const mode = input.mode || 'full-thumbnail';
   if (!['full-thumbnail', 'background-only', 'background-with-typography'].includes(mode)) return bad('Invalid image generation mode');
-  if (mode !== 'full-thumbnail' && input.provider !== 'openai') return bad('Background generation uses OpenAI');
-  if (mode === 'background-with-typography' && (!input.headline || input.headline.length > 100 || (input.subtitle || '').length > 140)) return bad('Invalid typography text');
+  if (mode === 'background-with-typography' && (!(input.headline?.trim() || input.subtitle?.trim() || input.badge?.trim()) || (input.headline || '').length > 100 || (input.subtitle || '').length > 140 || (input.badge || '').length > 60)) return bad('Specify at least one title, subtitle, or badge text (within length limits)');
+  const letteringStyle = ['auto', 'arched', 'flowing', 'stacked', 'hand-painted'].includes(input.letteringStyle || '') ? input.letteringStyle || 'auto' : 'auto';
   const backgroundStyle = input.backgroundStyle || 'watercolor';
   const backgroundIntensity = input.backgroundIntensity || 'balanced';
   const designBoldness = input.designBoldness || 'balanced';
@@ -47,10 +48,18 @@ export async function POST(req: Request) {
   if (!storage) return bad('Image storage is unavailable', 503);
   const collection = JSON.parse(rows[0].data) as { name?: string; theme?: string; subtheme?: string; style?: string; characters?: Array<{ name?: string }> };
   const layout = Array.isArray(input.layout) ? input.layout.slice(0, 48).filter(item => item && (item.type === 'image' || item.type === 'text')).map(item => ({
-    type: item.type, x: Math.max(-20, Math.min(120, Number(item.x) || 0)), y: Math.max(-20, Math.min(120, Number(item.y) || 0)),
-    width: Math.max(1, Math.min(120, Number(item.width) || 10)), height: Math.max(1, Math.min(120, Number(item.height) || 10)),
+    type: item.type, x: Math.max(-100, Math.min(200, Number(item.x) || 0)), y: Math.max(-100, Math.min(200, Number(item.y) || 0)),
+    width: Math.max(1, Math.min(200, Number(item.width) || 10)), height: Math.max(1, Math.min(200, Number(item.height) || 10)),
     text: item.type === 'text' ? String(item.text || '').slice(0, 120) : undefined
   })) : [];
+  // The source layout may deliberately bleed outside the frame. AI receives
+  // only the visible intersection of each rectangle with the 0-100 canvas.
+  // This is a prompt mask, NEVER a change to the user's composited PNG layers.
+  const visibleLayout = layout.filter(item => item.type === 'image').map(item => {
+    const x = Math.max(0, item.x), y = Math.max(0, item.y);
+    return { x, y, width: Math.max(0, Math.min(100, item.x + item.width) - x),
+      height: Math.max(0, Math.min(100, item.y + item.height) - y) };
+  }).filter(item => item.width > 0 && item.height > 0);
   const styleGuidance: Record<string, string> = {
     watercolor: 'Distinct layered watercolor pigment washes sweeping diagonally across the canvas, visible wet-on-wet edges, pigment blooms and delicate splatter-like granulation. The composition has artistic motion and meaningful color variation.',
     paper: 'Beautiful artisanal paper surface with clearly perceptible handmade fibers, subtle embossed textures, torn paper collage shapes and softly tinted overlapping paper layers.',
@@ -127,17 +136,36 @@ export async function POST(req: Request) {
   ].filter(Boolean).join(' ');
   const graphicDirection = [
     // Reference style deliberately outranks generic cover style when available.
-    referenceGuide || abstractStyles[coverStyle],
-    energy[designBoldness],
+    mode === 'background-only'
+      ? 'Premium nonfigurative graphic composition: painterly movement, textless color fields, tactile paper and refined ornamental structure; no text, badges or writing.'
+      : referenceGuide || abstractStyles[coverStyle],
+    mode === 'background-only' ? 'Balance abstract colors and texture without visual words or title-like shapes.' : energy[designBoldness],
     styleGuidance[backgroundStyle],
     intensityGuidance[backgroundIntensity],
     'Use non-representational forms ONLY. Every shape must look like paint, paper, typography or graphic geometry, never an object, character, illustration, photograph, silhouette or miniature icon.',
     'No pictorial symbols or decorative themed icons. Absolutely no standalone illustrations anywhere on canvas.',
     'The real product artwork is NOT in this request and is placed later from exact stored PNGs by PaletteIQ.'
   ].join(' ');
+  const artisticStyles: Record<string, string> = {
+    auto: 'Choose the most compelling bespoke hand-lettered composition: graceful arched headline, varied-size expressive serif with natural brush-script flourishes, or tasteful layered lettering. Avoid rigid straight baseline and generic font-template appearance.',
+    arched: 'Compose the dominant headline on a readable curved or arched baseline, with custom expressive calligraphy and beautifully varied letter heights. Set smaller supporting words on complementary gentle curves.',
+    flowing: 'Use energetic flowing watercolor-ink brush calligraphy with organic strokes, expressive swashes and rhythmically alternating letter heights. Maintain crisp word legibility.',
+    stacked: 'Create a striking multi-line editorial hierarchy using asymmetric stacked words, customized high-contrast lettering, selective italic forms and distinctive but readable spacing.',
+    'hand-painted': 'Draw organic hand-painted lettering with subtle ink variation and bespoke curved strokes, mixed with restrained refined editorial text. Avoid a mechanical font look.'
+  };
   const typographyInstruction = mode === 'background-only'
-    ? 'ZERO LETTERING: Do not render words, letters, digits, pseudo-letters, logos or glyphs. Accurate editable lettering will be added separately by PaletteIQ.'
-    : 'TYPOGRAPHY ONLY: Render these exact strings as beautifully designed, readable, premium lettering. Main title: ' + JSON.stringify(safeText(input.headline || '')) + '. Subtitle: ' + JSON.stringify(safeText(input.subtitle || '')) + '. They are words to typeset, NOT objects to illustrate. Do not draw a visual depiction of the title words. Do not add any other words, quantity, DPI or marketing claims.';
+    ? 'ZERO LETTERING: NO title, NO subtitle, NO badge, NO watermark, NO numbers, NO letters, NO pseudo-letters or decorative words anywhere. Entire canvas must be free of all text and glyph-like marks.'
+    : [
+      'PREMIUM CUSTOM ARTISTIC LETTERING: letterforms should feel composed by an experienced editorial artist, not typed with a rigid stock font.',
+      artisticStyles[letteringStyle],
+      input.headline?.trim() ? 'EXACT MAIN TITLE: ' + JSON.stringify(safeText(input.headline)) + '.' : 'NO MAIN TITLE: leave title blank.',
+      input.subtitle?.trim() ? 'EXACT SUBTITLE: ' + JSON.stringify(safeText(input.subtitle)) + '.' : 'NO SUBTITLE: leave subtitle blank.',
+      input.badge?.trim() ? 'EXACT BADGE LETTERING: ' + JSON.stringify(safeText(input.badge)) + ' in a tasteful abstract ornamental badge.' : 'NO BADGE: do not invent a badge or extra label.',
+      'Arched, curved, flowing, gently waved, offset, or layered typography is welcome when suitable; the title can split across lines with visual rhythm. Use balanced size contrasts, beautiful shapes and premium watercolor/editorial styling.',
+      'Prioritize legibility on Etsy search thumbnails: keep the lettering within the designated text-safe area, retain correct wording, spelling and punctuation, avoid obscuring the original clipart slots.',
+      'Do not add ANY other words, quantity, DPI, fake watermark or marketing claims.',
+      'These are words to typeset, NOT objects to illustrate. Do not draw a visual depiction of the title words.'
+    ].join(' ');
   const heroReferenceStyle = [
     'Create a premium Etsy cover with a large soft cream central medallion panel.',
     'Use a blush watercolor circular brush ring around the central title area.',
@@ -148,6 +176,24 @@ export async function POST(req: Request) {
     'Leave the outer perimeter visually suitable for exact original PNG clipart placements.'
   ].join(' ');
   const isHeroCover = /hero cover/i.test(String(input.slideName || ''));
+  // Preserve selected Reference & Assets configuration, but never accept untrusted
+  // freeform image-generation instructions from the client.
+  const brief = input.designBriefSettings;
+  const designBrief = mode === 'full-thumbnail' || !brief ? '' : buildThumbnailDesignBrief({
+    ...brief,
+    headline: input.headline || brief.headline,
+    subtitle: input.subtitle || brief.subtitle,
+    typography: mode === 'background-only' ? 'editable' : 'ai-artwork',
+    textDisabled: mode === 'background-only',
+    badge: mode === 'background-only' ? '' : (input.badge || ''),
+    quality: String(input.quality || brief.quality),
+    coverStyle, boldness: designBoldness,
+    backgroundStyle, intensity: backgroundIntensity,
+    // Collection style fields are read from the authenticated database, not the client.
+    collectionStyle: (collection as {style?:string}).style,
+    collectionPalette: (collection as {palette?:string}).palette,
+    collectionTexture: (collection as {texture?:string}).texture
+  });
   const prompt = mode === 'full-thumbnail'
     ? thumbnailImagePrompt(collection, layout, width, height, input.includeTitle !== false)
     : [
@@ -156,15 +202,17 @@ export async function POST(req: Request) {
       'ONLY authorized visual materials: abstract color fields, watercolor pigment strokes, soft gradients, paper collage textures, thin graphic rules, elegant geometric ornaments, abstract painted swashes, ribbons without pictorial motifs and type (when requested).',
       'Never create even tiny pictorial decorations or theme-related objects in corners, title panels, badges, circles or along the edges. The entire canvas is non-figurative.',
       typographyInstruction,
-      'Keep type inside the reserved safe area specified in 0-100 percent canvas coordinates:', JSON.stringify(titleZone),
-      'Reserved areas where original PNG assets will later be composited. Leave these shapes free of visually busy decoration; never fill them with substitutes:', JSON.stringify(layout.map(({x,y,width,height})=>({x,y,width,height}))),
-      'A small degree of deliberate original-PNG overlap is permitted and handled by PaletteIQ, but DO NOT draw any items in that space.',
+      ...(mode === 'background-only' ? [] : ['Keep all artistic lettering inside the reserved safe area (percent canvas coordinates):', JSON.stringify(titleZone)]),
+      'Visible areas where original PNG assets will later be composited. Some original images deliberately extend BEYOND the canvas: preserve their visible slots and allow natural crop at the final canvas edge. Leave these slots free of competing decoration; never fill them with substitutes:', JSON.stringify(visibleLayout),
+      'Exact original PNGs may intentionally OVERLAP the lettering after compositing, including over the headline or subtitle. The user owns the positions. Do not relocate text or block generation merely because a foreground PNG intersects the typography area; allow artistic layering and keep the remaining exposed letters legible. NEVER draw substitute objects.',
       'Premium design mood (follow reference graphic style when provided):', graphicDirection,
+      ...(designBrief ? ['REFERENCE & ASSETS SETTINGS (graphic art direction ONLY; never synthesize objects):', designBrief] : []),
       ...(isHeroCover ? ['HERO ART DIRECTION PRIORITY:', heroReferenceStyle] : []),
       'If a blush brush-ring reference is provided, DO NOT substitute red-orange geometric blobs. Keep the watercolor ring delicate and the central typography visually expressive.',
       'Slide composition identifier:', slideLabel.replace(/[^a-z0-9 -]/g,'').slice(0,50),
       'Graphic layout direction:', slideDirection.replace(/collection assets|original products|original clipart/gi,'empty image areas'),
-      'Prioritize decorative graphic design, NOT themed illustration. No accidental images, illustration vignettes or iconography.'
+      'Prioritize decorative graphic design, NOT themed illustration. No accidental images, illustration vignettes or iconography.',
+      ...(mode === 'background-only' ? ['FINAL STRICT RULE: ABSOLUTELY NO TEXT, TITLES, SUBTITLES, BADGES, SYMBOLS RESEMBLING LETTERS OR NUMBERS.'] : [])
     ].join('\n');
   let imageBase64 = '';
   let imageMime = 'image/png';

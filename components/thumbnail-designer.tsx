@@ -2,7 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import UpscaleCompare from '@/components/upscale-compare';
+import { readApiJson } from '@/lib/listing-image-upload';
+import ThumbnailStylePreviewSelect, { type ThumbnailStyleOption } from '@/components/thumbnail-style-preview-select';
+import { thumbnailSeoDefaults, type ThumbnailSeoSource } from '@/lib/thumbnail-seo-defaults';
+import type { ListingStudioConfig } from '@/lib/listing-studio-config';
 import { fitClipartAroundTypography, type ThumbnailBox } from '@/lib/thumbnail-fit';
+import { buildThumbnailDesignBrief, type ThumbnailBriefSettings } from '@/lib/thumbnail-design-brief';
 import { buildPack, filterThemeCharacters, placeOriginals, type PackPreset, type PackSlide, type ClipartHierarchy } from '@/lib/etsy-listing-pack';
 import { Download, Plus, Trash2, Copy, Undo2, Redo2, WandSparkles, RotateCcw } from 'lucide-react';
 
@@ -15,18 +20,53 @@ export type ThumbnailDesign = {
   id: string; name: string; width: number; height: number; background: string; backgroundImageUrl?: string; aiImageUrl?: string; aiImagePrompt?: string; renderedImageUrl?: string; upscaledImageUrl?: string; upscaleJob?: { id: string; sourceUrl: string; factor: 2 | 4 | 6 | 8; submittedAt: number }; elements: ThumbnailElement[];
   referenceUrl?: string; originalAssetsOnly?: boolean; generationError?: string; updatedAt: number;
   rejectedBackgroundUrl?: string; rejectedBackgroundReason?: string;
-  packTypography?: 'editable' | 'ai-artwork'; packSlideKey?: string; packHeadline?: string; packSubtitle?: string; packTextZone?: { x: number; y: number; width: number; height: number };
+  packTypography?: 'editable' | 'ai-artwork'; packSlideKey?: string; packHeadline?: string; packSubtitle?: string; packBadge?: string; packTextZone?: { x: number; y: number; width: number; height: number };
+  packImageProvider?: 'openai' | 'gemini'; packImageModel?: string;
+  backgroundOpacity?: number; // 0..1; applies to the full backdrop composite, never to original PNG layers.
+  packAiTypographyEnabled?: boolean; packLetteringStyle?: 'auto' | 'arched' | 'flowing' | 'stacked' | 'hand-painted';
   packHierarchy?: ClipartHierarchy; packBoldness?: 'soft' | 'balanced' | 'bold'; packCoverStyle?: 'editorial' | 'boutique' | 'storybook' | 'modern' | 'watercolor';
   referenceDesign?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string };
 };
 type Character = { id: string; name: string; imageUrl?: string; upscaledImageUrl?: string; category?: string; subtheme?: string; group?: string };
 export type ThumbnailSaveControls = { save: () => Promise<void>; hasUnsaved: () => boolean };
-type Props = { registerSaveControls?: (controls: ThumbnailSaveControls | null) => void; title: string; aiDefaults: { provider: 'openai' | 'gemini'; openaiModel: string; geminiModel: string }; projectId: string; characters: Character[]; references: string[]; designs: ThumbnailDesign[]; onChange: (designs: ThumbnailDesign[]) => void; onSave: (designs: ThumbnailDesign[]) => Promise<void> };
+type Props = { onStartListingStudio?: (settings: ListingStudioConfig) => void | Promise<void>; registerSaveControls?: (controls: ThumbnailSaveControls | null) => void; title: string; seoListing?: ThumbnailSeoSource; collectionVisualSettings?: {style?: string; palette?: string; texture?: string}; aiDefaults: { provider: 'openai' | 'gemini'; openaiModel: string; geminiModel: string }; projectId: string; characters: Character[]; references: string[]; designs: ThumbnailDesign[]; onChange: (designs: ThumbnailDesign[]) => void; onSave: (designs: ThumbnailDesign[]) => Promise<void> };
 const id = () => crypto.randomUUID();
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 const THUMBNAIL_SIZE = 1024;
-const newDesign = (index: number): ThumbnailDesign => ({ id: id(), name: 'Thumbnail ' + index, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, background: '#f7f1e9', elements: [], updatedAt: Date.now() });
-const newImage = (character: Character, index: number, preferredSource: 'auto' | 'original' | 'upscaled' = 'auto'): ThumbnailElement => ({
+const backgroundAlpha = (design: ThumbnailDesign) => clamp(design.backgroundOpacity ?? 1, 0, 1);
+const LETTERING_EXAMPLES: ThumbnailStyleOption[] = [
+  { value: 'auto', label: 'AI creative art direction', description: 'Ekspresif, kombinasi script & serif' },
+  { value: 'arched', label: 'Arched & curved lettering', description: 'Judul melengkung seperti lengkungan seni' },
+  { value: 'flowing', label: 'Flowing brush calligraphy', description: 'Aliran sapuan kuas organik' },
+  { value: 'stacked', label: 'Layered expressive typography', description: 'Hierarki kata artistik bertumpuk' },
+  { value: 'hand-painted', label: 'Hand-painted lettering', description: 'Huruf kuas handmade bertekstur' }
+];
+const COVER_EXAMPLES: ThumbnailStyleOption[] = [
+  { value: 'editorial', label: 'Premium editorial', description: 'Serif elegan, layout lapang' },
+  { value: 'boutique', label: 'Modern boutique', description: 'Pastel blush & aksen halus' },
+  { value: 'storybook', label: 'Storybook', description: 'Nuansa kertas buku cerita' },
+  { value: 'modern', label: 'Modern Etsy', description: 'Kontras grafis dan garis tegas' },
+  { value: 'watercolor', label: 'Artistic watercolor', description: 'Sapuan pigmen lembut & organik' }
+];
+const BOLDNESS_EXAMPLES: ThumbnailStyleOption[] = [
+  { value: 'soft', label: 'Soft', description: 'Tipis, tenang, banyak ruang kosong' },
+  { value: 'balanced', label: 'Balanced', description: 'Kontras dan keterbacaan seimbang' },
+  { value: 'bold', label: 'Bold', description: 'Huruf dominan, kontras tinggi' }
+];
+const BACKGROUND_EXAMPLES: ThumbnailStyleOption[] = [
+  { value: 'watercolor', label: 'Watercolor', description: 'Pigmen watercolor yang menyatu' },
+  { value: 'paper', label: 'Luxury paper', description: 'Serat dan lapisan kertas premium' },
+  { value: 'gradient', label: 'Color gradient', description: 'Gradasi warna lembut bertingkat' },
+  { value: 'botanical', label: 'Abstract botanical accents', description: 'Bayangan daun abstrak, tanpa clipart' },
+  { value: 'vintage', label: 'Vintage', description: 'Patina kertas dan ornamen klasik' }
+];
+const DECORATION_EXAMPLES: ThumbnailStyleOption[] = [
+  { value: 'soft', label: 'Soft', description: 'Aksen sangat ringan' },
+  { value: 'balanced', label: 'Balanced', description: 'Ornamen cukup terlihat' },
+  { value: 'vibrant', label: 'Vibrant', description: 'Warna dan dekorasi lebih kuat' }
+];
+const newDesign = (index: number, seo: { title: string; subtitle: string } = { title: '', subtitle: 'Digital Clipart Collection' }): ThumbnailDesign => ({ id: id(), name: 'Thumbnail ' + index, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, background: '#f7f1e9', elements: [], packHeadline: seo.title, packSubtitle: seo.subtitle, packAiTypographyEnabled: true, packLetteringStyle: 'auto', packTextZone: { x: 22, y: 30, width: 56, height: 34 }, updatedAt: Date.now() });
+const newImage = (character: Character, index: number, preferredSource: 'auto' | 'original' | 'upscaled' = 'original'): ThumbnailElement => ({
   id: id(), type: 'image', characterId: character.id, source: preferredSource === 'auto' ? (character.upscaledImageUrl ? 'upscaled' : 'original') : preferredSource,
   x: 10 + (index % 4) * 21, y: 17 + (Math.floor(index / 4) % 3) * 25, width: 22, height: 28, rotation: 0
 });
@@ -52,10 +92,12 @@ async function loadForExport(url: string): Promise<HTMLImageElement> {
   await image.decode();
   return image;
 }
-export default function ThumbnailDesigner({ registerSaveControls, title, aiDefaults, projectId, characters, references, designs, onChange, onSave }: Props) {
+export default function ThumbnailDesigner({ onStartListingStudio, registerSaveControls, title, seoListing, collectionVisualSettings, aiDefaults, projectId, characters, references, designs, onChange, onSave }: Props) {
+  const seoDefaults = thumbnailSeoDefaults(seoListing, title);
   const [activeId, setActiveId] = useState(designs[0]?.id || '');
   const [selectedId, setSelectedId] = useState('');
   const [previewZoom, setPreviewZoom] = useState(1);
+  const [showTypographyGuide, setShowTypographyGuide] = useState(true);
   const [sideTab, setSideTab] = useState<'reference' | 'generation'>('reference');
   const [viewportSize, setViewportSize] = useState({ width: 300, height: 300 });
   const [reference, setReference] = useState('');
@@ -73,7 +115,6 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const [backgroundRetryId, setBackgroundRetryId] = useState('');
   const cancelPackRef = useRef(false);
   const [referenceStyle, setReferenceStyle] = useState<'creative' | 'similar' | 'palette'>('similar');
-  const [imageBusy, setImageBusy] = useState(false);
   const [comparePreview, setComparePreview] = useState<{ name: string; originalUrl: string; upscaledUrl: string; temporary?: boolean } | null>(null);
   useEffect(() => () => { if (comparePreview?.temporary) URL.revokeObjectURL(comparePreview.originalUrl); }, [comparePreview]);
   const [upscaleBusy, setUpscaleBusy] = useState(false);
@@ -83,12 +124,18 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const [upscaleStatus, setUpscaleStatus] = useState('');
   const [upscaleJobs, setUpscaleJobs] = useState<Record<string, { status: string; elapsed?: number; remaining?: number | null; error?: string }>>({});
   const [upscaleRemaining, setUpscaleRemaining] = useState<Record<string, number | null>>({});
-  const [imageProvider, setImageProvider] = useState<'openai' | 'gemini'>('openai');
   const [imageModel, setImageModel] = useState('gpt-image-1-mini');
-  const [includeTitle, setIncludeTitle] = useState(true);
-  const [imageQuality, setImageQuality] = useState<'low' | 'medium' | 'high'>('low');
+  const [imageProvider, setImageProvider] = useState<'openai' | 'gemini'>('openai');
+  const [geminiImageModel, setGeminiImageModel] = useState('gemini-2.5-flash-image');
   const [imageModels, setImageModels] = useState<Array<{ id: string; name: string }>>([]);
   const [layoutMode, setLayoutMode] = useState<'ai' | 'manual'>('ai');
+  const startListingStudio = () => onStartListingStudio?.({
+    layoutMode, analysisProvider: provider, analysisModel: model,
+    imageModel, quality: packQuality, typography: 'ai-artwork',
+    boldness: packBoldness, hierarchy: packHierarchy, coverStyle: packCoverStyle,
+    backgroundStyle, intensity: backgroundIntensity, referenceStyle,
+    referenceImage: reference || undefined, headline: coverHeadline.trim() || undefined
+  });
   const [provider, setProvider] = useState<'openai' | 'gemini'>(aiDefaults.provider);
   const [model, setModel] = useState(aiDefaults.provider === 'gemini' ? aiDefaults.geminiModel : aiDefaults.openaiModel);
   const [models, setModels] = useState<Record<string, Array<{ id: string; name: string }>>>({ openai: [], gemini: [] });
@@ -263,7 +310,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     return () => window.removeEventListener('keydown', keyDown);
   }, [selectedId, design, designs, onChange]);
 
-  const create = () => { const next = newDesign(designs.length + 1); onChange([...designs, next]); setActiveId(next.id); };
+  const create = () => { const next = newDesign(designs.length + 1, seoDefaults); onChange([...designs, next]); setActiveId(next.id); };
   const duplicate = () => { if (!design) return; const copy = { ...design, id: id(), name: design.name + ' copy', elements: design.elements.map(e => ({ ...e, id: id() })), updatedAt: Date.now() }; onChange([...designs, copy]); setActiveId(copy.id); };
   const deleteThumbnail = (thumbnailId: string) => {
     const target = latestDesignsRef.current.find(d => d.id === thumbnailId);
@@ -309,28 +356,6 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     commit({ ...design, elements: design.elements.map(e => e.id === drag.id ? { ...e, ...next } : e) }, false);
   };
   const endDrag = () => { dragRef.current = null; };
-  const analyze = async () => {
-    if (!design || !reference) { setMessage('Choose or upload a reference image first.'); return; }
-    setAiBusy(true); setMessage('');
-    try {
-      const response = await fetch('/api/thumbnail-layout', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId, imageUrl: reference, provider, model, count: Math.min(characters.filter(c => c.imageUrl).length, 24) }) });
-      const body = await response.json() as { error?: string; layout?: { slots?: Array<{ x: number; y: number; width: number; height: number; rotation?: number }>; texts?: Array<{ text: string; x: number; y: number; width: number; height: number; curve?: number }> ; background?: string } };
-      if (!response.ok) throw new Error(body.error || 'AI layout analysis failed');
-      const available = characters.filter(c => c.imageUrl);
-      const slots = (body.layout?.slots || []).slice(0, available.length);
-      const images = slots.map((slot, i): ThumbnailElement => ({
-        ...newImage(available[i], i, 'original'), x: clamp(slot.x, 0, 100), y: clamp(slot.y, 0, 100), width: clamp(slot.width, 1, 100), height: clamp(slot.height, 1, 100), rotation: clamp(slot.rotation || 0, -180, 180)
-      }));
-      const texts = (body.layout?.texts || []).slice(0, 32).map((slot): ThumbnailElement => ({
-        ...newText(), id: id(), text: slot.text || 'CUSTOMIZE TITLE', curve: clamp(Number(slot.curve) || 0, -100, 100), x: clamp(slot.x, 0, 100), y: clamp(slot.y, 0, 100), width: clamp(slot.width, 5, 100), height: clamp(slot.height, 3, 100)
-      }));
-      commit({ ...design, elements: [...design.elements.map(e => e.type === 'image' ? { ...e, source: 'original' as const } : e), ...images, ...texts], background: /^#[0-9a-f]{6}$/i.test(body.layout?.background || '') ? body.layout!.background! : design.background, referenceUrl: reference.startsWith('https://') ? reference : undefined, originalAssetsOnly: true });
-      setMessage('Layout applied. Review the arrangement and customize all elements.');
-    } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
-    finally { setAiBusy(false); }
-  };
-
   // Exact human-readable typography. Unlike AI-rendered lettering, this cannot
   // hallucinate random words, and can be edited after generation.
   const typographyForSlide = (slide: PackSlide): ThumbnailElement[] => {
@@ -421,6 +446,195 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
       // Background generation is paid. Never discard it because vision layout failed.
       // Preserve existing original-only positions as a readable editable fallback.
       return { elements: safeFallback, usedFallback: true };
+    }
+  };
+
+  const currentBriefSettings = (slide?: PackSlide): ThumbnailBriefSettings => ({
+    layoutMode, scope: generationScope, slide: slide?.name || singleSlideKey,
+    headline: slide?.headline || coverHeadline.trim() || title,
+    subtitle: slide?.subtitle || 'CLIPART COLLECTION',
+    typography: packTypography, boldness: packBoldness, hierarchy: packHierarchy,
+    coverStyle: packCoverStyle, quality: packQuality,
+    backgroundStyle, intensity: backgroundIntensity,
+    referenceInterpretation: referenceStyle, hasReference: Boolean(reference),
+    analysisProvider: provider, analysisModel: model, imageModel,
+    collectionStyle: collectionVisualSettings?.style,
+    collectionPalette: collectionVisualSettings?.palette,
+    collectionTexture: collectionVisualSettings?.texture
+  });
+  const previewSlides = buildPack(generationScope === 'single' ? 'complete-10' : generationScope, title, characters);
+  const chosenPreviewSlides = generationScope === 'single'
+    ? previewSlides.filter(slide => slide.key === singleSlideKey).slice(0, 1)
+    : previewSlides;
+  const currentBriefPreview = chosenPreviewSlides.map(slide =>
+    buildThumbnailDesignBrief(currentBriefSettings({
+      ...slide, headline: generationScope === 'single' && coverHeadline.trim()
+        ? coverHeadline.trim() : slide.headline
+    }))
+  ).join('\n\n--- NEXT THUMBNAIL ---\n\n');
+
+  const typographyEnabled = design?.packAiTypographyEnabled !== false;
+  const previewHeading = design?.packHeadline ?? seoDefaults.title;
+  const previewSubtitle = design?.packSubtitle ?? seoDefaults.subtitle;
+  const previewBadge = design?.packBadge ?? '';
+  const previewHasText = typographyEnabled && Boolean(previewHeading.trim() || previewSubtitle.trim() || previewBadge.trim());
+  const manualCanvasPromptPreview = [
+    'ETSY MANUAL CANVAS — AI GRAPHIC BACKGROUND' + (previewHasText ? ' + CUSTOM ARTISTIC LETTERING' : ' WITHOUT ANY TEXT') + ' (1024 × 1024)',
+    'Generate nonfigurative design only. DO NOT redraw clipart, characters, food, products, or reference illustrations.',
+    ...(previewHasText ? [
+      'Main title (omit when blank): ' + JSON.stringify(previewHeading),
+      'Subtitle (omit when blank): ' + JSON.stringify(previewSubtitle),
+      'Badge (omit when blank): ' + JSON.stringify(previewBadge),
+      'Artistic lettering direction: ' + (design?.packLetteringStyle || 'auto') + '. Use fluid hand-drawn expressive lettering; arched, curved, flowing or layered title layouts are welcome when readable.'
+    ] : ['ZERO TYPOGRAPHY: no titles, subtitles, badges, symbols resembling letters, or decorative words.']),
+    ...(previewHasText ? ['Typography safe zone: ' + JSON.stringify(design?.packTextZone || { x: 22, y: 30, width: 56, height: 34 })] : []),
+    'Image provider/model: ' + imageProvider + ' / ' + (imageProvider === 'gemini' ? geminiImageModel : imageModel),
+    'Style: ' + packCoverStyle + ', ' + backgroundStyle + ', ' + backgroundIntensity + ', boldness ' + packBoldness,
+    'Reference template: ' + (reference ? 'selected (style cues only)' : 'none') + ', interpretation ' + referenceStyle,
+    'Original assets may deliberately overlap the artistic text as foreground PNG layers or extend beyond the canvas and will be CROPPED by the final canvas edge.',
+    'Only the VISIBLE portions of these manually positioned PNG rectangles are reserved on canvas; their pixels and identities are NEVER sent to the image provider:',
+    JSON.stringify((design?.elements || []).filter(e => e.type === 'image')
+      .map(e => ({ x: Math.max(0,e.x), y: Math.max(0,e.y),
+        width: Math.max(0,Math.min(100,e.x+e.width)-Math.max(0,e.x)),
+        height: Math.max(0,Math.min(100,e.y+e.height)-Math.max(0,e.y)) }))
+      .filter(e=>e.width>0&&e.height>0), null, 2),
+    'PaletteIQ composites exact original collection PNGs with the user-authored coordinates; crop at canvas borders.'
+  ].join('\n\n');
+
+  // User-directed workflow: layout is authored ON the current canvas. The AI
+  // receives only empty rectangles + exact text, never the original PNG pixels.
+  // Unlike the legacy pack generator, this must never overwrite manual positions.
+  const generateCanvasArtwork = async () => {
+    if (!design || aiBusy || backgroundRetryId) return;
+    const source = design;
+    const imageLayers = source.elements.filter(e => e.type === 'image' && e.characterId && assetMap.get(e.characterId)?.imageUrl);
+    if (!imageLayers.length) { setMessage('Add original clipart from Reference & Assets to the canvas first.'); return; }
+    if (imageLayers.length !== source.elements.filter(e => e.type === 'image').length) {
+      setMessage('An image layer has no original collection PNG. Replace it before generating.'); return;
+    }
+    const zone = source.packTextZone || { x: 22, y: 30, width: 56, height: 34 };
+    // Deliberate bleed beyond the canvas is allowed. Only the visible area is
+    // composited and reserved; the full source PNG is never resized or redrawn.
+    const hasVisibleAsset = imageLayers.some(e =>
+      e.x < 100 && e.y < 100 && e.x + e.width > 0 && e.y + e.height > 0);
+    if (!hasVisibleAsset) { setMessage('At least one original clipart must remain partially visible on the canvas.'); return; }
+    const enabled = source.packAiTypographyEnabled !== false;
+    const heading = (source.packHeadline ?? seoDefaults.title).trim();
+    const subtitle = (source.packSubtitle ?? seoDefaults.subtitle).trim();
+    const badge = (source.packBadge ?? '').trim();
+    const hasLettering = enabled && Boolean(heading || subtitle || badge);
+    if (hasLettering && ([zone.x, zone.y, zone.width, zone.height].some(n => !Number.isFinite(n)) ||
+      zone.x < 0 || zone.y < 0 || zone.width < 10 || zone.height < 10 ||
+      zone.x + zone.width > 100 || zone.y + zone.height > 100)) {
+      setMessage('Set a valid typography safe zone inside the canvas.'); return;
+    }
+    // Intentional image/text overlap is supported. Original PNGs are composited
+    // above the image-generated lettering; they can obscure portions of it.
+    if (hasLettering && (heading.length > 100 || subtitle.length > 140 || badge.length > 60)) {
+      setMessage('Title (max 100), subtitle (max 140), or badge (max 60) is too long.'); return;
+    }
+    if (source.elements.some(e => e.type === 'text') &&
+      !window.confirm('AI lettering is rendered into the background. Existing editable text layers on this canvas will be removed to avoid duplicate words. Continue?')) return;
+    if (!window.confirm('Generate a paid AI ' + (hasLettering ? 'background with artistic lettering' : 'background WITHOUT any text') + ' for this manually arranged canvas? Original clipart will never be regenerated.')) return;
+    setAiBusy(true);
+    setPackStatus('Analyzing the selected graphic reference and preserving manual artwork placement...');
+    try {
+      let referenceDesign = source.referenceDesign;
+      if (reference) {
+        try {
+          const response = await fetch('/api/thumbnail-layout', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              projectId, imageUrl: reference, provider, model,
+              referenceStyle, count: Math.min(imageLayers.length, 24)
+            })
+          });
+          const result = await readApiJson<{ layout?: ThumbnailDesign['referenceDesign']; error?: string }>(
+            response, 'Reference analysis');
+          if (result.layout) referenceDesign = {
+            graphicMotif: result.layout.graphicMotif,
+            letteringStyle: result.layout.letteringStyle,
+            paletteMood: result.layout.paletteMood
+          };
+        } catch (error) {
+          setPackStatus('Reference analysis unavailable; using your selected art preferences without repositioning clipart. ' +
+            (error instanceof Error ? error.message.slice(0, 100) : ''));
+        }
+      }
+      setPackStatus('Creating AI ' + (hasLettering ? 'background and artistic lettering' : 'background with no typography') + '. Original collection PNGs stay in place...');
+      const imageModelChoice = imageProvider === 'gemini' ? geminiImageModel : imageModel;
+      const requestBody = {
+        projectId, provider: imageProvider, model: imageModelChoice, quality: packQuality,
+        mode: hasLettering ? 'background-with-typography' as const : 'background-only' as const,
+        width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE,
+        headline: hasLettering ? heading : '', subtitle: hasLettering ? subtitle : '', badge: hasLettering ? badge : '',
+        letteringStyle: source.packLetteringStyle || 'auto',
+        slideName: 'Custom Canvas Artwork',
+        backgroundStyle, backgroundIntensity, designBoldness: packBoldness,
+        coverStyle: packCoverStyle, referenceDesign,
+        textZone: zone,
+        // Image rectangles may intersect the text zone intentionally.
+        // Exact source files, their contents, character names, and reference
+        // images are never part of the generation request.
+        layout: imageLayers.map(e => ({ type: 'image' as const,
+          x: e.x, y: e.y, width: e.width, height: e.height })),
+        designBriefSettings: {
+          ...currentBriefSettings(), scope: 'single' as const, slide: 'Custom Canvas Artwork',
+          headline: hasLettering ? heading : '', subtitle: hasLettering ? subtitle : '',
+          badge: hasLettering ? badge : '',
+          typography: hasLettering ? 'ai-artwork' as const : 'editable' as const,
+          textDisabled: !hasLettering,
+          imageModel: imageModelChoice
+        }
+      };
+      const response = await fetch('/api/thumbnail-ai-image', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody)
+      });
+      const result = await readApiJson<{
+        imageUrl?: string; prompt?: string; qcRejected?: boolean; qcReason?: string; error?: string
+      }>(response, 'AI background and typography');
+      if (!result.imageUrl) throw Error('AI did not return a background image.');
+      await loadForExport(result.imageUrl);
+      const currentDesign = latestDesignsRef.current.find(d => d.id === source.id) || source;
+      const exactLayers = currentDesign.elements.filter(e => e.type === 'image')
+        .map(e => ({ ...e, source: 'original' as const }));
+      const common: Partial<ThumbnailDesign> = {
+        originalAssetsOnly: true, packSlideKey: 'custom-canvas',
+        packTypography: hasLettering ? 'ai-artwork' : 'editable', packHeadline: heading, packSubtitle: subtitle,
+        packBadge: badge, packTextZone: zone, packAiTypographyEnabled: enabled,
+        packLetteringStyle: source.packLetteringStyle || 'auto',
+        packImageProvider: imageProvider, packImageModel: imageModelChoice,
+        packBoldness, packHierarchy, packCoverStyle, referenceDesign,
+        referenceUrl: reference.startsWith('https://') ? reference : undefined,
+        aiImagePrompt: result.prompt, aiImageUrl: undefined,
+        renderedImageUrl: undefined, upscaledImageUrl: undefined,
+        updatedAt: Date.now()
+      };
+      const next = latestDesignsRef.current.map(d => d.id === source.id
+        ? result.qcRejected
+          ? { ...d, ...common, rejectedBackgroundUrl: result.imageUrl,
+              rejectedBackgroundReason: result.qcReason || 'Possible generated product-like object',
+              generationError: 'Background requires review before use: ' + (result.qcReason || ''),
+              // Keep the current background until explicitly approved.
+              elements: exactLayers }
+          : { ...d, ...common, elements: exactLayers,
+              backgroundImageUrl: result.imageUrl, rejectedBackgroundUrl: undefined,
+              rejectedBackgroundReason: undefined, generationError: undefined }
+        : d);
+      latestDesignsRef.current = next;
+      onChange(next);
+      if (!result.qcRejected) setShowTypographyGuide(false);
+      setMessage(result.qcRejected
+        ? 'New AI background was flagged for review. Inspect it and explicitly approve it before composition; original clipart positions are preserved.'
+        : (hasLettering ? 'Artistic title, subtitle and optional badge applied.' : 'Text-free background applied.') + ' Manual clipart positions (including cropped edges) are unchanged. Save the design to persist.');
+      setPackStatus('');
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      setMessage('AI background and typography failed: ' + reason);
+      setPackStatus('');
+    } finally {
+      setAiBusy(false);
     }
   };
 
@@ -538,17 +752,17 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
               headline: slide.headline, subtitle: slide.subtitle,
               slideName: slide.name, textZone: slide.textZone,
               designBoldness: packBoldness, coverStyle: packCoverStyle,
-              referenceDesign,
+              referenceDesign, designBriefSettings: currentBriefSettings(slide),
               layout: initialElements.map(e => ({ type: 'image', x: e.x, y: e.y, width: e.width, height: e.height }))
             })
           });
-          const result = await response.json() as { imageUrl?: string; error?: string; qcRejected?: boolean; qcReason?: string };
+          const result = await response.json() as { imageUrl?: string; error?: string; prompt?: string; qcRejected?: boolean; qcReason?: string };
           if (!response.ok || !result.imageUrl) throw Error(result.error || 'Generation failed');
           await loadForExport(result.imageUrl);
           if (result.qcRejected) {
             const reason = result.qcReason || 'AI background requires manual inspection.';
             const next = latestDesignsRef.current.map(d => d.id === item.id ? {
-              ...d, rejectedBackgroundUrl: result.imageUrl, rejectedBackgroundReason: reason,
+              ...d, rejectedBackgroundUrl: result.imageUrl, rejectedBackgroundReason: reason, aiImagePrompt: result.prompt,
               generationError: 'AI QC review required: ' + reason
             } : d);
             latestDesignsRef.current = next;
@@ -567,7 +781,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
             ? [...placement.elements, ...typographyForSlide(slide)]
             : placement.elements;
           const next = latestDesignsRef.current.map(d => d.id === item.id ? {
-            ...d, elements: finalElements, backgroundImageUrl: result.imageUrl,
+            ...d, elements: finalElements, backgroundImageUrl: result.imageUrl, aiImagePrompt: result.prompt,
             rejectedBackgroundUrl: undefined, rejectedBackgroundReason: undefined,
             generationError: placement.usedFallback ? 'Vision placement unavailable; original PNG fallback layout used.' : undefined
           } : d);
@@ -610,17 +824,18 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
           slideName: target.name,
           designBoldness: target.packBoldness || packBoldness, coverStyle: target.packCoverStyle || packCoverStyle,
           referenceDesign: target.referenceDesign,
+          designBriefSettings: { ...currentBriefSettings(), headline: target.packHeadline || title, subtitle: target.packSubtitle || 'CLIPART COLLECTION', slide: target.name },
           textZone: target.packTextZone || { x: 22, y: 31, width: 56, height: 38 },
           layout: imageLayers.map(e => ({ type: 'image', x: e.x, y: e.y, width: e.width, height: e.height }))
         })
       });
-      const result = await response.json() as { imageUrl?: string; error?: string; qcRejected?: boolean; qcReason?: string };
+      const result = await response.json() as { imageUrl?: string; error?: string; prompt?: string; qcRejected?: boolean; qcReason?: string };
       if (!response.ok || !result.imageUrl) throw Error(result.error || 'No background returned');
       await loadForExport(result.imageUrl);
       if (result.qcRejected) {
         const reason = result.qcReason || 'The AI artwork needs manual inspection.';
         const pending = latestDesignsRef.current.map(d => d.id === target.id
-          ? { ...d, rejectedBackgroundUrl: result.imageUrl, rejectedBackgroundReason: reason,
+          ? { ...d, rejectedBackgroundUrl: result.imageUrl, rejectedBackgroundReason: reason, aiImagePrompt: result.prompt,
             generationError: 'AI QC review required: ' + reason, updatedAt: Date.now() } : d);
         latestDesignsRef.current = pending;
         onChange(pending);
@@ -645,7 +860,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         visionFallback = placement.usedFallback;
       }
       const next = latestDesignsRef.current.map(d => d.id === target.id
-        ? { ...d, backgroundImageUrl: result.imageUrl, elements: [
+        ? { ...d, backgroundImageUrl: result.imageUrl, aiImagePrompt: result.prompt, elements: [
             ...positioned, ...d.elements.filter(e => e.type === 'text')
           ], rejectedBackgroundUrl: undefined, rejectedBackgroundReason: undefined,
           generationError: visionFallback ? 'Vision placement unavailable; previous original PNG layout kept.' : undefined,
@@ -701,6 +916,20 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     if (!window.confirm('Have you OPENED and inspected this AI artwork at full size? Confirm it contains NO AI-generated collection clipart, foods, animals, product illustrations or imitations of your collection assets. Decorative shapes and lettering are allowed. Only approve if all artwork is background/typography.')) return;
     setBackgroundRetryId(target.id);
     try {
+      if (target.packSlideKey === 'custom-canvas') {
+        const next = latestDesignsRef.current.map(d => d.id === target.id ? {
+          ...d, backgroundImageUrl: d.rejectedBackgroundUrl,
+          rejectedBackgroundUrl: undefined, rejectedBackgroundReason: undefined,
+          generationError: undefined, updatedAt: Date.now(),
+          // Never replace the hand-arranged slots with AI Vision coordinates.
+          elements: d.elements.filter(e => e.type === 'image').map(e => ({ ...e, source: 'original' as const }))
+        } : d);
+        latestDesignsRef.current = next;
+        onChange(next);
+        setShowTypographyGuide(false);
+        setMessage('Reviewed AI lettering and background applied without moving any original collection PNGs.');
+        return;
+      }
       setMessage('AI Vision analyzing approved background before overlaying original collection PNGs...');
       const available = filterThemeCharacters(title, characters);
       const candidates = buildPack('complete-10', title, available);
@@ -742,7 +971,9 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     try {
       const response = await fetch('/api/thumbnail-ai-image', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId, provider: 'openai', model: imageModel.startsWith('gpt-image-') ? imageModel : 'gpt-image-1-mini', quality: imageQuality, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, mode: 'background-only', backgroundStyle, backgroundIntensity, layout: design.elements.map(e => ({ type: e.type, x: e.x, y: e.y, width: e.width, height: e.height })) })
+        body: JSON.stringify({ projectId, provider: 'openai', model: imageModel.startsWith('gpt-image-') ? imageModel : 'gpt-image-1-mini', quality: packQuality, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, mode: 'background-only', backgroundStyle, backgroundIntensity,
+          designBriefSettings: { ...currentBriefSettings(), typography: 'editable', headline: design.packHeadline || title, subtitle: design.packSubtitle || 'CLIPART COLLECTION', slide: design.name },
+          layout: design.elements.map(e => ({ type: e.type, x: e.x, y: e.y, width: e.width, height: e.height })) })
       });
       const result = await response.json() as { error?: string; imageUrl?: string };
       if (!response.ok || !result.imageUrl) throw Error(result.error || 'Background generation failed');
@@ -776,37 +1007,6 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
     finally { setBackgroundUploading(false); }
   };
-  const generateAiThumbnail = async () => {
-    if (!design || imageBusy) return;
-    if (!window.confirm('Generate a new AI thumbnail with ' + imageProvider + '? This uses the configured provider API key and may incur charges.')) return;
-    setImageBusy(true); setMessage('');
-    try {
-      let layout = design.elements.map(e => ({ type: e.type, x: e.x, y: e.y, width: e.width, height: e.height, text: e.type === 'text' ? e.text : undefined }));
-      if (reference && layoutMode === 'ai') {
-        const analysisResponse = await fetch('/api/thumbnail-layout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, imageUrl: reference, provider, model, count: Math.min(characters.filter(c => c.imageUrl).length, 24) }) });
-        const analysis = await analysisResponse.json() as { error?: string; layout?: { slots?: Array<{ x: number; y: number; width: number; height: number }>; texts?: Array<{ text: string; x: number; y: number; width: number; height: number }> } };
-        if (!analysisResponse.ok) throw Error(analysis.error || 'Could not analyze reference before image generation');
-        layout = [...(analysis.layout?.slots || []).map(e => ({ ...e, type: 'image' as const, text: undefined })), ...(analysis.layout?.texts || []).map(e => ({ ...e, type: 'text' as const }))];
-      }
-      const response = await fetch('/api/thumbnail-ai-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId, provider: imageProvider, model: imageModel, quality: imageQuality, includeTitle, layout: includeTitle ? layout : layout.filter(item => item.type !== 'text') }) });
-      const result = await response.json() as { error?: string; imageUrl?: string; prompt?: string };
-      if (!response.ok || !result.imageUrl) throw Error(result.error || 'AI image generation failed');
-      const sourceImage = await loadForExport(result.imageUrl);
-      const generated: ThumbnailDesign = {
-        ...newDesign(designs.length + 1),
-        name: design.name + ' · AI ' + (designs.length + 1),
-        width: sourceImage.naturalWidth, height: sourceImage.naturalHeight,
-        background: design.background, elements: [],
-        aiImageUrl: result.imageUrl, aiImagePrompt: result.prompt,
-        referenceUrl: reference || design.referenceUrl
-      };
-      const nextDesigns = [...designs, generated];
-      onChange(nextDesigns);
-      setActiveId(generated.id);
-      setMessage('AI thumbnail added to the thumbnail gallery. It is a single image, sized ' + sourceImage.naturalWidth + '×' + sourceImage.naturalHeight + ', and will be saved automatically.');
-    } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
-    finally { setImageBusy(false); }
-  };
   const downloadAiThumbnail = async () => {
     const sourceUrl = design?.upscaledImageUrl || design?.aiImageUrl;
     if (!design || !sourceUrl) return;
@@ -822,13 +1022,24 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
   const renderDesignBlob = async (target: ThumbnailDesign, format: 'png' | 'jpeg' = 'png'): Promise<Blob> => {
       const canvas = document.createElement('canvas'); canvas.width = THUMBNAIL_SIZE; canvas.height = THUMBNAIL_SIZE;
       const ctx = canvas.getContext('2d'); if (!ctx) throw new Error('Canvas unavailable');
-      ctx.fillStyle = target.background; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      // Apply opacity to the COMPLETE background composite (flat color + AI
+      // backdrop) over white. Foreground original PNGs always stay opaque.
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      const backdrop = document.createElement('canvas');
+      backdrop.width = THUMBNAIL_SIZE; backdrop.height = THUMBNAIL_SIZE;
+      const backdropContext = backdrop.getContext('2d'); if (!backdropContext) throw new Error('Background canvas unavailable');
+      backdropContext.fillStyle = target.background;
+      backdropContext.fillRect(0, 0, backdrop.width, backdrop.height);
       if (target.aiImageUrl || target.backgroundImageUrl) {
         const background = await loadForExport(target.aiImageUrl || target.backgroundImageUrl!);
         const scale = Math.max(THUMBNAIL_SIZE / background.naturalWidth, THUMBNAIL_SIZE / background.naturalHeight);
         const w = background.naturalWidth * scale, h = background.naturalHeight * scale;
-        ctx.drawImage(background, (THUMBNAIL_SIZE - w) / 2, (THUMBNAIL_SIZE - h) / 2, w, h);
+        backdropContext.drawImage(background, (THUMBNAIL_SIZE - w) / 2, (THUMBNAIL_SIZE - h) / 2, w, h);
       }
+      ctx.save();
+      ctx.globalAlpha = backgroundAlpha(target);
+      ctx.drawImage(backdrop, 0, 0);
+      ctx.restore();
       for (const element of target.elements) {
         const x = element.x / 100 * THUMBNAIL_SIZE, y = element.y / 100 * THUMBNAIL_SIZE;
         const w = element.width / 100 * THUMBNAIL_SIZE, h = element.height / 100 * THUMBNAIL_SIZE;
@@ -1007,7 +1218,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     const operation = saveQueueRef.current.catch(() => {}).then(async () => {
       const prepared: ThumbnailDesign[] = [];
       for (const item of snapshot) {
-        if (item.aiImageUrl) {
+        if (item.aiImageUrl && backgroundAlpha(item) === 1) {
           if (item.aiImageUrl.includes('format=jpg')) { prepared.push(item); continue; }
           // Preserve the AI artwork, but persist its collection thumbnail as JPEG.
           const original = await loadForExport(item.aiImageUrl);
@@ -1023,7 +1234,7 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
           continue;
         }
         // Cached JPEG is reusable until the editable content changes.
-        const signature = JSON.stringify({ format: 'jpeg', width: item.width, height: item.height, background: item.background, backgroundImageUrl: item.backgroundImageUrl, elements: item.elements });
+        const signature = JSON.stringify({ format: 'jpeg', width: item.width, height: item.height, background: item.background, backgroundOpacity: backgroundAlpha(item), backgroundImageUrl: item.backgroundImageUrl, aiImageUrl: item.aiImageUrl, elements: item.elements });
         const cached = renderCacheRef.current.get(item.id);
         if (cached?.signature === signature) {
           prepared.push({ ...item, renderedImageUrl: cached.url });
@@ -1100,52 +1311,9 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
     </div>
     {message && <p className="notice">{message}</p>}
     {!design ? <div className="panel empty-state" style={{ display: 'grid', gap: 12, maxWidth: 520, margin: '20px auto', padding: 24 }}>
-      <h2>Generate Etsy Listing Pack</h2>
-      <p>Use original collection clipart directly, without ZIP export. Reference images are optional. AI directs the layout and background; PaletteIQ places exact original PNGs and editable lettering.</p>
-      <label className="input-label">GENERATION SCOPE</label>
-      <select aria-label="Etsy generation scope" disabled={aiBusy} value={generationScope} onChange={event => setGenerationScope(event.target.value as typeof generationScope)}>
-        <option value="single">1 Thumbnail · low-cost trial (default)</option>
-        <option value="core-5">5 Thumbnails · core pack</option>
-        <option value="complete-10">10 Thumbnails · complete pack</option>
-        <option value="category-showcase">Category Showcase Pack</option>
-      </select>
-      {generationScope === 'single' && <>
-        <label className="input-label">THUMBNAIL TYPE</label>
-        <select aria-label="Single thumbnail type" disabled={aiBusy} value={singleSlideKey} onChange={event => setSingleSlideKey(event.target.value)}>
-          {buildPack('complete-10', title, characters).map((slide,index) => <option key={slide.key} value={slide.key}>{String(index+1).padStart(2,'0')} · {slide.name}</option>)}
-        </select>
-      </>}
-      <label className="input-label">CUSTOM MAIN TITLE (OPTIONAL)</label>
-      <input aria-label="Etsy custom cover headline" value={coverHeadline} disabled={aiBusy} maxLength={75} placeholder={title} onChange={event => setCoverHeadline(event.target.value)} />
-      <label className="input-label">TYPOGRAPHY MODE</label>
-      <select aria-label="Etsy pack typography mode" disabled={aiBusy} value={packTypography} onChange={event => setPackTypography(event.target.value as typeof packTypography)}>
-        <option value="editable">Editable artistic fonts · accurate text</option>
-        <option value="ai-artwork">AI background + artistic title + badges · recommended</option>
-      </select>
-      <label className="input-label">COVER STYLE</label>
-      <select aria-label="Etsy pack cover style" value={packCoverStyle} disabled={aiBusy} onChange={event => setPackCoverStyle(event.target.value as typeof packCoverStyle)}>
-        <option value="editorial">Premium editorial</option><option value="boutique">Modern boutique</option><option value="storybook">Storybook gallery</option><option value="modern">Modern Etsy</option><option value="watercolor">Artistic watercolor</option>
-      </select>
-      <label className="input-label">CLIPART HIERARCHY</label>
-      <select aria-label="Etsy pack clipart hierarchy" value={packHierarchy} disabled={aiBusy} onChange={event => setPackHierarchy(event.target.value as ClipartHierarchy)}>
-        <option value="dramatic">Dramatic · larger focal image</option><option value="medium">Medium</option><option value="soft">Soft</option>
-      </select>
-      <label className="input-label">DESIGN BOLDNESS</label>
-      <select aria-label="Etsy pack design boldness" value={packBoldness} disabled={aiBusy} onChange={event => setPackBoldness(event.target.value as typeof packBoldness)}>
-        <option value="bold">Bold</option><option value="balanced">Balanced</option><option value="soft">Soft</option>
-      </select>
-      <label className="input-label">OPTIONAL REFERENCE IMAGE</label>
-      <input aria-label="Upload optional reference" type="file" accept="image/png,image/jpeg,image/webp" onChange={event => void onReferenceUpload(event.target.files?.[0])}/>
-      {reference && <img src={reference} alt="Optional reference" style={{ maxHeight: 130, maxWidth: '100%', objectFit: 'contain' }}/>}
-      <label className="input-label">REFERENCE INTERPRETATION</label>
-      <select aria-label="Etsy reference interpretation" value={referenceStyle} disabled={aiBusy} onChange={event => setReferenceStyle(event.target.value as typeof referenceStyle)}>
-        <option value="similar">Similar composition · recommended</option><option value="creative">Creative adaptation</option><option value="palette">Palette only</option>
-      </select>
-      <small>For a reference-like watercolor ring and hand-lettered title, upload the reference image before generating. PaletteIQ extracts only graphic style tokens; it never sends reference product artwork to the image generator.</small>
-      <button className="primary-btn" disabled={aiBusy || !characters.some(c => c.imageUrl)} onClick={() => void generateReferenceBatch()}>{aiBusy ? 'Generating ' + (generationScope === 'single' ? '1 thumbnail' : 'Etsy pack') + '...' : generationScope === 'single' ? 'Generate 1 Thumbnail' : generationScope === 'core-5' ? 'Generate 5 Thumbnails' : generationScope === 'complete-10' ? 'Generate 10 Thumbnails' : 'Generate Category Showcase'}</button>
-      {aiBusy && <button className="outline-btn" onClick={() => { cancelPackRef.current = true; }}>Stop after current image</button>}
-      {packStatus && <small role="status">{packStatus}</small>}
-      <button className="outline-btn" onClick={create}>Or start with a blank design</button>
+      <h2>Start with your own canvas</h2>
+      <p>Create a blank 1024 × 1024 canvas, add exact original collection clipart from Reference &amp; Assets, then arrange and resize it yourself. Choose a reference template, enter a title, subtitle and optional badge, and let AI generate only the background and artistic lettering.</p>
+      <button type="button" className="primary-btn" onClick={create}><Plus size={15}/> Create blank canvas</button>
     </div> :
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(190px, 245px) minmax(0, 1fr) minmax(245px, 290px)', gap: 12, alignItems: 'start' }}>
       <div className="panel" style={{ padding: 14, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0, gap: 12, alignContent: 'start', overflowX: 'hidden', maxHeight: 'min(82vh, 950px)', overflowY: 'auto', overscrollBehavior: 'contain' }}>
@@ -1156,89 +1324,100 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
           setSideTab(next); document.getElementById('thumbnail-' + next + '-tab')?.focus();
         }}>
           <button id="thumbnail-reference-tab" role="tab" type="button" aria-selected={sideTab === 'reference'} aria-controls="thumbnail-reference-panel" tabIndex={sideTab === 'reference' ? 0 : -1} className={sideTab === 'reference' ? 'primary-btn' : 'outline-btn'} style={{ flex: 1, minWidth: 0, whiteSpace: 'normal', justifyContent: 'center', fontSize: 12, padding: '8px 6px' }} onClick={() => setSideTab('reference')}>Reference &amp; Assets</button>
-          <button id="thumbnail-generation-tab" role="tab" type="button" aria-selected={sideTab === 'generation'} aria-controls="thumbnail-generation-panel" tabIndex={sideTab === 'generation' ? 0 : -1} className={sideTab === 'generation' ? 'primary-btn' : 'outline-btn'} style={{ flex: 1, minWidth: 0, whiteSpace: 'normal', justifyContent: 'center', fontSize: 12, padding: '8px 6px' }} onClick={() => setSideTab('generation')}>AI Image Generation</button>
+          <button id="thumbnail-generation-tab" role="tab" type="button" aria-selected={sideTab === 'generation'} aria-controls="thumbnail-generation-panel" tabIndex={sideTab === 'generation' ? 0 : -1} className={sideTab === 'generation' ? 'primary-btn' : 'outline-btn'} style={{ flex: 1, minWidth: 0, whiteSpace: 'normal', justifyContent: 'center', fontSize: 12, padding: '8px 6px' }} onClick={() => setSideTab('generation')}>Thumbnail Prompt</button>
         </div>
         {sideTab === 'reference' && <div id="thumbnail-reference-panel" role="tabpanel" aria-labelledby="thumbnail-reference-tab" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0, gap: 12 }}>
         <h3>Reference & assets</h3>
         <label className="input-label">LAYOUT MODE</label>
         <select value={layoutMode} onChange={e => setLayoutMode(e.target.value as 'ai' | 'manual')}><option value="ai">AI + manual</option><option value="manual">Manual only</option></select>
-        {layoutMode === 'ai' && <>
-          <label className="input-label">AI PROVIDER</label>
-          <select value={provider} onChange={e => { const next = e.target.value as 'openai' | 'gemini'; setProvider(next); setModel(next === 'openai' ? aiDefaults.openaiModel : aiDefaults.geminiModel); }}>
-            <option value="openai">OpenAI</option><option value="gemini">Google Gemini</option>
-          </select>
-          <label className="input-label">AI MODEL</label>
-          <select value={model} onChange={e => setModel(e.target.value)}>
-            {!models[provider].some(m => m.id === model) && <option value={model}>{model} (saved/default)</option>}
-            {models[provider].map(m => <option key={m.id} value={m.id}>{m.name} ({m.id})</option>)}
-          </select>
-          {modelError && <small>{modelError}</small>}
-          <label className="input-label">REFERENCE IMAGE (OPTIONAL)</label>
-          <select style={control} value={reference.startsWith('data:') ? 'upload' : reference} onChange={e => setReference(e.target.value === 'upload' ? uploadedReference : e.target.value)}>
-            <option value="">Choose listing reference</option>{references.map((r,i)=><option key={r} value={r}>Listing image {i+1}</option>)}{uploadedReference && <option value="upload">Uploaded image</option>}
-          </select>
-          <input aria-label="Upload reference" type="file" accept="image/png,image/jpeg,image/webp" onChange={e => void onReferenceUpload(e.target.files?.[0])}/>
-          {reference && <img src={reference} alt="Layout reference" style={{ maxWidth: '100%', maxHeight: 140, objectFit: 'contain' }}/>}
-          <label className="input-label">REFERENCE INTERPRETATION</label>
-          <select aria-label="Reference interpretation" value={referenceStyle} onChange={e => setReferenceStyle(e.target.value as 'creative' | 'similar' | 'palette')}>
-            <option value="creative">Creative adaptation</option><option value="similar">Similar composition</option><option value="palette">Color and style inspiration</option>
-          </select>
-          <button className="primary-btn" disabled={!reference || aiBusy} onClick={() => void analyze()}><WandSparkles size={15}/> {aiBusy ? 'Analyzing...' : 'Analyze & apply layout'}</button>
-          <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 12, display: 'grid', gap: 8 }}>
-            <strong>Generate Etsy Listing Pack</strong>
-            <small>Reference optional. AI designs the layout and decorative background; PaletteIQ composites unmodified collection PNGs. Choose accurate editable lettering or experimental AI typography artwork.</small>
-            <label className="input-label">GENERATION SCOPE</label>
-            <select aria-label="Etsy generation scope" value={generationScope} disabled={aiBusy} onChange={e => setGenerationScope(e.target.value as typeof generationScope)}>
-              <option value="single">1 Thumbnail · low-cost trial (default)</option>
-              <option value="core-5">5 Thumbnails · core pack</option>
-              <option value="complete-10">10 Thumbnails · complete pack</option>
-              <option value="category-showcase">Category Showcase Pack · collection groups</option>
-            </select>
-            {generationScope === 'single' && <>
-              <label className="input-label">THUMBNAIL TYPE</label>
-              <select aria-label="Single thumbnail type" disabled={aiBusy} value={singleSlideKey} onChange={e => setSingleSlideKey(e.target.value)}>
-                {buildPack('complete-10', title, characters).map((slide,index) => <option key={slide.key} value={slide.key}>{String(index+1).padStart(2,'0')} · {slide.name}</option>)}
-              </select>
-            </>}
-            <label className="input-label">CUSTOM MAIN TITLE (OPTIONAL)</label>
-            <input aria-label="Etsy custom cover headline" value={coverHeadline} disabled={aiBusy} maxLength={75} placeholder={title} onChange={event => setCoverHeadline(event.target.value)} />
-            <label className="input-label">TYPOGRAPHY MODE</label>
-            <select aria-label="Etsy pack typography mode" value={packTypography} disabled={aiBusy} onChange={e => setPackTypography(e.target.value as typeof packTypography)}>
-              <option value="editable">Editable fonts · precise wording</option>
-              <option value="ai-artwork">AI background + artistic lettering + badges</option>
-            </select>
-            <label className="input-label">DESIGN BOLDNESS</label>
-            <select aria-label="Etsy pack design boldness" disabled={aiBusy} value={packBoldness} onChange={e => setPackBoldness(e.target.value as typeof packBoldness)}>
-              <option value="soft">Soft · restrained</option><option value="balanced">Balanced · premium</option><option value="bold">Bold · scroll-stopping</option>
-            </select>
-            <label className="input-label">CLIPART SIZE HIERARCHY</label>
-            <select aria-label="Etsy pack clipart hierarchy" disabled={aiBusy} value={packHierarchy} onChange={e => setPackHierarchy(e.target.value as ClipartHierarchy)}>
-              <option value="soft">Soft · subtle variation</option><option value="medium">Medium · clear hierarchy</option><option value="dramatic">Dramatic · large hero artwork</option>
-            </select>
-            <label className="input-label">COVER ART STYLE</label>
-            <select aria-label="Etsy pack cover style" disabled={aiBusy} value={packCoverStyle} onChange={e => setPackCoverStyle(e.target.value as typeof packCoverStyle)}>
-              <option value="editorial">Premium editorial</option><option value="boutique">Modern boutique</option><option value="storybook">Storybook gallery</option><option value="modern">Modern Etsy</option><option value="watercolor">Artistic watercolor</option>
-            </select>
-            <label className="input-label">BACKGROUND QUALITY</label>
-            <select aria-label="Etsy pack background quality" disabled={aiBusy} value={packQuality} onChange={e => setPackQuality(e.target.value as typeof packQuality)}><option value="low">Low · economical</option><option value="medium">Medium · recommended</option><option value="high">High · premium cost</option></select>
-            <label className="input-label">BACKGROUND + TYPOGRAPHY STYLE</label>
-            <select aria-label="Etsy pack background style" value={backgroundStyle} disabled={aiBusy} onChange={e => setBackgroundStyle(e.target.value as typeof backgroundStyle)}>
-              <option value="watercolor">Watercolor</option><option value="paper">Luxury paper</option><option value="gradient">Color gradient</option><option value="botanical">Botanical accents</option><option value="vintage">Vintage</option>
-            </select>
-            <label className="input-label">DECORATION INTENSITY</label>
-            <select aria-label="Etsy pack intensity" value={backgroundIntensity} disabled={aiBusy} onChange={e => setBackgroundIntensity(e.target.value as typeof backgroundIntensity)}>
-              <option value="soft">Soft</option><option value="balanced">Balanced</option><option value="vibrant">Vibrant</option>
-            </select>
-            <button className="primary-btn" type="button" disabled={aiBusy || !characters.some(c => c.imageUrl)} onClick={() => void generateReferenceBatch()}>
-              <WandSparkles size={15}/> {aiBusy ? 'Generating...' : generationScope === 'single' ? 'Generate 1 Thumbnail' : generationScope === 'core-5' ? 'Generate 5 Thumbnails' : generationScope === 'complete-10' ? 'Generate 10 Thumbnails' : 'Generate Category Showcase'}
-            </button>
-            {aiBusy && <button type="button" className="outline-btn" onClick={() => { cancelPackRef.current = true; setPackStatus('Stopping after current request...'); }}>Stop after current image</button>}
-            {packStatus && <small role="status">{packStatus}</small>}
-            <small>All characters are existing collection PNG files, never reconstructed by AI. Editable mode adds distinct typographic layers over a no-text AI background. AI lettering mode combines text and decoration in one image and checks for generated objects; verify its spelling. Native editor canvas: 1024 × 1024 px. API charges apply.</small>
-            <small>Only original collection clipart is placed on top. Upscaled assets are not used.</small>
+        <small>Arrange original clipart on the canvas first. AI generates a background and elegant typography around YOUR placed artwork; PaletteIQ does not reposition or redraw the PNGs.</small>
+        <label className="input-label">REFERENCE ANALYSIS PROVIDER</label>
+        <select value={provider} disabled={aiBusy} onChange={e => { const next = e.target.value as 'openai' | 'gemini'; setProvider(next); setModel(next === 'openai' ? aiDefaults.openaiModel : aiDefaults.geminiModel); }}>
+          <option value="openai">OpenAI Vision</option><option value="gemini">Google Gemini Vision</option>
+        </select>
+        <label className="input-label">REFERENCE ANALYSIS MODEL</label>
+        <select value={model} disabled={aiBusy} onChange={e => setModel(e.target.value)}>
+          {!models[provider].some(m => m.id === model) && <option value={model}>{model} (saved/default)</option>}
+          {models[provider].map(m => <option key={m.id} value={m.id}>{m.name} ({m.id})</option>)}
+        </select>
+        {modelError && <small>{modelError}</small>}
+        <label className="input-label">DESIGN REFERENCE TEMPLATE (OPTIONAL)</label>
+        <select aria-label="Design reference template" style={control} value={reference.startsWith('data:') ? 'upload' : reference} onChange={e => setReference(e.target.value === 'upload' ? uploadedReference : e.target.value)}>
+          <option value="">Auto style — no reference</option>
+          {references.map((r,i)=><option key={r} value={r}>Listing reference {i+1}</option>)}
+          {uploadedReference && <option value="upload">Uploaded template</option>}
+        </select>
+        <input aria-label="Upload design reference template" type="file" accept="image/png,image/jpeg,image/webp" disabled={aiBusy} onChange={e => void onReferenceUpload(e.target.files?.[0])}/>
+        {reference && <img src={reference} alt="Chosen visual template" style={{ maxWidth: '100%', maxHeight: 140, objectFit: 'contain' }}/>}
+        <label className="input-label">REFERENCE INTERPRETATION</label>
+        <select aria-label="Reference interpretation" value={referenceStyle} disabled={aiBusy} onChange={e => setReferenceStyle(e.target.value as 'creative' | 'similar' | 'palette')}>
+          <option value="creative">Creative adaptation</option><option value="similar">Similar layout / aesthetic</option><option value="palette">Palette and mood only</option>
+        </select>
+        <small>AI Vision extracts only layout styling and typographic direction from the reference, not its product images, text, or brand. User-placed clipart positions stay fixed.</small>
+        <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 12, display: 'grid', gap: 9 }}>
+          <strong>Background &amp; AI Typography</strong>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, fontWeight: 600 }}>
+            <input aria-label="Enable AI typography" type="checkbox" checked={typographyEnabled} disabled={aiBusy} onChange={e => mutate({ packAiTypographyEnabled: e.target.checked, renderedImageUrl: undefined })}/>
+            Enable AI Typography (title, subtitle &amp; badge)
+          </label>
+          <small>{typographyEnabled ? 'AI creates hand-crafted artistic lettering in the background. Each field may be left blank.' : 'No text, badge, letters or pseudo-writing will be requested from the AI. Only a decorative background will be generated.'} Changes to this checkbox or wording take effect after the next Generate AI Background &amp; Typography; the previous background is kept until then.</small>
+          <button type="button" className="outline-btn" disabled={aiBusy || !typographyEnabled} onClick={() => mutate({ packHeadline: seoDefaults.title, packSubtitle: seoDefaults.subtitle, renderedImageUrl: undefined })}>Use SEO defaults from Etsy Listing Draft</button>
+          <small>{seoDefaults.hasSeoTitle ? 'Main title is derived from Etsy SEO title' : 'No SEO title saved; collection title is used'} · {seoDefaults.hasSeoSubtitle ? 'subtitle uses SEO keyword/category' : 'subtitle falls back to Digital Clipart Collection'}. Existing manual edits remain until you reset them.</small>
+          <label className="input-label">MAIN TITLE</label>
+          <input aria-label="Canvas main title" maxLength={100} value={design.packHeadline ?? seoDefaults.title} disabled={aiBusy || !typographyEnabled} onChange={e => mutate({ packHeadline: e.target.value, renderedImageUrl: undefined })}/>
+          <label className="input-label">SUBTITLE</label>
+          <input aria-label="Canvas subtitle" maxLength={140} value={design.packSubtitle ?? seoDefaults.subtitle} disabled={aiBusy || !typographyEnabled} onChange={e => mutate({ packSubtitle: e.target.value, renderedImageUrl: undefined })}/>
+          <label className="input-label">BADGE TEXT (OPTIONAL)</label>
+          <input aria-label="Canvas badge text" maxLength={60} placeholder="Leave empty for no badge" value={design.packBadge ?? ''} disabled={aiBusy || !typographyEnabled} onChange={e => mutate({ packBadge: e.target.value, renderedImageUrl: undefined })}/>
+          <label className="input-label">ARTISTIC LETTERING COMPOSITION</label>
+          <ThumbnailStylePreviewSelect label="Artistic lettering composition" kind="lettering" value={design.packLetteringStyle || 'auto'} options={LETTERING_EXAMPLES}
+            disabled={aiBusy || !typographyEnabled} onChange={value => mutate({ packLetteringStyle: value as NonNullable<ThumbnailDesign['packLetteringStyle']>, renderedImageUrl: undefined })}/>
+          <strong>Typography safe area</strong>
+          <small>{typographyEnabled ? 'Typography guide is only a composition aid. Clipart may overlap text intentionally or extend beyond canvas edges. PNGs remain above AI lettering, so verify that important words stay legible.' : 'Typography is disabled; this area is ignored during background generation.'}</small>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 6 }}>
+            {(['x','y','width','height'] as const).map(field => <label key={field} style={{ minWidth: 0, display: 'grid', gap: 3 }}>
+              <span className="input-label">{field.toUpperCase()} (%)</span>
+              <input aria-label={'Typography zone ' + field} type="number" min={0} max={100} step={1} disabled={aiBusy || !typographyEnabled}
+                value={(design.packTextZone || { x: 22, y: 30, width: 56, height: 34 })[field]}
+                onChange={e => mutate({ packTextZone: { ...(design.packTextZone || { x: 22, y: 30, width: 56, height: 34 }), [field]: Number(e.target.value) }, renderedImageUrl: undefined })}/>
+            </label>)}
           </div>
-          <small>Optional references inspire layout. Automatically generated designs keep typography areas clear of collection clipart.</small>
-        </>}
+          <label className="input-label">IMAGE GENERATION PROVIDER</label>
+          <select aria-label="AI background and typography provider" value={imageProvider} disabled={aiBusy} onChange={e => setImageProvider(e.target.value as 'openai' | 'gemini')}>
+            <option value="openai">OpenAI Image</option><option value="gemini">Google Gemini Image</option>
+          </select>
+          <label className="input-label">IMAGE GENERATION MODEL</label>
+          {imageProvider === 'openai'
+            ? <select aria-label="AI background generation model" value={imageModel} disabled={aiBusy} onChange={e => setImageModel(e.target.value)}>
+                {!imageModels.some(m => m.id === imageModel) && <option value={imageModel}>{imageModel}</option>}
+                {imageModels.map(m => <option key={m.id} value={m.id}>{m.name} ({m.id})</option>)}
+              </select>
+            : <select aria-label="Gemini image generation model" value={geminiImageModel} disabled={aiBusy} onChange={e => setGeminiImageModel(e.target.value)}>
+                {!models.gemini.filter(m => m.id.includes('image')).some(m => m.id === geminiImageModel) && <option value={geminiImageModel}>{geminiImageModel} (default)</option>}
+                {models.gemini.filter(m => m.id.includes('image')).map(m => <option key={m.id} value={m.id}>{m.name} ({m.id})</option>)}
+              </select>}
+          <label className="input-label">AI BACKGROUND QUALITY</label>
+          <select aria-label="Custom canvas background quality" value={packQuality} disabled={aiBusy} onChange={e => setPackQuality(e.target.value as typeof packQuality)}>
+            <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
+          </select>
+          <label className="input-label">COVER ART STYLE</label>
+          <ThumbnailStylePreviewSelect label="Custom canvas cover style" kind="cover" value={packCoverStyle} options={COVER_EXAMPLES}
+            disabled={aiBusy} onChange={value => setPackCoverStyle(value as typeof packCoverStyle)}/>
+          <label className="input-label">TYPOGRAPHY BOLDNESS</label>
+          <ThumbnailStylePreviewSelect label="Custom canvas typography boldness" kind="boldness" value={packBoldness} options={BOLDNESS_EXAMPLES}
+            disabled={aiBusy} onChange={value => setPackBoldness(value as typeof packBoldness)}/>
+          <label className="input-label">BACKGROUND STYLE</label>
+          <ThumbnailStylePreviewSelect label="Custom canvas background style" kind="background" value={backgroundStyle} options={BACKGROUND_EXAMPLES}
+            disabled={aiBusy} onChange={value => setBackgroundStyle(value as typeof backgroundStyle)}/>
+          <label className="input-label">BACKGROUND DECORATION</label>
+          <ThumbnailStylePreviewSelect label="Custom canvas decoration intensity" kind="decoration" value={backgroundIntensity} options={DECORATION_EXAMPLES}
+            disabled={aiBusy} onChange={value => setBackgroundIntensity(value as typeof backgroundIntensity)}/>
+          <button type="button" className="primary-btn" disabled={aiBusy || Boolean(backgroundRetryId) || !design.elements.some(e => e.type === 'image')} onClick={() => void generateCanvasArtwork()}>
+            <WandSparkles size={15}/> {aiBusy ? 'Generating AI artwork...' : 'Generate AI Background & Typography'}
+          </button>
+          {packStatus && <small role="status">{packStatus}</small>}
+          <small>Artistic lettering can be curved, arched, flowing, or hand-painted rather than rigid font typesetting. Disable the checkbox for a background with no text. Clipart is clipped naturally at the canvas edge. Changing lettering requires another AI generation; verify spelling before use. API charges apply.</small>
+        </div>
         <h3>Characters</h3>
         <div style={{ maxHeight: 400, overflowY: 'auto', display: 'grid', gap: 8 }}>
           {characters.filter(c => c.imageUrl).map(c => <button type="button" key={c.id} onClick={() => add(newImage(c, design.elements.filter(e => e.type === 'image').length))} style={{ textAlign: 'left', display: 'flex', gap: 8, alignItems: 'center', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: 6 }}>
@@ -1250,20 +1429,20 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         <button className="outline-btn" onClick={() => add(newText(title))}>+ Add text</button>
         </div>}
         {sideTab === 'generation' && <div id="thumbnail-generation-panel" role="tabpanel" aria-labelledby="thumbnail-generation-tab" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0, gap: 12 }}>
-        <h3>AI Image Generation</h3>
-        <small>Generate a complete thumbnail using OpenAI or Gemini. Reference composition and character names guide the image; output is a single raster and may differ from your existing character artwork.</small>
-        <label className="input-label">IMAGE PROVIDER</label>
-        <select value={imageProvider} onChange={e => { const next = e.target.value as 'openai' | 'gemini'; setImageProvider(next); setImageModel(next === 'gemini' ? 'gemini-2.5-flash-image' : (imageModels[0]?.id || 'gpt-image-1-mini')); }}><option value="openai">OpenAI</option><option value="gemini">Gemini</option></select>
-        <label className="input-label">IMAGE MODEL</label>
-        <select value={imageModel} onChange={e => setImageModel(e.target.value)}>
-          {imageProvider === 'openai' ? <>{!imageModels.some(m => m.id === imageModel) && <option value={imageModel}>{imageModel} (default)</option>}{imageModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</> : <><option value="gemini-2.5-flash-image">Gemini 2.5 Flash Image</option><option value="gemini-3-pro-image-preview">Gemini 3 Pro Image (preview)</option></>}
+        <h3>Thumbnail Prompt</h3>
+        <small>Live brief derived from your Reference &amp; Assets inputs and actual original PNG layer rectangles. The AI generates only a background with title, subtitle and optional badge. PaletteIQ keeps your canvas layout unchanged.</small>
+        <label className="input-label">OPENAI BACKGROUND MODEL</label>
+        <select aria-label="OpenAI thumbnail background model" disabled={aiBusy} value={imageModel} onChange={e => setImageModel(e.target.value)}>
+          {!imageModels.some(m => m.id === imageModel) && <option value={imageModel}>{imageModel} (saved/default)</option>}
+          {imageModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
         </select>
-        {imageProvider === 'openai' && <><label className="input-label">IMAGE QUALITY</label>
-        <select value={imageQuality} onChange={e => setImageQuality(e.target.value as 'low' | 'medium' | 'high')}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></>}
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '12px 0' }}><input type="checkbox" checked={includeTitle} disabled={imageBusy} onChange={event => setIncludeTitle(event.target.checked)}/> Include title / theme text</label>
-        {!includeTitle && <small>The AI thumbnail will be requested without text or lettering.</small>}
-        <button className="primary-btn" disabled={imageBusy || !imageModel} type="button" onClick={() => void generateAiThumbnail()}><WandSparkles size={15}/> {imageBusy ? 'Generating AI thumbnail...' : 'Generate AI thumbnail'}</button>
-
+        <label className="input-label">PROMPT FROM REFERENCE & ASSETS</label>
+        <textarea aria-label="Thumbnail design prompt preview" readOnly rows={15} value={manualCanvasPromptPreview} style={{ width: '100%', fontSize: 11, lineHeight: 1.35 }} />
+        <button className="outline-btn" type="button" onClick={() => void navigator.clipboard.writeText(manualCanvasPromptPreview)}>Copy thumbnail prompt</button>
+        <button className="primary-btn" type="button" disabled={aiBusy || !design.elements.some(e => e.type === 'image')} onClick={() => void generateCanvasArtwork()}>
+          <WandSparkles size={15}/> {aiBusy ? 'Generating...' : 'Generate AI Background & Typography from Canvas'}
+        </button>
+        <small>AI image generation uses your chosen background quality in Reference & Assets. Your manual clipart positions and proportions are preserved. API charges apply.</small>
         </div>}
       </div>
       <div style={{ minWidth: 0, position: 'sticky', top: 12, alignSelf: 'start' }}>
@@ -1275,26 +1454,47 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
           <span>{Math.round(previewZoom*100)}%</span>
           <button className="outline-btn" aria-label="Zoom in canvas" onClick={() => setPreviewZoom(z => clamp(z + .25, .5, 3))}>+</button>
           <button className="outline-btn" onClick={() => setPreviewZoom(1)} title="Reset zoom"><RotateCcw size={15}/></button>
-          <button className="outline-btn" type="button" onClick={() => add(newText())}><Plus size={15}/> Text</button>
+          <button className="outline-btn" type="button" onClick={() => setShowTypographyGuide(v => !v)}>{showTypographyGuide ? 'Hide type guide' : 'Show type guide'}</button>
+          <button className="outline-btn" type="button" onClick={() => add(newText())}><Plus size={15}/> Editable text</button>
           <button className="outline-btn" type="button" disabled={!selection || selection.locked} onClick={remove} title="Delete selected object"><Trash2 size={15}/> Delete</button>
           <span style={{ marginLeft: 'auto' }}>{design.width}×{design.height}</span>
         </div>
         <div ref={canvasViewportRef} onPointerDown={startPan} onPointerMove={movePan} onPointerUp={stopPan} onPointerCancel={stopPan} aria-label="Thumbnail canvas viewport" style={{ overflow: previewZoom > 1 ? 'auto' : 'hidden', height: 'min(66vh, 780px)', minHeight: 240, boxSizing: 'border-box', background: '#e8e8e8', padding: 16, borderRadius: 8, cursor: previewZoom > 1 ? 'grab' : 'default', touchAction: 'none' }}>
           <div style={{ width: fittedWidth * previewZoom, margin: '0 auto', marginTop: Math.max(0, (viewportSize.height - fittedHeight * previewZoom) / 2) }}>
-            <div ref={stageRef} onPointerDown={() => setSelectedId('')} style={{ width: '100%', aspectRatio: `${design.width}/${design.height}`, backgroundColor: design.background, position: 'relative', containerType: 'inline-size', overflow: 'hidden', boxShadow: '0 5px 25px #0002', touchAction: 'none' }}>
-              {(design.backgroundImageUrl || design.aiImageUrl) && <img
-                key={design.backgroundImageUrl || design.aiImageUrl}
-                src={design.backgroundImageUrl || design.aiImageUrl}
-                alt="Thumbnail background"
-                onLoad={() => setBackgroundLoadError('')}
-                onError={() => setBackgroundLoadError('Background image cannot be displayed. Check the generated image URL or your image storage.')}
-                draggable={false}
-                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none', userSelect: 'none' }}
-              />}
+            <div ref={stageRef} onPointerDown={() => setSelectedId('')} style={{ width: '100%', aspectRatio: `${design.width}/${design.height}`, backgroundColor: '#fff', position: 'relative', containerType: 'inline-size', overflow: 'hidden', boxShadow: '0 5px 25px #0002', touchAction: 'none' }}>
+              <div data-thumbnail-background="true" style={{ position: 'absolute', inset: 0, opacity: backgroundAlpha(design), pointerEvents: 'none' }}>
+                <div style={{ position: 'absolute', inset: 0, backgroundColor: design.background }}/>
+                {(design.backgroundImageUrl || design.aiImageUrl) && <img
+                  key={design.backgroundImageUrl || design.aiImageUrl}
+                  src={design.backgroundImageUrl || design.aiImageUrl}
+                  alt="Thumbnail background"
+                  onLoad={() => setBackgroundLoadError('')}
+                  onError={() => setBackgroundLoadError('Background image cannot be displayed. Check the generated image URL or your image storage.')}
+                  draggable={false}
+                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none', userSelect: 'none' }}
+                />}
+              </div>
+              {showTypographyGuide && typographyEnabled && <div aria-label="Reserved AI typography zone" style={{
+                position: 'absolute',
+                left: (design.packTextZone || { x: 22, y: 30, width: 56, height: 34 }).x + '%',
+                top: (design.packTextZone || { x: 22, y: 30, width: 56, height: 34 }).y + '%',
+                width: (design.packTextZone || { x: 22, y: 30, width: 56, height: 34 }).width + '%',
+                height: (design.packTextZone || { x: 22, y: 30, width: 56, height: 34 }).height + '%',
+                border: '2px dashed #c76a31', boxSizing: 'border-box', borderRadius: 9,
+                background: 'rgba(255,244,223,0.28)', color: '#704129', pointerEvents: 'none',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                gap: '4%', padding: '2%', textAlign: 'center', zIndex: 1
+              }}>
+                {!design.backgroundImageUrl && !design.aiImageUrl && <>
+                  <strong style={{ fontSize: 'clamp(7px, 4cqw, 48px)', lineHeight: 1.08, overflowWrap: 'anywhere' }}>{design.packHeadline ?? seoDefaults.title}</strong>
+                  <span style={{ fontSize: 'clamp(6px, 1.7cqw, 23px)', lineHeight: 1.2 }}>{design.packSubtitle ?? seoDefaults.subtitle}</span>
+                  {Boolean(design.packBadge?.trim()) && <span style={{ fontSize: 'clamp(6px, 1.4cqw, 20px)', background: '#fff4de', border: '1px solid #d7b28f', borderRadius: 20, padding: '1% 4%' }}>{design.packBadge}</span>}
+                </>}
+              </div>}
               {design.elements.map(e => {
                 const isSelected = e.id === selectedId;
                 return <div key={e.id} data-thumbnail-element="true" onPointerDown={event => startDrag(event,e,'move')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
-                  style={{ position: 'absolute', left: e.x+'%', top: e.y+'%', width: e.width+'%', height: e.height+'%', transform: `rotate(${e.rotation}deg)`, opacity: e.opacity ?? 1, border: isSelected ? '2px dashed #e36a1b' : '1px solid transparent', cursor: e.locked ? 'not-allowed' : 'move', boxSizing: 'border-box', touchAction: 'none', userSelect: 'none' }}>
+                  style={{ position: 'absolute', left: e.x+'%', top: e.y+'%', width: e.width+'%', height: e.height+'%', transform: `rotate(${e.rotation}deg)`, opacity: e.opacity ?? 1, zIndex: 2, border: isSelected ? '2px dashed #e36a1b' : '1px solid transparent', cursor: e.locked ? 'not-allowed' : 'move', boxSizing: 'border-box', touchAction: 'none', userSelect: 'none' }}>
                   {e.type === 'image' ? (imageUrl(e) ? <img src={imageUrl(e)} alt={assetMap.get(e.characterId || '')?.name || 'Character'} draggable={false} style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }}/> : <div style={{ color: '#d33' }}>Image unavailable</div>) :
                     (e.curve ? <CurvedText element={e} designWidth={design.width}/> : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', fontSize: `clamp(5px, ${(e.fontSize || 80) / design.width * 100}cqw, 250px)`, fontFamily: e.fontFamily || 'Arial', fontWeight: e.fontWeight || 'bold', color: e.color || '#333', whiteSpace: 'pre-line', overflow: 'hidden', pointerEvents: 'none' }}>{e.text}</div>)}
                   {isSelected && !e.locked && <div title="Drag to rotate" onPointerDown={event => startDrag(event,e,'rotate')} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
@@ -1321,13 +1521,18 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
         <input readOnly aria-label="Thumbnail size" value="1024 × 1024 px" />
         <small>Fixed thumbnail creation and standard JPG/PNG export: 1024 × 1024 pixels. Remote upscale is a separate optional action.</small>
         <label className="input-label">BACKGROUND COLOR</label>
-        <input type="color" value={design.background} onChange={e => mutate({ background: e.target.value })}/>
+        <input type="color" value={design.background} onChange={e => mutate({ background: e.target.value, renderedImageUrl: undefined, upscaledImageUrl: undefined })}/>
+        <label className="input-label" htmlFor="thumbnail-background-opacity">BACKGROUND OPACITY — {Math.round(backgroundAlpha(design) * 100)}%</label>
+        <input id="thumbnail-background-opacity" aria-label="Background opacity" type="range" min="0" max="100" step="1"
+          value={Math.round(backgroundAlpha(design) * 100)}
+          onChange={e => mutate({ backgroundOpacity: Number(e.target.value) / 100, renderedImageUrl: undefined, upscaledImageUrl: undefined })}/>
+        <small>0% = latar memudar putih, 100% = desain asli. PNG clipart dan teks editable tidak memudar. AI lettering yang menyatu dengan background ikut memudar karena masih satu gambar. Save, PNG, dan JPG memakai opacity yang sama.</small>
         <label className="input-label">AI DECORATIVE BACKGROUND (OPENAI)</label>
         <label className="input-label">BACKGROUND STYLE</label>
         <select aria-label="Background style" value={backgroundStyle} disabled={backgroundGenerating} onChange={event => setBackgroundStyle(event.target.value as typeof backgroundStyle)}><option value="watercolor">Artistic watercolor washes</option><option value="paper">Luxury textured paper</option><option value="gradient">Premium colorful gradient</option><option value="botanical">Abstract botanical motifs</option><option value="vintage">Vintage decorative texture</option></select>
         <label className="input-label">DECORATION INTENSITY</label>
         <select aria-label="Background decoration intensity" value={backgroundIntensity} disabled={backgroundGenerating} onChange={event => setBackgroundIntensity(event.target.value as typeof backgroundIntensity)}><option value="soft">Soft — visible pastel details</option><option value="balanced">Balanced — recommended</option><option value="vibrant">Vibrant — stronger colors</option></select>
-        <button className="outline-btn" type="button" disabled={backgroundGenerating || imageBusy} onClick={() => void generateReferenceBackground()}><WandSparkles size={15}/> {backgroundGenerating ? 'Generating background...' : 'Generate background (no clipart or text)'}</button>
+        <button className="outline-btn" type="button" disabled={backgroundGenerating || aiBusy} onClick={() => void generateReferenceBackground()}><WandSparkles size={15}/> {backgroundGenerating ? 'Generating background...' : 'Generate background (no clipart or text)'}</button>
         <small>Generate visible decorative textures and color variations. Original clipart and typography stay on top as independent layers. Generating again may incur API charges.</small>
         <label className="input-label">BACKGROUND IMAGE (LOCAL PNG/JPG)</label>
         <input type="file" accept="image/png,image/jpeg" disabled={backgroundUploading} onChange={e => void uploadBackground(e.target.files?.[0])}/>
@@ -1393,8 +1598,11 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
               Select for upscale
             </label>
             <button type="button" onClick={() => { setActiveId(item.id); setSelectedId(''); }} style={{ border: 0, background: 'transparent', textAlign: 'left', padding: 0, width: '100%', cursor: 'pointer' }}>
-            <div style={{ width: '100%', aspectRatio: item.width + '/' + item.height, position: 'relative', overflow: 'hidden', borderRadius: 6, backgroundColor: item.background }}>
-              {(item.backgroundImageUrl || item.aiImageUrl) && <img src={item.backgroundImageUrl || item.aiImageUrl} alt="" draggable={false} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}/>}
+            <div style={{ width: '100%', aspectRatio: item.width + '/' + item.height, position: 'relative', overflow: 'hidden', borderRadius: 6, backgroundColor: '#fff' }}>
+              <div data-thumbnail-gallery-background="true" style={{ position: 'absolute', inset: 0, opacity: backgroundAlpha(item), pointerEvents: 'none' }}>
+                <div style={{ position: 'absolute', inset: 0, backgroundColor: item.background }}/>
+                {(item.backgroundImageUrl || item.aiImageUrl) && <img src={item.backgroundImageUrl || item.aiImageUrl} alt="" draggable={false} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}/>}
+              </div>
               {!item.aiImageUrl && item.elements.map(element => element.type === 'image' ? <img key={element.id} src={imageUrl(element)} alt="" style={{ position: 'absolute', left: element.x + '%', top: element.y + '%', width: element.width + '%', height: element.height + '%', objectFit: 'contain', transform: 'rotate(' + element.rotation + 'deg)' }}/> : <span key={element.id} style={{ position: 'absolute', left: element.x + '%', top: element.y + '%', width: element.width + '%', color: element.color, fontFamily: element.fontFamily, fontSize: 9, overflow: 'hidden' }}>{element.text}</span>)}
             </div>
             <strong style={{ display: 'block', marginTop: 7, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</strong>
@@ -1410,10 +1618,10 @@ export default function ThumbnailDesigner({ registerSaveControls, title, aiDefau
             {item.upscaledImageUrl ? <button type="button" className="outline-btn" style={{ fontSize: 12, marginTop: 6 }} onClick={() => void compareThumbnail(item)}>Compare images</button>
               : item.aiImageUrl && <a href={item.aiImageUrl} download style={{ display: 'block', fontSize: 12 }}>View AI image</a>}
             <div style={{ display: 'flex', gap: 5, marginTop: 8, flexWrap: 'wrap' }}>
-              {item.originalAssetsOnly && item.backgroundImageUrl && <button type="button" className="outline-btn" style={{ fontSize: 11, padding: '5px 7px', flex: 1 }} disabled={aiBusy || Boolean(backgroundRetryId)} onClick={() => void reLayoutWithVision(item)}>
+              {item.originalAssetsOnly && item.backgroundImageUrl && <button type="button" className="outline-btn" style={{ fontSize: 11, padding: '5px 7px', flex: 1 }} disabled={aiBusy || Boolean(backgroundRetryId)} onClick={() => item.packSlideKey === 'custom-canvas' ? (setActiveId(item.id), setMessage('Custom canvas positions are manually authored. Move original clipart on the canvas; no AI re-layout is applied.')) : void reLayoutWithVision(item)}>
                 <WandSparkles size={12}/> {backgroundRetryId === item.id ? 'Analyzing...' : 'Re-layout with AI Vision'}
               </button>}
-              {item.originalAssetsOnly && <button type="button" className="outline-btn" style={{ fontSize: 11, padding: '5px 7px', flex: 1 }} disabled={aiBusy || Boolean(backgroundRetryId)} onClick={() => void retryBackground(item)}>
+              {item.originalAssetsOnly && <button type="button" className="outline-btn" style={{ fontSize: 11, padding: '5px 7px', flex: 1 }} disabled={aiBusy || Boolean(backgroundRetryId)} onClick={() => item.packSlideKey === 'custom-canvas' ? (setActiveId(item.id), setMessage('Choose Generate AI Background & Typography in Reference & Assets to regenerate without changing clipart placement.')) : void retryBackground(item)}>
                 <WandSparkles size={12}/> {backgroundRetryId === item.id ? 'Generating...' : item.backgroundImageUrl ? 'Regenerate AI' : 'Generate AI Background'}
               </button>}
               <button type="button" className="outline-btn" aria-label={'Delete thumbnail ' + item.name} title="Delete this thumbnail only" style={{ color: '#b91c1c', fontSize: 11, padding: '5px 7px' }} disabled={aiBusy || Boolean(item.upscaleJob)} onClick={() => deleteThumbnail(item.id)}>

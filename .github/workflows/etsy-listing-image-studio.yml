@@ -1,0 +1,39 @@
+name: Etsy Listing Image Studio checks
+
+on:
+  push:
+    branches:
+      - feature/etsy-listing-image-studio-15
+  pull_request:
+    paths:
+      - 'components/etsy-listing-image-studio.tsx'
+      - 'lib/etsy-listing-image-plan.ts'
+      - 'app/api/listing-image-studio/**'
+      - 'app/api/listing-style-analysis/**'
+      - 'lib/etsy-listing-visual-style.ts'
+      - 'lib/etsy-listing-creative-direction.ts'
+      - 'tests/etsy-listing-*.test.mjs'
+      - 'app/page.tsx'
+      - 'app/api/studio/route.ts'
+      - 'components/thumbnail-designer.tsx'
+      - 'app/api/thumbnail-ai-image/route.ts'
+      - 'lib/thumbnail-seo-defaults.ts'
+      - 'lib/thumbnail-design-brief.ts'
+      - 'tests/thumbnail-*.test.mjs'
+      - '.github/workflows/etsy-listing-image-studio.yml'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install pinned dependencies
+        run: npx --yes pnpm@11.25.0 install --frozen-lockfile
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test production invariants
+        run: npm run test:production

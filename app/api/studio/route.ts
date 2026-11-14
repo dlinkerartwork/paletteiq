@@ -77,6 +77,17 @@ export async function POST(req: Request) {
     if (current.length) {
       // An older browser snapshot must not erase assets already persisted by the image worker.
       const old = JSON.parse(current[0].data) as { thumbnails?: Array<{ id: string; upscaledImageUrl?: string; upscaleJob?: { id: string } }>; characters?: Array<{ id: string; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: { id: string }; status?: string; similarityReview?: SimilarityReview }>; lastDownloadedAt?: number; downloadCount?: number; lastDownloadImageCount?: number; downloadedImageIds?: string[] };
+      // Style analysis is server-owned and derived from original collection pixels.
+      // A stale browser snapshot must never erase its cached (paid) Vision result.
+      const storedStyle = (old as { listingVisualStyle?: unknown }).listingVisualStyle;
+      if (storedStyle) (incoming as typeof incoming & { listingVisualStyle?: unknown }).listingVisualStyle = storedStyle;
+      // The white-canvas pre-layouts are server-owned per-image drafts.
+      // Preserve them when other tabs save an older collection snapshot.
+      const savedLayouts = (old as { listingPreLayouts?: Record<string, unknown> }).listingPreLayouts;
+      if (savedLayouts) (incoming as typeof incoming & { listingPreLayouts?: Record<string, unknown> }).listingPreLayouts = savedLayouts;
+      // Listing Image Studio persists individual approved images independently. A stale
+      // browser save must never overwrite those saved results or the review decisions.
+      if (Array.isArray((old as { listingImages?: unknown[] }).listingImages)) incoming.listingImages = (old as { listingImages: unknown[] }).listingImages;
       // Download history belongs to the persisted collection, not a potentially stale browser snapshot.
       if (old.lastDownloadedAt) { incoming.lastDownloadedAt = old.lastDownloadedAt; incoming.downloadCount = old.downloadCount ?? 1; incoming.lastDownloadImageCount = old.lastDownloadImageCount; incoming.downloadedImageIds = old.downloadedImageIds; }
       const storedImages = new Map((old.characters || []).filter(c => c.imageUrl).map(c => [c.id, c]));

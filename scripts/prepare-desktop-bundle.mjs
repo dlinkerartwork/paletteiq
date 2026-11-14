@@ -11,10 +11,28 @@ if (!sourceNode.toLowerCase().endsWith('node.exe') || !existsSync(sourceNode)) t
 // Both editions include the Microsoft runtime needed by native Windows tools.
 const vcRedist = path.join(root, 'desktop', 'prerequisites', 'vc_redist.x64.exe');
 if (!existsSync(vcRedist)) throw new Error('Run scripts/prepare-windows-prerequisites.ps1 before packaging.');
-const verifiedPrerequisite = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-  "$s = Get-AuthenticodeSignature -LiteralPath $env:PALETTEIQ_BUILD_VC_REDIST; if ($s.Status -ne 'Valid' -or $s.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') { exit 1 }"
-], { env: { ...process.env, PALETTEIQ_BUILD_VC_REDIST: vcRedist }, windowsHide: true, encoding: 'utf8' });
-if (verifiedPrerequisite.error || verifiedPrerequisite.status !== 0) throw new Error('Bundled Visual C++ installer must have a valid Microsoft signature.');
+const verifiedPrerequisite = spawnSync('powershell.exe', [
+  '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
+  path.join(root, 'scripts', 'verify-windows-prerequisite.ps1')
+], {
+  env: {
+    ...process.env,
+    // GitHub Actions invokes npm from pwsh. Its PSModulePath can hide
+    // Windows PowerShell 5.1's bundled Microsoft.PowerShell.Security module.
+    // Prepend the Windows module directory so Authenticode validation still runs.
+    PSModulePath: [
+      path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'Modules'),
+      process.env.PSModulePath || ''
+    ].filter(Boolean).join(path.delimiter),
+    PALETTEIQ_BUILD_VC_REDIST: vcRedist
+  },
+  windowsHide: true, encoding: 'utf8'
+});
+if (verifiedPrerequisite.error || verifiedPrerequisite.status !== 0) {
+  const details = (verifiedPrerequisite.stderr || verifiedPrerequisite.stdout || verifiedPrerequisite.error?.message || '')
+    .replace(/[\r\n]+/g, ' ').slice(0, 400);
+  throw new Error('Bundled Visual C++ installer failed Microsoft signature verification. ' + details);
+}
 
 const unlicensedEdition = process.argv.includes('--no-license');
 const publicKey = path.join(root, 'license-issuer', 'public.pem');
