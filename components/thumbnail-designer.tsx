@@ -517,6 +517,16 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     'PaletteIQ composites exact original collection PNGs with AI Vision-fitted positions, preserving PNG proportions and transparency.'
   ].join('\n\n');
 
+  // Exact badge copy is rendered as an editable layer, not entrusted to AI lettering.
+  const badgeOverlay = (zone: ThumbnailBox, copy: string): ThumbnailElement[] => {
+    if (!copy.trim()) return [];
+    return [{ ...newText(copy.trim()), id: id(),
+      x: zone.x + zone.width*.18, y: zone.y + zone.height*.80,
+      width: zone.width*.64, height: Math.max(5,zone.height*.16),
+      fontFamily: 'Montserrat', fontSize: 53, fontWeight: 'bold', color: '#294735',
+      rotation: 0, curve: 0 }];
+  };
+
   // User-directed workflow: layout is authored ON the current canvas. The AI
   // receives only empty rectangles + exact text, never the original PNG pixels.
   // Unlike the legacy pack generator, this must never overwrite manual positions.
@@ -592,7 +602,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         slideName: 'Custom Canvas Artwork',
         backgroundStyle, backgroundIntensity: 'soft' as const, designBoldness: 'balanced' as const,
         coverStyle: 'editorial' as const, referenceDesign,
-        textZone: zone,
+        textZone: zone, reserveBadgeZone: Boolean(hasLettering && badge),
         // Image rectangles may intersect the text zone intentionally.
         // Exact source files, their contents, character names, and reference
         // images are never part of the generation request.
@@ -619,6 +629,25 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
       const currentDesign = latestDesignsRef.current.find(d => d.id === source.id) || source;
       const exactLayers = currentDesign.elements.filter(e => e.type === 'image')
         .map(e => ({ ...e, source: 'original' as const }));
+      let positioned = exactLayers;
+      let usedFallback = false;
+      if (!result.qcRejected && layoutMode === 'ai') {
+        setPackStatus('AI Vision arranging original clipart around the actual background and reference typography...');
+        const baseSlide = buildPack('complete-10', title, characters)[0];
+        if (baseSlide) {
+          const guidedSlide: PackSlide = {
+            ...baseSlide, key: 'custom-canvas', name: 'Reference-guided canvas',
+            headline: heading, subtitle, textZone: zone, limit: exactLayers.length
+          };
+          const placement = await placeOriginalsOverBackground(
+            guidedSlide, result.imageUrl, exactLayers, characters,
+            packHierarchy, 'editorial', referenceSlots, referenceDesign?.compositionGuide || ''
+          );
+          positioned = placement.elements;
+          usedFallback = placement.usedFallback;
+        }
+      }
+      const badgeTextLayers = hasLettering ? badgeOverlay(zone,badge) : [];
       const common: Partial<ThumbnailDesign> = {
         originalAssetsOnly: true, packSlideKey: 'custom-canvas',
         packTypography: hasLettering ? 'ai-artwork' : 'editable', packHeadline: heading, packSubtitle: subtitle,
@@ -638,16 +667,17 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
               generationError: 'Background requires review before use: ' + (result.qcReason || ''),
               // Keep the current background until explicitly approved.
               elements: exactLayers }
-          : { ...d, ...common, elements: exactLayers,
+          : { ...d, ...common, elements: [...positioned, ...badgeTextLayers],
               backgroundImageUrl: result.imageUrl, rejectedBackgroundUrl: undefined,
-              rejectedBackgroundReason: undefined, generationError: undefined }
+              rejectedBackgroundReason: undefined,
+              generationError: usedFallback ? 'AI Vision used reference-guided safe fallback positions.' : undefined }
         : d);
       latestDesignsRef.current = next;
       onChange(next);
       if (!result.qcRejected) setShowTypographyGuide(false);
       setMessage(result.qcRejected
         ? 'New AI background was flagged for review. Inspect it and explicitly approve it before composition; original clipart positions are preserved.'
-        : (hasLettering ? 'Artistic title, subtitle and optional badge applied.' : 'Text-free background applied.') + ' Manual clipart positions (including cropped edges) are unchanged. Save the design to persist.');
+        : (hasLettering ? 'Background, exact badge text and typography applied.' : 'Text-free background applied.') + (layoutMode === 'ai' ? ' Original PNGs were fitted to reference and background.' : ' Manual PNG positions preserved.') + ' Save the design to persist.');
       setPackStatus('');
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
