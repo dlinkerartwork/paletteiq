@@ -47,7 +47,7 @@ const intersects = (a: ListingTextZone, b: ListingTextZone) =>
 
 export function isListingPlacementSafe(
   placement: ListingPlacement, number: number, hasReference: boolean,
-  layout?: ListingReferenceLayout
+  layout?: ListingReferenceLayout, zoneOverride?: ListingTextZone
 ): boolean {
   if (!isCentralHero(number,hasReference)) return isListingPlacementTextSafe(placement);
   const p = placement;
@@ -58,7 +58,7 @@ export function isListingPlacementSafe(
   const rotatedH = Math.abs(p.height*Math.cos(radians))+Math.abs(p.width*Math.sin(radians));
   const rect = { x:p.x+(p.width-rotatedW)/2,y:p.y+(p.height-rotatedH)/2,
     width:rotatedW,height:rotatedH };
-  const protectedZone = heroTextZone(layout);
+  const protectedZone = zoneOverride || heroTextZone(layout);
   return rect.x >= 0 && rect.y >= 0 && rect.x+rect.width <= 100 &&
     rect.y+rect.height <= 100 && !intersects(rect,protectedZone);
 }
