@@ -68,7 +68,7 @@ export async function POST(req: Request) {
     vintage: 'Vintage decorative printing texture, softly weathered colored parchment, faded ornamental corner flourishes, halftone pigment details and gentle aged-paper tonal variation.'
   };
   const intensityGuidance: Record<string, string> = {
-    soft: 'Understated but undeniably visible artwork: at least three distinct pastel color regions, recognizable textural details, and a noticeable vignette. Avoid near-white blank surfaces.',
+    soft: 'Extremely subtle, pale and low-opacity decoration on predominantly warm ivory or white paper. Use very light pigment edges, no prominent color blocks. At least 85 percent of the image must remain light neutral space, except the necessary legible title. Avoid heavy washes, large saturated geometric shapes, harsh gradients, or dark vignettes.',
     balanced: 'Clearly visible decorative design with medium contrast, multiple complementary colored areas and varied textures. Decoration should be recognizable at small Etsy search thumbnail size.',
     vibrant: 'Expressive colorful decorative backdrop with stronger saturation, layered visual depth and lively abstract detailing. Keep a quiet central text zone despite the energetic edges.'
   };
@@ -138,6 +138,7 @@ export async function POST(req: Request) {
     referenceComposition ? 'Follow this reference-derived NONFIGURATIVE graphic composition and typography: ' + referenceComposition : ''
   ].filter(Boolean).join(' ');
   const graphicDirection = [
+    'CRITICAL BACKGROUND COLOR RESTRAINT: colors and watercolor washes must be translucent and whisper-soft. Reserve bold colors only for crisp readable typography; avoid dense pigment, dark fills, strong colored corner blocks, and loud multi-color backgrounds. Reference composition does not authorize heavy saturated color fields.',
     // Reference style deliberately outranks generic cover style when available.
     mode === 'background-only'
       ? 'Premium nonfigurative graphic composition: painterly movement, textless color fields, tactile paper and refined ornamental structure; no text, badges or writing.'
@@ -163,7 +164,7 @@ export async function POST(req: Request) {
       artisticStyles[letteringStyle],
       input.headline?.trim() ? 'EXACT MAIN TITLE: ' + JSON.stringify(safeText(input.headline)) + '.' : 'NO MAIN TITLE: leave title blank.',
       input.subtitle?.trim() ? 'EXACT SUBTITLE: ' + JSON.stringify(safeText(input.subtitle)) + '.' : 'NO SUBTITLE: leave subtitle blank.',
-      input.reserveBadgeZone ? 'NO BADGE TEXT: Reserve the LOWER 20 PERCENT of the title typography-safe rectangle as quiet, empty space for an exact badge layer added by PaletteIQ.' : 'NO BADGE: do not invent a badge or extra label.',
+      input.reserveBadgeZone && input.badge?.trim() ? 'USER-SPECIFIED EXACT BADGE LABEL: ' + JSON.stringify(safeText(input.badge)) + '. Design an understated EMPTY badge backing or quiet space to accommodate that exact text when PaletteIQ overlays it. DO NOT render badge letters in the background image; the exact badge text is composited later and must not be duplicated.' : 'NO BADGE: do not invent a badge or extra label.',
       'Arched, curved, flowing, gently waved, offset, or layered typography is welcome when suitable; the title can split across lines with visual rhythm. Use balanced size contrasts, beautiful shapes and premium watercolor/editorial styling.',
       'Prioritize legibility on Etsy search thumbnails: keep the lettering within the designated text-safe area, retain correct wording, spelling and punctuation, avoid obscuring the original clipart slots.',
       'Do not add ANY other words, quantity, DPI, fake watermark or marketing claims.',
@@ -209,6 +210,7 @@ export async function POST(req: Request) {
       'Visible areas where original PNG assets will later be composited. Some original images deliberately extend BEYOND the canvas: preserve their visible slots and allow natural crop at the final canvas edge. Leave these slots free of competing decoration; never fill them with substitutes:', JSON.stringify(visibleLayout),
       'Exact original PNGs may intentionally OVERLAP the lettering after compositing, including over the headline or subtitle. The user owns the positions. Do not relocate text or block generation merely because a foreground PNG intersects the typography area; allow artistic layering and keep the remaining exposed letters legible. NEVER draw substitute objects.',
       'Premium design mood (follow reference graphic style when provided):', graphicDirection,
+      'Soft and airy reference-derived design must outweigh saturated color palette descriptors. Keep most of the background near white or ivory.',
       ...(referenceComposition ? ['REFERENCE COMPOSITION HAS PRIORITY OVER DEFAULT ABSTRACT DECORATION: ' + referenceComposition] : []),
       ...(designBrief ? ['REFERENCE & ASSETS SETTINGS (graphic art direction ONLY; never synthesize objects):', designBrief] : []),
       ...(isHeroCover ? ['HERO ART DIRECTION PRIORITY:', heroReferenceStyle] : []),
