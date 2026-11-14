@@ -10,6 +10,7 @@ import { listingCreativeDirection, listingCreativeSummary, listingMockupScene } 
 import { currentListingVisualStyle, listingStyleDirection, type ListingVisualStyleProfile } from '@/lib/etsy-listing-visual-style';
 import { estimateListingImageGenerationCost, type GeneratedImageUsage } from '@/lib/etsy-listing-image-cost';
 import { aiFirstConceptPrompt, aiFirstBackgroundPrompt, AI_FIRST_MAX_REFERENCE_SHEETS, AI_FIRST_MAX_REFERENCE_ASSETS } from '@/lib/etsy-listing-ai-first';
+import { originalAssetStorageKey, sourceZipFilename, selectedSourceManifest } from '@/lib/etsy-listing-source-zip';
 import {
   LISTING_IMAGE_SPECS, LISTING_HEIGHT, LISTING_WIDTH, listingFilename, listingTitle,
   originalAssets, isSquareListingApproved, validListingPlacement, defaultListingCompositionMode, listingImageTextDefaults, DEFAULT_MAIN_COVER_CLIPART_COUNT, type ListingCompositionMode, type ListingFinalReview, type ListingImageText, type ListingImageRecord, type ListingPlacement, type ListingAsset, type ListingImageStatus
@@ -239,7 +240,7 @@ export async function GET(request: Request) {
 }
 
 type Input = {
-  action?: 'generate' | 'preview-prompt' | 'generate-concept' | 'save' | 'layout' | 'reject' | 'critique' | 'prelayout'; projectId?: string; number?: number;
+  action?: 'generate' | 'preview-prompt' | 'generate-concept' | 'source-zip' | 'save' | 'layout' | 'reject' | 'critique' | 'prelayout'; projectId?: string; number?: number;
   image?: ListingImageRecord; model?: string; quality?: string;
   backgroundUrl?: string; conceptUrl?: string; placements?: ListingPlacement[]; revisionNotes?: string;
   selectedAssetIds?: string[]; sampledAssetIds?: string[]; referenceSheets?: string[];
@@ -419,6 +420,47 @@ export async function POST(request: Request) {
       return bad('Could not reject and delete listing image: ' +
         (error instanceof Error ? error.message : String(error)).slice(0, 180), 500);
     }
+  }
+  if (input.action === 'source-zip') {
+    // A ZIP is a downloadable package of ORIGINAL bytes; it is not a visual
+    // input to OpenAI. The AI-first workflow uses the same selected asset IDs
+    // to render numbered contact sheets for the supported Vision image input.
+    const collection=originalAssets(project.characters || []);
+    const byId=new Map(collection.map(a=>[a.id,a]));
+    const ids=input.selectedAssetIds;
+    if (!Array.isArray(ids)||!ids.length||ids.length>collection.length||
+        ids.some(id=>typeof id!=='string'||!byId.has(id))||
+        new Set(ids).size!==ids.length)
+      return bad('Select original collection clipart before creating a source ZIP');
+    const storage=bucket();
+    if(!storage) return bad('Image storage is unavailable',503);
+    const refs: Array<{asset:ListingAsset;key:string;name:string}> = [];
+    for(let i=0;i<ids.length;i++){
+      const asset=byId.get(ids[i])!;
+      const ref=originalAssetStorageKey(asset,user.userId);
+      if(!ref) return bad('Selected artwork does not point to a managed original image: '+asset.name,409);
+      if(!(await storage.head(ref.key)))
+        return bad('Original artwork is missing from storage: '+asset.name,409);
+      refs.push({asset,key:ref.key,name:sourceZipFilename(i,asset,ref.extension)});
+    }
+    const title=typeof input.title==='string'?sanitizedText(input.title,140):'';
+    const subtitle=typeof input.subtitle==='string'?sanitizedText(input.subtitle,140):'';
+    const badge=typeof input.badge==='string'?sanitizedText(input.badge,60):'';
+    const manifest=selectedSourceManifest({
+      theme:project.subtheme||project.theme||project.name,title,subtitle,badge,
+      prompt:typeof input.backgroundPrompt==='string'?input.backgroundPrompt.slice(0,24000):'',
+      assets:refs.map(({asset,name})=>({assetId:asset.id,name:asset.name,category:asset.category,file:name}))
+    });
+    const meta=JSON.stringify(manifest,null,2);
+    const entries:ZipEntry[]=[
+      {name:'paletteiq-source-manifest.json',stream:async()=>new Blob([meta],{type:'application/json'}).stream()},
+      ...refs.map(({name,key}):ZipEntry=>({name,stream:async()=> (await storage.get(key))?.body||null}))
+    ];
+    const safe=(project.name||'collection').replace(/[^a-zA-Z0-9-_ ]/g,'').replace(/\\s+/g,'-').slice(0,64)||'collection';
+    return new Response(zipStream(entries),{headers:{
+      'Content-Type':'application/zip','Content-Disposition':'attachment; filename="'+safe+'-original-clipart-source.zip"',
+      'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'
+    }});
   }
   if (input.action === 'prelayout') {
     // Pre-generation layout is independent of saved/approved JPGs.
@@ -705,9 +747,15 @@ export async function POST(request: Request) {
     new Set(preLayout.map(p => p.assetId)).size !== preLayout.length))
     return bad('Invalid pre-layout: select valid original collection artwork and arrange it on the white canvas.');
   const mode = input.compositionMode ?? defaultListingCompositionMode(input.number);
+  const sourceById = new Map(originalAssets(project.characters || []).map(a=>[a.id,a]));
+  const selectedSources = Array.isArray(input.placements)
+    ? [...new Set(input.placements.map(p=>p.assetId))].map(id=>sourceById.get(id)).filter((a):a is ListingAsset=>Boolean(a))
+    : originalAssets(project.characters || []);
   const prompt = mode === 'ai-first'
     ? aiFirstConceptPrompt({ theme: project.subtheme || project.theme || project.name, ...text,
-      selectedCount: input.featuredCount || count,
+      style:project.style,palette:project.palette,texture:project.texture,
+      sourceAssets:selectedSources.map(a=>({name:a.name,category:a.category})),
+      selectedCount:selectedSources.length || input.featuredCount || count,
       revisionNotes: typeof input.revisionNotes === 'string' ? input.revisionNotes : '' })
     : artPrompt(input.number,
       { ...project, selectedArtworkCount: input.featuredCount },
