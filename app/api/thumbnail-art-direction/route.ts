@@ -91,7 +91,7 @@ export async function POST(request: Request) {
     'Safe typography zone:',JSON.stringify(titleArea),
     'REFERENCE-DRIVEN LAYOUT: make the size rhythm and position of original objects match the reference composition, while keeping all lettering readable. Position/scale originals after analyzing the real AI background.',
     'Reference composition guide (graphic layout only; never illustrate reference objects):',
-    String(body.referenceCompositionGuide || '').replace(/[<>\\r\\n]/g,' ').slice(0,450),
+    String(body.referenceCompositionGuide || '').replace(/[<>\r\n]/g,' ').slice(0,450),
     'Reference original-asset placement hints (prefer these while avoiding typography):',JSON.stringify((body.suggestedSlots || []).slice(0,36)).slice(0,2600),
     'Authorized ORIGINAL assets:',JSON.stringify(selected)
   ].join('\n');
