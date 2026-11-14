@@ -230,9 +230,13 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
       ? (layoutReference ? heroTextZone(layoutReference) : current?.protectedTextZone || heroTextZone())
       : undefined;
     setWorking('render'); setMessage('Compositing ' + layout.length + ' exact original clipart images at 1024 × 1024 px...');
-    if (!layout.length || duplicateListingAssetIds(layout).length ||
-        !layout.every(p => isListingPlacementSafe(p,step,heroReference,layoutReference,protectedZone)))
-      throw Error('One or more original PNGs overlap the reference-guided text area, or repeat an asset. Adjust the layout before saving.');
+    if (!layout.length)
+      throw Error('No original clipart is available to render for this image.');
+    const reviewWarnings: string[] = [];
+    if (duplicateListingAssetIds(layout).length)
+      reviewWarnings.push('Repeated original clipart detected. Replace duplicates if you want a more distinct composition.');
+    if (!layout.every(p => isListingPlacementSafe(p,step,heroReference,layoutReference,protectedZone)))
+      reviewWarnings.push('Some original clipart may overlap the text area. Review the saved image and adjust placements if needed.');
     const file = await compose(background, layout, assets);
     setMessage('Saving JPG preview to the collection in safe upload chunks...');
     const renderedImageUrl = await upload(projectId, step, file, (done, total) => setMessage('Uploading original-asset JPG: ' + done + '/' + total + ' parts...'));
@@ -241,11 +245,12 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
       compositionMode: protectedZone ? 'reference-guided' : 'top-gallery',
       protectedTextZone: protectedZone,
       protectedTextZones: layoutReference ? referenceTextZones(layoutReference) : current?.protectedTextZones,
-      notes: info, updatedAt: Date.now()
+      reviewWarnings, notes: info, updatedAt: Date.now()
     };
     await saveRecord(image);
     setChanges(old => { const next = { ...old }; delete next[step]; return next; });
-    setMessage('Image ' + String(step).padStart(2, '0') + ' saved as a draft. Review the actual pixels and approve or revise.');
+    setMessage('Image ' + String(step).padStart(2, '0') + ' saved as a draft. Review or request revisions.' +
+      (reviewWarnings.length ? ' ' + reviewWarnings.join(' ') : ''));
   };
   const generate = async () => {
     if (working || settingsBusy) return;
@@ -258,7 +263,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
       let effectivePositions = config.layoutMode === 'manual' ? positions :
         fitListingPlacementsToReference(step,positions,Boolean(config.referenceImage),referenceDesign);
       if (duplicateListingAssetIds(effectivePositions).length)
-        throw Error('Duplicate clipart is selected. Replace repeated artwork with distinct collection PNGs.');
+        setMessage('Some selected clipart repeats; the image can still be saved as draft and revised later.');
       if ((step === 3 || step === 5) && !current?.placements && !changes[step] &&
           !Object.keys(categories).length && !assets.some(a => a.category || a.subtheme || a.group)) {
         setMessage('Organizing the collection into honest categories before designing...');
