@@ -40,8 +40,15 @@ export function originalAssets(assets: ListingAsset[]): ListingAsset[] {
   const identity = (value: string) => {
     try {
       const url = new URL(value, 'https://paletteiq.local');
-      return url.origin + url.pathname + (url.pathname === '/api/character-image' ?
-        '?characterId=' + (url.searchParams.get('characterId') || '') : '');
+      // Query parameters can carry the ONLY asset identity (assetId/imageId).
+      // Never collapse the entire /api/assets collection into a single URL.
+      const stable = ['assetId','imageId','characterId','id','key'].map(key =>
+        url.searchParams.has(key) ? key+'='+url.searchParams.get(key) : '').filter(Boolean);
+      return url.origin + url.pathname +
+        (stable.length ? '?' + stable.join('&') :
+          (url.search ? '?' + [...url.searchParams.entries()]
+            .filter(([key]) => !['token','expires','signature','cache','t'].includes(key))
+            .sort(([a],[b]) => a.localeCompare(b)).map(([k,v])=>k+'='+v).join('&') : ''));
     } catch { return value.split('?')[0]; }
   };
   const words = (value: string) => value.toLowerCase()
