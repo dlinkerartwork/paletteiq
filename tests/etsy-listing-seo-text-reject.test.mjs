@@ -41,7 +41,7 @@ test('every generate sends editable exact wording to the server and persists it 
   assert.match(backend,/NO BADGE: do not invent a badge/);
   assert.match(backend,/Invalid ' \+ key/);
   assert.match(plan,/title\?: string; subtitle\?: string; badge\?: string/);
-  assert.match(backend,/title, subtitle, badge, notes:/);
+  assert.match(backend,/title, subtitle, badge, finalReview, notes:/);
 });
 
 test('edits after generated AI lettering require regeneration before rerender or approve',()=>{
