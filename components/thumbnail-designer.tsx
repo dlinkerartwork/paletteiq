@@ -539,7 +539,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     if (imageLayers.length !== source.elements.filter(e => e.type === 'image').length) {
       setMessage('An image layer has no original collection PNG. Replace it before generating.'); return;
     }
-    const zone = source.packTextZone || { x: 22, y: 30, width: 56, height: 34 };
+    let zone = source.packTextZone || { x: 22, y: 30, width: 56, height: 34 };
     // Deliberate bleed beyond the canvas is allowed. Only the visible area is
     // composited and reserved; the full source PNG is never resized or redrawn.
     const hasVisibleAsset = imageLayers.some(e =>
@@ -577,10 +577,22 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
               referenceStyle, count: Math.min(imageLayers.length, 24)
             })
           });
-          const result = await readApiJson<{ layout?: ThumbnailDesign['referenceDesign'] & {slots?: typeof referenceSlots}; error?: string }>(
+          const result = await readApiJson<{ layout?: ThumbnailDesign['referenceDesign'] & {slots?: typeof referenceSlots; texts?: Array<{x:number;y:number;width:number;height:number}>}; error?: string }>(
             response, 'Reference analysis');
           if (result.layout) {
             referenceSlots = result.layout.slots || [];
+            if (layoutMode === 'ai') {
+              const textBoxes = (result.layout.texts || []).slice(0,3).filter(t =>
+                [t.x,t.y,t.width,t.height].every(Number.isFinite) && t.width > 0 && t.height > 0);
+              if (textBoxes.length) {
+                const x = Math.max(0,Math.min(...textBoxes.map(t=>t.x)));
+                const y = Math.max(0,Math.min(...textBoxes.map(t=>t.y)));
+                const right = Math.min(100,Math.max(...textBoxes.map(t=>t.x+t.width)));
+                const bottom = Math.min(100,Math.max(...textBoxes.map(t=>t.y+t.height)));
+                if (right-x >= 20 && right-x <= 85 && bottom-y >= 15 && bottom-y <= 80)
+                  zone = {x,y,width:right-x,height:bottom-y};
+              }
+            }
             referenceDesign = { graphicMotif: result.layout.graphicMotif,
               letteringStyle: result.layout.letteringStyle, paletteMood: result.layout.paletteMood,
               compositionGuide: result.layout.compositionGuide };
