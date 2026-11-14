@@ -53,21 +53,21 @@ export type MockupScene = { name: string; prompt: string };
 export function listingMockupScene(number: number, family: ListingArtDirection['family']): MockupScene | null {
   if (number === 8) return {
     name:'sticker sheet',
-    prompt:'Photorealistic premium overhead view of a large completely BLANK white die-cut sticker sheet on an uncluttered desk. Flat central unprinted sheet from x=35–68% and y=38–88% in the final 4:3 canvas, evenly lit. No printed stickers or illustrations.'
+    prompt:'Photorealistic premium overhead view of a large completely BLANK white die-cut sticker sheet on an uncluttered desk. Flat central unprinted sheet from x=35–68% and y=38–88% in the final 1:1 square canvas, evenly lit. No printed stickers or illustrations.'
   };
   if (number === 9) return family === 'cute' || family === 'seasonal'
-    ? {name:'sweatshirt',prompt:'Photorealistic overhead view of ONE plain light-cream sweatshirt laid FLAT, front facing camera, with a perfectly blank chest panel from x=40–63% and y=45–77% in final 4:3. No printed design, embroidery or logo.'}
-    : {name:'T-shirt',prompt:'Photorealistic overhead view of ONE plain off-white T-shirt laid FLAT with clearly visible blank front chest region x=40–63%, y=45–77% in final 4:3. No print, embroidered art or brand.'};
+    ? {name:'sweatshirt',prompt:'Photorealistic overhead view of ONE plain light-cream sweatshirt laid FLAT, front facing camera, with a perfectly blank chest panel from x=40–63% and y=45–77% in final 1:1 square. No printed design, embroidery or logo.'}
+    : {name:'T-shirt',prompt:'Photorealistic overhead view of ONE plain off-white T-shirt laid FLAT with clearly visible blank front chest region x=40–63%, y=45–77% in final 1:1 square. No print, embroidered art or brand.'};
   if (number === 10) return family === 'cute' || family === 'seasonal'
-    ? {name:'mug',prompt:'Photorealistic eye-level centered view of ONE large plain white ceramic mug with its broad cylindrical front print panel facing camera, no perspective obstruction, blank usable center from x=40–63% and y=45–77% in final 4:3. No print, writing or decorative objects on mug.'}
-    : {name:'tote bag',prompt:'Photorealistic straight-on view of ONE natural ivory canvas tote bag with the front fabric panel facing camera, perfectly blank central print area x=40–63% and y=45–77% in final 4:3. No logo, print or decoration.'};
+    ? {name:'mug',prompt:'Photorealistic eye-level centered view of ONE large plain white ceramic mug with its broad cylindrical front print panel facing camera, no perspective obstruction, blank usable center from x=40–63% and y=45–77% in final 1:1 square. No print, writing or decorative objects on mug.'}
+    : {name:'tote bag',prompt:'Photorealistic straight-on view of ONE natural ivory canvas tote bag with the front fabric panel facing camera, perfectly blank central print area x=40–63% and y=45–77% in final 1:1 square. No logo, print or decoration.'};
   if (number === 11) return {
     name:'packaging label',
-    prompt:'Photorealistic overhead view of ONE premium kraft product box with one large blank smooth white rectangular label perfectly flat to camera, centered print area x=40–62% and y=47–77% in final 4:3. No graphic, logo, decorative print or writing.'
+    prompt:'Photorealistic overhead view of ONE premium kraft product box with one large blank smooth white rectangular label perfectly flat to camera, centered print area x=40–62% and y=47–77% in final 1:1 square. No graphic, logo, decorative print or writing.'
   };
   if (number === 12) return family === 'minimal' || family === 'cute'
-    ? {name:'planner DIY spread',prompt:'Photorealistic overhead view of an OPEN blank planner DIY spread on cream paper with a large completely empty flat central page x=34–70%, y=42–82% in final 4:3. No printed icons, drawings, decorative art, lettering or cards.'}
-    : {name:'scrapbook DIY spread',prompt:'Photorealistic premium overhead scrapbook DIY layout with a large completely BLANK, flat cream craft-paper page x=34–70% and y=42–82% in final 4:3. No printed art, photographs, greeting cards, invitations or decorations.'};
+    ? {name:'planner DIY spread',prompt:'Photorealistic overhead view of an OPEN blank planner DIY spread on cream paper with a large completely empty flat central page x=34–70%, y=42–82% in final 1:1 square. No printed icons, drawings, decorative art, lettering or cards.'}
+    : {name:'scrapbook DIY spread',prompt:'Photorealistic premium overhead scrapbook DIY layout with a large completely BLANK, flat cream craft-paper page x=34–70% and y=42–82% in final 1:1 square. No printed art, photographs, greeting cards, invitations or decorations.'};
   return null;
 }
 
