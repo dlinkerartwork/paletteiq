@@ -25,7 +25,8 @@ export type ListingAsset = { id: string; name: string; imageUrl?: string; catego
 export type ListingPlacement = { assetId: string; x: number; y: number; width: number; height: number; rotation?: number };
 export type ListingImageRecord = {
   number: number; status: ListingImageStatus; backgroundUrl?: string; renderedImageUrl?: string;
-  placements?: ListingPlacement[]; notes?: string; updatedAt: number;
+  placements?: ListingPlacement[]; compositionMode?: 'hero-center' | 'top-gallery';
+  notes?: string; updatedAt: number;
 };
 export type ListingImageKind = typeof LISTING_IMAGE_SPECS[number]['kind'];
 
