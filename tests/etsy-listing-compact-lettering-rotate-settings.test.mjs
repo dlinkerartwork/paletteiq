@@ -11,16 +11,16 @@ const settings=readFileSync(new URL('../components/studio-settings.tsx',import.m
 test('source collection art dominates thumbnail: prompt uses scaled compact artistic lettering by default',()=>{
   assert.match(backend,/textScale: 'compact' \| 'balanced' \| 'statement' = 'compact'/);
   assert.match(backend,/TYPOGRAPHY SCALE — COMPACT \(default\)/);
-  assert.match(backend,/title block HEIGHT no more than about 22% of canvas/);
-  assert.match(backend,/supporting subtitle about 5–7%/);
-  assert.match(backend,/all text combined ideally below 33%/);
-  assert.match(backend,/Keep title readable but NOT giant/);
+  assert.match(backend,/ENTIRE main title block only about 14–16% of canvas height/);
+  assert.match(backend,/subtitle only about 3–5%/);
+  assert.match(backend,/combined lettering generally below 24%/);
+  assert.match(backend,/authentic original artwork must dominate/);
   assert.match(backend,/Do not make every line equally large/);
   assert.match(backend,/Optional badge must remain modest/);
   assert.match(backend,/user-selected genuine clipart layers/);
   assert.match(backend,/No generated imitation clipart or substitute objects/);
   assert.match(backend,/if \(input\.textScale !== undefined && !\['compact','balanced','statement'\]\.includes\(input\.textScale\)\)/);
-  assert.match(ui,/<option value="compact">Compact — smaller title, more artwork \(recommended\)<\/option>/);
+  assert.match(ui,/<option value="compact">Compact — extra-small title, artwork first \(recommended\)<\/option>/);
   assert.match(ui,/const \[textScale, setTextScale\] = useState<'compact' \| 'balanced' \| 'statement'>\('compact'\)/);
   assert.match(ui,/placements: effectivePositions, textScale/);
 });

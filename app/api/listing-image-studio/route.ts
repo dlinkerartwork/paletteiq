@@ -11,7 +11,7 @@ import { currentListingVisualStyle, listingStyleDirection, type ListingVisualSty
 import { estimateListingImageGenerationCost, type GeneratedImageUsage } from '@/lib/etsy-listing-image-cost';
 import {
   LISTING_IMAGE_SPECS, LISTING_HEIGHT, LISTING_WIDTH, listingFilename, listingTitle,
-  originalAssets, isSquareListingApproved, listingImageTextDefaults, type ListingFinalReview, type ListingImageText, type ListingImageRecord, type ListingPlacement, type ListingAsset, type ListingImageStatus
+  originalAssets, isSquareListingApproved, listingImageTextDefaults, DEFAULT_MAIN_COVER_CLIPART_COUNT, type ListingFinalReview, type ListingImageText, type ListingImageRecord, type ListingPlacement, type ListingAsset, type ListingImageStatus
 } from '@/lib/etsy-listing-image-plan';
 
 const bad = (message: string, status = 400) => Response.json({ error: message }, { status });
@@ -237,7 +237,7 @@ type Input = {
   action?: 'generate' | 'save' | 'layout' | 'reject' | 'critique' | 'prelayout'; projectId?: string; number?: number;
   image?: ListingImageRecord; model?: string; quality?: string;
   backgroundUrl?: string; placements?: ListingPlacement[]; revisionNotes?: string;
-  featuredCount?: number; critiqueFeedback?: string; textScale?: 'compact' | 'balanced' | 'statement';
+  featuredCount?: number; critiqueFeedback?: string; textScale?: 'compact' | 'balanced' | 'statement'; backgroundStyle?: 'plain' | 'minimal' | 'soft-texture';
   title?: string; subtitle?: string; badge?: string;
 };
 /**
@@ -245,7 +245,7 @@ type Input = {
  * are composited by the client AFTER this call; the image model never receives
  * a copy of the PNGs and cannot replace or redraw them.
  */
-function artPrompt(number: number, project: StoredProject, count: number, revisionNotes = '', text?: ListingImageText, preLayout?: ListingPlacement[], textScale: 'compact' | 'balanced' | 'statement' = 'compact'): string {
+function artPrompt(number: number, project: StoredProject, count: number, revisionNotes = '', text?: ListingImageText, preLayout?: ListingPlacement[], textScale: 'compact' | 'balanced' | 'statement' = 'compact', backgroundStyle: 'plain' | 'minimal' | 'soft-texture' = 'minimal'): string {
   const spec = LISTING_IMAGE_SPECS[number - 1];
   const direction = listingCreativeDirection(project);
   const observed = currentListingVisualStyle(project.listingVisualStyle, project.characters || []);
@@ -267,18 +267,26 @@ function artPrompt(number: number, project: StoredProject, count: number, revisi
     observed
       ? listingStyleDirection(observed)
       : 'No visual sample analysis of the real collection is available. Treat the stored collection style and theme as secondary descriptive hints, not visual evidence. Avoid imposing generic watercolor or retro aesthetics without support.',
-    'CREATIVE FREEDOM: Design a fresh premium Etsy layout with bespoke expressive lettering and nonfigurative graphic decoration. Innovate freely in composition, layering, balance and hierarchy, while matching the OBSERVED source-art medium, softness, palette, texture and mood when an analyzed profile exists.',
+    'CREATIVE FREEDOM: Design a fresh premium Etsy layout with bespoke expressive lettering, innovative balance and restrained nonfigurative details. Be imaginative with hierarchy but keep the BACKGROUND quiet and subordinate to the original clipart; match the OBSERVED source-art medium, softness, palette and mood when available.',
     'The collection theme guides the SUBJECT of the merchandising message, but is not permission to draw themed subjects. Original clipart will be composited later in exact original PNG pixels by PaletteIQ.',
     'Design typography for quick readability on a small Etsy search-result thumbnail: bold but friendly high-contrast custom lettering, artistically curved or hand-painted where appropriate, with restrained supporting text.',
     'MERCHANDISING HIERARCHY: original collection artwork is the product and must remain prominent; no generic giant text wall. Keep a clear headline and much smaller supporting subtitle. If both are long, prioritize visual clarity rather than inflating every word. Never add extra words or repeat the provided title in tiny ornamental lettering.',
     textScale === 'compact'
-      ? 'TYPOGRAPHY SCALE — COMPACT (default): Make custom lettering refined and SMALL relative to the whole 1024 square. Aim for total main title block HEIGHT no more than about 22% of canvas (including 2-line titles), supporting subtitle about 5–7%, and all text combined ideally below 33%. Keep title readable but NOT giant: original clipart should visually dominate this Etsy merchandise cover. Treat these percentages as art-direction targets, not a fixed location or box.'
+      ? 'TYPOGRAPHY SCALE — COMPACT (default): Make custom lettering refined, readable, and decidedly SMALL relative to the 1024 square. Aim for the ENTIRE main title block only about 14–16% of canvas height (INCLUDING all title lines), subtitle only about 3–5%, and combined lettering generally below 24%. Never enlarge the heading merely to fill empty space; the authentic original artwork must dominate. These are art-direction proportions, not a mandatory fixed position or box.'
       : textScale === 'balanced'
-        ? 'TYPOGRAPHY SCALE — BALANCED: Main title group roughly 26–30% of canvas height at most, subtitle about 6–9%, total typography below 40%. Keep source original artwork as the dominant product illustration.'
-        : 'TYPOGRAPHY SCALE — STATEMENT: Expressive headline may use up to roughly 33% of canvas height, subtitle no more than 10%, but preserve generous visible room for original clipart and never let text overpower the source artwork.',
+        ? 'TYPOGRAPHY SCALE — BALANCED: Main title group roughly 19–22% of canvas height at most, subtitle about 4–6%, combined typography below 29%. Keep source original artwork as the dominant product illustration.'
+        : 'TYPOGRAPHY SCALE — STATEMENT: Expressive headline may use up to roughly 26–28% of canvas height, subtitle no more than 7%, but leave plenty of room for original clipart and never let text overpower the artwork.',
     'Scale down the lettering intelligently when the title contains multiple words. Do not make every line equally large: one elegant compact headline with a smaller supporting subtitle is preferred. Avoid tall stacked lettering that fills the entire center from top to bottom.',
     'Optional badge must remain modest (about 8–12% of canvas width) and separated enough from critical title letters to stay legible after real clipart is composited. Never create a larger competing badge than the actual source illustrations.',
-    'Reduce ornamental noise. Use restrained background detailing and only the decorative accents needed to frame the source artwork, letting the collection illustration style carry the appeal.',
+    'BACKGROUND RULE: the background must support, never compete with, the ORIGINAL clipart. It must remain theme-matched but plain/minimal, with no elaborate frames, geometric gold lines, busy swirls, heavy watercolor blobs, repeated motifs or fake illustrative flowers/vehicles. Reserve most visual contrast and rich details for the pasted originals.',
+    number >= 8 && number <= 12
+      ? 'MOCKUP EXCEPTION: retain a realistic uncluttered blank product environment; only the extra backdrop decorations should be minimal.'
+      : backgroundStyle === 'plain'
+        ? 'BACKGROUND STYLE — PLAIN: use a nearly flat clean cream/white/light neutral color softly tinted toward the saved collection palette. No frames, patterns, decorative curves or visible washes. Keep ample negative space, with ONLY the exact requested lettering.'
+        : backgroundStyle === 'soft-texture'
+          ? 'BACKGROUND STYLE — SOFT TEXTURE: use a very light, low-contrast paper/pigment grain or faint edge wash, harmonized to the collection style. No hard graphic frames or dominant ornament. Keep at least 85% of the background quiet and nearly uniform.'
+          : 'BACKGROUND STYLE — MINIMAL (default): a quiet clean white/cream/pale theme-aligned backdrop with only a whisper of paper texture or faint peripheral color accents. Keep about 90% visually simple; no strong frames, layered geometries, golden swirls or large decoration. The ORIGINAL clipart provides all the rich visual interest.',
+    'MAIN IMAGE TEXT must stay subordinate to the real artwork. Use more whitespace, small elegant headline lettering, and smaller subtitle; do not fill the entire central region with text.',
     preLayout?.length
       ? 'USER-ARRANGED WHITE CANVAS PRE-LAYOUT (spatial references ONLY; do not draw the assets): ' +
         JSON.stringify(preLayout.map(p => ({x:p.x,y:p.y,width:p.width,height:p.height,rotation:p.rotation??0}))) +
@@ -292,7 +300,7 @@ function artPrompt(number: number, project: StoredProject, count: number, revisi
     'Use clean commercial visual hierarchy, artwork-first layout, consistent recognizable product identity and elegant foreground/background separation.',
     'No greeting cards, invitation cards, wedding stationery or card-based mockups by default. Those are NOT included in this workflow.',
     number === 1
-      ? 'MAIN COVER PRIORITY: make the title clearly readable at mobile size while letting the authentic source illustrations dominate. Plan the outer and lower perimeter around exactly ' + (project.selectedArtworkCount || 7) + ' user-selected genuine clipart layers, which PaletteIQ will insert after you create this background. Natural partial overlap with decorative lettering is welcome, never obscure whole headline words. Do not add extra text, fake clipart or excessive ornaments.'
+      ? 'MAIN COVER PRIORITY: authentic original clipart is the visual HERO, with about 2 large focal originals, 4 medium supporting originals, and smaller accents from a richer collage of exactly ' + (project.selectedArtworkCount || DEFAULT_MAIN_COVER_CLIPART_COUNT) + ' user-selected genuine layers. PaletteIQ places them afterwards; the image model must NOT draw any of these assets. Keep the headline comparatively small and legible, using the naturally available negative space rather than creating a giant centered typography poster. Avoid heavy ornament, invented text, or artificial frames.'
       : number <= 5
         ? 'Show diversity and collection breadth, with elegant but varied composition. Never add imaginary items.'
         : number === 6 || number === 7 || number === 13
@@ -316,12 +324,12 @@ function artPrompt(number: number, project: StoredProject, count: number, revisi
   ].join('\n');
   return [
     ...core,
-    'Make ONLY nonfigurative commercial art-direction: light neutral paper, compatible abstract colored washes, decorative graphic shapes and the exact words given above. DO NOT draw themed objects or real products.',
+    'Make ONLY nonfigurative commercial art-direction: quiet theme-matched PLAIN or MINIMAL backdrop (as selected above), with no competing artwork or heavy decorative graphics, plus the exact requested words. DO NOT draw themed objects or real products.',
     spec.kind === 'all' || spec.kind === 'all-grouped' || spec.kind === 'categories'
       ? 'Provide a light, legible graphic hierarchy and adaptable negative space for the full collection gallery. Text can follow a natural position, not a fixed upper strip; avoid a dense decorated background that clashes with small originals.'
       : spec.kind === 'information'
         ? 'Reserve useful uncluttered space for genuine clipart and verified information, without a hard rectangular no-overlap zone; use restrained ornamentation.'
-        : 'Balance natural negative space around the requested lettering with soft abstract texture at the perimeter. Original source illustrations will be placed later and may overlap minor lettering flourishes.',
+        : 'Balance generous negative space around modest artistic lettering and a barely textured, light theme-matched background. PaletteIQ overlays the more numerous original source illustrations later; leave room for varied hero, medium and accent layers.'
   ].join('\n');
 }
 
@@ -461,6 +469,8 @@ export async function POST(request: Request) {
   };
   if (input.textScale !== undefined && !['compact','balanced','statement'].includes(input.textScale))
     return bad('Choose a valid lettering size: compact, balanced or statement.');
+  if (input.backgroundStyle !== undefined && !['plain','minimal','soft-texture'].includes(input.backgroundStyle))
+    return bad('Choose a valid background style: plain, minimal or soft texture.');
   if (input.featuredCount !== undefined &&
       (!Number.isInteger(input.featuredCount) || input.featuredCount < 1 || input.featuredCount > count))
     return bad('Choose a clipart count between 1 and the number of available originals.');
@@ -476,7 +486,7 @@ export async function POST(request: Request) {
     return bad('Invalid pre-layout: select valid original collection artwork and arrange it on the white canvas.');
   const prompt = artPrompt(input.number,
     { ...project, selectedArtworkCount: input.featuredCount },
-    count, typeof input.revisionNotes === 'string' ? input.revisionNotes : '', text, preLayout, input.textScale ?? 'compact');
+    count, typeof input.revisionNotes === 'string' ? input.revisionNotes : '', text, preLayout, input.textScale ?? 'compact', input.backgroundStyle ?? 'minimal');
   try {
     const response = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
