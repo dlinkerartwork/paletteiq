@@ -152,26 +152,26 @@ type Input = {
  * are composited by the client AFTER this call; the image model never receives
  * a copy of the PNGs and cannot replace or redraw them.
  */
-function artPrompt(number: number, project: StoredProject, count: number, revisionNotes = ''): string {
+function artPrompt(number: number, project: StoredProject, count: number, revisionNotes = '', text?: ListingImageText): string {
   const spec = LISTING_IMAGE_SPECS[number - 1];
   const direction = listingCreativeDirection(project);
-  const title = number === 1 ? direction.title : listingTitle(number, direction.identity);
-  // Counts refer to unique saved ORIGINAL artwork image URLs. Do not infer a
-  // particular file format, alpha channel, DPI, licensing or original pixel size.
-  const subtitle = number === 1 || number === 6 || number === 13
-    ? count + ' original clipart illustrations'
-    : number === 2 || number === 3 || number === 5
-      ? count + ' original collection images'
-      : number === 14 ? 'Purchase • Download • Create'
-      : 'Ideas using original clipart';
+  const defaults = listingImageTextDefaults(project.listing, direction.title);
+  const title = text?.title ?? defaults.title;
+  const subtitle = text?.subtitle ?? defaults.subtitle;
+  const badge = text?.badge ?? '';
+  // Counts refer to unique saved ORIGINAL artwork image URLs. Never infer formats
+  // or DPI, and never add quantity claims unless explicitly supported.
   const core = [
     'You are an Etsy visual merchandiser and expert creative director. Produce a conversion-focused image BACKGROUND plus exact artistic lettering for ONE image in a cohesive 15-image listing sequence.',
     'Image ' + number + ' of 15 — ' + spec.title + '. Its purpose is ' + spec.purpose + '.',
     'FINAL CANVAS IS 1024 x 1024 pixels, 1:1 SQUARE JPG. Your source is already 1024 x 1024. No landscape crop, no black bars. Place all lettering within the square safe margin (minimum 6% from all sides).',
-    'Display EXACT main title ' + JSON.stringify(title) + ' and EXACT subtitle ' + JSON.stringify(subtitle) + '. No additional claims or marketing copy. Spell every character correctly.',
+    title ? 'Render EXACT user-supplied MAIN TITLE as bespoke artistic lettering: ' + JSON.stringify(title) + '.' : 'No main title; never invent headline text.',
+    subtitle ? 'Render EXACT user-supplied SUBTITLE as readable artistic lettering: ' + JSON.stringify(subtitle) + '.' : 'No subtitle; do not invent extra supporting words.',
+    badge ? 'Render this OPTIONAL BADGE as premium graphic typography with EXACT words: ' + JSON.stringify(badge) + '. Decorative outlines are permitted, but no illustrated objects.' : 'NO BADGE: do not invent a badge, sticker label or other words.',
+    'The text above is the COMPLETE allowed wording. No additional claims or marketing copy. Spell every requested character correctly.',
     listingCreativeSummary(direction),
     'Design typography for quick readability on a small Etsy search-result thumbnail: bold but friendly high-contrast custom lettering, artistically curved or hand-painted where appropriate, with restrained supporting text.',
-    'Keep main title and subtitle entirely within the upper 24% of the FINAL 1:1 square canvas. The original artwork will occupy most of the remaining region; keep mobile thumbnail readability.',
+    'Place the exact requested main title and subtitle within the upper 24% of the FINAL 1:1 square canvas, and optional badge in a visually balanced non-overlapping position. The original artwork occupies most of the remaining region; keep mobile readability.',
     'The actual collection images are NOT provided to you. PaletteIQ will composite the exact originals later. Do NOT generate clipart, animal/food/flower drawings, icons, logos, product print art, or stand-in illustrations.',
     'Only verified count of unique original images is ' + count + '. Never claim PNG, transparency, ZIP contents, DPI, license, print resolution, or asset dimensions without verified metadata.',
     'Use clean commercial visual hierarchy, artwork-first layout, consistent recognizable product identity and elegant foreground/background separation.',
@@ -306,7 +306,19 @@ export async function POST(request: Request) {
   if (!['low', 'medium', 'high'].includes(quality)) return bad('Invalid image quality');
   const key = await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
   if (!key) return bad('Configure OpenAI API key in Settings', 503);
-  const prompt = artPrompt(input.number, project, count, typeof input.revisionNotes === 'string' ? input.revisionNotes : '');
+  // Type and length validation happens BEFORE any paid image generation.
+  for (const [key, limit] of [['title', 140], ['subtitle', 140], ['badge', 60]] as const) {
+    const raw = input[key];
+    if (raw !== undefined && (typeof raw !== 'string' || raw.length > limit))
+      return bad('Invalid ' + key + ': expected text of at most ' + limit + ' characters.');
+  }
+  const defaults = listingImageTextDefaults(project.listing, listingCreativeDirection(project).title);
+  const text: ListingImageText = {
+    title: typeof input.title === 'string' ? sanitizedText(input.title, 140) : defaults.title.slice(0, 140),
+    subtitle: typeof input.subtitle === 'string' ? sanitizedText(input.subtitle, 140) : defaults.subtitle.slice(0, 140),
+    badge: typeof input.badge === 'string' ? sanitizedText(input.badge, 60) : ''
+  };
+  const prompt = artPrompt(input.number, project, count, typeof input.revisionNotes === 'string' ? input.revisionNotes : '', text);
   try {
     const response = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
