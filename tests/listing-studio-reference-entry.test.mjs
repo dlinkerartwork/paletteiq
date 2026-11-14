@@ -18,8 +18,8 @@ test('automatic pack panels remain hidden in Thumbnail Designer; restored PR18 s
 test('restored PR18 generator uses its original OpenAI prompt and Vision coordinates', () => {
   assert.match(studio, /action: 'generate', projectId, number: step, model, quality/);
   assert.match(studio, /action: 'layout', projectId, number: step, backgroundUrl: response\.backgroundUrl, placements: effectivePositions/);
-  assert.match(route, /function artPrompt\(number: number, project: StoredProject, count: number\)/);
-  assert.match(route, /artPrompt\(input\.number, project, count\)/);
+  assert.match(route, /function artPrompt\(number: number, project: StoredProject, count: number, revisionNotes = ''\)/);
+  assert.match(route, /artPrompt\(input\.number, project, count, typeof input\.revisionNotes === 'string'/);
   assert.doesNotMatch(studio, /referenceDesign: styleTokens|settings: config/);
   assert.doesNotMatch(route, /input\.settings/);
 });
