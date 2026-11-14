@@ -69,6 +69,8 @@ test('OpenAI Vision sees numbered thumbnails from actual original clipart and fr
   assert.match(ui,/await imageFromUrl\(url\)/);
   assert.match(ui,/ctx\.drawImage\(image,bounds\.sx,bounds\.sy,bounds\.sw,bounds\.sh/);
   assert.match(ui,/canvas\.toDataURL\('image\/jpeg',0\.66\)/);
+  assert.match(ui,/const perSheet = 64, columns = 8, cell = 128/);
+  assert.match(api,/contactSheets\.length > 5/);
   assert.match(ui,/compositionMode === 'free'/);
   assert.match(api,/contactSheets\.map\(image_url => \(\{type:'input_image',image_url\}\)\)/);
   assert.match(api,/DISREGARD ALL suggested x\/y\/width\/height values|Disregard ALL suggested x\/y\/width\/height values/);
