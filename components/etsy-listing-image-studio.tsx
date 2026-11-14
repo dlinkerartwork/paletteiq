@@ -420,6 +420,30 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
               </select>
             </div>
           </details>
+          <div style={{ border: '1px solid #eadfce', borderRadius: 10, padding: 12, display: 'grid', gap: 9 }}>
+            <strong>Title, Subtitle &amp; Badge for Image {String(step).padStart(2,'0')}</strong>
+            <small style={{ color: '#75695e' }}>Default Title = SEO Title, Subtitle = Primary Keyword from Etsy Listing Draft. Both can be edited. Badge is optional and empty by default.</small>
+            <label className="input-label" htmlFor="listing-image-title">TITLE (SEO TITLE DEFAULT)</label>
+            <input id="listing-image-title" aria-label="Listing image title" type="text" maxLength={140}
+              value={currentLettering.title} disabled={!!working}
+              onChange={e => editLettering('title', e.target.value)}
+              placeholder="Listing title"/>
+            <label className="input-label" htmlFor="listing-image-subtitle">SUBTITLE (PRIMARY KEYWORD DEFAULT)</label>
+            <input id="listing-image-subtitle" aria-label="Listing image subtitle" type="text" maxLength={140}
+              value={currentLettering.subtitle} disabled={!!working}
+              onChange={e => editLettering('subtitle', e.target.value)}
+              placeholder="Primary keyword"/>
+            <label className="input-label" htmlFor="listing-image-badge">BADGE (OPTIONAL)</label>
+            <input id="listing-image-badge" aria-label="Listing image badge" type="text" maxLength={60}
+              value={currentLettering.badge} disabled={!!working}
+              onChange={e => editLettering('badge', e.target.value)}
+              placeholder="e.g. 80 CLIPART • Leave blank for no badge"/>
+            <button type="button" className="outline-btn" disabled={!!working}
+              onClick={() => setLetteringChanges(prev => ({ ...prev, [step]: { ...seoText } }))}>
+              Reset text to Etsy SEO defaults
+            </button>
+            {letteringDirty && <small role="alert" style={{ color: '#a04c22' }}>Title, Subtitle or Badge has changed since this background was generated. Click Regenerate AI background + lettering to apply the new text. A layout-only re-render cannot change AI lettering.</small>}
+          </div>
           <button type="button" className="primary-btn" onClick={() => void generate()} disabled={!loaded || !assets.length || !!working || !precedingApproved}>
             {working === 'generate' ? <LoaderCircle className="spin" size={16}/> : <Sparkles size={16}/>}
             {current?.backgroundUrl ? 'Revise Image ' + String(step).padStart(2,'0') + ' (AI background)' : step === 1 ? 'Start /new-listing — Generate Main Cover' : 'Generate Image ' + String(step).padStart(2,'0')}
@@ -450,7 +474,10 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           <small style={{ color: '#74695e' }}>Your revision notes are included in the next paid AI background regeneration for this image only. To adjust original clipart positions without AI charges, use Apply layout & save JPG. Review spelling, crop, verified facts and mockup realism before approving.</small>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button type="button" className="outline-btn" disabled={!current?.renderedImageUrl || !!working} onClick={() => void review('needs_revision')}>Needs revision</button>
-            <button type="button" className="primary-btn" disabled={!current?.renderedImageUrl || !!working || current.width !== LISTING_WIDTH || current.height !== LISTING_HEIGHT} onClick={() => void review('approved')}><Check size={16}/> Approve & Next (/next) <ArrowRight size={15}/></button>
+            <button type="button" className="outline-btn" disabled={!loaded || !!working || (!current?.backgroundUrl && !current?.renderedImageUrl)}
+              style={{ color: '#a8342b', borderColor: '#d7a19c' }}
+              onClick={() => void rejectAndDelete()}>Reject &amp; Delete</button>
+            <button type="button" className="primary-btn" disabled={!current?.renderedImageUrl || !!working || letteringDirty || current.width !== LISTING_WIDTH || current.height !== LISTING_HEIGHT} onClick={() => void review('approved')}><Check size={16}/> Approve & Next (/next) <ArrowRight size={15}/></button>
           </div>
         </div>
       </div>
