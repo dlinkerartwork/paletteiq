@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Check, Download, Image as ImageIcon, LoaderCircle, RotateCcw, Sparkles } from 'lucide-react';
 import { readApiJson, uploadListingJpg } from '@/lib/listing-image-upload';
-import { DEFAULT_LISTING_STUDIO_CONFIG, type ListingStudioConfig } from '@/lib/listing-studio-config';
 import {
   LISTING_IMAGE_SPECS, LISTING_WIDTH, LISTING_HEIGHT, originalAssets,
   planListingPlacements, listingFilename, type ListingAsset, type ListingImageRecord, type ListingPlacement
@@ -11,16 +10,13 @@ import {
 
 type Props = {
   projectId: string;
-  config?: ListingStudioConfig;
-  references: string[];
-  onConfigSave: (config: ListingStudioConfig) => Promise<void>;
   name: string;
   theme: string;
   subtheme: string;
   characters: ListingAsset[];
   onSaved?: (images: ListingImageRecord[]) => void;
 };
-type ListResponse = { images?: ListingImageRecord[]; backgroundUrl?: string; placements?: ListingPlacement[]; fallback?: string; error?: string; layout?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string } };
+type ListResponse = { images?: ListingImageRecord[]; backgroundUrl?: string; placements?: ListingPlacement[]; fallback?: string; error?: string };
 const apiUrl = '/api/listing-image-studio';
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Number.isFinite(n) ? n : lo));
 const fileName = (number: number) => listingFilename(number);
@@ -97,80 +93,28 @@ async function compose(backgroundUrl: string, placements: ListingPlacement[], as
     canvas.toBlob(blob => blob ? resolve(blob) : reject(Error('Could not render JPG image.')), 'image/jpeg', 0.92));
 }
 async function upload(projectId: string, number: number, blob: Blob, onProgress?: (done: number, total: number) => void): Promise<string> {
+  // Preserve the working fix for Payload Too Large (HTTP 413).
   return uploadListingJpg(projectId, fileName(number), blob, fetch, onProgress);
 }
 
-export default function EtsyListingImageStudio({ config: initialConfig, references, onConfigSave, projectId, name, theme, subtheme, characters, onSaved }: Props) {
+export default function EtsyListingImageStudio({ projectId, name, theme, subtheme, characters, onSaved }: Props) {
   const assets = useMemo(() => originalAssets(characters), [characters]);
   const [records, setRecords] = useState<ListingImageRecord[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [step, setStep] = useState(1);
   const [working, setWorking] = useState('');
   const [message, setMessage] = useState('');
-  const [config, setConfig] = useState<ListingStudioConfig>(() => ({ ...DEFAULT_LISTING_STUDIO_CONFIG, ...initialConfig }));
-  const [settingsDirty, setSettingsDirty] = useState(false);
-  const [settingsBusy, setSettingsBusy] = useState(false);
-  const [visionModels, setVisionModels] = useState<Record<'openai' | 'gemini', Array<{id: string; name: string}>>>({ openai: [], gemini: [] });
-  const [quality, setQuality] = useState<'low' | 'medium' | 'high'>(initialConfig?.quality || 'medium');
-  const [model, setModel] = useState(initialConfig?.imageModel || 'gpt-image-1-mini');
-  const [referenceDesign, setReferenceDesign] = useState<ListResponse['layout']>();
+  const [quality, setQuality] = useState<'low' | 'medium' | 'high'>('medium');
+  const [model, setModel] = useState('gpt-image-1-mini');
   const [availableModels, setAvailableModels] = useState<Array<{id: string; name: string}>>([]);
   const [changes, setChanges] = useState<Record<number, ListingPlacement[]>>({});
   const [notes, setNotes] = useState<Record<number, string>>({});
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [categories, setCategories] = useState<Record<string,string>>({});
-  function changeConfig<K extends keyof ListingStudioConfig>(key: K, value: ListingStudioConfig[K]) {
-    setConfig(current => ({ ...current, [key]: value }));
-    setSettingsDirty(true);
-  }
-  const persistConfig = async () => {
-    if (settingsBusy) return;
-    setSettingsBusy(true);
-    try {
-      await onConfigSave(config);
-      setSettingsDirty(false);
-      setMessage('Reference & Assets settings saved for this collection. Ready to generate the next listing image.');
-    } catch (error) {
-      setMessage('Could not save listing design settings: ' + (error instanceof Error ? error.message : String(error)));
-    } finally { setSettingsBusy(false); }
-  };
-  const uploadReference = async (file?: File) => {
-    if (!file) return;
-    if (!['image/png','image/jpeg','image/webp'].includes(file.type) || file.size > 15_000_000) {
-      setMessage('Select a PNG, JPG, or WebP reference smaller than 15 MB.');
-      return;
-    }
-    try {
-      const bitmap = await createImageBitmap(file);
-      const scale = Math.min(1, 720 / Math.max(bitmap.width, bitmap.height));
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-      const context = canvas.getContext('2d');
-      if (!context) throw Error('Canvas unavailable');
-      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-      bitmap.close();
-      changeConfig('referenceImage', canvas.toDataURL('image/jpeg', 0.76));
-      setMessage('Reference loaded for style analysis. Uploaded pixels stay in this browser session; use a collection reference for persistent selection.');
-    } catch (error) {
-      setMessage('Could not load reference: ' + (error instanceof Error ? error.message : String(error)));
-    }
-  };
 
   const categorizedAssets = useMemo(() => assets.map(a => ({ ...a, category: categories[a.id] || a.category })), [assets, categories]);
-  const initialPlacements = useCallback((number: number) => {
-    const planned = planListingPlacements(number, categorizedAssets);
-    if (!config || ![1,4,7,15].includes(number)) return planned;
-    return planned.map((p, i) => {
-      const factor = config.hierarchy === 'dramatic' ? (i < 3 ? 1.12 : 0.95) :
-        config.hierarchy === 'soft' ? 0.92 : 1;
-      const width = clamp(p.width * factor, 2, 100), height = clamp(p.height * factor, 2, 100);
-      return { ...p, x: clamp(p.x + (p.width - width) / 2, 0, 100 - width),
-        y: clamp(p.y + (p.height - height) / 2, 23, 100 - height), width, height };
-    });
-  }, [categorizedAssets, config]);
   const current = records.find(item => item.number === step);
-  const positions = changes[step] || current?.placements || initialPlacements(step);
+  const positions = changes[step] || current?.placements || planListingPlacements(step, categorizedAssets);
   const selected = positions[selectedIndex] || positions[0];
   const approved = LISTING_IMAGE_SPECS.filter(s => records.some(r => r.number === s.number && r.status === 'approved')).length;
   const precedingApproved = LISTING_IMAGE_SPECS.slice(0, step - 1).every(s => records.some(r => r.number === s.number && r.status === 'approved'));
@@ -189,18 +133,6 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
       const models = data as ListResponse & { models?: Array<{id:string;name:string}> };
       if (live) setAvailableModels((models.models || []).filter(m => /^gpt-image-/.test(m.id)));
     }).catch(() => {});
-    return () => { live = false; };
-  }, []);
-  useEffect(() => {
-    let live = true;
-    void Promise.all((['openai','gemini'] as const).map(async provider => {
-      try {
-        const response = await fetch('/api/settings?models=' + (provider === 'openai' ? 'openai-seo' : 'gemini'));
-        if (!response.ok) return;
-        const result = await response.json() as { models?: Array<{id: string; name: string}> };
-        if (live) setVisionModels(old => ({ ...old, [provider]: result.models || [] }));
-      } catch { /* The selected saved model stays available offline. */ }
-    }));
     return () => { live = false; };
   }, []);
   const receive = useCallback((images: ListingImageRecord[]) => {
@@ -241,8 +173,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
     setMessage('Image ' + String(step).padStart(2, '0') + ' saved as a draft. Review the actual pixels and approve or revise.');
   };
   const generate = async () => {
-    if (working || settingsBusy) return;
-    if (settingsDirty) return setMessage('Save Reference & Assets settings before generating.');
+    if (working) return;
     if (!assets.length) return setMessage('Generate collection clipart in Image Production first.');
     if (!precedingApproved) return setMessage('Approve all preceding listing images before generating this one.');
     if (current?.status === 'approved' && !window.confirm('Regenerate an approved image? Its approval will be reset to Draft.')) return;
@@ -264,41 +195,22 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
           }
         } catch { /* Continue with a neutral collection gallery rather than invent categories. */ }
       }
-      let styleTokens = referenceDesign;
-      if (!styleTokens && config?.referenceImage) {
-        setMessage('Analyzing selected Reference & Assets image for nonfigurative design cues...');
-        try {
-          const refResult = await request('/api/thumbnail-layout', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              projectId, imageUrl: config.referenceImage, provider: config.analysisProvider,
-              model: config.analysisModel, count: Math.min(assets.length, 12), referenceStyle: config.referenceStyle
-            })
-          });
-          styleTokens = refResult.layout;
-          if (styleTokens) setReferenceDesign(styleTokens);
-        } catch {
-          setMessage('Reference analysis unavailable; continuing with the chosen Reference & Assets style.');
-        }
-      }
       setMessage('Generating the AI graphic background and artistic typography...');
-      const response = await send({ action: 'generate', projectId, number: step, model, quality,
-        settings: config ? { ...config, referenceImage: undefined } : undefined,
-        referenceDesign: styleTokens
-      });
+      const response = await send({ action: 'generate', projectId, number: step, model, quality });
       if (!response.backgroundUrl) throw Error('OpenAI did not return the background');
       let suggested = effectivePositions;
       let layoutWarning = '';
-      if (config?.layoutMode !== 'manual' && effectivePositions.length <= 24) {
+      if (effectivePositions.length <= 24) {
         setMessage('AI Vision is finding typography-safe original artwork slots on the actual generated background...');
         try {
-          const vision = await send({ action: 'layout', projectId, number: step, backgroundUrl: response.backgroundUrl, placements: effectivePositions, settings: config ? { ...config, referenceImage: undefined } : undefined });
+          const vision = await send({ action: 'layout', projectId, number: step, backgroundUrl: response.backgroundUrl, placements: effectivePositions });
           if (vision.placements?.length === effectivePositions.length) suggested = vision.placements;
           layoutWarning = vision.fallback || '';
         } catch { layoutWarning = 'Vision placement unavailable; original image placements retained.'; }
       }
-      // Save the paid AI background before transferring the large composed JPG.
-      // If upload fails, "Apply layout & save JPG" retries without another AI bill.
+      // The paid AI background is recorded before JPG transfer so a failed
+      // upload can be retried without generating and paying for the AI again.
+      // An empty renderedImageUrl intentionally invalidates prior approved pixels.
       await saveRecord({
         number: step, status: 'draft', backgroundUrl: response.backgroundUrl,
         renderedImageUrl: '', placements: suggested,
@@ -330,7 +242,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
   };
   const move = (field: 'assetId' | 'x' | 'y' | 'width' | 'height' | 'rotation', value: string) => {
     setChanges(prev => {
-      const list = [...(prev[step] || current?.placements || initialPlacements(step))];
+      const list = [...(prev[step] || current?.placements || planListingPlacements(step, categorizedAssets))];
       const target = list[selectedIndex];
       if (!target) return prev;
       list[selectedIndex] = { ...target, [field]: field === 'assetId' ? value : clamp(Number(value), field === 'rotation' ? -30 : field === 'width' || field === 'height' ? 2 : 0, field === 'rotation' ? 30 : 100) };
@@ -341,89 +253,9 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
   const spec = LISTING_IMAGE_SPECS[step - 1];
 
   return <div style={{ display: 'grid', gap: 18 }}>
-    <div className="panel" style={{ padding: 20, display: 'grid', gap: 12 }}>
-      <h2>Reference & Assets — Listing Image Studio</h2>
-      <p className="sub">Configure the 15-image workflow here. The legacy Thumbnail Designer is temporarily hidden, but its existing designs remain saved. Only collection originals are placed over AI backgrounds.</p>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(215px, 1fr))', gap: 12 }}>
-        <label style={{ display: 'grid', gap: 5 }}><span className="input-label">LAYOUT MODE</span>
-          <select value={config.layoutMode} disabled={!!working || settingsBusy} onChange={e => changeConfig('layoutMode', e.target.value as ListingStudioConfig['layoutMode'])}>
-            <option value="ai">AI + manual</option><option value="manual">Manual placement</option>
-          </select>
-        </label>
-        <label style={{ display: 'grid', gap: 5 }}><span className="input-label">VISION PROVIDER</span>
-          <select value={config.analysisProvider} disabled={!!working || settingsBusy} onChange={e => {
-            const value = e.target.value as ListingStudioConfig['analysisProvider'];
-            setConfig(old => ({ ...old, analysisProvider: value, analysisModel: value === 'openai' ? 'gpt-4.1-mini' : 'gemini-2.5-pro' }));
-            setSettingsDirty(true);
-          }}><option value="openai">OpenAI</option><option value="gemini">Gemini (reference analysis)</option></select>
-        </label>
-        <label style={{ display: 'grid', gap: 5 }}><span className="input-label">VISION MODEL</span>
-          <select value={config.analysisModel} disabled={!!working || settingsBusy} onChange={e => changeConfig('analysisModel', e.target.value)}>
-            {!visionModels[config.analysisProvider].some(m => m.id === config.analysisModel) && <option value={config.analysisModel}>{config.analysisModel}</option>}
-            {visionModels[config.analysisProvider].map(m => <option key={m.id} value={m.id}>{m.name} ({m.id})</option>)}
-          </select>
-        </label>
-        <label style={{ display: 'grid', gap: 5 }}><span className="input-label">TYPOGRAPHY</span>
-          <select value="ai-artwork" disabled><option value="ai-artwork">AI artistic lettering</option></select>
-        </label>
-        <label style={{ display: 'grid', gap: 5 }}><span className="input-label">COVER ART STYLE</span>
-          <select value={config.coverStyle} disabled={!!working || settingsBusy} onChange={e => changeConfig('coverStyle', e.target.value as ListingStudioConfig['coverStyle'])}>
-            <option value="editorial">Premium editorial</option><option value="boutique">Modern boutique</option><option value="storybook">Storybook</option><option value="modern">Modern Etsy</option><option value="watercolor">Artistic watercolor</option>
-          </select>
-        </label>
-        <label style={{ display: 'grid', gap: 5 }}><span className="input-label">BACKGROUND STYLE</span>
-          <select value={config.backgroundStyle} disabled={!!working || settingsBusy} onChange={e => changeConfig('backgroundStyle', e.target.value as ListingStudioConfig['backgroundStyle'])}>
-            <option value="watercolor">Watercolor</option><option value="paper">Luxury paper</option><option value="gradient">Gradient</option><option value="botanical">Abstract botanical</option><option value="vintage">Vintage</option>
-          </select>
-        </label>
-        <label style={{ display: 'grid', gap: 5 }}><span className="input-label">DESIGN BOLDNESS</span>
-          <select value={config.boldness} disabled={!!working || settingsBusy} onChange={e => changeConfig('boldness', e.target.value as ListingStudioConfig['boldness'])}>
-            <option value="soft">Soft</option><option value="balanced">Balanced</option><option value="bold">Bold</option>
-          </select>
-        </label>
-        <label style={{ display: 'grid', gap: 5 }}><span className="input-label">CLIPART HIERARCHY</span>
-          <select value={config.hierarchy} disabled={!!working || settingsBusy} onChange={e => changeConfig('hierarchy', e.target.value as ListingStudioConfig['hierarchy'])}>
-            <option value="soft">Soft</option><option value="medium">Medium</option><option value="dramatic">Dramatic</option>
-          </select>
-        </label>
-        <label style={{ display: 'grid', gap: 5 }}><span className="input-label">DECORATION INTENSITY</span>
-          <select value={config.intensity} disabled={!!working || settingsBusy} onChange={e => changeConfig('intensity', e.target.value as ListingStudioConfig['intensity'])}>
-            <option value="soft">Soft</option><option value="balanced">Balanced</option><option value="vibrant">Vibrant</option>
-          </select>
-        </label>
-        <label style={{ display: 'grid', gap: 5 }}><span className="input-label">CUSTOM MAIN TITLE</span>
-          <input maxLength={75} value={config.headline || ''} disabled={!!working || settingsBusy} placeholder={subtheme || theme || name} onChange={e => changeConfig('headline', e.target.value)}/>
-        </label>
-        <label style={{ display: 'grid', gap: 5 }}><span className="input-label">REFERENCE IMAGE (OPTIONAL)</span>
-          <select value={config.referenceImage?.startsWith('data:') ? '__uploaded__' : config.referenceImage || ''} disabled={!!working || settingsBusy}
-            onChange={e => changeConfig('referenceImage', e.target.value || undefined)}>
-            <option value="">None — auto style</option>
-            {config.referenceImage?.startsWith('data:') && <option value="__uploaded__">Uploaded image (this session)</option>}
-            {config.referenceImage && !config.referenceImage.startsWith('data:') && !references.includes(config.referenceImage) && <option value={config.referenceImage}>Previously selected reference</option>}
-            {references.map((src,i) => <option value={src} key={src}>Etsy reference {i + 1}</option>)}
-          </select>
-        </label>
-        <label style={{ display: 'grid', gap: 5 }}><span className="input-label">REFERENCE INTERPRETATION</span>
-          <select value={config.referenceStyle} disabled={!!working || settingsBusy} onChange={e => changeConfig('referenceStyle', e.target.value as ListingStudioConfig['referenceStyle'])}>
-            <option value="similar">Similar composition</option><option value="creative">Creative interpretation</option><option value="palette">Palette only</option>
-          </select>
-        </label>
-      </div>
-      <label style={{ display: 'grid', gap: 6 }}><span className="input-label">UPLOAD DESIGN REFERENCE (OPTIONAL)</span>
-        <input type="file" accept="image/jpeg,image/png,image/webp" disabled={!!working || settingsBusy} onChange={e => { void uploadReference(e.target.files?.[0]); e.target.value = ''; }}/>
-      </label>
-      {config.referenceImage && <img src={config.referenceImage} alt="Selected graphic-style reference" style={{ maxHeight: 145, maxWidth: 240, objectFit: 'contain', borderRadius: 8 }}/>}
-      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-        <button className="primary-btn" disabled={settingsBusy || !!working || !settingsDirty} onClick={() => void persistConfig()}>
-          {settingsBusy ? <LoaderCircle className="spin" size={16}/> : <Check size={16}/>} Save listing design settings
-        </button>
-        <small>{settingsDirty ? 'Unsaved settings — save before generating.' : 'Settings saved. Ready for listing generation.'}</small>
-      </div>
-    </div>
     <div className="panel" style={{ padding: 20 }}>
       <h2>Etsy Listing Image Studio</h2>
-      <p className="sub">15-image workflow • 3000 × 2250 px • 4:3 landscape • OpenAI artistic lettering • exact original collection clipart. Configure Reference & Assets above; existing legacy thumbnail projects stay intact.</p>
-      {config && <p className="sub">Style: {config.coverStyle} · {config.backgroundStyle} · {config.boldness} · {config.hierarchy} hierarchy · {config.intensity} decoration · {config.referenceImage ? 'Selected reference enabled' : 'No reference'}. These settings guide each generated listing image.</p>}
+      <p className="sub">15-image workflow • 3000 × 2250 px • 4:3 landscape • OpenAI artistic lettering • exact original collection clipart. Thumbnail Designer remains separate.</p>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         <strong>{approved}/15 approved • {assets.length} original images available</strong>
         <button type="button" className="primary-btn" disabled={approved !== 15 || !!working} onClick={() => {
@@ -464,15 +296,15 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
         </div>
         <div style={{ display: 'grid', alignContent: 'start', gap: 10 }}>
           <label className="input-label">OPENAI ARTISTIC BACKGROUND MODEL</label>
-          <select value={model} disabled={!!working || settingsBusy} onChange={e => { setModel(e.target.value); changeConfig('imageModel', e.target.value); }}>
+          <select value={model} disabled={!!working} onChange={e => setModel(e.target.value)}>
             {!availableModels.some(x => x.id === model) && <option value={model}>{model}</option>}
             {availableModels.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
           </select>
           <label className="input-label">BACKGROUND QUALITY</label>
-          <select value={quality} disabled={!!working || settingsBusy} onChange={e => { const value = e.target.value as typeof quality; setQuality(value); changeConfig('quality', value); }}>
+          <select value={quality} disabled={!!working} onChange={e => setQuality(e.target.value as typeof quality)}>
             <option value="low">Low — economical</option><option value="medium">Medium — recommended</option><option value="high">High</option>
           </select>
-          <button type="button" className="primary-btn" onClick={() => void generate()} disabled={!loaded || !assets.length || !!working || settingsBusy || settingsDirty || !precedingApproved}>
+          <button type="button" className="primary-btn" onClick={() => void generate()} disabled={!loaded || !assets.length || !!working || !precedingApproved}>
             {working === 'generate' ? <LoaderCircle className="spin" size={16}/> : <Sparkles size={16}/>}
             {current?.backgroundUrl ? 'Regenerate AI background + lettering' : 'Generate Image ' + String(step).padStart(2,'0')}
           </button>
