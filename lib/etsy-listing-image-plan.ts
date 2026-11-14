@@ -25,10 +25,16 @@ export type ListingImageNumber = number;
 export type ListingImageStatus = 'draft' | 'approved' | 'needs_revision';
 export type ListingAsset = { id: string; name: string; imageUrl?: string; category?: string; subtheme?: string; group?: string };
 export type ListingPlacement = { assetId: string; x: number; y: number; width: number; height: number; rotation?: number };
+export type ListingFinalReview = {
+  score: number; titleReadability: number; artworkProminence: number;
+  visualBalance: number; styleHarmony: number; strengths: string[];
+  improvements: string[]; analyzedImageUrl: string; analyzedAt: number;
+};
 export type ListingImageRecord = {
   number: number; status: ListingImageStatus; backgroundUrl?: string; renderedImageUrl?: string;
   placements?: ListingPlacement[]; notes?: string; reviewWarning?: string;
   title?: string; subtitle?: string; badge?: string; // Exact user-approved AI lettering per image.
+  finalReview?: ListingFinalReview; // Vision critique of FINAL composited JPG, not background alone.
   width?: number; height?: number; // Missing size = legacy 4:3, pending square re-render.
   updatedAt: number;
 };
@@ -100,7 +106,8 @@ export function curatedListingHighlights(source: ListingAsset[], limit = 10): Li
   for (const item of available) add(item);
   return result;
 }
-export function planListingPlacements(number: number, source: ListingAsset[]): ListingPlacement[] {
+export type ListingPlanOptions = { count?: number; assetIds?: string[] };
+export function planListingPlacements(number: number, source: ListingAsset[], options?: ListingPlanOptions): ListingPlacement[] {
   const available = originalAssets(source);
   if (!available.length) return [];
   const spec = LISTING_IMAGE_SPECS[number - 1];
@@ -132,6 +139,22 @@ export function planListingPlacements(number: number, source: ListingAsset[]): L
   else if (number === 13) selected = available.slice(0, 5);
   else if (number === 14) selected = available.slice(0, 2);
   else selected = number === 15 ? curatedListingHighlights(available, 9) : available.slice(0, 9);
+
+  // Overrides are per-image and fully controlled by the user, not a hidden
+  // 7/8/9-item limit. Explicit order is preserved without duplicated asset IDs.
+  const overrideCount = Number.isInteger(options?.count) ? Math.min(available.length, Math.max(1, options!.count!)) : null;
+  if (options?.assetIds) {
+    const byId = new Map(available.map(a => [a.id, a]));
+    const used = new Set<string>();
+    selected = options.assetIds.map(id => byId.get(id)).filter((a): a is ListingAsset => {
+      if (!a || used.has(a.id)) return false;
+      used.add(a.id); return true;
+    });
+    if (overrideCount !== null) selected = selected.slice(0, overrideCount);
+    if (!selected.length) selected = curatedListingHighlights(available, 1);
+  } else if (overrideCount !== null) {
+    selected = curatedListingHighlights(available, overrideCount);
+  }
 
   const box = (asset: ListingAsset, x: number, y: number, width: number, height: number): ListingPlacement =>
     ({ assetId: asset.id, x, y, width, height, rotation: 0 });
@@ -183,11 +206,29 @@ export function planListingPlacements(number: number, source: ListingAsset[]): L
       [13, 78, 23, 21], [64, 77, 23, 21],
       [41, 81, 19, 18]
     ];
-    return selected.map((a, i) => box(a, ...coverSlots[i % coverSlots.length] as [number, number, number, number]));
+    if (selected.length <= coverSlots.length)
+      return selected.map((a, i) => box(a, ...coverSlots[i] as [number, number, number, number]));
+    // For a larger user-selected cover collage, distribute across the left,
+    // right and bottom perimeter instead of repeating seven overlapping slots.
+    const sideCount = Math.ceil(selected.length * 0.36);
+    const bottomCount = selected.length - sideCount * 2;
+    return selected.map((asset, index) => {
+      if (index < sideCount * 2) {
+        const onLeft = index < sideCount;
+        const i = onLeft ? index : index - sideCount;
+        const cell = 78 / sideCount;
+        return box(asset, onLeft ? 1 : 76, 9 + i * cell, 23, Math.max(5, cell + 1));
+      }
+      const j = index - sideCount * 2;
+      const cell = 64 / Math.max(1, bottomCount);
+      return box(asset, 18 + j * cell, 79, Math.min(22, cell + 1), 19);
+    });
   }
   if (number === 15) {
     const slots = [[3, 28, 26, 34], [71, 29, 26, 34], [29, 37, 20, 29], [51, 37, 20, 29], [4, 64, 22, 27], [73, 64, 23, 27], [27, 69, 17, 23], [56, 69, 17, 23], [14, 50, 19, 28], [66, 50, 19, 28]];
-    return selected.map((a, i) => box(a, ...slots[i % slots.length] as [number, number, number, number]));
+    if (selected.length <= slots.length)
+      return selected.map((a, i) => box(a, ...slots[i] as [number, number, number, number]));
+    // User-selected larger finale becomes a clean multi-row gallery.
   }
   const count = selected.length;
   const cols = count > 12 ? 6 : count > 6 ? 4 : count > 3 ? 3 : count;
