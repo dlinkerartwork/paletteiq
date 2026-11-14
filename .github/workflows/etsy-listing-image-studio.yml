@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/etsy-listing-image-studio-15
+      - feature/reference-assets-thumbnail-prompt
   pull_request:
     paths:
       - 'components/etsy-listing-image-studio.tsx'
