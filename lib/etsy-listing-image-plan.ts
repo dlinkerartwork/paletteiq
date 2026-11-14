@@ -58,7 +58,7 @@ export type ListingFinalReview = {
 };
 export type ListingImageRecord = {
   number: number; status: ListingImageStatus; backgroundUrl?: string; conceptUrl?: string; renderedImageUrl?: string;
-  placements?: ListingPlacement[]; notes?: string; reviewWarning?: string;
+  placements?: ListingPlacement[]; selectedSourceIds?: string[]; creativeBrief?: string; notes?: string; reviewWarning?: string;
   title?: string; subtitle?: string; badge?: string; // Exact user-approved AI lettering per image.
   finalReview?: ListingFinalReview; // Vision critique of FINAL composited JPG, not background alone.
   width?: number; height?: number; // Missing size = legacy 4:3, pending square re-render.
