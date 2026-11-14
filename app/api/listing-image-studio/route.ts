@@ -54,7 +54,7 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
       placements.length !== value.placements.length)
     throw Error('One or more clipart files are missing, duplicated or disallowed; refresh the collection before saving.');
   const compositionMode = value.compositionMode ?? previous?.compositionMode ?? 'top-gallery';
-  const heroReference = compositionMode === 'hero-center';
+  const heroReference = compositionMode === 'hero-center' || compositionMode === 'reference-guided';
   const rawZone = value.protectedTextZone || previous?.protectedTextZone;
   const protectedTextZone = heroReference && rawZone &&
     [rawZone.x,rawZone.y,rawZone.width,rawZone.height].every(Number.isFinite) &&
@@ -271,7 +271,7 @@ export async function POST(request: Request) {
           p.x+p.width<=100 && p.y+p.height<=100 && Math.abs(p.rotation??0)<=15;
       });
       if (!correct) return Response.json({placements:safeFallback, fallback:'Vision could not verify a safe layout. Retained a reference-safe original PNG layout.'});
-      const safe = fitListingPlacementsToReference(input.number,candidates,hero,input.referenceDesign);
+      const safe = fitListingPlacementsToReference(input.number,candidates,hero,input.referenceDesign,true);
       if (safe.length !== fallback.length || duplicateListingAssetIds(safe).length)
         return Response.json({placements:safeFallback, fallback:'Vision returned unsafe or duplicated clipart positions. Used a safe original layout.'});
       return Response.json({placements:safe, note:sanitizedText(parsed.notes||'',180)});
