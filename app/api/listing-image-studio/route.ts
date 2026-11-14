@@ -11,7 +11,7 @@ import { currentListingVisualStyle, listingStyleDirection, type ListingVisualSty
 import { estimateListingImageGenerationCost, type GeneratedImageUsage } from '@/lib/etsy-listing-image-cost';
 import {
   LISTING_IMAGE_SPECS, LISTING_HEIGHT, LISTING_WIDTH, listingFilename, listingTitle,
-  originalAssets, isSquareListingApproved, listingImageTextDefaults, DEFAULT_MAIN_COVER_CLIPART_COUNT, type ListingFinalReview, type ListingImageText, type ListingImageRecord, type ListingPlacement, type ListingAsset, type ListingImageStatus
+  originalAssets, isSquareListingApproved, validListingPlacement, defaultListingCompositionMode, listingImageTextDefaults, DEFAULT_MAIN_COVER_CLIPART_COUNT, type ListingCompositionMode, type ListingFinalReview, type ListingImageText, type ListingImageRecord, type ListingPlacement, type ListingAsset, type ListingImageStatus
 } from '@/lib/etsy-listing-image-plan';
 
 const bad = (message: string, status = 400) => Response.json({ error: message }, { status });
@@ -23,6 +23,7 @@ type StoredProject = {
   listing?: { title?: string; primaryKeyword?: string };
   characters?: ListingAsset[]; listingImages?: ListingImageRecord[]; listingVisualStyle?: ListingVisualStyleProfile;
   listingPreLayouts?: Record<string, ListingPlacement[]>;
+  listingCompositionModes?: Record<string, ListingCompositionMode>;
   selectedArtworkCount?: number; // Transient generation-only prompt hint, never persisted.
 };
 const sanitizedText = (s: string, limit: number) => s.replace(/[<>\r\n]/g, ' ').trim().slice(0, limit);
@@ -45,13 +46,9 @@ function savedAssetKey(urlString: string, projectId: string, owner: string): str
 }
 function preparedRecord(value: ListingImageRecord, project: StoredProject, previous?: ListingImageRecord): ListingImageRecord {
   const allowed = new Set(originalAssets(project.characters || []).map(item => item.id));
-  const placements: ListingPlacement[] = Array.isArray(value.placements) ? value.placements.slice(0, 300).filter(p =>
-    p && allowed.has(p.assetId) &&
-    [p.x, p.y, p.width, p.height, p.rotation ?? 0].every(v => typeof v === 'number' && Number.isFinite(v)) &&
-    p.x >= 0 && p.x <= 100 && p.y >= 0 && p.y <= 100 &&
-    p.width > 0 && p.width <= 100 && p.height > 0 && p.height <= 100 &&
-    Math.abs(p.rotation ?? 0) <= 180
-  ) : previous?.placements || [];
+  const placements: ListingPlacement[] = Array.isArray(value.placements)
+    ? value.placements.slice(0, 300).filter(p => p && allowed.has(p.assetId) && validListingPlacement(p, value.number))
+    : previous?.placements || [];
   const status: ListingImageStatus = value.status === 'approved' || value.status === 'needs_revision' ? value.status : 'draft';
   // An explicit empty render URL clears stale approved JPGs during regeneration.
   // Preserve this reliability fix while restoring the PR18 generation prompts.
@@ -238,6 +235,7 @@ type Input = {
   image?: ListingImageRecord; model?: string; quality?: string;
   backgroundUrl?: string; placements?: ListingPlacement[]; revisionNotes?: string;
   featuredCount?: number; critiqueFeedback?: string; textScale?: 'compact' | 'balanced' | 'statement'; backgroundStyle?: 'plain' | 'minimal' | 'soft-texture';
+  compositionMode?: ListingCompositionMode; artworkContactSheet?: string;
   title?: string; subtitle?: string; badge?: string;
 };
 /**
@@ -245,7 +243,7 @@ type Input = {
  * are composited by the client AFTER this call; the image model never receives
  * a copy of the PNGs and cannot replace or redraw them.
  */
-function artPrompt(number: number, project: StoredProject, count: number, revisionNotes = '', text?: ListingImageText, preLayout?: ListingPlacement[], textScale: 'compact' | 'balanced' | 'statement' = 'compact', backgroundStyle: 'plain' | 'minimal' | 'soft-texture' = 'minimal'): string {
+function artPrompt(number: number, project: StoredProject, count: number, revisionNotes = '', text?: ListingImageText, preLayout?: ListingPlacement[], textScale: 'compact' | 'balanced' | 'statement' = 'compact', backgroundStyle: 'plain' | 'minimal' | 'soft-texture' = 'minimal', compositionMode: ListingCompositionMode = defaultListingCompositionMode(number)): string {
   const spec = LISTING_IMAGE_SPECS[number - 1];
   const direction = listingCreativeDirection(project);
   const observed = currentListingVisualStyle(project.listingVisualStyle, project.characters || []);
@@ -286,13 +284,17 @@ function artPrompt(number: number, project: StoredProject, count: number, revisi
         : backgroundStyle === 'soft-texture'
           ? 'BACKGROUND STYLE — SOFT TEXTURE: use a very light, low-contrast paper/pigment grain or faint edge wash, harmonized to the collection style. No hard graphic frames or dominant ornament. Keep at least 85% of the background quiet and nearly uniform.'
           : 'BACKGROUND STYLE — MINIMAL (default): a quiet clean white/cream/pale theme-aligned backdrop with only a whisper of paper texture or faint peripheral color accents. Keep about 90% visually simple; no strong frames, layered geometries, golden swirls or large decoration. The ORIGINAL clipart provides all the rich visual interest.',
-    'MAIN IMAGE TEXT must stay subordinate to the real artwork. Use more whitespace, small elegant headline lettering, and smaller subtitle; do not fill the entire central region with text.',
-    preLayout?.length
-      ? 'USER-ARRANGED WHITE CANVAS PRE-LAYOUT (spatial references ONLY; do not draw the assets): ' +
-        JSON.stringify(preLayout.map(p => ({x:p.x,y:p.y,width:p.width,height:p.height,rotation:p.rotation??0}))) +
-        '. Coordinates are percentages of the final 1024 square. The user has already chosen and arranged these ' + preLayout.length +
-        ' original PNG layers. Compose title, subtitle, badge and abstract background to harmonize with THIS planned composition; keep main words readable. Some decorative partial overlap is welcome. Do not move, recreate or imitate the cliparts in the AI output.'
-      : 'No user pre-layout was supplied; compose flexibly with room for authentic original artwork.',
+    'MAIN IMAGE TEXT must stay subordinate to the real artwork. Use more whitespace, a strong readable headline and smaller subtitle; do not fill the entire central region with text.',
+    compositionMode === 'free'
+      ? 'FREE ART DIRECTION: balance a visually rich variety of authentic large, medium and tiny illustrations after compositing. A few assets can crop naturally off the outer edge, much like a premium illustrated collage, while the main words remain readable. No rigid equal-sized grid, predetermined corner slots, or compulsory perimeter-only arrangements. The AI layout planner is empowered to change any suggested asset position and size completely.'
+      : 'STRUCTURED ART DIRECTION: keep the user chosen placement proportions with only requested refinements.',
+    compositionMode === 'free'
+      ? 'FREE COMPOSITION MODE (MAIN COVER): Any positions from PaletteIQ are ONLY an optional selection sketch, never a placement constraint. An independent AI Vision art director will decide all clipart positions, rotations and radically varied scales AFTER the typography background is generated. Create an excellent flexible typographic poster with a clearly readable headline and subtitle, rich visually balanced layout and open regions for a dense collage of ' + (project.selectedArtworkCount || DEFAULT_MAIN_COVER_CLIPART_COUNT) + ' genuine original elements. Text colors CAN differ (e.g. harmonious dark forest, warm burgundy and cream) to maximize hierarchy. Let title/subtitle/badge align elegantly; do not enforce a fixed box or prohibit touching/overlapping artwork near letters.'
+      : preLayout?.length
+        ? 'STRUCTURED COMPOSITION: honor user-arranged WHITE CANVAS positions as a blueprint (do not draw the assets): ' +
+          JSON.stringify(preLayout.map(p => ({x:p.x,y:p.y,width:p.width,height:p.height,rotation:p.rotation??0}))) +
+          '. Coordinates are percentages of the final 1024 square. Preserve the user layout while keeping all words legible. Do not redraw any clipart.'
+        : 'STRUCTURED COMPOSITION: no user pre-layout was supplied; compose flexibly with room for exact original artwork.',
     'Compose the exact requested lettering NATURALLY, following the visual hierarchy and available square space. The main title must be easily readable at Etsy thumbnail size and the subtitle should be reasonably legible. Do not force all text into a rigid 24% header or a hard no-overlap box. Use expressive curves, flowing hand-lettered forms and a balanced hierarchy.',
     'PaletteIQ will overlay authentic collection clipart afterwards. Allow tasteful partial overlap around outer letter edges, swashes or nonessential decoration, while giving the central strokes of the main headline enough contrast and space to read. No generated imitation clipart or substitute objects.',
     'The actual collection images are NOT provided to you. PaletteIQ will composite the exact originals later. Do NOT generate clipart, animal/food/flower drawings, icons, logos, product print art, or stand-in illustrations.',
