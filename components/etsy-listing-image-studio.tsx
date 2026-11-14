@@ -123,6 +123,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
   const [categories, setCategories] = useState<Record<string,string>>({});
   function changeConfig<K extends keyof ListingStudioConfig>(key: K, value: ListingStudioConfig[K]) {
     setConfig(current => ({ ...current, [key]: value }));
+    if (key === 'referenceImage') setReferenceDesign(undefined);
     setSettingsDirty(true);
   }
   const persistConfig = async () => {
@@ -161,8 +162,9 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
 
   const categorizedAssets = useMemo(() => assets.map(a => ({ ...a, category: categories[a.id] || a.category })), [assets, categories]);
   const initialPlacements = useCallback((number: number) => {
-    return fitListingPlacementsToReference(number,planListingPlacements(number,categorizedAssets),Boolean(config.referenceImage),referenceDesign);
-  }, [categorizedAssets,config.referenceImage,referenceDesign]);
+    const planned = planListingPlacements(number,categorizedAssets);
+    return config.layoutMode === 'manual' ? planned : fitListingPlacementsToReference(number,planned,Boolean(config.referenceImage),referenceDesign);
+  }, [categorizedAssets,config.layoutMode,config.referenceImage,referenceDesign]);
   const current = records.find(item => item.number === step);
   const positions = changes[step] || current?.placements || initialPlacements(step);
   const selected = positions[selectedIndex] || positions[0];
@@ -248,7 +250,8 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
     if (current?.status === 'approved' && !window.confirm('Regenerate an approved image? Its approval will be reset to Draft.')) return;
     setWorking('generate'); setMessage('Generating artistic background + exact typography with OpenAI (no clipart regeneration)...');
     try {
-      let effectivePositions = fitListingPlacementsToReference(step,positions,Boolean(config.referenceImage),referenceDesign);
+      let effectivePositions = config.layoutMode === 'manual' ? positions :
+        fitListingPlacementsToReference(step,positions,Boolean(config.referenceImage),referenceDesign);
       if (duplicateListingAssetIds(effectivePositions).length)
         throw Error('Duplicate clipart is selected. Replace repeated artwork with distinct collection PNGs.');
       if ((step === 3 || step === 5) && !current?.placements && !changes[step] &&
@@ -262,7 +265,9 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
           for (const group of groupResult.groups || []) for (const id of group.ids) map[id] = group.name;
           if (new Set(Object.values(map)).size >= 2) {
             setCategories(map);
-            effectivePositions = fitListingPlacementsToReference(step,planListingPlacements(step,assets.map(a => ({ ...a, category: map[a.id] || a.category }))),Boolean(config.referenceImage),styleTokens);
+            const categorized = planListingPlacements(step,assets.map(a => ({ ...a, category: map[a.id] || a.category })));
+            effectivePositions = config.layoutMode === 'manual' ? categorized :
+              fitListingPlacementsToReference(step,categorized,Boolean(config.referenceImage),styleTokens);
           }
         } catch { /* Continue with a neutral collection gallery rather than invent categories. */ }
       }
@@ -280,7 +285,8 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
           styleTokens = refResult.layout;
           if (styleTokens) {
             setReferenceDesign(styleTokens);
-            effectivePositions = fitListingPlacementsToReference(step,positions,Boolean(config.referenceImage),styleTokens);
+            if (config.layoutMode !== 'manual')
+              effectivePositions = fitListingPlacementsToReference(step,positions,Boolean(config.referenceImage),styleTokens);
           }
         } catch {
           setMessage('Reference analysis unavailable; continuing with the chosen Reference & Assets style.');
