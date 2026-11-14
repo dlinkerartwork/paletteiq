@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Check, Download, Image as ImageIcon, LoaderCircle, RotateCcw, Sparkles } from 'lucide-react';
 import { readApiJson, uploadListingJpg } from '@/lib/listing-image-upload';
+import type { ListingStyleSample, ListingVisualStyleProfile } from '@/lib/etsy-listing-visual-style';
 import type { ImageGenerationCostEstimate } from '@/lib/etsy-listing-image-cost';
 import { listingCreativeDirection, listingMockupScene } from '@/lib/etsy-listing-creative-direction';
 import {
@@ -25,6 +26,11 @@ type Props = {
 };
 type ListResponse = { images?: ListingImageRecord[]; backgroundUrl?: string; placements?: ListingPlacement[]; fallback?: string; reviewWarning?: string; costEstimate?: ImageGenerationCostEstimate | null; warning?: string; deleted?: boolean; error?: string };
 const apiUrl = '/api/listing-image-studio';
+const styleApiUrl = '/api/listing-style-analysis';
+type StyleResponse = { profile?: ListingVisualStyleProfile | null; cached?: boolean; error?: string };
+async function styleRequest(url: string, options?: RequestInit): Promise<StyleResponse> {
+  return readApiJson<StyleResponse>(await fetch(url, options), 'Collection style analysis');
+}
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Number.isFinite(n) ? n : lo));
 const fileName = (number: number) => listingFilename(number);
 const smoothName = (name: string) => name.replace(/\s+/g, ' ').trim().slice(0, 75);
@@ -69,6 +75,39 @@ async function inspectOriginalCollectionSample(assets: ListingAsset[]): Promise<
     transparent: succeeded.filter(x => x.hasAlpha).length,
     dimensionSummary: sizes.slice(0, 4).join(', ') + (sizes.length > 4 ? ', …' : ''),
     failed: sample.length - succeeded.length };
+}
+
+/**
+ * Make a compact contact sample from REAL collection PNG pixels. Only these
+ * thumbnails are sent to Vision for art STYLE observation; the image model that
+ * creates the listing background receives text direction, never original art.
+ */
+async function createCollectionStyleSamples(assets: ListingAsset[]): Promise<ListingStyleSample[]> {
+  const count = Math.min(6, assets.length);
+  const choices = Array.from({ length: count }, (_, i) =>
+    assets[Math.min(assets.length - 1, Math.floor((i + 0.5) * assets.length / count))]);
+  const samples = await Promise.all(choices.map(async asset => {
+    try {
+      const image = await imageFromUrl(asset.imageUrl!);
+      const bounds = imageBounds(image);
+      const canvas = document.createElement('canvas');
+      canvas.width = 320; canvas.height = 320;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+      // Solid neutral backing prevents alpha transparency from becoming black
+      // in JPEG and allows Vision to judge the true edges of painted assets.
+      ctx.fillStyle = '#fffefd';
+      ctx.fillRect(0, 0, 320, 320);
+      const ratio = Math.min(292 / bounds.sw, 292 / bounds.sh);
+      const width = bounds.sw * ratio, height = bounds.sh * ratio;
+      ctx.drawImage(image, bounds.sx, bounds.sy, bounds.sw, bounds.sh,
+        (320 - width) / 2, (320 - height) / 2, width, height);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.78);
+      return dataUrl.length < 230_000
+        ? { assetId: asset.id, dataUrl } satisfies ListingStyleSample : null;
+    } catch { return null; }
+  }));
+  return samples.filter((s): s is ListingStyleSample => Boolean(s));
 }
 
 function imageBounds(image: HTMLImageElement): { sx: number; sy: number; sw: number; sh: number } {
@@ -152,6 +191,9 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [categories, setCategories] = useState<Record<string,string>>({});
   const [inspection, setInspection] = useState<CollectionInspection | null>(null);
+  const [styleProfile, setStyleProfile] = useState<ListingVisualStyleProfile | null>(null);
+  const [styleWarning, setStyleWarning] = useState('');
+  const [costNotice, setCostNotice] = useState<{ step: number; model: string; quality: string; estimate: ImageGenerationCostEstimate | null } | null>(null);
 
   const categorizedAssets = useMemo(() => assets.map(a => ({ ...a, category: categories[a.id] || a.category })), [assets, categories]);
   const current = records.find(item => item.number === step);
@@ -198,6 +240,16 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   }, [projectId, assets]);
   useEffect(() => {
     let live = true;
+    setStyleProfile(null);
+    setStyleWarning('');
+    setCostNotice(null);
+    void styleRequest(styleApiUrl + '?projectId=' + encodeURIComponent(projectId))
+      .then(response => { if (live && response.profile) setStyleProfile(response.profile); })
+      .catch(() => { /* The initial read is optional; generate will retry. */ });
+    return () => { live = false; };
+  }, [projectId]);
+  useEffect(() => {
+    let live = true;
     void request('/api/settings?models=openai').then(data => {
       const models = data as ListResponse & { models?: Array<{id:string;name:string}> };
       if (live) setAvailableModels((models.models || []).filter(m => /^gpt-image-/.test(m.id)));
@@ -208,6 +260,28 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     setRecords(images);
     onSaved?.(images);
   }, [onSaved]);
+
+  const ensureSourceStyle = async (): Promise<string> => {
+    // The server owns the durable cache and checks the current collection
+    // fingerprint. A reload or switching tabs must not incur repeat Vision fees.
+    const existing = await styleRequest(styleApiUrl + '?projectId=' + encodeURIComponent(projectId));
+    if (existing.profile) {
+      setStyleProfile(existing.profile);
+      setStyleWarning('');
+      return '';
+    }
+    setMessage('Inspecting representative ORIGINAL clipart pixels to match the collection visual style...');
+    const samples = await createCollectionStyleSamples(assets);
+    if (!samples.length) throw Error('Could not decode original clipart previews for Vision analysis');
+    const analyzed = await styleRequest(styleApiUrl, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId, samples })
+    });
+    if (!analyzed.profile) throw Error('Style analysis returned no visual profile');
+    setStyleProfile(analyzed.profile);
+    setStyleWarning('');
+    return '';
+  };
 
   const categorize = async () => {
     setWorking('categories'); setMessage('Analyzing collection categories from saved artwork names...');
@@ -248,9 +322,19 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     if (!precedingApproved) return setMessage('Approve all preceding listing images before generating this one.');
     if (current?.status === 'approved' && !window.confirm('Regenerate an approved image? Its approval will be reset to Draft.')) return;
     const lettering = { ...currentLettering };
-    let imageCostNotice = '';
-    setWorking('generate'); setMessage('Generating artistic background + exact typography with OpenAI (no clipart regeneration)...');
+    setCostNotice(null);
+    setWorking('generate');
+    setMessage('Preparing visual style direction from original collection clipart...');
     try {
+      let styleFallback = '';
+      try {
+        await ensureSourceStyle();
+      } catch (error) {
+        styleFallback = ' Collection style Vision unavailable: ' +
+          (error instanceof Error ? error.message : String(error)) +
+          '. Used saved theme/style description instead.';
+        setStyleWarning(styleFallback.trim());
+      }
       let effectivePositions = positions;
       if ((step === 3 || step === 5) && !current?.placements && !changes[step] &&
           !Object.keys(categories).length && !assets.some(a => a.category || a.subtheme || a.group)) {
@@ -272,18 +356,12 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
         title: lettering.title, subtitle: lettering.subtitle, badge: lettering.badge,
         revisionNotes: (notes[step] ?? current?.notes ?? '').trim() });
       if (!response.backgroundUrl) throw Error('OpenAI did not return the background');
-      imageCostNotice = response.costEstimate
-        ? 'Estimated OpenAI image cost (' + model + ', ' + quality + '): US$' +
-          response.costEstimate.usd.toFixed(5) +
-          (response.costEstimate.basis === 'reported-usage'
-            ? ' (based on reported image-generation tokens)'
-            : ' (published square-image output estimate; prompt tokens excluded)') +
-          '. Additional Vision/QC API charges not included; actual billing may differ.'
-        : 'Estimated image-generation cost unavailable for this model; actual billing and Vision/QC charges may differ.';
+      // Cost belongs to a separate dismissible floating notice, not workflow status.
+      setCostNotice({ step, model, quality, estimate: response.costEstimate ?? null });
       let suggested = effectivePositions;
       let layoutWarning = '';
       if (effectivePositions.length <= 24) {
-        setMessage('AI Vision is arranging original artwork around the real lettering with natural partial overlap... ' + imageCostNotice);
+        setMessage('AI Vision is arranging original artwork around the real lettering with natural partial overlap...');
         try {
           const vision = await send({ action: 'layout', projectId, number: step, backgroundUrl: response.backgroundUrl, placements: effectivePositions });
           if (vision.placements?.length === effectivePositions.length) suggested = vision.placements;
@@ -300,9 +378,9 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
         notes: notes[step] || current?.notes || '', reviewWarning: response.reviewWarning || '', updatedAt: Date.now()
       });
       await renderAndSave(response.backgroundUrl, suggested, notes[step] || current?.notes || '', response.reviewWarning || '', lettering);
-      setMessage('Image ' + String(step).padStart(2, '0') + ' saved as draft. ' + imageCostNotice +
-        (layoutWarning ? ' Layout note: ' + layoutWarning : ' Review lettering legibility and clipart overlap before approving.'));
-    } catch (error) { setMessage('Generation failed: ' + (error instanceof Error ? error.message : String(error)) + (imageCostNotice ? ' ' + imageCostNotice : '')); }
+      setMessage('Image ' + String(step).padStart(2, '0') + ' saved as draft.' +
+        (layoutWarning ? ' Layout note: ' + layoutWarning : ' Review lettering legibility and clipart overlap before approving.') + styleFallback);
+    } catch (error) { setMessage('Generation failed: ' + (error instanceof Error ? error.message : String(error))); }
     finally { setWorking(''); }
   };
   const rerender = async () => {
@@ -367,7 +445,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       ...previous, [step]: { ...currentLettering, [field]: value }
     }));
   };
-  const setPage = (number: number) => { setStep(number); setSelectedIndex(0); setMessage(''); };
+  const setPage = (number: number) => { setStep(number); setSelectedIndex(0); setMessage(''); setCostNotice(null); };
   const spec = LISTING_IMAGE_SPECS[step - 1];
 
   return <div style={{ display: 'grid', gap: 18 }}>
@@ -375,7 +453,13 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       <h2>Etsy Clipart Listing Studio</h2>
       <p className="sub">Etsy Clipart Listing Studio v1.1 • 15 separate JPGs • 1024 × 1024 px (1:1 square) • automatic art direction • exact originals from the selected PaletteIQ collection, not ZIP.</p>
       {inspection && <p className="sub">Original collection check: {assets.length} distinct source-image references; {inspection.checked}/{inspection.sampled} sampled images decoded{inspection.dimensionSummary ? ' (dimensions: ' + inspection.dimensionSummary + ')' : ''}; {inspection.transparent} show transparency in the sample{inspection.failed ? '; ' + inspection.failed + ' could not be inspected' : ''}. Counts exclude duplicate URLs. Other image formats, dimensions, DPI and licensing are not assumed.</p>}
-      <p className="sub">Creative direction: {artDirection.family} · {artDirection.palette} · AI artwork style follows the collection. {step === 1 ? 'Review the cover first to set the visual direction.' : 'Approved images remain saved; use the same visual language across the series.'}</p>
+      <p className="sub">Creative direction: {artDirection.family} · {artDirection.palette} · {styleProfile ? 'Visual style observed from ' + styleProfile.sampleCount + ' original clipart samples.' : 'Visual style will be checked against original clipart before generation.'} {step === 1 ? 'Review the cover first to set the visual direction.' : 'Approved images remain saved; use the same visual language across the series.'}</p>
+      {styleProfile && <div style={{ border: '1px solid #ddd7cc', background: '#faf9f5', borderRadius: 9, padding: '10px 12px', fontSize: 12 }}>
+        <strong>Observed original clipart style:</strong> {styleProfile.summary}
+        <small style={{ display: 'block', marginTop: 5, color: '#655c50' }}>Medium: {styleProfile.medium} · Palette: {styleProfile.palette} · Texture: {styleProfile.texture}. AI still creates its own background and lettering; original collection images are never redrawn.</small>
+      </div>}
+      {styleWarning && <p className="sub" role="status" style={{ color: '#a15a20' }}>{styleWarning}</p>}
+      {!styleProfile && <small className="sub">The first generation may run one additional paid OpenAI Vision analysis on downsized original clipart samples. Its result is cached and reused across the collection. Subsequent image costs are separate from this analysis.</small>}
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         <strong>{approved}/15 approved • {assets.length} original images available</strong>
         <button type="button" className="primary-btn" disabled={approved !== 15 || !!working} onClick={() => {
@@ -494,5 +578,33 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       </div>
       {!!message && <p role="status" className="notice" style={{ marginTop: 12 }}>{working ? <LoaderCircle className="spin" size={16}/> : null}{message}</p>}
     </div>
+    {costNotice && <aside role="status" aria-live="polite" aria-label="Estimated image generation cost"
+      data-listing-floating-cost="true" style={{
+        position: 'fixed', bottom: 20, right: 20, zIndex: 1100,
+        width: 'min(405px, calc(100vw - 32px))', maxHeight: 'min(65vh, 430px)',
+        overflowY: 'auto', boxSizing: 'border-box',
+        background: '#fffaf0', border: '1px solid #e8bc7b', borderRadius: 12,
+        padding: '13px 15px', boxShadow: '0 10px 32px rgba(51,40,29,.19)',
+        color: '#604526', fontSize: 13, lineHeight: 1.5
+      }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: 12 }}>
+        <strong>Estimated OpenAI Image Cost — Image {String(costNotice.step).padStart(2,'0')}</strong>
+        <button type="button" className="outline-btn" aria-label="Dismiss image cost notice"
+          onClick={() => setCostNotice(null)}
+          style={{ padding: '1px 7px', fontSize: 18, lineHeight: 1.3, minWidth: 28 }}>×</button>
+      </div>
+      {costNotice.estimate
+        ? <div style={{ marginTop: 8, fontSize: 18, fontWeight: 750 }}>{'US$' + costNotice.estimate.usd.toFixed(5)}</div>
+        : <div style={{ marginTop: 8 }}>Price estimate unavailable for this model.</div>}
+      <div style={{ marginTop: 4 }}>{costNotice.model} · {costNotice.quality} quality · 1024 × 1024 px</div>
+      <small style={{ display: 'block', marginTop: 5, color: '#806b51' }}>
+        {costNotice.estimate?.basis === 'reported-usage'
+          ? 'Estimated from provider-reported image generation tokens.'
+          : costNotice.estimate?.basis === 'published-square-output'
+            ? 'Published square-image output estimate; prompt tokens not included.'
+            : 'No reliable pricing information returned for this model.'}
+        {' '}Additional Vision (style/layout), QC and other API requests are not included. This is not the final OpenAI invoice.
+      </small>
+    </aside>}
   </div>;
 }
