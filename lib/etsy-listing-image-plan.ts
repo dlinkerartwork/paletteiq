@@ -16,7 +16,7 @@ export const LISTING_IMAGE_SPECS = [
   { number: 12, key: 'Creative_Projects_Mockup', title: 'Creative Projects Mockup', headline: 'Creative Project Ideas', purpose: 'Original PNG art in a blank scrapbook layout', kind: 'mockup' },
   { number: 13, key: 'Whats_Included', title: "What's Included", headline: "What's Included", purpose: 'Accurately summarize available collection files', kind: 'information' },
   { number: 14, key: 'How_To_Download_And_Use', title: 'How to Download & Use', headline: 'Digital Download Guide', purpose: 'Explain how customers receive digital products', kind: 'information' },
-  { number: 15, key: 'Final_Bundle_Showcase', title: 'Final Bundle Showcase', headline: 'Create Something Wonderful', purpose: 'Premium closing gallery of original clipart', kind: 'gallery' },
+  { number: 15, key: 'Final_Showcase', title: 'Final Bundle Showcase', headline: 'Create Something Wonderful', purpose: 'Premium closing gallery of original clipart', kind: 'gallery' },
 ] as const;
 
 export type ListingImageNumber = number;
