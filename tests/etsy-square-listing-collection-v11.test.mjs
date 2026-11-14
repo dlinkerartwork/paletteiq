@@ -15,7 +15,7 @@ test('2026 listing instruction uses 1024 square canvases across image AI, client
   assert.equal(LISTING_WIDTH/LISTING_HEIGHT,1);
   assert.match(backend,/size: '1024x1024'/);
   assert.match(backend,/FINAL CANVAS IS 1024 x 1024 pixels, 1:1 SQUARE JPG/);
-  assert.match(backend,/No crop is applied/);
+  assert.match(backend,/Final image is clipped to the 1024 square bounds naturally/);
   assert.match(component,/canvas\.width = LISTING_WIDTH; canvas\.height = LISTING_HEIGHT/);
   assert.match(component,/canvas\.toBlob\(blob => blob \? resolve\(blob\) : reject\(Error\('Could not render JPG image\.'\)\), 'image\/jpeg'/);
   assert.match(component,/aspectRatio: '1 \/ 1'/);
