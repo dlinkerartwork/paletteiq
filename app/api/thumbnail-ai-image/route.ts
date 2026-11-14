@@ -113,7 +113,7 @@ export async function POST(req: Request) {
     'blush-brush-ring': 'Delicate translucent pale blush-pink hand-painted CIRCULAR BRUSH RING surrounding an airy title region; cream watercolor paper. No flowers, petals, leaves, food or illustrated objects.',
     'split-panel': 'Refined asymmetric panel division with gentle soft-edged color fields, not large hard geometric slabs.',
     'paper-collage': 'Layered subtly deckled handmade paper and restrained warm painterly edges.',
-    'soft-wash': 'Very light watercolor pigment haze around outer edges, mostly ivory negative space.',
+    'soft-wash': 'Subtle, sparse low-opacity graphic texture where the reference composition actually needs it; NO automatic watercolor patches in corners. Leave negative space clean.',
     'minimal-lines': 'Thin elegant editorial rules and subtle typographic framing on ivory paper.'
   };
   const letteringStyles: Record<string, string> = {
@@ -144,7 +144,7 @@ export async function POST(req: Request) {
       ? 'Premium nonfigurative graphic composition: painterly movement, textless color fields, tactile paper and refined ornamental structure; no text, badges or writing.'
       : referenceGuide || abstractStyles[coverStyle],
     mode === 'background-only' ? 'Balance abstract colors and texture without visual words or title-like shapes.' : energy[designBoldness],
-    styleGuidance[backgroundStyle],
+    referenceComposition ? 'Match the actual reference background MATERIAL and spatial composition, instead of imposing a generic watercolor/aged-paper template.' : styleGuidance[backgroundStyle],
     intensityGuidance[backgroundIntensity],
     'Use non-representational forms ONLY. Every shape must look like paint, paper, typography or graphic geometry, never an object, character, illustration, photograph, silhouette or miniature icon.',
     'No pictorial symbols or decorative themed icons. Absolutely no standalone illustrations anywhere on canvas.',
@@ -211,11 +211,11 @@ export async function POST(req: Request) {
       'Visible areas where original PNG assets will later be composited. Some original images deliberately extend BEYOND the canvas: preserve their visible slots and allow natural crop at the final canvas edge. Leave these slots free of competing decoration; never fill them with substitutes:', JSON.stringify(visibleLayout),
       'Exact original PNGs may intentionally OVERLAP the lettering after compositing, including over the headline or subtitle. The user owns the positions. Do not relocate text or block generation merely because a foreground PNG intersects the typography area; allow artistic layering and keep the remaining exposed letters legible. NEVER draw substitute objects.',
       'Premium design mood (follow reference graphic style when provided):', graphicDirection,
-      'Soft and airy reference-derived design must outweigh saturated color palette descriptors. Keep most of the background near white or ivory.',
+      'Keep the background clean, low saturation and subordinate to original clipart. Avoid repeating the same four-corner watercolor motif across collections or slides.',
       ...(referenceComposition ? ['REFERENCE COMPOSITION HAS PRIORITY OVER DEFAULT ABSTRACT DECORATION: ' + referenceComposition] : []),
       ...(designBrief ? ['REFERENCE & ASSETS SETTINGS (graphic art direction ONLY; never synthesize objects):', designBrief] : []),
-      ...(isHeroCover ? ['HERO ART DIRECTION PRIORITY:', heroReferenceStyle] : []),
-      'If a blush brush-ring reference is provided, DO NOT substitute red-orange geometric blobs. Keep the watercolor ring delicate and the central typography visually expressive.',
+      ...(isHeroCover && !referenceComposition && reference?.graphicMotif === 'blush-brush-ring' ? ['HERO ART DIRECTION PRIORITY:', heroReferenceStyle] : []),
+      'Do not apply pink brush rings, torn paper corners or colorful corner washes by default. Only use such motifs when the reference analysis explicitly supports them; otherwise choose a different high-end design vocabulary.',
       'Slide composition identifier:', slideLabel.replace(/[^a-z0-9 -]/g,'').slice(0,50),
       'Graphic layout direction:', slideDirection.replace(/collection assets|original products|original clipart/gi,'empty image areas'),
       'Prioritize decorative graphic design, NOT themed illustration. No accidental images, illustration vignettes or iconography.',

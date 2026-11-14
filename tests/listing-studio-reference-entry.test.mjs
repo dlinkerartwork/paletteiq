@@ -15,7 +15,7 @@ test('15-image listing workflow remains separate while the legacy launch panel i
   assert.match(page, /setTab\('listing-images'\)/);
 });
 test('Reference & Assets selections flow to AI background generation', () => {
-  assert.match(studio, /action: 'generate', projectId, number: step, model, quality/);
+  assert.match(studio, /action: 'generate', projectId, number: step, model: config\.imageModel, quality/);
   assert.match(studio, /settings: config \?/);
   assert.match(route, /artPrompt\(input.number, project, count, input.settings, input.referenceDesign\)/);
   assert.match(route, /settings\?\.backgroundStyle/);

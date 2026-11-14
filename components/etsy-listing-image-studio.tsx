@@ -113,7 +113,6 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [visionModels, setVisionModels] = useState<Record<'openai' | 'gemini', Array<{id: string; name: string}>>>({ openai: [], gemini: [] });
   const [quality, setQuality] = useState<'low' | 'medium' | 'high'>(initialConfig?.quality || 'medium');
-  const [model, setModel] = useState(initialConfig?.imageModel || 'gpt-image-1-mini');
   const [referenceDesign, setReferenceDesign] = useState<ListResponse['layout']>();
   const [availableModels, setAvailableModels] = useState<Array<{id: string; name: string}>>([]);
   const [changes, setChanges] = useState<Record<number, ListingPlacement[]>>({});
@@ -229,7 +228,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
     receive(result.images || []);
   };
   const renderAndSave = async (background: string, layout: ListingPlacement[], info: string) => {
-    setWorking('render'); setMessage('Compositing ' + layout.length + ' exact original clipart images at 3000 × 2250 px...');
+    setWorking('render'); setMessage('Compositing ' + layout.length + ' exact original clipart images at 1024 × 1024 px...');
     const file = await compose(background, layout, assets);
     setMessage('Saving JPG preview to the collection in safe upload chunks...');
     const renderedImageUrl = await upload(projectId, step, file, (done, total) => setMessage('Uploading original-asset JPG: ' + done + '/' + total + ' parts...'));
@@ -283,7 +282,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
         }
       }
       setMessage('Generating the AI graphic background and artistic typography...');
-      const response = await send({ action: 'generate', projectId, number: step, model, quality,
+      const response = await send({ action: 'generate', projectId, number: step, model: config.imageModel, quality,
         settings: config ? { ...config, referenceImage: undefined } : undefined,
         referenceDesign: styleTokens
       });
@@ -358,6 +357,13 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
             setSettingsDirty(true);
           }}><option value="openai">OpenAI</option><option value="gemini">Gemini (reference analysis)</option></select>
         </label>
+        <label style={{ display: 'grid', gap: 5 }}><span className="input-label">OPENAI BACKGROUND GENERATION MODEL</span>
+          <select value={config.imageModel} disabled={!!working || settingsBusy} onChange={e => changeConfig('imageModel', e.target.value)}>
+            {!availableModels.some(x => x.id === config.imageModel) && <option value={config.imageModel}>{config.imageModel}</option>}
+            {availableModels.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
+          </select>
+          <small>For creating backgrounds and artistic lettering. Vision model above is for analyzing the reference image.</small>
+        </label>
         <label style={{ display: 'grid', gap: 5 }}><span className="input-label">VISION MODEL</span>
           <select value={config.analysisModel} disabled={!!working || settingsBusy} onChange={e => changeConfig('analysisModel', e.target.value)}>
             {!visionModels[config.analysisProvider].some(m => m.id === config.analysisModel) && <option value={config.analysisModel}>{config.analysisModel}</option>}
@@ -423,7 +429,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
     </div>
     <div className="panel" style={{ padding: 20 }}>
       <h2>Etsy Listing Image Studio</h2>
-      <p className="sub">15-image workflow • 3000 × 2250 px • 4:3 landscape • OpenAI artistic lettering • exact original collection clipart. Configure Reference & Assets above; existing legacy thumbnail projects stay intact.</p>
+      <p className="sub">15-image workflow • 1024 × 1024 px • square 1:1 • OpenAI artistic lettering • exact original collection clipart. Configure Reference & Assets above; existing legacy thumbnail projects stay intact.</p>
       {config && <p className="sub">Style: {config.coverStyle} · {config.backgroundStyle} · {config.boldness} · {config.hierarchy} hierarchy · {config.intensity} decoration · {config.referenceImage ? 'Selected reference enabled' : 'No reference'}. These settings guide each generated listing image.</p>}
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         <strong>{approved}/15 approved • {assets.length} original images available</strong>
@@ -453,7 +459,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
       <p className="sub">{spec.purpose}. Source: {smoothName(subtheme || theme || name)}.</p>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(300px,1fr))', gap: 18 }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ aspectRatio: '4 / 3', background: '#f7f1e9', border: '1px solid #e5dbcb', borderRadius: 10, overflow: 'hidden', display: 'grid', placeItems: 'center' }}>
+          <div style={{ aspectRatio: '1 / 1', background: '#f7f1e9', border: '1px solid #e5dbcb', borderRadius: 10, overflow: 'hidden', display: 'grid', placeItems: 'center' }}>
             {current?.renderedImageUrl ? <img key={current.renderedImageUrl} src={current.renderedImageUrl} alt={'Saved listing image '+step} style={{ width: '100%', height: '100%', objectFit: 'contain' }}/> :
               <div style={{ textAlign: 'center', padding: 24, color: '#68594a' }}><ImageIcon size={40}/><p>Generate the AI graphic background, then PaletteIQ will composite original collection PNGs.</p></div>}
           </div>
@@ -464,11 +470,6 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
           {(spec.kind === 'mockup') && <p className="sub">Mockup is a demonstration, not included in the sold collection. Inspect printable placement: the photograph is AI-generated, while the featured clipart is composited from its original file.</p>}
         </div>
         <div style={{ display: 'grid', alignContent: 'start', gap: 10 }}>
-          <label className="input-label">OPENAI ARTISTIC BACKGROUND MODEL</label>
-          <select value={model} disabled={!!working || settingsBusy} onChange={e => { setModel(e.target.value); changeConfig('imageModel', e.target.value); }}>
-            {!availableModels.some(x => x.id === model) && <option value={model}>{model}</option>}
-            {availableModels.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
-          </select>
           <label className="input-label">BACKGROUND QUALITY</label>
           <select value={quality} disabled={!!working || settingsBusy} onChange={e => { const value = e.target.value as typeof quality; setQuality(value); changeConfig('quality', value); }}>
             <option value="low">Low — economical</option><option value="medium">Medium — recommended</option><option value="high">High</option>

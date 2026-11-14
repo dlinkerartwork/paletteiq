@@ -15,8 +15,8 @@ test('listing image plan contains exactly 15 unique numbered pages in approved o
   assert.equal(LISTING_IMAGE_SPECS.length, 15);
   assert.deepEqual(LISTING_IMAGE_SPECS.map(x=>x.number), Array.from({ length: 15 },(_,i)=>i+1));
   assert.equal(new Set(LISTING_IMAGE_SPECS.map(x=>x.key)).size, 15);
-  assert.equal(LISTING_WIDTH, 3000);
-  assert.equal(LISTING_HEIGHT, 2250);
+  assert.equal(LISTING_WIDTH, 1024);
+  assert.equal(LISTING_HEIGHT, 1024);
 });
 test('all source images appear exactly once in 02 and 03 without regenerating assets', () => {
   for(const number of [2,3]){

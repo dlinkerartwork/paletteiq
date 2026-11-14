@@ -131,17 +131,19 @@ function artPrompt(number: number, project: StoredProject, count: number, settin
   const mood = ['blush-sage','earthy-warm','forest-cream','pastel','vibrant'].includes(referenceDesign?.paletteMood || '') ? referenceDesign?.paletteMood : 'collection colors';
   const core = [
     'Create a premium conversion-focused Etsy digital clipart listing IMAGE BACKGROUND with exact ARTISTIC TYPOGRAPHY.',
-    'Aspect: 3:2 landscape source, center-cropped to 4:3. All important lettering must be within the middle 82% of source width. Final composition is 3000 x 2250.',
+    'Square 1:1 composition. The final JPG and generated background are both 1024 x 1024 pixels. Keep all critical lettering within the central safe area.',
     'Render the exact main title: ' + JSON.stringify(title) + '. Render the exact subtitle: ' + JSON.stringify(subtitle) + '. No other writing, numerals, file specifications, licensing or marketing claims.',
     'Typography: expressive premium artisanal brush-script plus clear editorial serif, refined and striking at Etsy mobile thumbnail size. Lettering must be correctly spelled and legible.',
-    'Visual continuity: warm ivory artisanal paper, gentle watercolor washes, forest or botanical dark lettering, elegant soft touches; suggested color direction: ' + JSON.stringify(palette) + '.',
-    'Reserve the top 23% of the image for the headline and subtitle. Place all essential text ONLY in the top 23%, with ample edge-safe spacing.',
+    'Visual continuity comes from the actual collection palette and selected reference, not a hardcoded watercolor template: ' + JSON.stringify(palette) + '. Use restrained decorative color and plenty of clean readable space.',
+    'Reserve a clear title area sized for the headline and subtitle, usually near the top. Keep text safely inside square margins and allow the rest of the square for original clipart.',
     'The actual digital clipart collection is NOT provided to you; original PNG assets will be composited later by PaletteIQ. Do not invent or paint any clipart artwork, characters, food, floral illustrations, miniature icons, badges depicting objects, or product substitutes.',
     'Do not claim asset dimensions, DPI, license terms, digital file formats or asset counts other than the exact verified subtitle supplied.',
     'Consistent tasteful professional photography/graphic design, high-key natural lighting, spacious graphic hierarchy.',
     'REFERENCE & ASSETS DESIGN SETTINGS (abstract art and typography only): cover=' + artStyle + ', background=' + backgroundStyle + ', intensity=' + intensity + ', lettering emphasis=' + boldness + '.',
     'Verified reference analysis GRAPHIC STYLE ONLY (not product depiction): motif=' + motif + ', lettering=' + lettering + ', palette mood=' + mood + '.',
-    'The uploaded reference is only a guide to abstract aesthetic and spacing. Do not reproduce original reference artwork or distinctive composition verbatim.'
+    'Use the selected reference to guide design geometry, lettering scale, badge shape and palette, but keep the result original. Do not force watercolor corner washes, colored torn-paper patches, circular rings or multicolor corner gradients unless the reference specifically calls for them.',
+    'Avoid the default repeated cream-center / turquoise-and-orange watercolor-corner motif. For each listing slide, design a distinct nonfigurative graphic structure matched to its purpose, while preserving collection coherence.',
+    'Do not add large saturated pigment to any of the four corners. Background must not overpower the original clipart. Typography remains the primary generated graphic.'
   ];
   if (spec.kind === 'mockup') {
     return [
@@ -158,7 +160,7 @@ function artPrompt(number: number, project: StoredProject, count: number, settin
     spec.kind === 'all' || spec.kind === 'all-grouped' || spec.kind === 'categories'
       ? 'Make the area below the top 23% mostly soft ivory with minimal low-contrast paper grain; many small original clipart assets will be arranged in a balanced gallery grid there.'
       : spec.kind === 'information' ? 'Keep lower two thirds very clean and light for clear informational overlays and the original artworks.' :
-      'Keep the area beneath title open with gentle nonfigurative watercolor pigment edges, leaving generous room to showcase selected original clipart.',
+      'Keep the artwork area beneath the title open and calm, using the selected reference\'s actual composition language. Do not add automatic corner pigment or watercolor borders.',
     'Design direction: ' + spec.purpose
   ].join('\n');
 }
@@ -207,7 +209,7 @@ export async function POST(request: Request) {
             {type:'input_text',text:[
               'You are an expert graphic designer positioning EXISTING ORIGINAL PNG LAYERS on an AI-generated empty listing design. NEVER draw or regenerate clipart.',
               'Inspect the supplied BACKGROUND IMAGE PIXELS to locate the already-rendered artistic typography and unobstructed blank printable space.',
-              'Final export is 4:3 landscape (3000x2250), made by center-cropping the supplied 3:2 background, removing approximately 5.56% from both left and right edges. Return coordinate percentages relative to this FINAL 4:3 crop, NOT the uncropped source.',
+              'The supplied generated background and the final JPG are both exact 1:1 square at 1024x1024. Return position percentages relative to this square; there is no aspect-ratio crop.',
               'The title and subtitle must remain unobstructed, usually in the upper 23% of the final canvas.',
               isMockup ? 'This is a realistic BLANK PRODUCT MOCKUP. All supplied original asset layers MUST fit on the blank flat printable area of the product and not float on table/background. Account for actual blank surface position in visible pixels. Do not cover straps, hands, folds, shadows or the product edge.' : 'Use intentional size hierarchy and negative space. For many gallery items keep original grid, adjust only to avoid title, maintain layout clarity.',
               'Return ONLY JSON: {"placements":[{"assetId":"source-id","x":30,"y":40,"width":18,"height":22,"rotation":0}],"unsafe":false,"notes":""}.',
@@ -255,7 +257,7 @@ export async function POST(request: Request) {
     const response = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, prompt, size: '1536x1024', quality, output_format: 'png', n: 1 }),
+      body: JSON.stringify({ model, prompt, size: '1024x1024', quality, output_format: 'png', n: 1 }),
       signal: AbortSignal.timeout(120000)
     });
     if (!response.ok) return bad('AI background failed (HTTP ' + response.status + '): ' + (await response.text()).slice(0, 250), 502);
