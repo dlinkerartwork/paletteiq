@@ -66,7 +66,8 @@ test('save white canvas snapshots per step, prevent stale full-collection saves 
   assert.match(api,/eq\(projects\.owner,user\.userId\)/);
   assert.match(ui,/await savePreLayout\(effectivePositions\)/);
   assert.match(ui,/setPreLayouts\(response\.preLayouts \|\| \{\}\)/);
-  assert.match(ui,/changes\[step\] \|\| current\?\.placements \|\| preLayouts\[String\(step\)\]/);
+  assert.match(ui,/const positions = changes\[step\] \|\|/);
+  assert.match(ui,/current\?\.placements \|\| preLayouts\[String\(step\)\]/);
   assert.match(ui,/Save White Canvas Pre-Layout \(no AI cost\)/);
   assert.match(studio,/const savedLayouts = \(old as \{ listingPreLayouts\?: Record<string, unknown> \}\)\.listingPreLayouts/);
 });
