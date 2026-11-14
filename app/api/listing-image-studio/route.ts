@@ -47,7 +47,7 @@ function savedAssetKey(urlString: string, projectId: string, owner: string): str
 function preparedRecord(value: ListingImageRecord, project: StoredProject, previous?: ListingImageRecord): ListingImageRecord {
   const allowed = new Set(originalAssets(project.characters || []).map(item => item.id));
   const placements: ListingPlacement[] = Array.isArray(value.placements)
-    ? value.placements.slice(0, 300).filter(p => p && allowed.has(p.assetId) && validListingPlacement(p, value.number))
+    ? value.placements.filter(p => p && allowed.has(p.assetId) && validListingPlacement(p, value.number))
     : previous?.placements || [];
   const status: ListingImageStatus = value.status === 'approved' || value.status === 'needs_revision' ? value.status : 'draft';
   // An explicit empty render URL clears stale approved JPGs during regeneration.
@@ -236,6 +236,7 @@ type Input = {
   backgroundUrl?: string; placements?: ListingPlacement[]; revisionNotes?: string;
   featuredCount?: number; critiqueFeedback?: string; textScale?: 'compact' | 'balanced' | 'statement'; backgroundStyle?: 'plain' | 'minimal' | 'soft-texture';
   compositionMode?: ListingCompositionMode; artworkContactSheets?: string[];
+  existingPlacements?: ListingPlacement[]; totalSelected?: number;
   title?: string; subtitle?: string; badge?: string;
 };
 /**
@@ -267,13 +268,14 @@ function artPrompt(number: number, project: StoredProject, count: number, revisi
       : 'No visual sample analysis of the real collection is available. Treat the stored collection style and theme as secondary descriptive hints, not visual evidence. Avoid imposing generic watercolor or retro aesthetics without support.',
     'CREATIVE FREEDOM: Design a fresh premium Etsy layout with bespoke expressive lettering, innovative balance and restrained nonfigurative details. Be imaginative with hierarchy but keep the BACKGROUND quiet and subordinate to the original clipart; match the OBSERVED source-art medium, softness, palette and mood when available.',
     'The collection theme guides the SUBJECT of the merchandising message, but is not permission to draw themed subjects. Original clipart will be composited later in exact original PNG pixels by PaletteIQ.',
-    'Design typography for quick readability on a small Etsy search-result thumbnail: bold but friendly high-contrast custom lettering, artistically curved or hand-painted where appropriate, with restrained supporting text.',
+    'TYPOGRAPHY COLOR REQUIREMENT: use TWO OR THREE DISTINCT harmonious lettering colors coordinated with the collection palette. Do NOT render all words, title, subtitle and badge in one color. Use a contrasting accent on one word or intentional letterforms of the main title, another readable color for the subtitle, and a complementary badge color when present. Maintain contrast on the quiet background.',
+    'Design typography for quick readability on a small Etsy search-result thumbnail: elegant compact bespoke lettering, artistically curved or hand-painted where appropriate, with restrained supporting text. Original artwork dominates both in area and contrast.',
     'MERCHANDISING HIERARCHY: original collection artwork is the product and must remain prominent; no generic giant text wall. Keep a clear headline and much smaller supporting subtitle. If both are long, prioritize visual clarity rather than inflating every word. Never add extra words or repeat the provided title in tiny ornamental lettering.',
     textScale === 'compact'
-      ? 'TYPOGRAPHY SCALE — COMPACT (default): Make custom lettering refined, readable, and decidedly SMALL relative to the 1024 square. Aim for the ENTIRE main title block only about 14–16% of canvas height (INCLUDING all title lines), subtitle only about 3–5%, and combined lettering generally below 24%. Never enlarge the heading merely to fill empty space; the authentic original artwork must dominate. These are art-direction proportions, not a mandatory fixed position or box.'
+      ? 'TYPOGRAPHY SCALE — COMPACT (default): Make custom lettering refined, readable, and decidedly SMALL relative to the 1024 square. Aim for the ENTIRE main title block only about 10–13% of canvas height (INCLUDING all title lines), subtitle only about 2–4%, and combined lettering generally below 19%. Never enlarge the heading merely to fill empty space; the authentic original artwork must dominate. These are art-direction proportions, not a mandatory fixed position or box.'
       : textScale === 'balanced'
-        ? 'TYPOGRAPHY SCALE — BALANCED: Main title group roughly 19–22% of canvas height at most, subtitle about 4–6%, combined typography below 29%. Keep source original artwork as the dominant product illustration.'
-        : 'TYPOGRAPHY SCALE — STATEMENT: Expressive headline may use up to roughly 26–28% of canvas height, subtitle no more than 7%, but leave plenty of room for original clipart and never let text overpower the artwork.',
+        ? 'TYPOGRAPHY SCALE — BALANCED: Main title group roughly 15–18% of canvas height at most, subtitle about 3–5%, combined typography below 24%. Keep source original artwork as the dominant product illustration.'
+        : 'TYPOGRAPHY SCALE — STATEMENT: Expressive headline may use up to roughly 21–24% of canvas height, subtitle no more than 6%, but leave plenty of room for original clipart and never let text overpower the artwork.',
     'Scale down the lettering intelligently when the title contains multiple words. Do not make every line equally large: one elegant compact headline with a smaller supporting subtitle is preferred. Avoid tall stacked lettering that fills the entire center from top to bottom.',
     'Optional badge must remain modest (about 8–12% of canvas width) and separated enough from critical title letters to stay legible after real clipart is composited. Never create a larger competing badge than the actual source illustrations.',
     'BACKGROUND RULE: the background must support, never compete with, the ORIGINAL clipart. It must remain theme-matched but plain/minimal, with no elaborate frames, geometric gold lines, busy swirls, heavy watercolor blobs, repeated motifs or fake illustrative flowers/vehicles. Reserve most visual contrast and rich details for the pasted originals.',
@@ -289,7 +291,7 @@ function artPrompt(number: number, project: StoredProject, count: number, revisi
       ? 'FREE ART DIRECTION: balance a visually rich variety of authentic large, medium and tiny illustrations after compositing. A few assets can crop naturally off the outer edge, much like a premium illustrated collage, while the main words remain readable. No rigid equal-sized grid, predetermined corner slots, or compulsory perimeter-only arrangements. The AI layout planner is empowered to change any suggested asset position and size completely.'
       : 'STRUCTURED ART DIRECTION: keep the user chosen placement proportions with only requested refinements.',
     compositionMode === 'free'
-      ? 'FREE COMPOSITION MODE (MAIN COVER): Any positions from PaletteIQ are ONLY an optional selection sketch, never a placement constraint. An independent AI Vision art director will decide all clipart positions, rotations and radically varied scales AFTER the typography background is generated. Create an excellent flexible typographic poster with a clearly readable headline and subtitle, rich visually balanced layout and open regions for a dense collage of ' + (project.selectedArtworkCount || DEFAULT_MAIN_COVER_CLIPART_COUNT) + ' genuine original elements. Text colors CAN differ (e.g. harmonious dark forest, warm burgundy and cream) to maximize hierarchy. Let title/subtitle/badge align elegantly; do not enforce a fixed box or prohibit touching/overlapping artwork near letters.'
+      ? 'FREE COMPOSITION MODE (MAIN COVER): Any positions from PaletteIQ are ONLY an optional selection sketch, never a placement constraint. An independent AI Vision art director will decide all clipart positions, rotations and radically varied scales AFTER the typography background is generated. Create an excellent flexible typographic poster with a clearly readable headline and subtitle, rich visually balanced layout and open regions for a dense collage of ' + (project.selectedArtworkCount || DEFAULT_MAIN_COVER_CLIPART_COUNT) + ' genuine original elements. Text colors MUST differ across title accent words and the supporting subtitle (e.g. forest green, warm burgundy and cream), maintaining contrast; monotone lettering is NOT acceptable. Let title/subtitle/badge align elegantly; do not enforce a fixed box or prohibit touching/overlapping artwork near letters.'
       : preLayout?.length
         ? 'STRUCTURED COMPOSITION: honor user-arranged WHITE CANVAS positions as a blueprint (do not draw the assets): ' +
           JSON.stringify(preLayout.map(p => ({x:p.x,y:p.y,width:p.width,height:p.height,rotation:p.rotation??0}))) +
@@ -362,7 +364,7 @@ export async function POST(request: Request) {
     // Reject invalid or duplicated asset IDs; never silently rewrite originals.
     const valid = new Set(originalAssets(project.characters || []).map(asset => asset.id));
     const placements = input.placements;
-    if (!Array.isArray(placements) || !placements.length || placements.length > 300 ||
+    if (!Array.isArray(placements) || !placements.length || placements.length > originalAssets(project.characters || []).length ||
         placements.some(p => !p || !valid.has(p.assetId) || !validListingPlacement(p, input.number!)) ||
         new Set(placements.map(p => p.assetId)).size !== placements.length ||
         (input.compositionMode !== undefined && !['free','structured'].includes(input.compositionMode)))
@@ -388,7 +390,7 @@ export async function POST(request: Request) {
     const fallback = Array.isArray(input.placements) ? input.placements : [];
     const originals = originalAssets(project.characters || []);
     const valid = new Map(originals.map(asset => [asset.id, asset.name]));
-    if (!fallback.length || fallback.length > 300 ||
+    if (!fallback.length || fallback.length > originals.length ||
         fallback.some(p => !p || !valid.has(p.assetId) || !validListingPlacement(p,input.number!)) ||
         new Set(fallback.map(p=>p.assetId)).size !== fallback.length)
       return bad('Invalid original collection placement plan');
@@ -408,14 +410,23 @@ export async function POST(request: Request) {
     // The source-contact sheet is a small preview of actual original assets,
     // not an image-generation input. The model may SEE, but NEVER DRAW, clipart.
     const contactSheets = input.artworkContactSheets || [];
-    if (!Array.isArray(contactSheets) || contactSheets.length > 5 ||
+    if (!Array.isArray(contactSheets) || contactSheets.length > Math.ceil(fallback.length / 24) ||
       contactSheets.some(sheet => typeof sheet !== 'string' ||
         sheet.length > 1_800_000 || !/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(sheet)))
       return bad('Invalid original artwork contact sheets', 413);
-    const descriptor = fallback.map((p,index) => ({
-      index:index+1, assetId:p.assetId, name:valid.get(p.assetId),
-      x:p.x,y:p.y,width:p.width,height:p.height,rotation:p.rotation||0
-    }));
+    // Free Composition must NOT receive PaletteIQ's initial coordinates:
+    // supplying them anchored Vision to the starter sketch.
+    const descriptor = fallback.map((p,index) => free
+      ? { index:index+1, assetId:p.assetId, name:valid.get(p.assetId) }
+      : { index:index+1, assetId:p.assetId, name:valid.get(p.assetId),
+          x:p.x,y:p.y,width:p.width,height:p.height,rotation:p.rotation||0 });
+    const existing = Array.isArray(input.existingPlacements) ? input.existingPlacements : [];
+    if (existing.some(p => !p || !valid.has(p.assetId) || !validListingPlacement(p,input.number!) ||
+        fallback.some(current => current.assetId === p.assetId)) ||
+        new Set(existing.map(p => p.assetId)).size !== existing.length)
+      return bad('Invalid previously arranged original artwork');
+    const totalSelected = Number.isInteger(input.totalSelected) && (input.totalSelected || 0) >= fallback.length + existing.length
+      ? input.totalSelected! : fallback.length + existing.length;
     const directions = [
       'You are an award-winning Etsy visual merchandiser, art director and composition planner.',
       'You will REPOSITION AND RESIZE existing exact ORIGINAL PNG LAYERS. NEVER redraw, regenerate, modify, recolor or replace any image. PaletteIQ performs all compositing using the original stored image bytes.',
@@ -432,13 +443,17 @@ export async function POST(request: Request) {
         : 'Keep all layers within 0–100% canvas bounds; for product mockups, use only the actual flat printable product surface.',
       isMockup ? 'This is a realistic BLANK PRODUCT MOCKUP. Never place clipart outside the printable surface, on hands, background or product edges.' : '',
       contactSheets.length && free
-        ? 'Following the BACKGROUND are up to five numbered contact sheets with small previews of ACTUAL original artwork, ordered by GLOBAL index 1..N matching the asset descriptors. Use real silhouettes, orientations and colors to choose a varied poster hierarchy. These images are reference samples ONLY: NEVER redraw any pictured object.'
+        ? 'Following the BACKGROUND is a numbered contact sheet of ACTUAL original artwork, indexed 1..N matching THIS BATCH of asset descriptors. Use true silhouettes and colors to make a varied collage. These are reference samples ONLY: NEVER redraw the pictured objects.'
         : 'If original artwork previews are unavailable, infer cautiously from names; do not invent visual attributes.',
       'RETURN JSON ONLY: {"placements":[{"assetId":"exact-source-id","x":-4,"y":22,"width":33,"height":38,"rotation":-7}],"unsafe":false,"notes":"..."}',
       'Return each listed assetId EXACTLY ONCE, and NO fabricated or duplicate asset IDs. No missing selected originals. All placement values must be finite numeric coordinates and sizes.',
       input.critiqueFeedback
         ? 'PREVIOUS FINAL COMPOSITION REVIEW FEEDBACK: ' + JSON.stringify(sanitizedText(input.critiqueFeedback,500))
         : 'No previous critique. Prioritize a genuinely legible title and distinct varied artwork hierarchy.',
+      free ? 'THERE ARE ' + totalSelected + ' SELECTED ORIGINALS IN THIS FINAL COVER, and this request arranges ' + fallback.length + ' of them. Allocate visual scale and density for the TOTAL, not a fixed 12-clipart layout. Use striking size contrast, but leave room for every selected original across batches.' : '',
+      free && existing.length ? 'ALREADY AI-ARRANGED ORIGINALS (other batches; DO NOT return again): ' +
+        JSON.stringify(existing.map(p => ({assetId:p.assetId,x:p.x,y:p.y,width:p.width,height:p.height,rotation:p.rotation??0}))) +
+        '. Consider their occupied areas and typography, but do not move them; place THIS batch around them with controlled overlaps and without edge-only rows.' : '',
       'ACTUAL SELECTED ORIGINAL ASSETS IN ORDER: ' + JSON.stringify(descriptor)
     ];
     try {
@@ -472,7 +487,15 @@ export async function POST(request: Request) {
           (free || (p.x+p.width<=100 && p.y+p.height<=100));
       });
       if (!correct) return Response.json({placements:fallback,
-        fallback:'AI Vision could not return a complete valid composition. No source clipart was changed; adjust manually or retry Auto Arrange.'});
+        fallback:'AI Vision did not produce a valid independent layout for this batch; the starter positions were kept. Retry Auto Arrange.'});
+      const unchanged = free && candidates.every((p,i) => {
+        const before = fallback[i];
+        return p.assetId === before.assetId &&
+          Math.abs(p.x-before.x) < 0.5 && Math.abs(p.y-before.y) < 0.5 &&
+          Math.abs(p.width-before.width) < 0.5 && Math.abs(p.height-before.height) < 0.5;
+      });
+      if (unchanged) return Response.json({placements:fallback,
+        fallback:'AI Vision returned the same PaletteIQ starter composition. Free Composition was NOT applied; retry Auto Arrange.'});
       return Response.json({placements:candidates, note:sanitizedText(parsed.notes||'',180), compositionMode:mode});
     } catch {
       return Response.json({placements:fallback,
@@ -513,7 +536,7 @@ export async function POST(request: Request) {
   if (input.compositionMode !== undefined && !['free','structured'].includes(input.compositionMode))
     return bad('Invalid composition mode');
   if (preLayout !== undefined && (
-    !Array.isArray(preLayout) || !preLayout.length || preLayout.length > 300 ||
+    !Array.isArray(preLayout) || !preLayout.length || preLayout.length > originalAssets(project.characters || []).length ||
     preLayout.some(p => !p || typeof p.assetId !== 'string' ||
       !originalAssets(project.characters || []).some(a => a.id === p.assetId) ||
       !validListingPlacement(p, input.number!)) ||
