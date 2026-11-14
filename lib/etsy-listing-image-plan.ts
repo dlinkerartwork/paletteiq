@@ -28,10 +28,23 @@ export type ListingPlacement = { assetId: string; x: number; y: number; width: n
 export type ListingImageRecord = {
   number: number; status: ListingImageStatus; backgroundUrl?: string; renderedImageUrl?: string;
   placements?: ListingPlacement[]; notes?: string; reviewWarning?: string;
+  title?: string; subtitle?: string; badge?: string; // Exact user-approved AI lettering per image.
   width?: number; height?: number; // Missing size = legacy 4:3, pending square re-render.
   updatedAt: number;
 };
 export type ListingImageKind = typeof LISTING_IMAGE_SPECS[number]['kind'];
+export type ListingImageText = { title: string; subtitle: string; badge: string };
+/** SEO fields are defaults only. Existing per-image edits override them. */
+export function listingImageTextDefaults(
+  listing: { title?: string; primaryKeyword?: string } | undefined, fallback: string
+): ListingImageText {
+  return {
+    title: (listing?.title || '').trim() || fallback.trim() || 'Original Clipart Collection',
+    subtitle: (listing?.primaryKeyword || '').trim(),
+    badge: ''
+  };
+}
+
 /** Old 4:3 approved JPGs remain stored but cannot count toward square exports. */
 export function isSquareListingApproved(record?: ListingImageRecord): boolean {
   return Boolean(record && record.status === 'approved' && record.renderedImageUrl &&
