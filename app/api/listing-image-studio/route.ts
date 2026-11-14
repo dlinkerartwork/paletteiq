@@ -287,7 +287,7 @@ function artPrompt(number: number, project: StoredProject, count: number, revisi
       : 'Design typography for quick readability on a small Etsy search-result thumbnail: elegant compact bespoke lettering with restrained supporting text. Original artwork dominates both in area and contrast.',
     'MERCHANDISING HIERARCHY: original collection artwork is the product and must remain prominent; no generic giant text wall. Keep a clear headline and much smaller supporting subtitle. If both are long, prioritize visual clarity rather than inflating every word. Never add extra words or repeat the provided title in tiny ornamental lettering.',
     compositionMode === 'free'
-      ? 'TYPOGRAPHY SIZE PREFERENCE — ' + textScale.toUpperCase() + ': Treat this as a preference only: compact means smaller, balanced means moderate, statement means more emphasis. You determine the best actual sizes and hierarchy for the artwork. There are no required percentages or fixed headline boxes. Keep the whole title readable, not hidden by pasted originals.'
+      ? 'TYPOGRAPHY CREATIVE FREEDOM: Choose the font, lettering style, proportions, scale and location independently. There are NO preset text sizes or hierarchy formulas. Keep the title, subtitle and badge completely readable and make the final clipart collage visually balanced.'
       : textScale === 'compact'
       ? 'TYPOGRAPHY SCALE — COMPACT (default): Make custom lettering refined, readable, and decidedly SMALL relative to the 1024 square. Aim for the ENTIRE main title block only about 10–13% of canvas height (INCLUDING all title lines), subtitle only about 2–4%, and combined lettering generally below 19%. Never enlarge the heading merely to fill empty space; the authentic original artwork must dominate. These are art-direction proportions, not a mandatory fixed position or box.'
       : textScale === 'balanced'
@@ -305,7 +305,7 @@ function artPrompt(number: number, project: StoredProject, count: number, revisi
     number >= 8 && number <= 12
       ? 'MOCKUP EXCEPTION: retain a realistic uncluttered blank product environment; only the extra backdrop decorations should be minimal.'
       : compositionMode === 'free'
-        ? 'BACKGROUND STYLE PREFERENCE — ' + backgroundStyle.toUpperCase() + ': Choose how to interpret this preference artistically (plain = spare, minimal = understated, soft-texture = gently tactile). No prescribed placement, decoration, color ratio or font style. Coordinate freely with the original collection.'
+        ? 'BACKGROUND CREATIVE FREEDOM: OpenAI freely chooses background colors, materials, subtle texture, graphic balance and spatial relationships from the user prompt and original art identity. No preset style or palette formula is imposed. Never create replacement clipart.'
       : backgroundStyle === 'plain'
         ? 'BACKGROUND STYLE — PLAIN: use a nearly flat clean cream/white/light neutral color softly tinted toward the saved collection palette. No frames, patterns, decorative curves or visible washes. Keep ample negative space, with ONLY the exact requested lettering.'
         : backgroundStyle === 'soft-texture'
@@ -603,7 +603,9 @@ export async function POST(request: Request) {
         ? 'Following the BACKGROUND is a numbered contact sheet of ACTUAL original artwork, indexed 1..N matching THIS BATCH of asset descriptors. Use true silhouettes and colors to make a varied collage. These are reference samples ONLY: NEVER redraw the pictured objects.'
         : 'If original artwork previews are unavailable, infer cautiously from names; do not invent visual attributes.',
       'RETURN JSON ONLY: {"placements":[{"assetId":"exact-source-id","x":-4,"y":22,"width":33,"height":38,"rotation":-7}],"unsafe":false,"notes":"..."}',
-      'Return each listed assetId EXACTLY ONCE, and NO fabricated or duplicate asset IDs. No missing selected originals. All placement values must be finite numeric coordinates and sizes.',
+      mode === 'ai-first'
+        ? 'Use ONLY the supplied source asset IDs. Each of the selected originals must appear at least once; you MAY repeat existing real original PNG layers when it helps the design. Every returned placement needs its source assetId; no fabricated IDs or AI-created illustrations. All values must be finite numbers.'
+        : 'Return each listed assetId EXACTLY ONCE, and NO fabricated or duplicate asset IDs. No missing selected originals. All placement values must be finite numeric coordinates and sizes.',
       input.critiqueFeedback
         ? 'PREVIOUS FINAL COMPOSITION REVIEW FEEDBACK: ' + JSON.stringify(sanitizedText(input.critiqueFeedback,500))
         : 'No previous critique. Prioritize a genuinely legible title and distinct varied artwork hierarchy.',
@@ -636,16 +638,18 @@ export async function POST(request: Request) {
       const candidates = Array.isArray(parsed.placements) ? parsed.placements : [];
       const ids = new Set(fallback.map(p=>p.assetId));
       const seen = new Set<string>();
-      const correct = !parsed.unsafe && candidates.length === fallback.length && candidates.every(p=>{
-        if (!p || !ids.has(p.assetId) || seen.has(p.assetId)) return false;
+      const correct = !parsed.unsafe && (mode === 'ai-first'
+        ? candidates.length >= fallback.length
+        : candidates.length === fallback.length) && candidates.every(p=>{
+        if (!p || !ids.has(p.assetId) || (mode !== 'ai-first' && seen.has(p.assetId))) return false;
         seen.add(p.assetId);
         return validListingPlacement(p,input.number!) &&
           (!isMockup || (p.x+p.width<=100 && p.y+p.height<=100)) &&
           (free || (p.x+p.width<=100 && p.y+p.height<=100));
-      });
+      }) && seen.size === fallback.length;
       if (!correct) return Response.json({placements:fallback,
         fallback:'AI Vision did not produce a valid independent layout for this batch; the starter positions were kept. Retry Auto Arrange.'});
-      const unchanged = free && candidates.every((p,i) => {
+      const unchanged = free && candidates.length === fallback.length && candidates.every((p,i) => {
         const before = fallback[i];
         return p.assetId === before.assetId &&
           Math.abs(p.x-before.x) < 0.5 && Math.abs(p.y-before.y) < 0.5 &&
