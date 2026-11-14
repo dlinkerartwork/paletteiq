@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Check, Download, Image as ImageIcon, LoaderCircle, RotateCcw, Sparkles } from 'lucide-react';
 import { readApiJson, uploadListingJpg } from '@/lib/listing-image-upload';
+import { listingCreativeDirection, listingMockupScene } from '@/lib/etsy-listing-creative-direction';
 import {
   LISTING_IMAGE_SPECS, LISTING_WIDTH, LISTING_HEIGHT, originalAssets,
   planListingPlacements, listingFilename, type ListingAsset, type ListingImageRecord, type ListingPlacement
@@ -13,6 +14,10 @@ type Props = {
   name: string;
   theme: string;
   subtheme: string;
+  style?: string;
+  palette?: string;
+  texture?: string;
+  seoTitle?: string;
   characters: ListingAsset[];
   onSaved?: (images: ListingImageRecord[]) => void;
 };
@@ -97,7 +102,8 @@ async function upload(projectId: string, number: number, blob: Blob, onProgress?
   return uploadListingJpg(projectId, fileName(number), blob, fetch, onProgress);
 }
 
-export default function EtsyListingImageStudio({ projectId, name, theme, subtheme, characters, onSaved }: Props) {
+export default function EtsyListingImageStudio({ projectId, name, theme, subtheme, style, palette, texture, seoTitle, characters, onSaved }: Props) {
+  const artDirection = useMemo(() => listingCreativeDirection({ name, theme, subtheme, style, palette, texture, listing: { title: seoTitle } }), [name, theme, subtheme, style, palette, texture, seoTitle]);
   const assets = useMemo(() => originalAssets(characters), [characters]);
   const [records, setRecords] = useState<ListingImageRecord[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -123,7 +129,15 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     let live = true;
     setLoaded(false);
     request(apiUrl + '?projectId=' + encodeURIComponent(projectId)).then(response => {
-      if (live) { setRecords(response.images || []); setLoaded(true); }
+      if (live) {
+        const images = response.images || [];
+        setRecords(images);
+        // Resume the first unapproved image on return/reload, instead of always
+        // restarting visually at step 01 (approved JPGs are never regenerated).
+        setStep(LISTING_IMAGE_SPECS.find(s => !images.some(r => r.number === s.number && r.status === 'approved'))?.number || 15);
+        setSelectedIndex(0);
+        setLoaded(true);
+      }
     }).catch(error => { if (live) { setLoaded(true); setMessage('Could not load saved listing images: ' + String(error)); } });
     return () => { live = false; };
   }, [projectId]);
@@ -196,7 +210,8 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
         } catch { /* Continue with a neutral collection gallery rather than invent categories. */ }
       }
       setMessage('Generating the AI graphic background and artistic typography...');
-      const response = await send({ action: 'generate', projectId, number: step, model, quality });
+      const response = await send({ action: 'generate', projectId, number: step, model, quality,
+        revisionNotes: (notes[step] ?? current?.notes ?? '').trim() });
       if (!response.backgroundUrl) throw Error('OpenAI did not return the background');
       let suggested = effectivePositions;
       let layoutWarning = '';
@@ -235,7 +250,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     setWorking('review');
     try {
       await saveRecord({ ...current, status, notes: notes[step] || current.notes || '', updatedAt: Date.now() });
-      setMessage(status === 'approved' ? 'Image ' + step + ' approved and saved.' : 'Image marked for revision. Change placements or regenerate the AI background.');
+      setMessage(status === 'approved' ? 'Image ' + step + ' approved and saved.' : 'Image marked for revision. Edit placement for a free JPG re-render, or write feedback and regenerate the AI background to apply those notes.');
       if (status === 'approved' && step < 15) { setStep(step + 1); setSelectedIndex(0); }
     } catch (error) { setMessage('Could not save review: ' + String(error)); }
     finally { setWorking(''); }
@@ -255,7 +270,8 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   return <div style={{ display: 'grid', gap: 18 }}>
     <div className="panel" style={{ padding: 20 }}>
       <h2>Etsy Listing Image Studio</h2>
-      <p className="sub">15-image workflow • 3000 × 2250 px • 4:3 landscape • OpenAI artistic lettering • exact original collection clipart. Thumbnail Designer remains separate.</p>
+      <p className="sub">15-image workflow • 3000 × 2250 px • 4:3 landscape • automatic art direction from this collection • exact original collection clipart. Thumbnail Designer remains separate.</p>
+      <p className="sub">Creative direction: {artDirection.family} · {artDirection.palette} · AI artwork style follows the collection. {step === 1 ? 'Review the cover first to set the visual direction.' : 'Approved images remain saved; use the same visual language across the series.'}</p>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         <strong>{approved}/15 approved • {assets.length} original images available</strong>
         <button type="button" className="primary-btn" disabled={approved !== 15 || !!working} onClick={() => {
@@ -292,7 +308,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
             <a className="outline-btn" href={current.renderedImageUrl} download={fileName(step)}><Download size={15}/> Download JPG</a>
             <span className="sub">{LISTING_WIDTH} × {LISTING_HEIGHT} • {current.status === 'approved' ? 'Approved' : 'Awaiting approval'}</span>
           </div>}
-          {(spec.kind === 'mockup') && <p className="sub">Mockup is a demonstration, not included in the sold collection. Inspect printable placement: the photograph is AI-generated, while the featured clipart is composited from its original file.</p>}
+          {(spec.kind === 'mockup') && <p className="sub">Application example: {listingMockupScene(step, artDirection.family)?.name}. Mockup is a demonstration, not included in the sold collection. Inspect printable placement: the photograph is AI-generated, while the featured clipart is composited from its original file.</p>}
         </div>
         <div style={{ display: 'grid', alignContent: 'start', gap: 10 }}>
           <label className="input-label">OPENAI ARTISTIC BACKGROUND MODEL</label>
@@ -330,7 +346,8 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
             <button type="button" className="outline-btn" disabled={!!working || !current?.backgroundUrl} onClick={() => void rerender()}><RotateCcw size={15}/> {current?.renderedImageUrl ? 'Apply layout & save JPG (no AI cost)' : 'Retry save JPG (no AI cost)'}</button>
           </>}
           <label className="input-label">REVISION NOTES</label>
-          <textarea rows={3} maxLength={800} value={notes[step] ?? current?.notes ?? ''} onChange={e => setNotes(old => ({ ...old, [step]: e.target.value }))} placeholder="What would you change in this image?"/>
+          <textarea rows={3} maxLength={800} value={notes[step] ?? current?.notes ?? ''} onChange={e => setNotes(old => ({ ...old, [step]: e.target.value }))} placeholder="Specify desired revision to the current image, if any."/>
+          <small style={{ color: '#74695e' }}>Your revision notes are included in the next paid AI background regeneration for this image only. To adjust original clipart positions without AI charges, use Apply layout & save JPG. Review spelling, crop, verified facts and mockup realism before approving.</small>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button type="button" className="outline-btn" disabled={!current?.renderedImageUrl || !!working} onClick={() => void review('needs_revision')}>Needs revision</button>
             <button type="button" className="primary-btn" disabled={!current?.renderedImageUrl || !!working} onClick={() => void review('approved')}><Check size={16}/> Approve & Next <ArrowRight size={15}/></button>
