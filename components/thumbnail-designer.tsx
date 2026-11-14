@@ -887,13 +887,17 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           model: imageModel.startsWith('gpt-image-') ? imageModel : 'gpt-image-1-mini',
           quality: packQuality, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE,
           mode: artistic ? 'background-with-typography' : 'background-only',
-          backgroundStyle, backgroundIntensity,
+          backgroundStyle, backgroundIntensity: target.packSlideKey === 'custom-canvas' ? 'soft' : backgroundIntensity,
+          reserveBadgeZone: target.packSlideKey === 'custom-canvas' && Boolean(target.packBadge),
+          badge: '', letteringStyle: 'auto',
           headline: target.packHeadline || title,
           subtitle: target.packSubtitle || 'Digital Clipart Collection',
           slideName: target.name,
-          designBoldness: target.packBoldness || packBoldness, coverStyle: target.packCoverStyle || packCoverStyle,
+          designBoldness: target.packSlideKey === 'custom-canvas' ? 'balanced' : (target.packBoldness || packBoldness),
+          coverStyle: target.packSlideKey === 'custom-canvas' ? 'editorial' : (target.packCoverStyle || packCoverStyle),
           referenceDesign: target.referenceDesign,
-          designBriefSettings: { ...currentBriefSettings(), headline: target.packHeadline || title, subtitle: target.packSubtitle || 'CLIPART COLLECTION', slide: target.name },
+          designBriefSettings: { ...currentBriefSettings(), headline: target.packHeadline || title, subtitle: target.packSubtitle || 'CLIPART COLLECTION', slide: target.name,
+            ...(target.packSlideKey === 'custom-canvas' ? {boldness:'balanced',coverStyle:'editorial',intensity:'soft',badge:''} : {}) },
           textZone: target.packTextZone || { x: 22, y: 31, width: 56, height: 38 },
           layout: imageLayers.map(e => ({ type: 'image', x: e.x, y: e.y, width: e.width, height: e.height }))
         })
@@ -915,7 +919,8 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
       const savedSlides = buildPack('complete-10', title, allAvailable);
       const matchedSlide = savedSlides.find(candidate => candidate.key === target.packSlideKey ||
         target.name.toLowerCase().includes(candidate.name.toLowerCase())) || savedSlides[0];
-      const slide = matchedSlide && { ...matchedSlide, headline: target.packHeadline || matchedSlide.headline,
+      const slide = matchedSlide && { ...matchedSlide, key: target.packSlideKey === 'custom-canvas' ? 'custom-canvas' : matchedSlide.key,
+        headline: target.packHeadline || matchedSlide.headline,
         subtitle: target.packSubtitle || matchedSlide.subtitle, textZone: target.packTextZone || matchedSlide.textZone };
       let positioned = imageLayers;
       let visionFallback = true;
@@ -956,14 +961,15 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
       const slides = buildPack('complete-10', title, available);
       const matchedSlide = slides.find(item => item.key === target.packSlideKey ||
         target.name.toLowerCase().includes(item.name.toLowerCase())) || slides[0];
-      const slide = matchedSlide && { ...matchedSlide, headline: target.packHeadline || matchedSlide.headline,
+      const slide = matchedSlide && { ...matchedSlide, key: target.packSlideKey === 'custom-canvas' ? 'custom-canvas' : matchedSlide.key,
+        headline: target.packHeadline || matchedSlide.headline,
         subtitle: target.packSubtitle || matchedSlide.subtitle, textZone: target.packTextZone || matchedSlide.textZone };
       if (!slide) throw Error('No collection layout available');
       const originals = target.elements.filter(e => e.type === 'image');
       setMessage('AI Vision inspecting saved background and adjusting original PNG positions...');
       const result = await placeOriginalsOverBackground(
         slide, target.backgroundImageUrl, originals, available,
-        target.packHierarchy || packHierarchy, target.packCoverStyle || packCoverStyle
+        target.packHierarchy || packHierarchy, 'editorial', [], target.referenceDesign?.compositionGuide || ''
       );
       const next = latestDesignsRef.current.map(d => d.id === target.id ? {
         ...d, elements: [...result.elements, ...d.elements.filter(e => e.type === 'text')],
@@ -1017,12 +1023,13 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
       const candidates = buildPack('complete-10', title, available);
       const matchedSlide = candidates.find(item => item.key === target.packSlideKey ||
         target.name.toLowerCase().includes(item.name.toLowerCase())) || candidates[0];
-      const slide = matchedSlide && { ...matchedSlide, headline: target.packHeadline || matchedSlide.headline,
+      const slide = matchedSlide && { ...matchedSlide, key: target.packSlideKey === 'custom-canvas' ? 'custom-canvas' : matchedSlide.key,
+        headline: target.packHeadline || matchedSlide.headline,
         subtitle: target.packSubtitle || matchedSlide.subtitle, textZone: target.packTextZone || matchedSlide.textZone };
       const imageLayers = target.elements.filter(e => e.type === 'image');
       const placement = slide
         ? await placeOriginalsOverBackground(slide, target.rejectedBackgroundUrl, imageLayers, available,
-            target.packHierarchy || packHierarchy, target.packCoverStyle || packCoverStyle)
+            target.packHierarchy || packHierarchy, 'editorial', [], target.referenceDesign?.compositionGuide || '')
         : { elements: imageLayers, usedFallback: true };
       const next = latestDesignsRef.current.map(d => d.id === target.id ? {
         ...d, backgroundImageUrl: d.rejectedBackgroundUrl,
