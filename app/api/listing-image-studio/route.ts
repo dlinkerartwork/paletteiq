@@ -11,7 +11,8 @@ import {
   LISTING_IMAGE_SPECS, LISTING_HEIGHT, LISTING_WIDTH, listingFilename, listingTitle,
   originalAssets, type ListingImageRecord, type ListingPlacement, type ListingAsset, type ListingImageStatus
 } from '@/lib/etsy-listing-image-plan';
-import { fitListingPlacementsBelowText, isListingPlacementTextSafe, duplicateListingAssetIds } from '@/lib/listing-text-safe';
+import { duplicateListingAssetIds } from '@/lib/listing-text-safe';
+import { fitListingPlacementsToReference, isListingPlacementSafe, isCentralHero, heroTextZone, type ListingReferenceLayout } from '@/lib/listing-reference-composition';
 
 const bad = (message: string, status = 400) => Response.json({ error: message }, { status });
 const bucket = () => nativeAssetBucket() ?? env.BUCKET;
@@ -20,6 +21,7 @@ const validNumber = (n: unknown): n is number => typeof n === 'number' && Number
 type StoredProject = {
   id: string; name: string; theme?: string; subtheme?: string; palette?: string;
   characters?: ListingAsset[]; listingImages?: ListingImageRecord[];
+  listingStudioSettings?: { referenceImage?: string };
 };
 const sanitizedText = (s: string, limit: number) => s.replace(/[<>\r\n]/g, ' ').trim().slice(0, limit);
 const normalizedImages = (project: StoredProject) => Array.isArray(project.listingImages)
@@ -51,8 +53,16 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
   if (value.renderedImageUrl && Array.isArray(value.placements) &&
       placements.length !== value.placements.length)
     throw Error('One or more clipart files are missing, duplicated or disallowed; refresh the collection before saving.');
+  const compositionMode = value.compositionMode ?? previous?.compositionMode ?? 'top-gallery';
+  const heroReference = compositionMode === 'hero-center';
+  const rawZone = value.protectedTextZone || previous?.protectedTextZone;
+  const protectedTextZone = heroReference && rawZone &&
+    [rawZone.x,rawZone.y,rawZone.width,rawZone.height].every(Number.isFinite) &&
+    rawZone.x >= 15 && rawZone.y >= 12 && rawZone.width >= 35 && rawZone.height >= 30 &&
+    rawZone.x+rawZone.width <= 85 && rawZone.y+rawZone.height <= 90
+    ? rawZone : heroReference ? heroTextZone() : undefined;
   if (value.renderedImageUrl && (duplicateListingAssetIds(placements).length ||
-      !placements.every(p => isListingPlacementTextSafe(p))))
+      !placements.every(p => isListingPlacementSafe(p,value.number,heroReference,undefined,protectedTextZone))))
     throw Error('Clipart must be distinct and stay below the protected title/subtitle area before saving.');
   const status: ListingImageStatus = value.status === 'approved' || value.status === 'needs_revision' ? value.status : 'draft';
   // An explicitly empty renderedImageUrl invalidates an older render when a
@@ -62,7 +72,9 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
   if (renderedImageUrl && !savedAssetKey(renderedImageUrl, project.id, 'owner-placeholder')) throw Error('Invalid composed image reference');
   if (backgroundUrl && !savedAssetKey(backgroundUrl, project.id, 'owner-placeholder')) throw Error('Invalid AI background reference');
   if (status === 'approved' && (!renderedImageUrl || !placements.length)) throw Error('Render an image with original collection artwork before approval');
-  return { number: value.number, status, backgroundUrl, renderedImageUrl, placements, notes: sanitizedText(value.notes || '', 800), updatedAt: Date.now() };
+  return { number: value.number, status, backgroundUrl, renderedImageUrl, placements,
+    compositionMode, protectedTextZone,
+    notes: sanitizedText(value.notes || '', 800), updatedAt: Date.now() };
 }
 async function updateImage(project: StoredProject, number: number, patch: ListingImageRecord, owner: string) {
   const existing = normalizedImages(project);
@@ -109,8 +121,9 @@ export async function GET(request: Request) {
 type Input = {
   action?: 'generate' | 'save' | 'layout'; projectId?: string; number?: number;
   image?: ListingImageRecord; model?: string; quality?: string;
-  backgroundUrl?: string; placements?: ListingPlacement[]; settings?: Partial<ListingStudioConfig>;
-  referenceDesign?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string };
+  backgroundUrl?: string; placements?: ListingPlacement[];
+  settings?: Partial<ListingStudioConfig> & { hasReference?: boolean };
+  referenceDesign?: ListingReferenceLayout;
 };
 const blankScene: Record<number, string> = {
   8: 'Premium realistic overhead flat-lay photograph of ONE blank, white sticker sheet on an elegant desk. The sticker sheet should have a broad clean unprinted center occupying 36%-66% horizontally and 38%-86% vertically, with soft natural shadows. Absolutely no stickers, illustrations or printed designs on the sheet.',
@@ -119,7 +132,7 @@ const blankScene: Record<number, string> = {
   11: 'Premium realistic overhead photograph of ONE kraft cardboard gift box with a large blank white rectangular paper label, flat to camera, in the lower middle; center label from around 40%-61% horizontal and 46%-74% vertical. All surfaces unprinted and free of illustrations.',
   12: 'Premium realistic overhead flat-lay scrapbook spread on handmade paper with a large clean blank cream craft page in the lower middle. Leave 34%-69% horizontal and 42%-80% vertical clear for exact transparent artwork to be overlaid. No drawings, stickers, animals, flowers or printed pictures in the mockup.'
 };
-function artPrompt(number: number, project: StoredProject, count: number, settings?: Partial<ListingStudioConfig>, referenceDesign?: Input['referenceDesign']): string {
+function artPrompt(number: number, project: StoredProject, count: number, settings?: Partial<ListingStudioConfig> & { hasReference?: boolean }, referenceDesign?: Input['referenceDesign']): string {
   const spec = LISTING_IMAGE_SPECS[number - 1];
   const title = number === 1 && settings?.headline ? sanitizedText(settings.headline, 75) : listingTitle(number, project.subtheme || project.theme || project.name);
   const subtitle = number === 6 || number === 13 ? count + ' original digital clipart illustrations'
@@ -129,21 +142,32 @@ function artPrompt(number: number, project: StoredProject, count: number, settin
   const palette = sanitizedText(project.palette || 'warm ivory, forest green, muted earthy accents', 180);
   // Only allow known style tokens from the Reference & Assets UI. Never treat
   // arbitrary uploaded reference pixels as clipart or additional product art.
-  const motif = ['blush-brush-ring','split-panel','paper-collage','soft-wash','minimal-lines'].includes(referenceDesign?.graphicMotif || '') ? referenceDesign?.graphicMotif : 'none';
+  const motif = ['blush-brush-ring','split-panel','paper-collage','soft-wash','minimal-lines','central-medallion','retro-signage','perimeter-collage'].includes(referenceDesign?.graphicMotif || '') ? referenceDesign?.graphicMotif : 'none';
   const lettering = ['script-serif','editorial-serif','modern-display','hand-lettered'].includes(referenceDesign?.letteringStyle || '') ? referenceDesign?.letteringStyle : 'artistic brush script and editorial serif';
   const mood = ['blush-sage','earthy-warm','forest-cream','pastel','vibrant'].includes(referenceDesign?.paletteMood || '') ? referenceDesign?.paletteMood : 'collection colors';
+  const centralHero = isCentralHero(number,Boolean(settings?.hasReference || settings?.referenceImage));
+  const referenceComposition = sanitizedText(referenceDesign?.compositionGuide || '',850);
+  const centralZone = heroTextZone(referenceDesign);
+  const referenceArtworkSlots = (referenceDesign?.slots || []).slice(0,12)
+    .filter(slot => [slot.x,slot.y,slot.width,slot.height].every(Number.isFinite) &&
+      slot.width > 2 && slot.height > 2)
+    .map(slot => ({x:Math.round(slot.x),y:Math.round(slot.y),
+      width:Math.round(slot.width),height:Math.round(slot.height)}));
   const core = [
     'Create a premium conversion-focused Etsy digital clipart listing IMAGE BACKGROUND with exact ARTISTIC TYPOGRAPHY.',
     'Square 1:1 composition. The final JPG and generated background are both 1024 x 1024 pixels. Keep all critical lettering within the central safe area.',
     'Render the exact main title: ' + JSON.stringify(title) + '. Render the exact subtitle: ' + JSON.stringify(subtitle) + '. No other writing, numerals, file specifications, licensing or marketing claims.',
     'Typography: expressive premium artisanal brush-script plus clear editorial serif, refined and striking at Etsy mobile thumbnail size. Lettering must be correctly spelled and legible.',
     'Visual continuity comes from the actual collection palette and selected reference, not a hardcoded watercolor template: ' + JSON.stringify(palette) + '. Use restrained decorative color and plenty of clean readable space.',
-    'STRICT TEXT SAFETY: all title and subtitle letters must be entirely inside the TOP 30 PERCENT of the 1024x1024 square, with no text below y=30%. Reserve y=30-38% as empty whitespace for separation. Original clipart never overlaps a single letter. Do not put decorative copy or an extra caption below this text-only area.',
+    centralHero ? ('REFERENCE-LED CENTRAL HERO COMPOSITION: place the expressive main title and subtitle TOGETHER inside a generous central medallion at x=' + centralZone.x + '-' + (centralZone.x+centralZone.width) + '%, y=' + centralZone.y + '-' + (centralZone.y+centralZone.height) + '%. Text must not leave the medallion. Lettering may stack to fit a long collection title. Surround the medallion with open peripheral space for LARGER original PNG artwork: top, left and right sides, and bottom. NO assets in the middle title space. THIS IS NOT A TOP-HEADING GRID.' ) : 'STRICT GALLERY TEXT SAFETY: title and subtitle stay within the TOP 30 PERCENT of the square, and y=30-38% remains empty whitespace. The original clipart grid starts BELOW 38%.',
     'The actual digital clipart collection is NOT provided to you; original PNG assets will be composited later by PaletteIQ. Do not invent or paint any clipart artwork, characters, food, floral illustrations, miniature icons, badges depicting objects, or product substitutes.',
     'Do not claim asset dimensions, DPI, license terms, digital file formats or asset counts other than the exact verified subtitle supplied.',
     'Consistent tasteful professional photography/graphic design, high-key natural lighting, spacious graphic hierarchy.',
     'Design is determined automatically by the reference image, actual theme and purpose of this slide, not by disabled manual typography/cover/background/boldness/hierarchy/intensity controls.',
     'Verified reference analysis GRAPHIC STYLE ONLY (not product depiction): motif=' + motif + ', lettering=' + lettering + ', palette mood=' + mood + '.',
+    referenceComposition ? 'MATCH THIS REFERENCE SPATIAL COMPOSITION (not its depicted objects or wording): ' + referenceComposition : '',
+    centralHero && referenceArtworkSlots.length ? 'REFERENCE ARTWORK OCCUPANCY / NEGATIVE-SPACE PLAN: keep these locations clear for ORIGINAL PNG LAYERS THAT WILL BE ADDED AFTER IMAGE GENERATION: ' + JSON.stringify(referenceArtworkSlots) + '. These are EMPTY placement zones; DO NOT paint objects into them.' : '',
+    centralHero ? 'For lengthy collection titles, form an elegant multi-level center lockup: emphasize the first short meaningful phrase as the visual hero, arrange all remaining exact title words in smaller supporting lines, preserving spelling, and keep everything inside the central title safe zone.' : '',
     'Use the selected reference to guide design geometry, lettering scale, badge shape and palette, but keep the result original. Do not force watercolor corner washes, colored torn-paper patches, circular rings or multicolor corner gradients unless the reference specifically calls for them.',
     'Avoid the default repeated cream-center / turquoise-and-orange watercolor-corner motif. For each listing slide, design a distinct nonfigurative graphic structure matched to its purpose, while preserving collection coherence.',
     'Do not add large saturated pigment to any of the four corners. Background must not overpower the original clipart. Typography remains the primary generated graphic.'
@@ -160,7 +184,7 @@ function artPrompt(number: number, project: StoredProject, count: number, settin
   return [
     ...core,
     'Create ONLY a decorative NONFIGURATIVE graphic background and the requested exact title and subtitle. No photographs, product objects, illustrated figures, patterns depicting products, animals, plants, food, icons or silhouettes.',
-    spec.kind === 'all' || spec.kind === 'all-grouped' || spec.kind === 'categories'
+    centralHero ? 'HERO COVER ART DIRECTION: build a large, visually commanding CENTRAL title lockup or central sign shape, and leave spacious surrounding perimeter positions for oversized, different-sized original clipart. The reference may have artwork visually framing the letters from all four sides; imitate the composition rhythm, NOT any actual object, vehicle or food. Prefer central title hierarchy plus bold clipart placement, NOT a top title above two rows of tiny art.' : spec.kind === 'all' || spec.kind === 'all-grouped' || spec.kind === 'categories'
       ? 'Reserve y=0-38% for artistic typography and clear separation. From y=38-99% keep a calm unillustrated area for a dense grid of distinct original PNGs; never place text or miniature images there.'
       : spec.kind === 'information' ? 'Keep lower two thirds very clean and light for clear informational overlays and the original artworks.' :
       'Keep the artwork area beneath the title open and calm, using the selected reference\'s actual composition language. Do not add automatic corner pigment or watercolor borders.',
@@ -202,6 +226,8 @@ export async function POST(request: Request) {
     const keyOpenAi = await userCredential(user.userId, 'openai') || (env as unknown as Record<string,string|undefined>).OPENAI_API_KEY;
     if (!keyOpenAi) return bad('Configure OpenAI API key for Vision positioning', 503);
     const isMockup = input.number >= 8 && input.number <= 12;
+    const hero = isCentralHero(input.number,Boolean(input.settings?.hasReference));
+    const safeFallback = fitListingPlacementsToReference(input.number,fallback,hero,input.referenceDesign);
     const descriptor = fallback.map(p => ({ id:p.assetId, name:valid.get(p.assetId), x:p.x, y:p.y, width:p.width, height:p.height }));
     try {
       const response = await fetch('https://api.openai.com/v1/responses', {
@@ -213,8 +239,9 @@ export async function POST(request: Request) {
               'You are an expert graphic designer positioning EXISTING ORIGINAL PNG LAYERS on an AI-generated empty listing design. NEVER draw or regenerate clipart.',
               'Inspect the supplied BACKGROUND IMAGE PIXELS to locate the already-rendered artistic typography and unobstructed blank printable space.',
               'The supplied generated background and the final JPG are both exact 1:1 square at 1024x1024. Return position percentages relative to this square; there is no aspect-ratio crop.',
-              'STRICT: title/subtitle occupy a protected TOP band y=0-38% of the square. Every original clipart must stay BELOW y=38%, even if Vision thinks a character can overlap blank pixels within the lettering zone. No text/clipart collision, including rotated artwork. Do not return duplicate or near-identical assets.',
-              isMockup ? 'This is a realistic BLANK PRODUCT MOCKUP. All supplied original asset layers MUST fit on the blank flat printable area of the product and not float on table/background. Account for actual blank surface position in visible pixels. Do not cover straps, hands, folds, shadows or the product edge.' : 'Use intentional size hierarchy and negative space. For many gallery items keep original grid, adjust only to avoid title, maintain layout clarity.',
+              hero ? 'CENTERED REFERENCE HERO: the generated image has a large typographic centerpiece at x=25-75%, y=24-78%, and the selected ORIGINAL PNGs must FRAME IT from the top, left, right and bottom, not in a uniform grid beneath. Use strongly varied artwork sizes, with a few large hero assets and smaller supporting details. Zero overlap with the actual text glyphs. Keep all PNGs inside the canvas and never create or redraw objects.' : 'GALLERY TEXT SAFETY: title/subtitle are protected at y=0-38%; every original PNG must stay BELOW y=38%, even if some pixels in that band appear blank. No overlap with text, including rotated objects.',
+              isMockup ? 'This is a realistic BLANK PRODUCT MOCKUP. All supplied original asset layers MUST fit on the blank flat printable area of the product and not float on table/background. Account for actual blank surface position in visible pixels. Do not cover straps, hands, folds, shadows or the product edge.' : hero ? 'Reference image shows an art-directed product-cover collage with the title in the middle, surrounded by larger originals: match that spatial hierarchy, never copy reference subjects.' : 'Use intentional size hierarchy and negative space. For catalogue pages preserve legible gallery organization.',
+              input.referenceDesign?.compositionGuide ? 'Reference graphical composition guide: ' + sanitizedText(input.referenceDesign.compositionGuide,850) : '',
               'Return ONLY JSON: {"placements":[{"assetId":"source-id","x":30,"y":40,"width":18,"height":22,"rotation":0}],"unsafe":false,"notes":""}.',
               'Return each listed assetId EXACTLY ONCE and NO new IDs. Coordinate ranges 0–100. Retain approximate proportions of existing placement slots; never infer an object shape or invent an asset from its name.',
               'If a safe printable area does not exist, set unsafe=true and return current proposed placements unchanged. Values must be numbers.',
@@ -224,7 +251,7 @@ export async function POST(request: Request) {
           ]}],text:{format:{type:'json_object'}}
         }), signal:AbortSignal.timeout(60000)
       });
-      if (!response.ok) return Response.json({placements:fitListingPlacementsBelowText(fallback), fallback:'Vision layout unavailable; typography-safe original positioning retained.'});
+      if (!response.ok) return Response.json({placements:safeFallback, fallback:'Vision layout unavailable; reference-aware safe original positioning retained.'});
       const answer = await response.json() as {output?:Array<{content?:Array<{text?:string}>}>};
       const raw = answer.output?.flatMap(a=>a.content||[]).map(c=>c.text||'').join('') || '{}';
       const parsed = JSON.parse(raw) as {placements?:ListingPlacement[]; unsafe?:boolean; notes?:string};
@@ -235,16 +262,16 @@ export async function POST(request: Request) {
         if (!p || !ids.has(p.assetId) || seen.has(p.assetId)) return false;
         seen.add(p.assetId);
         return [p.x,p.y,p.width,p.height,p.rotation ?? 0].every(n=>typeof n==='number' && Number.isFinite(n)) &&
-          p.x>=0 && p.y>=23 && p.width>=2 && p.height>=2 &&
-          p.x+p.width<=100 && p.y+p.height<=98 && Math.abs(p.rotation??0)<=15;
+          p.x>=0 && p.y>=0 && p.width>=2 && p.height>=2 &&
+          p.x+p.width<=100 && p.y+p.height<=100 && Math.abs(p.rotation??0)<=15;
       });
-      if (!correct) return Response.json({placements:fitListingPlacementsBelowText(fallback), fallback:'Vision could not verify a safe layout. Retained a typography-safe original PNG layout.'});
-      const safe = fitListingPlacementsBelowText(candidates);
+      if (!correct) return Response.json({placements:safeFallback, fallback:'Vision could not verify a safe layout. Retained a reference-safe original PNG layout.'});
+      const safe = fitListingPlacementsToReference(input.number,candidates,hero,input.referenceDesign);
       if (safe.length !== fallback.length || duplicateListingAssetIds(safe).length)
-        return Response.json({placements:fitListingPlacementsBelowText(fallback), fallback:'Vision returned unsafe or duplicated clipart positions. Used a safe original layout.'});
+        return Response.json({placements:safeFallback, fallback:'Vision returned unsafe or duplicated clipart positions. Used a safe original layout.'});
       return Response.json({placements:safe, note:sanitizedText(parsed.notes||'',180)});
     } catch {
-      return Response.json({placements:fitListingPlacementsBelowText(fallback), fallback:'Vision layout timed out; typography-safe original positioning retained.'});
+      return Response.json({placements:safeFallback, fallback:'Vision layout timed out; reference-safe original positioning retained.'});
     }
   }
   if (input.action !== 'generate') return bad('Unknown listing image action');

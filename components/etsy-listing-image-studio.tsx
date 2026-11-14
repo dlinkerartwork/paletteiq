@@ -9,7 +9,8 @@ import {
   LISTING_IMAGE_SPECS, LISTING_WIDTH, LISTING_HEIGHT, originalAssets,
   planListingPlacements, listingFilename, type ListingAsset, type ListingImageRecord, type ListingPlacement
 } from '@/lib/etsy-listing-image-plan';
-import { fitListingPlacementsBelowText, isListingPlacementTextSafe, duplicateListingAssetIds } from '@/lib/listing-text-safe';
+import { duplicateListingAssetIds } from '@/lib/listing-text-safe';
+import { fitListingPlacementsToReference, isListingPlacementSafe, heroTextZone, type ListingReferenceLayout } from '@/lib/listing-reference-composition';
 
 type Props = {
   projectId: string;
@@ -22,7 +23,7 @@ type Props = {
   characters: ListingAsset[];
   onSaved?: (images: ListingImageRecord[]) => void;
 };
-type ListResponse = { images?: ListingImageRecord[]; backgroundUrl?: string; placements?: ListingPlacement[]; fallback?: string; error?: string; layout?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string } };
+type ListResponse = { images?: ListingImageRecord[]; backgroundUrl?: string; placements?: ListingPlacement[]; fallback?: string; error?: string; layout?: ListingReferenceLayout };
 const apiUrl = '/api/listing-image-studio';
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Number.isFinite(n) ? n : lo));
 const fileName = (number: number) => listingFilename(number);
@@ -122,6 +123,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
   const [categories, setCategories] = useState<Record<string,string>>({});
   function changeConfig<K extends keyof ListingStudioConfig>(key: K, value: ListingStudioConfig[K]) {
     setConfig(current => ({ ...current, [key]: value }));
+    if (key === 'referenceImage') setReferenceDesign(undefined);
     setSettingsDirty(true);
   }
   const persistConfig = async () => {
@@ -160,8 +162,9 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
 
   const categorizedAssets = useMemo(() => assets.map(a => ({ ...a, category: categories[a.id] || a.category })), [assets, categories]);
   const initialPlacements = useCallback((number: number) => {
-    return fitListingPlacementsBelowText(planListingPlacements(number, categorizedAssets));
-  }, [categorizedAssets]);
+    const planned = planListingPlacements(number,categorizedAssets);
+    return config.layoutMode === 'manual' ? planned : fitListingPlacementsToReference(number,planned,Boolean(config.referenceImage),referenceDesign);
+  }, [categorizedAssets,config.layoutMode,config.referenceImage,referenceDesign]);
   const current = records.find(item => item.number === step);
   const positions = changes[step] || current?.placements || initialPlacements(step);
   const selected = positions[selectedIndex] || positions[0];
@@ -220,16 +223,23 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
     const result = await send({ action: 'save', projectId, number: step, image });
     receive(result.images || []);
   };
-  const renderAndSave = async (background: string, layout: ListingPlacement[], info: string) => {
+  const renderAndSave = async (background: string, layout: ListingPlacement[], info: string,
+    layoutReference: ListingReferenceLayout | undefined = referenceDesign,
+    heroReference = Boolean(config.referenceImage) || current?.compositionMode === 'hero-center') => {
+    const protectedZone = heroReference && (step === 1 || step === 15)
+      ? (layoutReference ? heroTextZone(layoutReference) : current?.protectedTextZone || heroTextZone())
+      : undefined;
     setWorking('render'); setMessage('Compositing ' + layout.length + ' exact original clipart images at 1024 × 1024 px...');
     if (!layout.length || duplicateListingAssetIds(layout).length ||
-        !layout.every(p => isListingPlacementTextSafe(p)))
-      throw Error('One or more original PNGs overlap the protected title/subtitle area, or repeat an asset. Adjust the layout before saving.');
+        !layout.every(p => isListingPlacementSafe(p,step,heroReference,layoutReference,protectedZone)))
+      throw Error('One or more original PNGs overlap the reference-guided text area, or repeat an asset. Adjust the layout before saving.');
     const file = await compose(background, layout, assets);
     setMessage('Saving JPG preview to the collection in safe upload chunks...');
     const renderedImageUrl = await upload(projectId, step, file, (done, total) => setMessage('Uploading original-asset JPG: ' + done + '/' + total + ' parts...'));
     const image: ListingImageRecord = {
       number: step, status: 'draft', backgroundUrl: background, renderedImageUrl, placements: layout,
+      compositionMode: protectedZone ? 'hero-center' : 'top-gallery',
+      protectedTextZone: protectedZone,
       notes: info, updatedAt: Date.now()
     };
     await saveRecord(image);
@@ -244,7 +254,8 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
     if (current?.status === 'approved' && !window.confirm('Regenerate an approved image? Its approval will be reset to Draft.')) return;
     setWorking('generate'); setMessage('Generating artistic background + exact typography with OpenAI (no clipart regeneration)...');
     try {
-      let effectivePositions = fitListingPlacementsBelowText(positions);
+      let effectivePositions = config.layoutMode === 'manual' ? positions :
+        fitListingPlacementsToReference(step,positions,Boolean(config.referenceImage),referenceDesign);
       if (duplicateListingAssetIds(effectivePositions).length)
         throw Error('Duplicate clipart is selected. Replace repeated artwork with distinct collection PNGs.');
       if ((step === 3 || step === 5) && !current?.placements && !changes[step] &&
@@ -258,7 +269,9 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
           for (const group of groupResult.groups || []) for (const id of group.ids) map[id] = group.name;
           if (new Set(Object.values(map)).size >= 2) {
             setCategories(map);
-            effectivePositions = fitListingPlacementsBelowText(planListingPlacements(step, assets.map(a => ({ ...a, category: map[a.id] || a.category }))));
+            const categorized = planListingPlacements(step,assets.map(a => ({ ...a, category: map[a.id] || a.category })));
+            effectivePositions = config.layoutMode === 'manual' ? categorized :
+              fitListingPlacementsToReference(step,categorized,Boolean(config.referenceImage),styleTokens);
           }
         } catch { /* Continue with a neutral collection gallery rather than invent categories. */ }
       }
@@ -274,14 +287,19 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
             })
           });
           styleTokens = refResult.layout;
-          if (styleTokens) setReferenceDesign(styleTokens);
+          if (styleTokens) {
+            setReferenceDesign(styleTokens);
+            if (config.layoutMode !== 'manual')
+              effectivePositions = fitListingPlacementsToReference(step,positions,Boolean(config.referenceImage),styleTokens);
+          }
         } catch {
           setMessage('Reference analysis unavailable; continuing with the chosen Reference & Assets style.');
         }
       }
-      setMessage('Generating the AI graphic background and artistic typography...');
+      if (!effectivePositions.length) throw Error('No safe space for all originals and the reference title layout. Reduce the artwork count or adjust the reference.');
+      setMessage('Generating reference-guided AI background and artistic typography...');
       const response = await send({ action: 'generate', projectId, number: step, model: config.imageModel, quality,
-        settings: config ? { ...config, referenceImage: undefined } : undefined,
+        settings: config ? { ...config, referenceImage: undefined, hasReference: Boolean(config.referenceImage) } : undefined,
         referenceDesign: styleTokens
       });
       if (!response.backgroundUrl) throw Error('OpenAI did not return the background');
@@ -290,9 +308,10 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
       if (config?.layoutMode !== 'manual' && effectivePositions.length <= 24) {
         setMessage('AI Vision is finding typography-safe original artwork slots on the actual generated background...');
         try {
-          const vision = await send({ action: 'layout', projectId, number: step, backgroundUrl: response.backgroundUrl, placements: effectivePositions, settings: config ? { ...config, referenceImage: undefined } : undefined });
+          const vision = await send({ action: 'layout', projectId, number: step, backgroundUrl: response.backgroundUrl, placements: effectivePositions,
+            referenceDesign: styleTokens, settings: config ? { ...config, referenceImage: undefined, hasReference: Boolean(config.referenceImage) } : undefined });
           if (vision.placements?.length === effectivePositions.length) {
-            suggested = fitListingPlacementsBelowText(vision.placements);
+            suggested = fitListingPlacementsToReference(step,vision.placements,Boolean(config.referenceImage),styleTokens);
             if (!suggested.length) throw Error('Vision positions could not be kept outside the text zone.');
           }
           layoutWarning = vision.fallback || '';
@@ -303,9 +322,11 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
       await saveRecord({
         number: step, status: 'draft', backgroundUrl: response.backgroundUrl,
         renderedImageUrl: '', placements: suggested,
+        compositionMode: (step === 1 || step === 15) && config.referenceImage ? 'hero-center' : 'top-gallery',
+      protectedTextZone: (step === 1 || step === 15) && config.referenceImage ? heroTextZone(layoutReference) : undefined,
         notes: notes[step] || current?.notes || '', updatedAt: Date.now()
       });
-      await renderAndSave(response.backgroundUrl, suggested, notes[step] || current?.notes || '');
+      await renderAndSave(response.backgroundUrl, suggested, notes[step] || current?.notes || '', styleTokens,Boolean(config.referenceImage));
       if (layoutWarning) setMessage('Image saved as draft. ' + layoutWarning);
     } catch (error) { setMessage('Generation failed: ' + (error instanceof Error ? error.message : String(error))); }
     finally { setWorking(''); }
@@ -459,7 +480,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
           <small style={{ color: '#74695e' }}>Only the graphic background, premium lettering and blank mockup environment are AI-generated. PaletteIQ composites original collection assets, preserving their identity. Generation uses paid API requests.</small>
           <hr style={{ width: '100%', border: 0, borderTop: '1px solid #eee4d9' }}/>
           <strong>Original asset placement ({positions.length}) — text-safe, distinct originals</strong>
-          <small>Title/subtitle occupy the protected top 38% of this square. Art cannot overlap the text; repeated assets are unavailable in the replacement selector.</small>
+          <small>{(step === 1 || step === 15) && config.referenceImage ? 'Hero Cover: lettering is centered and original PNGs arranged around the perimeter, inspired by the reference.' : 'Gallery: lettering stays in a protected top band.'} Text and clipart may not overlap; repeated assets are unavailable.</small>
           <label className="input-label">SELECT ARTWORK TO ADJUST</label>
           <select value={selectedIndex < positions.length ? selectedIndex : 0} disabled={!positions.length || !!working} onChange={e => setSelectedIndex(Number(e.target.value))}>
             {positions.map((p, i) => <option key={i} value={i}>{i + 1}. {assets.find(a => a.id === p.assetId)?.name || 'Original artwork'}</option>)}
