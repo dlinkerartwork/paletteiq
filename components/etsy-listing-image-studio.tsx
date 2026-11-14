@@ -617,6 +617,42 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           {(step === 3 || step === 5) && <button className="outline-btn" type="button" onClick={() => void categorize()} disabled={!!working}>Analyze collection categories (optional)</button>}
           <small style={{ color: '#74695e' }}>Only the graphic background, premium lettering and blank mockup environment are AI-generated. PaletteIQ composites original collection assets, preserving their identity. Generation uses paid API requests.</small>
           <hr style={{ width: '100%', border: 0, borderTop: '1px solid #eee4d9' }}/>
+          <div style={{ border: '1px solid #eadfce', padding: 12, borderRadius: 10, display: 'grid', gap: 9 }}>
+            <strong>Original clipart selection — Image {String(step).padStart(2,'0')}</strong>
+            <small>Choose how many ORIGINAL collection assets appear in this listing image. Main Cover defaults to 7, but you can use any count up to the collection size. Larger covers may reduce title readability; check the final critique.</small>
+            <label className="input-label" htmlFor="listing-clipart-count">NUMBER OF CLIPARTS (1–{assets.length})</label>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <input id="listing-clipart-count" aria-label="Number of listing cliparts" type="number" min={1} max={assets.length} step={1} value={positions.length}
+                disabled={!assets.length || !!working} onChange={e => changeArtworkCount(Number(e.target.value))}
+                style={{ width: 105, flexShrink: 0 }}/>
+              <button type="button" className="outline-btn" disabled={!!working || !assets.length} onClick={autoSelectArtwork}>Auto Select ({positions.length})</button>
+              <button type="button" className="outline-btn" disabled={!!working} aria-expanded={showAssetPicker}
+                onClick={() => setShowAssetPicker(value => !value)}>{showAssetPicker ? 'Hide Clipart Picker' : 'Select Cliparts'}</button>
+            </div>
+            {showAssetPicker && <div style={{ display: 'grid', gap: 7 }}>
+              <input aria-label="Search original collection cliparts" type="search" placeholder="Search clipart names or categories..."
+                value={assetSearch} disabled={!!working} onChange={e => setAssetSearch(e.target.value)}/>
+              <div style={{ maxHeight: 300, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 7, border: '1px solid #eee7dc', padding: 8, borderRadius: 8 }}>
+                {visibleAssetChoices.map(asset => <label key={asset.id} style={{ display: 'flex', alignItems: 'center', gap: 8, border: '1px solid #eee4d8', borderRadius: 6, padding: 6, minWidth: 0, cursor: 'pointer' }}>
+                  <input type="checkbox" aria-label={'Include ' + asset.name} checked={selectedAssetIds.includes(asset.id)}
+                    disabled={!!working || (selectedAssetIds.length === 1 && selectedAssetIds.includes(asset.id))}
+                    onChange={e => toggleArtwork(asset.id, e.target.checked)}/>
+                  <img src={asset.imageUrl} alt="" loading="lazy" style={{ width: 36, height: 36, objectFit: 'contain', flexShrink: 0 }}/>
+                  <span style={{ fontSize: 11, overflowWrap: 'anywhere' }}>{asset.name}</span>
+                </label>)}
+                {!visibleAssetChoices.length && <small>No matching original clipart.</small>}
+              </div>
+              <small>Checked: {positions.length} / {assets.length}. Each selected original appears once; adding or removing clipart does not redraw the source.</small>
+            </div>}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button type="button" className="outline-btn" disabled={!!working || !positions.length}
+                onClick={() => void autoArrangeArtwork()}>Auto Arrange ({positions.length})</button>
+              <button type="button" className="outline-btn" disabled={!!working || !selected || positions.length <= 1}
+                onClick={() => selected && toggleArtwork(selected.assetId, false)}>Remove Selected Clipart</button>
+            </div>
+            <small>With an existing AI background, change clipart count/selection, Auto Arrange, then click Apply layout &amp; save JPG — no new image-generation charge. AI Vision handles up to 24 placements; larger selections use local arrangement.</small>
+            {step === 1 && positions.length > 12 && <small role="alert" style={{ color: '#9f581b' }}>More than 12 cover elements may make the headline difficult to read at Etsy search size. Consider fewer standout artworks or use the final critique before approval.</small>}
+          </div>
           <strong>Original asset placement ({positions.length})</strong>
           <label className="input-label">SELECT ARTWORK TO ADJUST</label>
           <select value={selectedIndex < positions.length ? selectedIndex : 0} disabled={!positions.length || !!working} onChange={e => setSelectedIndex(Number(e.target.value))}>
@@ -625,7 +661,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           {selected && <>
             <label className="input-label">REPLACE WITH ORIGINAL COLLECTION ASSET</label>
             <select value={selected.assetId} disabled={!!working} onChange={e => move('assetId', e.target.value)}>
-              {assets.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              {assets.map(a => <option key={a.id} value={a.id} disabled={positions.some(p => p.assetId === a.id && p.assetId !== selected.assetId)}>{a.name}</option>)}
             </select>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 8 }}>
               {(['x','y','width','height'] as const).map(field => <label key={field} style={{ fontSize: 12, display: 'grid', gap: 3 }}>{field.toUpperCase()} (%)
