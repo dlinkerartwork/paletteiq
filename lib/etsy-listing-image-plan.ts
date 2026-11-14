@@ -122,7 +122,7 @@ export function planListingPlacements(number: number, source: ListingAsset[]): L
       for (const group of distinct.slice(0, 6)) chosen.push(...group.slice(0, 3));
       selected = chosen;
     } else selected = available.slice(0, 18);
-  } else if (number === 1) selected = curatedListingHighlights(available, 10);
+  } else if (number === 1) selected = curatedListingHighlights(available, 7);
   else if (number === 4) selected = curatedListingHighlights(available, 8);
   else if (number === 6) selected = available.slice(0, 2);
   else if (number === 7) selected = available.slice(0, 3);
@@ -172,7 +172,20 @@ export function planListingPlacements(number: number, source: ListingAsset[]): L
     const cellH = 70 / rows;
     return selected.map((a, i) => box(a, 5 + (i % cols) * cellW + 0.5, 24 + Math.floor(i / cols) * cellH + 0.3, cellW - 1, cellH - 0.7));
   }
-  if (number === 1 || number === 15) {
+  if (number === 1) {
+    // A cover is an expressive poster, not a ten-object pile. Give OpenAI
+    // lettering real visual breathing space while allowing intentional partial
+    // foreground overlap. Vision can adapt these starter placements to the
+    // generated lettering's ACTUAL position rather than a fixed title zone.
+    const coverSlots = [
+      [2, 17, 24, 27], [74, 14, 23, 28],
+      [3, 52, 25, 30], [73, 50, 25, 32],
+      [13, 78, 23, 21], [64, 77, 23, 21],
+      [41, 81, 19, 18]
+    ];
+    return selected.map((a, i) => box(a, ...coverSlots[i % coverSlots.length] as [number, number, number, number]));
+  }
+  if (number === 15) {
     const slots = [[3, 28, 26, 34], [71, 29, 26, 34], [29, 37, 20, 29], [51, 37, 20, 29], [4, 64, 22, 27], [73, 64, 23, 27], [27, 69, 17, 23], [56, 69, 17, 23], [14, 50, 19, 28], [66, 50, 19, 28]];
     return selected.map((a, i) => box(a, ...slots[i % slots.length] as [number, number, number, number]));
   }
