@@ -622,6 +622,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           x: e.x, y: e.y, width: e.width, height: e.height })),
         designBriefSettings: {
           ...currentBriefSettings(), scope: 'single' as const, slide: 'Custom Canvas Artwork',
+          boldness: 'balanced', coverStyle: 'editorial', intensity: 'soft',
           headline: hasLettering ? heading : '', subtitle: hasLettering ? subtitle : '',
           badge: '',
           typography: hasLettering ? 'ai-artwork' as const : 'editable' as const,
@@ -1046,7 +1047,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     try {
       const response = await fetch('/api/thumbnail-ai-image', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId, provider: 'openai', model: imageModel.startsWith('gpt-image-') ? imageModel : 'gpt-image-1-mini', quality: packQuality, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, mode: 'background-only', backgroundStyle, backgroundIntensity,
+        body: JSON.stringify({ projectId, provider: 'openai', model: imageModel.startsWith('gpt-image-') ? imageModel : 'gpt-image-1-mini', quality: packQuality, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, mode: 'background-only', backgroundStyle, backgroundIntensity: 'soft',
           designBriefSettings: { ...currentBriefSettings(), typography: 'editable', headline: design.packHeadline || title, subtitle: design.packSubtitle || 'CLIPART COLLECTION', slide: design.name },
           layout: design.elements.map(e => ({ type: e.type, x: e.x, y: e.y, width: e.width, height: e.height })) })
       });
