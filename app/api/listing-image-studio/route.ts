@@ -163,9 +163,9 @@ function artPrompt(number: number, project: StoredProject, count: number, settin
       width:Math.round(slot.width),height:Math.round(slot.height)}));
   const core = [
     'Create a premium conversion-focused Etsy digital clipart listing IMAGE BACKGROUND with exact ARTISTIC TYPOGRAPHY.',
-    'Square 1:1 composition. The final JPG and generated background are both 1024 x 1024 pixels. Keep all lettering safely inside the image edges and follow the chosen reference's actual text arrangement.',
+    'Square 1:1 composition. The final JPG and generated background are both 1024 x 1024 pixels. Keep all lettering safely inside the image edges and follow the chosen reference\'s actual text arrangement.',
     'Render the exact main title: ' + JSON.stringify(title) + '. Render the exact subtitle: ' + JSON.stringify(subtitle) + '. No other writing, numerals, file specifications, licensing or marketing claims.',
-    'Typography must match the reference's visual hierarchy, lettering style, alignment, spacing and position (without copying branded lettering). Use exact supplied wording, readable at Etsy mobile size.',
+    'Typography must match the reference\'s visual hierarchy, lettering style, alignment, spacing and position (without copying branded lettering). Use exact supplied wording, readable at Etsy mobile size.',
     'Visual continuity comes from the actual collection palette and selected reference, not a hardcoded watercolor template: ' + JSON.stringify(palette) + '. Use restrained decorative color and plenty of clean readable space.',
     referenceDriven ? 'REFERENCE-DRIVEN TYPOGRAPHY: match the exact spatial distribution and hierarchy of the user-selected reference image. Detected typography zones (percent of the 1024 square): ' + textPlacement + '. Text may appear at the top, center, bottom, sides, or multiple locations. NEVER enforce a universal top-title or central-medallion layout. Keep each letter readable and allow original PNG assets to occupy the other regions.' : 'NO REFERENCE SELECTED: use a readable top headline and a separate original-artwork area below it.',
 
