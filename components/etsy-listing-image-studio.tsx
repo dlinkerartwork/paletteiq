@@ -227,14 +227,15 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     const result = await send({ action: 'save', projectId, number: step, image });
     receive(result.images || []);
   };
-  const renderAndSave = async (background: string, layout: ListingPlacement[], info: string, reviewWarning = '') => {
+  const renderAndSave = async (background: string, layout: ListingPlacement[], info: string, reviewWarning = '', lettering: ListingImageText = currentLettering) => {
     setWorking('render'); setMessage('Compositing ' + layout.length + ' exact original collection clipart images at 1024 × 1024 px...');
     const file = await compose(background, layout, assets);
     setMessage('Saving JPG preview to the collection in safe upload chunks...');
     const renderedImageUrl = await upload(projectId, step, file, (done, total) => setMessage('Uploading original-asset JPG: ' + done + '/' + total + ' parts...'));
     const image: ListingImageRecord = {
       number: step, status: 'draft', backgroundUrl: background, renderedImageUrl, placements: layout,
-      width: LISTING_WIDTH, height: LISTING_HEIGHT, notes: info, reviewWarning, updatedAt: Date.now()
+      width: LISTING_WIDTH, height: LISTING_HEIGHT, title: lettering.title, subtitle: lettering.subtitle,
+      badge: lettering.badge, notes: info, reviewWarning, updatedAt: Date.now()
     };
     await saveRecord(image);
     setChanges(old => { const next = { ...old }; delete next[step]; return next; });
@@ -245,6 +246,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     if (!assets.length) return setMessage('Generate collection clipart in Image Production first.');
     if (!precedingApproved) return setMessage('Approve all preceding listing images before generating this one.');
     if (current?.status === 'approved' && !window.confirm('Regenerate an approved image? Its approval will be reset to Draft.')) return;
+    const lettering = { ...currentLettering };
     setWorking('generate'); setMessage('Generating artistic background + exact typography with OpenAI (no clipart regeneration)...');
     try {
       let effectivePositions = positions;
@@ -265,6 +267,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       }
       setMessage('Generating the AI graphic background and artistic typography...');
       const response = await send({ action: 'generate', projectId, number: step, model, quality,
+        title: lettering.title, subtitle: lettering.subtitle, badge: lettering.badge,
         revisionNotes: (notes[step] ?? current?.notes ?? '').trim() });
       if (!response.backgroundUrl) throw Error('OpenAI did not return the background');
       let suggested = effectivePositions;
@@ -283,9 +286,10 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       await saveRecord({
         number: step, status: 'draft', backgroundUrl: response.backgroundUrl,
         renderedImageUrl: '', placements: suggested, width: LISTING_WIDTH, height: LISTING_HEIGHT,
+        title: lettering.title, subtitle: lettering.subtitle, badge: lettering.badge,
         notes: notes[step] || current?.notes || '', reviewWarning: response.reviewWarning || '', updatedAt: Date.now()
       });
-      await renderAndSave(response.backgroundUrl, suggested, notes[step] || current?.notes || '', response.reviewWarning || '');
+      await renderAndSave(response.backgroundUrl, suggested, notes[step] || current?.notes || '', response.reviewWarning || '', lettering);
       if (layoutWarning) setMessage('Image saved as draft. ' + layoutWarning);
     } catch (error) { setMessage('Generation failed: ' + (error instanceof Error ? error.message : String(error))); }
     finally { setWorking(''); }
@@ -294,6 +298,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     if (working) return;
     if (!current?.backgroundUrl) return setMessage('Generate the background first.');
     if (current.status === 'approved' && !window.confirm('Revise this approved image and reset approval?')) return;
+    if (letteringDirty) return setMessage('Title, Subtitle, or Badge changed. Regenerate AI background & typography to apply the new lettering before saving.');
     try { await renderAndSave(current.backgroundUrl, positions, notes[step] || current.notes || '', current.reviewWarning || ''); }
     catch (error) { setMessage('Could not save revised image: ' + (error instanceof Error ? error.message : String(error))); }
     finally { setWorking(''); }
@@ -304,10 +309,12 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       return setMessage('Render a new 1024 × 1024 square JPG before approval. Your older 4:3 image remains saved.');
     if (status === 'approved' && current.reviewWarning &&
         !window.confirm('Automatic review flagged a possible issue:\n' + current.reviewWarning + '\n\nHave you carefully checked the artwork, mockup, text and verified facts and want to approve this JPG anyway?')) return;
+    if (letteringDirty) return setMessage('Title, Subtitle, or Badge changed. Regenerate the AI artwork before approving the new text.');
     if (changes[step]) return setMessage('You changed the layout. Click Apply layout & save JPG before approval.');
     setWorking('review');
     try {
-      await saveRecord({ ...current, status, notes: notes[step] || current.notes || '', updatedAt: Date.now() });
+      await saveRecord({ ...current, status, title: currentLettering.title, subtitle: currentLettering.subtitle,
+        badge: currentLettering.badge, notes: notes[step] || current.notes || '', updatedAt: Date.now() });
       setMessage(status === 'approved' ? 'Image ' + step + ' approved and saved.' : 'Image marked for revision. Edit placement for a free JPG re-render, or write feedback and regenerate the AI background to apply those notes.');
       if (status === 'approved' && step < 15) { setStep(step + 1); setSelectedIndex(0); }
     } catch (error) { setMessage('Could not save review: ' + String(error)); }
