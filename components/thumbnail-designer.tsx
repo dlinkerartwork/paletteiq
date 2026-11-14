@@ -408,7 +408,19 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         minScale: hierarchy === 'soft' ? .75 : hierarchy === 'medium' ? .65 : .55
       });
     // Safe fallback must never paint original clipart over the known typography area.
-    const safeFallback = fit(imageElements, [slide.textZone], []);
+    const hintedOriginals = referenceHints.length ? imageElements.map((item,i) => {
+      const hint = referenceHints[i];
+      if (!hint || ![hint.x,hint.y,hint.width,hint.height].every(Number.isFinite) ||
+        hint.width <= 0 || hint.height <= 0) return item;
+      // Resize the ORIGINAL PNG layer uniformly; drawing remains contain/alpha compositing.
+      const scale = Math.max(.45, Math.min(2.5,
+        Math.min(hint.width / Math.max(item.width,1), hint.height / Math.max(item.height,1))));
+      const width = item.width * scale, height = item.height * scale;
+      return { ...item, width, height,
+        x: hint.x + (hint.width - width)/2, y: hint.y + (hint.height - height)/2,
+        rotation: Math.max(-10,Math.min(10,hint.rotation || 0)) };
+    }) : imageElements;
+    const safeFallback = fit(hintedOriginals, [slide.textZone], []);
     try {
       const response = await fetch('/api/thumbnail-art-direction', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
