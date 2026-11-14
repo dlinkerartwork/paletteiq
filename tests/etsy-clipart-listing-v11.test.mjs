@@ -9,10 +9,10 @@ const route=readFileSync(new URL('../app/api/listing-image-studio/route.ts',impo
 const studio=readFileSync(new URL('../components/etsy-listing-image-studio.tsx',import.meta.url),'utf8');
 const page=readFileSync(new URL('../app/page.tsx',import.meta.url),'utf8');
 
-test('v1.1 listing plan uses exact 15-image commercial sequence and 4:3 JPGs', () => {
-  assert.equal(LISTING_WIDTH,3000);
-  assert.equal(LISTING_HEIGHT,2250);
-  assert.equal(LISTING_WIDTH/LISTING_HEIGHT,4/3);
+test('latest v1.1 listing uses exactly fifteen 1024×1024 square JPG files', () => {
+  assert.equal(LISTING_WIDTH,1024);
+  assert.equal(LISTING_HEIGHT,1024);
+  assert.equal(LISTING_WIDTH/LISTING_HEIGHT,1);
   assert.deepEqual(LISTING_IMAGE_SPECS.map(x=>x.title),[
     'Main Cover','Bundle Overview','Complete Collection','Best Elements','Collection Categories',
     'File Features','Artwork Close-Up','Sticker Sheet Mockup','Apparel Mockup','Accessories Mockup',
@@ -97,11 +97,11 @@ test('generate/revise/approve/next persists each independent step and resumes at
   assert.match(studio,/revisionNotes: \(notes\[step\] \?\? current\?\.notes \?\? ''\)\.trim\(\)/);
   assert.match(route,/CURRENT IMAGE REVISION REQUEST from the user/);
   assert.match(route,/typeof input\.revisionNotes === 'string'/);
-  assert.match(studio,/setStep\(LISTING_IMAGE_SPECS\.find\(s => !images\.some\(r => r\.number === s\.number && r\.status === 'approved'\)\)\?\.number \|\| 15\)/);
+  assert.match(studio,/setStep\(LISTING_IMAGE_SPECS\.find\(s => !images\.some\(r => r\.number === s\.number && isSquareListingApproved\(r\)\)\)\?\.number \|\| 15\)/);
   assert.match(studio,/if \(!precedingApproved\)/);
   assert.match(studio,/if \(status === 'approved' && step < 15\)/);
   assert.match(studio,/Review spelling, crop, verified facts and mockup realism before approving/);
-  assert.match(route,/Approve all 15 rendered listing images before exporting/);
+  assert.match(route,/Approve all 15 square 1024 × 1024 JPG listing images before exporting/);
 });
 
 test('QC warnings save paid backgrounds for manual review rather than silently rejecting them', () => {

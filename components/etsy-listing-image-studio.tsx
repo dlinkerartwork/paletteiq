@@ -6,7 +6,7 @@ import { readApiJson, uploadListingJpg } from '@/lib/listing-image-upload';
 import { listingCreativeDirection, listingMockupScene } from '@/lib/etsy-listing-creative-direction';
 import {
   LISTING_IMAGE_SPECS, LISTING_WIDTH, LISTING_HEIGHT, originalAssets,
-  planListingPlacements, listingFilename, type ListingAsset, type ListingImageRecord, type ListingPlacement
+  planListingPlacements, listingFilename, isSquareListingApproved, type ListingAsset, type ListingImageRecord, type ListingPlacement
 } from '@/lib/etsy-listing-image-plan';
 
 type Props = {
@@ -39,6 +39,36 @@ async function imageFromUrl(url: string): Promise<HTMLImageElement> {
   await image.decode();
   return image;
 }
+type CollectionInspection = { sampled: number; checked: number; transparent: number; dimensionSummary: string; failed: number };
+async function inspectOriginalCollectionSample(assets: ListingAsset[]): Promise<CollectionInspection> {
+  // The full collection remains the source of truth. Limit automatic image decode
+  // work so a 120+ asset bundle doesn't download every full-res PNG on page entry.
+  const sample = assets.slice(0, 12);
+  const results = await Promise.all(sample.map(async asset => {
+    try {
+      const image = await imageFromUrl(asset.imageUrl!);
+      const canvas = document.createElement('canvas');
+      canvas.width = 48; canvas.height = 48;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) throw Error('Canvas inspection unavailable');
+      ctx.clearRect(0, 0, 48, 48);
+      ctx.drawImage(image, 0, 0, 48, 48);
+      const data = ctx.getImageData(0, 0, 48, 48).data;
+      let hasAlpha = false;
+      for (let i = 3; i < data.length; i += 4) {
+        if (data[i] < 255) { hasAlpha = true; break; }
+      }
+      return { width: image.naturalWidth, height: image.naturalHeight, hasAlpha };
+    } catch { return null; }
+  }));
+  const succeeded = results.filter((x): x is NonNullable<typeof x> => Boolean(x));
+  const sizes = [...new Set(succeeded.map(x => x.width + '×' + x.height))];
+  return { sampled: sample.length, checked: succeeded.length,
+    transparent: succeeded.filter(x => x.hasAlpha).length,
+    dimensionSummary: sizes.slice(0, 4).join(', ') + (sizes.length > 4 ? ', …' : ''),
+    failed: sample.length - succeeded.length };
+}
+
 function imageBounds(image: HTMLImageElement): { sx: number; sy: number; sw: number; sh: number } {
   // Detect transparent margins in a small temporary raster. The source pixels remain
   // untouched; clipping whitespace only improves sizing of the original PNG layer.
@@ -117,13 +147,14 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   const [notes, setNotes] = useState<Record<number, string>>({});
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [categories, setCategories] = useState<Record<string,string>>({});
+  const [inspection, setInspection] = useState<CollectionInspection | null>(null);
 
   const categorizedAssets = useMemo(() => assets.map(a => ({ ...a, category: categories[a.id] || a.category })), [assets, categories]);
   const current = records.find(item => item.number === step);
   const positions = changes[step] || current?.placements || planListingPlacements(step, categorizedAssets);
   const selected = positions[selectedIndex] || positions[0];
-  const approved = LISTING_IMAGE_SPECS.filter(s => records.some(r => r.number === s.number && r.status === 'approved')).length;
-  const precedingApproved = LISTING_IMAGE_SPECS.slice(0, step - 1).every(s => records.some(r => r.number === s.number && r.status === 'approved'));
+  const approved = LISTING_IMAGE_SPECS.filter(s => records.some(r => r.number === s.number && isSquareListingApproved(r))).length;
+  const precedingApproved = LISTING_IMAGE_SPECS.slice(0, step - 1).every(s => records.some(r => r.number === s.number && isSquareListingApproved(r)));
 
   useEffect(() => {
     let live = true;
@@ -134,13 +165,23 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
         setRecords(images);
         // Resume the first unapproved image on return/reload, instead of always
         // restarting visually at step 01 (approved JPGs are never regenerated).
-        setStep(LISTING_IMAGE_SPECS.find(s => !images.some(r => r.number === s.number && r.status === 'approved'))?.number || 15);
+        setStep(LISTING_IMAGE_SPECS.find(s => !images.some(r => r.number === s.number && isSquareListingApproved(r)))?.number || 15);
         setSelectedIndex(0);
         setLoaded(true);
       }
     }).catch(error => { if (live) { setLoaded(true); setMessage('Could not load saved listing images: ' + String(error)); } });
     return () => { live = false; };
   }, [projectId]);
+  useEffect(() => {
+    let live = true;
+    setInspection(null);
+    if (assets.length) {
+      void inspectOriginalCollectionSample(assets).then(data => {
+        if (live) setInspection(data);
+      }).catch(() => { if (live) setInspection(null); });
+    }
+    return () => { live = false; };
+  }, [projectId, assets]);
   useEffect(() => {
     let live = true;
     void request('/api/settings?models=openai').then(data => {
@@ -174,13 +215,13 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     receive(result.images || []);
   };
   const renderAndSave = async (background: string, layout: ListingPlacement[], info: string, reviewWarning = '') => {
-    setWorking('render'); setMessage('Compositing ' + layout.length + ' exact original clipart images at 3000 × 2250 px...');
+    setWorking('render'); setMessage('Compositing ' + layout.length + ' exact original collection clipart images at 1024 × 1024 px...');
     const file = await compose(background, layout, assets);
     setMessage('Saving JPG preview to the collection in safe upload chunks...');
     const renderedImageUrl = await upload(projectId, step, file, (done, total) => setMessage('Uploading original-asset JPG: ' + done + '/' + total + ' parts...'));
     const image: ListingImageRecord = {
       number: step, status: 'draft', backgroundUrl: background, renderedImageUrl, placements: layout,
-      notes: info, reviewWarning, updatedAt: Date.now()
+      width: LISTING_WIDTH, height: LISTING_HEIGHT, notes: info, reviewWarning, updatedAt: Date.now()
     };
     await saveRecord(image);
     setChanges(old => { const next = { ...old }; delete next[step]; return next; });
@@ -228,7 +269,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       // An empty renderedImageUrl intentionally invalidates prior approved pixels.
       await saveRecord({
         number: step, status: 'draft', backgroundUrl: response.backgroundUrl,
-        renderedImageUrl: '', placements: suggested,
+        renderedImageUrl: '', placements: suggested, width: LISTING_WIDTH, height: LISTING_HEIGHT,
         notes: notes[step] || current?.notes || '', reviewWarning: response.reviewWarning || '', updatedAt: Date.now()
       });
       await renderAndSave(response.backgroundUrl, suggested, notes[step] || current?.notes || '', response.reviewWarning || '');
@@ -246,6 +287,8 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   };
   const review = async (status: 'approved' | 'needs_revision') => {
     if (!current?.renderedImageUrl || working) return;
+    if (status === 'approved' && (current.width !== LISTING_WIDTH || current.height !== LISTING_HEIGHT))
+      return setMessage('Render a new 1024 × 1024 square JPG before approval. Your older 4:3 image remains saved.');
     if (status === 'approved' && current.reviewWarning &&
         !window.confirm('Automatic review flagged a possible issue:\n' + current.reviewWarning + '\n\nHave you carefully checked the artwork, mockup, text and verified facts and want to approve this JPG anyway?')) return;
     if (changes[step]) return setMessage('You changed the layout. Click Apply layout & save JPG before approval.');
@@ -271,8 +314,9 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
 
   return <div style={{ display: 'grid', gap: 18 }}>
     <div className="panel" style={{ padding: 20 }}>
-      <h2>Etsy Listing Image Studio</h2>
-      <p className="sub">15-image workflow • 3000 × 2250 px • 4:3 landscape • automatic art direction from this collection • exact original collection clipart. Thumbnail Designer remains separate.</p>
+      <h2>Etsy Clipart Listing Studio</h2>
+      <p className="sub">Etsy Clipart Listing Studio v1.1 • 15 separate JPGs • 1024 × 1024 px (1:1 square) • automatic art direction • exact originals from the selected PaletteIQ collection, not ZIP.</p>
+      {inspection && <p className="sub">Original collection check: {assets.length} distinct source-image references; {inspection.checked}/{inspection.sampled} sampled images decoded{inspection.dimensionSummary ? ' (dimensions: ' + inspection.dimensionSummary + ')' : ''}; {inspection.transparent} show transparency in the sample{inspection.failed ? '; ' + inspection.failed + ' could not be inspected' : ''}. Counts exclude duplicate URLs. Other image formats, dimensions, DPI and licensing are not assumed.</p>}
       <p className="sub">Creative direction: {artDirection.family} · {artDirection.palette} · AI artwork style follows the collection. {step === 1 ? 'Review the cover first to set the visual direction.' : 'Approved images remain saved; use the same visual language across the series.'}</p>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         <strong>{approved}/15 approved • {assets.length} original images available</strong>
@@ -292,7 +336,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
         }}>
           <strong>{String(s.number).padStart(2, '0')} · {s.title}</strong>
           <small style={{ display: 'block', marginTop: 6, color: item?.status === 'approved' ? '#247046' : '#786a5b' }}>
-            {item?.status === 'approved' ? '✓ Approved' : item?.status === 'needs_revision' ? 'Needs revision' : item?.renderedImageUrl ? 'Draft • Review' : 'Not generated'}
+            {isSquareListingApproved(item) ? '✓ Approved (square)' : item?.renderedImageUrl && (item.width !== LISTING_WIDTH || item.height !== LISTING_HEIGHT) ? 'Legacy 4:3 • remake as square' : item?.status === 'needs_revision' ? 'Needs revision' : item?.renderedImageUrl ? 'Draft • Review' : 'Not generated'}
           </small>
         </button>;
       })}
@@ -302,30 +346,36 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       <p className="sub">{spec.purpose}. Source: {smoothName(subtheme || theme || name)}.</p>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(300px,1fr))', gap: 18 }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ aspectRatio: '4 / 3', background: '#f7f1e9', border: '1px solid #e5dbcb', borderRadius: 10, overflow: 'hidden', display: 'grid', placeItems: 'center' }}>
+          <div style={{ aspectRatio: '1 / 1', background: '#f7f1e9', border: '1px solid #e5dbcb', borderRadius: 10, overflow: 'hidden', display: 'grid', placeItems: 'center' }}>
             {current?.renderedImageUrl ? <img key={current.renderedImageUrl} src={current.renderedImageUrl} alt={'Saved listing image '+step} style={{ width: '100%', height: '100%', objectFit: 'contain' }}/> :
               <div style={{ textAlign: 'center', padding: 24, color: '#68594a' }}><ImageIcon size={40}/><p>Generate the AI graphic background, then PaletteIQ will composite original collection PNGs.</p></div>}
           </div>
           {current?.renderedImageUrl && <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
             <a className="outline-btn" href={current.renderedImageUrl} download={fileName(step)}><Download size={15}/> Download JPG</a>
-            <span className="sub">{LISTING_WIDTH} × {LISTING_HEIGHT} • {current.status === 'approved' ? 'Approved' : 'Awaiting approval'}</span>
+            <span className="sub">{current.width || 'Legacy'} × {current.height || '4:3'} • {isSquareListingApproved(current) ? 'Approved square JPG' : 'Awaiting square approval'}</span>
           </div>}
+          {current?.renderedImageUrl && (current.width !== LISTING_WIDTH || current.height !== LISTING_HEIGHT) && <p role="alert" className="notice">This saved image was produced by the previous 4:3 workflow. It is preserved for reference; regenerate the AI background, or re-render its background as 1024 × 1024 before approving the square edition.</p>}
           {current?.reviewWarning && <p role="alert" style={{ border: '1px solid #d48c48', borderRadius: 8, padding: 10, color: '#7b431b', background: '#fff6e9' }}>Manual quality review required: {current.reviewWarning}. Approval requires your explicit confirmation.</p>}
           {(spec.kind === 'mockup') && <p className="sub">Application example: {listingMockupScene(step, artDirection.family)?.name}. Mockup is a demonstration, not included in the sold collection. Inspect printable placement: the photograph is AI-generated, while the featured clipart is composited from its original file.</p>}
         </div>
         <div style={{ display: 'grid', alignContent: 'start', gap: 10 }}>
-          <label className="input-label">OPENAI ARTISTIC BACKGROUND MODEL</label>
-          <select value={model} disabled={!!working} onChange={e => setModel(e.target.value)}>
-            {!availableModels.some(x => x.id === model) && <option value={model}>{model}</option>}
-            {availableModels.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
-          </select>
-          <label className="input-label">BACKGROUND QUALITY</label>
-          <select value={quality} disabled={!!working} onChange={e => setQuality(e.target.value as typeof quality)}>
-            <option value="low">Low — economical</option><option value="medium">Medium — recommended</option><option value="high">High</option>
-          </select>
+          <details style={{ border: '1px solid #e5d9cb', borderRadius: 9, padding: '9px 12px' }}>
+            <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>Advanced AI settings (optional)</summary>
+            <div style={{ display: 'grid', gap: 9, marginTop: 12 }}>
+              <label className="input-label">OPENAI ARTISTIC BACKGROUND MODEL</label>
+              <select value={model} disabled={!!working} onChange={e => setModel(e.target.value)}>
+                {!availableModels.some(x => x.id === model) && <option value={model}>{model}</option>}
+                {availableModels.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </select>
+              <label className="input-label">BACKGROUND QUALITY</label>
+              <select value={quality} disabled={!!working} onChange={e => setQuality(e.target.value as typeof quality)}>
+                <option value="low">Low — economical</option><option value="medium">Medium — recommended</option><option value="high">High</option>
+              </select>
+            </div>
+          </details>
           <button type="button" className="primary-btn" onClick={() => void generate()} disabled={!loaded || !assets.length || !!working || !precedingApproved}>
             {working === 'generate' ? <LoaderCircle className="spin" size={16}/> : <Sparkles size={16}/>}
-            {current?.backgroundUrl ? 'Regenerate AI background + lettering' : 'Generate Image ' + String(step).padStart(2,'0')}
+            {current?.backgroundUrl ? 'Revise Image ' + String(step).padStart(2,'0') + ' (AI background)' : step === 1 ? 'Start /new-listing — Generate Main Cover' : 'Generate Image ' + String(step).padStart(2,'0')}
           </button>
           {!precedingApproved && <small style={{ color: '#94502e' }}>Approve the earlier images in order before generating this image.</small>}
           {(step === 3 || step === 5) && <button className="outline-btn" type="button" onClick={() => void categorize()} disabled={!!working}>Analyze collection categories (optional)</button>}
@@ -353,7 +403,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           <small style={{ color: '#74695e' }}>Your revision notes are included in the next paid AI background regeneration for this image only. To adjust original clipart positions without AI charges, use Apply layout & save JPG. Review spelling, crop, verified facts and mockup realism before approving.</small>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button type="button" className="outline-btn" disabled={!current?.renderedImageUrl || !!working} onClick={() => void review('needs_revision')}>Needs revision</button>
-            <button type="button" className="primary-btn" disabled={!current?.renderedImageUrl || !!working} onClick={() => void review('approved')}><Check size={16}/> Approve & Next <ArrowRight size={15}/></button>
+            <button type="button" className="primary-btn" disabled={!current?.renderedImageUrl || !!working || current.width !== LISTING_WIDTH || current.height !== LISTING_HEIGHT} onClick={() => void review('approved')}><Check size={16}/> Approve & Next (/next) <ArrowRight size={15}/></button>
           </div>
         </div>
       </div>

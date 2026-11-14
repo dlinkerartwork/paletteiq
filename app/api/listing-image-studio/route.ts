@@ -9,7 +9,7 @@ import { zipStream, type ZipEntry } from '@/lib/zip-stream';
 import { listingCreativeDirection, listingCreativeSummary, listingMockupScene } from '@/lib/etsy-listing-creative-direction';
 import {
   LISTING_IMAGE_SPECS, LISTING_HEIGHT, LISTING_WIDTH, listingFilename, listingTitle,
-  originalAssets, type ListingImageRecord, type ListingPlacement, type ListingAsset, type ListingImageStatus
+  originalAssets, isSquareListingApproved, type ListingImageRecord, type ListingPlacement, type ListingAsset, type ListingImageStatus
 } from '@/lib/etsy-listing-image-plan';
 
 const bad = (message: string, status = 400) => Response.json({ error: message }, { status });
@@ -55,8 +55,11 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
   const backgroundUrl = value.backgroundUrl !== undefined ? value.backgroundUrl : previous?.backgroundUrl;
   if (renderedImageUrl && !savedAssetKey(renderedImageUrl, project.id, 'owner-placeholder')) throw Error('Invalid composed image reference');
   if (backgroundUrl && !savedAssetKey(backgroundUrl, project.id, 'owner-placeholder')) throw Error('Invalid AI background reference');
-  if (status === 'approved' && (!renderedImageUrl || !placements.length)) throw Error('Render an image with original collection artwork before approval');
-  return { number: value.number, status, backgroundUrl, renderedImageUrl, placements, notes: sanitizedText(value.notes || '', 800),
+  const width = value.width ?? previous?.width;
+  const height = value.height ?? previous?.height;
+  if (status === 'approved' && (!renderedImageUrl || !placements.length || width !== LISTING_WIDTH || height !== LISTING_HEIGHT))
+    throw Error('Save a 1024 × 1024 JPG using original collection artwork before approval. Legacy 4:3 renders must be remade.');
+  return { number: value.number, status, backgroundUrl, renderedImageUrl, placements, width, height, notes: sanitizedText(value.notes || '', 800),
     reviewWarning: typeof value.reviewWarning === 'string' ? sanitizedText(value.reviewWarning, 280) : '',
     updatedAt: Date.now() };
 }
@@ -84,8 +87,8 @@ export async function GET(request: Request) {
   const images = normalizedImages(project);
   if (url.searchParams.get('export') !== '1') return Response.json({ images });
   const selected = LISTING_IMAGE_SPECS.map(spec => images.find(item => item.number === spec.number));
-  if (selected.some(item => !item || item.status !== 'approved' || !item.renderedImageUrl))
-    return bad('Approve all 15 rendered listing images before exporting.', 409);
+  if (selected.some(item => !isSquareListingApproved(item)))
+    return bad('Approve all 15 square 1024 × 1024 JPG listing images before exporting. Legacy 4:3 images are not eligible.', 409);
   const storage = bucket();
   if (!storage) return bad('Image storage is unavailable', 503);
   const entries: ZipEntry[] = [];
@@ -127,11 +130,11 @@ function artPrompt(number: number, project: StoredProject, count: number, revisi
   const core = [
     'You are an Etsy visual merchandiser and expert creative director. Produce a conversion-focused image BACKGROUND plus exact artistic lettering for ONE image in a cohesive 15-image listing sequence.',
     'Image ' + number + ' of 15 — ' + spec.title + '. Its purpose is ' + spec.purpose + '.',
-    'Final file is 3000 × 2250 pixels, 4:3 landscape JPG. Your source image is 1536 × 1024 (3:2) and will be center-cropped to 4:3. Keep important text inside the middle 82% of the source width.',
+    'FINAL CANVAS IS 1024 x 1024 pixels, 1:1 SQUARE JPG. Your source is already 1024 x 1024. No landscape crop, no black bars. Place all lettering within the square safe margin (minimum 6% from all sides).',
     'Display EXACT main title ' + JSON.stringify(title) + ' and EXACT subtitle ' + JSON.stringify(subtitle) + '. No additional claims or marketing copy. Spell every character correctly.',
     listingCreativeSummary(direction),
     'Design typography for quick readability on a small Etsy search-result thumbnail: bold but friendly high-contrast custom lettering, artistically curved or hand-painted where appropriate, with restrained supporting text.',
-    'Keep main title and subtitle entirely within the upper 23% of the FINAL 4:3 canvas. The original artwork will occupy most of the lower region.',
+    'Keep main title and subtitle entirely within the upper 24% of the FINAL 1:1 square canvas. The original artwork will occupy most of the remaining region; keep mobile thumbnail readability.',
     'The actual collection images are NOT provided to you. PaletteIQ will composite the exact originals later. Do NOT generate clipart, animal/food/flower drawings, icons, logos, product print art, or stand-in illustrations.',
     'Only verified count of unique original images is ' + count + '. Never claim PNG, transparency, ZIP contents, DPI, license, print resolution, or asset dimensions without verified metadata.',
     'Use clean commercial visual hierarchy, artwork-first layout, consistent recognizable product identity and elegant foreground/background separation.',
@@ -214,7 +217,7 @@ export async function POST(request: Request) {
             {type:'input_text',text:[
               'You are an expert graphic designer positioning EXISTING ORIGINAL PNG LAYERS on an AI-generated empty listing design. NEVER draw or regenerate clipart.',
               'Inspect the supplied BACKGROUND IMAGE PIXELS to locate the already-rendered artistic typography and unobstructed blank printable space.',
-              'Final export is 4:3 landscape (3000x2250), made by center-cropping the supplied 3:2 background, removing approximately 5.56% from both left and right edges. Return coordinate percentages relative to this FINAL 4:3 crop, NOT the uncropped source.',
+              'Final export is a 1:1 SQUARE canvas (1024x1024), exactly matching the supplied 1024x1024 background pixels. No crop is applied. Return x/y/width/height as percentages of the FULL SQUARE canvas.',
               'The title and subtitle must remain unobstructed, usually in the upper 23% of the final canvas.',
               isMockup ? 'This is a realistic BLANK PRODUCT MOCKUP. All supplied original asset layers MUST fit on the blank flat printable area of the product and not float on table/background. Account for actual blank surface position in visible pixels. Do not cover straps, hands, folds, shadows or the product edge.' : 'Use intentional size hierarchy and negative space. For many gallery items keep original grid, adjust only to avoid title, maintain layout clarity.',
               'Return ONLY JSON: {"placements":[{"assetId":"source-id","x":30,"y":40,"width":18,"height":22,"rotation":0}],"unsafe":false,"notes":""}.',
@@ -262,7 +265,7 @@ export async function POST(request: Request) {
     const response = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, prompt, size: '1536x1024', quality, output_format: 'png', n: 1 }),
+      body: JSON.stringify({ model, prompt, size: '1024x1024', quality, output_format: 'png', n: 1 }),
       signal: AbortSignal.timeout(120000)
     });
     if (!response.ok) return bad('AI background failed (HTTP ' + response.status + '): ' + (await response.text()).slice(0, 250), 502);

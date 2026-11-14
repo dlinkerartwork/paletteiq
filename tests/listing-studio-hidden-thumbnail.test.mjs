@@ -17,7 +17,7 @@ test('Thumbnail Designer and original 15-image Listing Studio remain separately 
 });
 
 test('restore original PR18 listing studio without the later Reference & Assets configuration panel', () => {
-  assert.match(studio, /<h2>Etsy Listing Image Studio<\/h2>/);
+  assert.match(studio, /<h2>Etsy Clipart Listing Studio<\/h2>/);
   assert.match(studio, /OPENAI ARTISTIC BACKGROUND MODEL/);
   assert.match(studio, /BACKGROUND QUALITY/);
   assert.match(studio, /const \[quality, setQuality\] = useState<'low' \| 'medium' \| 'high'>\('medium'\)/);
@@ -35,9 +35,9 @@ test('original sequence requires review/approval per image and retains 15-image 
   assert.match(studio, /if \(status === 'approved' && step < 15\)/);
   assert.match(studio, /Apply layout & save JPG/);
   assert.match(studio, /Export 15 approved JPGs as ZIP/);
-  assert.match(studio, /aspectRatio: '4 \/ 3'/);
+  assert.match(studio, /aspectRatio: '1 \/ 1'/);
   assert.match(studio, /const file = await compose\(background, layout, assets\)/);
-  assert.match(route, /Approve all 15 rendered listing images before exporting/);
+  assert.match(route, /Approve all 15 square 1024 × 1024 JPG listing images before exporting/);
 });
 
 test('revert keeps safe upload and paid background retry fixes, including original project data', () => {
