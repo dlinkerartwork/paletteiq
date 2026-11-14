@@ -10,7 +10,7 @@ import EtsyListingLayoutCanvas from '@/components/etsy-listing-layout-canvas';
 import { evaluateListingCoverTitle, suggestListingCoverCopy } from '@/lib/etsy-listing-cover-copy';
 import {
   LISTING_IMAGE_SPECS, LISTING_WIDTH, LISTING_HEIGHT, originalAssets,
-  planListingPlacements, curatedListingHighlights, DEFAULT_MAIN_COVER_CLIPART_COUNT, defaultListingCompositionMode, listingFilename, listingImageTextDefaults, isSquareListingApproved, type ListingCompositionMode, type ListingImageText, type ListingFinalReview, type ListingAsset, type ListingImageRecord, type ListingPlacement
+  planListingPlacements, curatedListingHighlights, DEFAULT_MAIN_COVER_CLIPART_COUNT, defaultListingCompositionMode, listingAllowsBleed, listingFilename, listingImageTextDefaults, isSquareListingApproved, type ListingCompositionMode, type ListingImageText, type ListingFinalReview, type ListingAsset, type ListingImageRecord, type ListingPlacement
 } from '@/lib/etsy-listing-image-plan';
 
 type Props = {
@@ -595,8 +595,8 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       if (!target) return prev;
       list[selectedIndex] = { ...target, [field]: field === 'assetId' ? value :
         clamp(Number(value),
-          field === 'rotation' ? -180 : field === 'width' || field === 'height' ? 2 : step === 1 ? -100 : 0,
-          field === 'rotation' ? 180 : field === 'width' || field === 'height' ? (step === 1 ? 200 : 100) : step === 1 ? 99 : 100) };
+          field === 'rotation' ? -180 : field === 'width' || field === 'height' ? 2 : listingAllowsBleed(step) ? -100 : 0,
+          field === 'rotation' ? 180 : field === 'width' || field === 'height' ? (listingAllowsBleed(step) ? 200 : 100) : listingAllowsBleed(step) ? 99 : 100) };
       return { ...prev, [step]: list };
     });
   };
@@ -725,7 +725,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
               onSelect={setSelectedIndex}
               onChange={layout => setChanges(old => ({ ...old, [step]: layout }))}
               backgroundUrl={current?.backgroundUrl}
-              allowBleed={step === 1}
+              allowBleed={listingAllowsBleed(step)}
               disabled={!!working}
             />
             {!current?.backgroundUrl && <div style={{ display:'grid',gap:7 }}>
@@ -919,7 +919,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
             {step === 1 && positions.length > 14 && <small role="alert" style={{ color: '#9f581b' }}>More than 14 cover elements may reduce readability at Etsy search size. Adjust hero/medium/accent sizes and review the final critique before approval.</small>}
           </div>
           <strong>Original asset placement ({positions.length})</strong>
-          {step === 1 && <small>Canvas bleed is allowed: X/Y may be negative and artwork may extend beyond edges. The final 1024×1024 JPG crops only the overflow, preserving original artwork pixels inside.</small>}
+          {listingAllowsBleed(step) && <small>Canvas bleed is allowed: X/Y may be negative and artwork may extend beyond edges. The final 1024×1024 JPG crops only the overflow, preserving original artwork pixels inside.</small>}
           <label className="input-label">SELECT ARTWORK TO ADJUST</label>
           <select value={selectedIndex < positions.length ? selectedIndex : 0} disabled={!positions.length || !!working} onChange={e => setSelectedIndex(Number(e.target.value))}>
             {positions.map((p, i) => <option key={i} value={i}>{i + 1}. {assets.find(a => a.id === p.assetId)?.name || 'Original artwork'}</option>)}
@@ -931,8 +931,8 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
             </select>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 8 }}>
               {(['x','y','width','height'] as const).map(field => <label key={field} style={{ fontSize: 12, display: 'grid', gap: 3 }}>{field.toUpperCase()} (%)
-                <input type="number" min={step === 1 && (field === 'x' || field === 'y') ? -100 : 0}
-                  max={step === 1 ? (field === 'width' || field === 'height' ? 200 : 99) : 100}
+                <input type="number" min={listingAllowsBleed(step) && (field === 'x' || field === 'y') ? -100 : 0}
+                  max={listingAllowsBleed(step) ? (field === 'width' || field === 'height' ? 200 : 99) : 100}
                   step={0.5} value={Number(selected[field]).toFixed(1)}
                   disabled={!!working} onChange={e => move(field, e.target.value)}/>
               </label>)}
