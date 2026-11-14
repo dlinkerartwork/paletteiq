@@ -120,3 +120,29 @@ test('Free Composition excludes PaletteIQ starter geometry and can arrange all u
   assert.equal(dense.length,120);
   assert.equal(new Set(dense.map(x=>x.assetId)).size,120);
 });
+
+test('users can review and edit both OpenAI prompts before any paid generation or Auto Arrange',()=>{
+  assert.match(api,/action\?: 'generate' \| 'preview-prompt'/);
+  assert.match(api,/const isPreview = input\.action === 'preview-prompt'/);
+  assert.match(api,/if \(isPreview\) return Response\.json\(\{/);
+  assert.match(api,/backgroundPrompt: prompt/);
+  assert.match(api,/layoutPrompt: defaultVisionArtDirection/);
+  assert.match(api,/const effectivePrompt = input\.backgroundPrompt !== undefined \? input\.backgroundPrompt : prompt/);
+  assert.match(api,/prompt: effectivePrompt, size: '1024x1024'/);
+  assert.match(api,/input\.layoutPrompt !== undefined \? input\.layoutPrompt : defaultVisionArtDirection/);
+  assert.match(api,/Do not place an opaque original over ANY essential letter shapes/);
+  assert.match(api,/no mandatory grid, center, perimeter, hero count, size percentages, object count, font or font style/);
+  assert.match(ui,/data-listing-openai-prompt-editor="true"/);
+  assert.match(ui,/id="listing-background-prompt"/);
+  assert.match(ui,/id="listing-vision-prompt"/);
+  assert.match(ui,/action:'preview-prompt', projectId, number:step/);
+  assert.match(ui,/setPromptDrafts\(prev =>/);
+  assert.match(ui,/backgroundPrompt:promptDraft!\.backgroundPrompt/);
+  assert.match(ui,/layoutPrompt:visionArtPrompt/);
+  assert.match(ui,/if \(!promptsReady\) return setMessage/);
+  assert.match(ui,/disabled=\{!loaded \|\| !assets\.length \|\| !!working \|\| !precedingApproved \|\| !promptsReady\}/);
+  assert.match(ui,/promptDraft\.context === promptContext/);
+  assert.match(ui,/Replace your edited OpenAI prompt drafts with fresh defaults/);
+  assert.doesNotMatch(ui.slice(ui.indexOf('const prepareOpenAiPrompts ='),ui.indexOf('const generate = async')),/await ensureSourceStyle\(/,
+    'Preview must not silently charge for style analysis');
+});
