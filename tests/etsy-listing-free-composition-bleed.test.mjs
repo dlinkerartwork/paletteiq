@@ -111,7 +111,7 @@ test('Free Composition excludes PaletteIQ starter geometry and can arrange all u
   assert.match(ui,/const batchSize = 24/);
   assert.match(ui,/offset < initial\.length; offset \+= batchSize/);
   assert.match(ui,/existingPlacements:arranged, totalSelected:initial\.length/);
-  assert.match(ui,/await arrangeWithAI\(response\.backgroundUrl, effectivePositions\)/);
+  assert.match(ui,/await arrangeWithAI\(response\.backgroundUrl, effectivePositions/);
   assert.match(ui,/await arrangeWithAI\(current\.backgroundUrl, positions/);
   assert.doesNotMatch(api,/\.slice\(0, 300\)/);
   assert.doesNotMatch(api,/length > 300/);
