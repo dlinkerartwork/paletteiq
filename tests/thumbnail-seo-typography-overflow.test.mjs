@@ -70,13 +70,11 @@ test('partially off-canvas PNGs are permitted and only visible rectangles are se
   assert.match(endpoint,/JSON\.stringify\(visibleLayout\)/);
   assert.match(designer,/Clipart may overlap text intentionally or extend beyond canvas edges/);
 });
-test('AI lettering is artistically directed, optionally curved or hand-painted, without changing exact source assets', () => {
-  assert.match(designer,/Artistic lettering composition/);
-  assert.match(designer,/Arched & curved lettering/);
-  assert.match(designer,/Flowing brush calligraphy/);
-  assert.match(designer,/packLetteringStyle: source\.packLetteringStyle \|\| 'auto'/);
-  assert.match(endpoint,/const artisticStyles: Record<string, string>/);
-  assert.match(endpoint,/not typed with a rigid stock font/);
-  assert.match(endpoint,/Arched, curved, flowing, gently waved, offset, or layered typography/);
-  assert.match(endpoint,/Do not draw a visual depiction of the title words/);
+test('experimental lettering composition UI is disabled while AI uses reference structure', () => {
+  assert.doesNotMatch(designer, /label="Artistic lettering composition"/);
+  assert.match(designer, /letteringStyle: 'auto' as const/);
+  assert.match(designer, /referenceSlots = result\.layout\.slots \|\| \[\]/);
+  assert.match(designer, /await placeOriginalsOverBackground\(/);
+  assert.match(endpoint, /const artisticStyles: Record<string, string>/);
+  assert.match(endpoint, /Do not draw a visual depiction of the title words/);
 });
