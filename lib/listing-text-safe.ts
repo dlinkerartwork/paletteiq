@@ -24,6 +24,8 @@ export function isListingPlacementTextSafe(p: ListingPlacement, textBottom = cei
 export function fitListingPlacementsBelowText(placements: ListingPlacement[], textBottom = ceil): ListingPlacement[] {
   if (!placements.length) return [];
   const top = Math.min(65, Math.max(ceil, textBottom));
+  // Existing mockup layouts and manually edited safe positions must not drift.
+  if (placements.every(p => isListingPlacementTextSafe(p,top))) return placements.map(p => ({...p}));
   const available = 99 - top;
   const minY = Math.min(...placements.map(p => p.y));
   const maxBottom = Math.max(...placements.map(p => p.y+p.height));
