@@ -23,18 +23,20 @@ test('OpenAI Vision arranges actual clipart around visible lettering naturally w
   assert.match(client, /const file = await compose\(background, layout, assets\)/);
 });
 
-test('Main Cover uses seven varied original cliparts with artwork around edges, not ten piled in the center', () => {
+test('Main Cover uses twelve diverse original cliparts with 3 distinct scales and open central title area', () => {
   const source = Array.from({ length: 45 }, (_, i) => ({
     id: 'clipart-' + i, name: 'Art ' + i, imageUrl: '/original/' + i + '.png',
     category: ['Americana','Cars','Travel'][i % 3]
   }));
   const cover = planListingPlacements(1, source);
-  assert.equal(cover.length, 7);
-  assert.equal(new Set(cover.map(item => item.assetId)).size, 7);
+  assert.equal(cover.length, 12);
+  assert.equal(new Set(cover.map(item => item.assetId)).size, 12);
   assert.ok(cover.some(item => item.x < 8), 'left perimeter');
   assert.ok(cover.some(item => item.x >= 70), 'right perimeter');
   assert.ok(cover.some(item => item.y >= 75), 'lower perimeter');
-  assert.ok(cover.every(item => item.width >= 15 && item.height >= 18));
+  assert.equal(cover.filter(item => item.width >= 25).length, 2, 'large focal illustrations');
+  assert.equal(cover.filter(item => item.width >= 18 && item.width < 25).length, 4, 'medium supports');
+  assert.equal(cover.filter(item => item.width < 15).length, 6, 'small accents');
   assert.equal(planListingPlacements(4, source).length, 8);
   assert.equal(planListingPlacements(15, source).length, 9);
   assert.equal(curatedListingHighlights(source,10).length,10,'other callers still support ten');
