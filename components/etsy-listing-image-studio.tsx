@@ -221,11 +221,11 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
     const result = await send({ action: 'save', projectId, number: step, image });
     receive(result.images || []);
   };
-  const renderAndSave = async (background: string, layout: ListingPlacement[], info: string) => {
+  const renderAndSave = async (background: string, layout: ListingPlacement[], info: string, layoutReference: ListingReferenceLayout | undefined = referenceDesign) => {
     setWorking('render'); setMessage('Compositing ' + layout.length + ' exact original clipart images at 1024 × 1024 px...');
     if (!layout.length || duplicateListingAssetIds(layout).length ||
-        !layout.every(p => isListingPlacementSafe(p,step,Boolean(config.referenceImage),referenceDesign,
-          current?.protectedTextZone || (config.referenceImage ? heroTextZone(referenceDesign) : undefined))))
+        !layout.every(p => isListingPlacementSafe(p,step,Boolean(config.referenceImage),layoutReference,
+          config.referenceImage ? heroTextZone(layoutReference) : undefined)))
       throw Error('One or more original PNGs overlap the reference-guided text area, or repeat an asset. Adjust the layout before saving.');
     const file = await compose(background, layout, assets);
     setMessage('Saving JPG preview to the collection in safe upload chunks...');
@@ -233,7 +233,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
     const image: ListingImageRecord = {
       number: step, status: 'draft', backgroundUrl: background, renderedImageUrl, placements: layout,
       compositionMode: (step === 1 || step === 15) && config.referenceImage ? 'hero-center' : 'top-gallery',
-      protectedTextZone: (step === 1 || step === 15) && config.referenceImage ? current?.protectedTextZone || heroTextZone(referenceDesign) : undefined,
+      protectedTextZone: (step === 1 || step === 15) && config.referenceImage ? heroTextZone(layoutReference) : undefined,
       notes: info, updatedAt: Date.now()
     };
     await saveRecord(image);
@@ -313,10 +313,10 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
         number: step, status: 'draft', backgroundUrl: response.backgroundUrl,
         renderedImageUrl: '', placements: suggested,
         compositionMode: (step === 1 || step === 15) && config.referenceImage ? 'hero-center' : 'top-gallery',
-      protectedTextZone: (step === 1 || step === 15) && config.referenceImage ? current?.protectedTextZone || heroTextZone(referenceDesign) : undefined,
+      protectedTextZone: (step === 1 || step === 15) && config.referenceImage ? heroTextZone(layoutReference) : undefined,
         notes: notes[step] || current?.notes || '', updatedAt: Date.now()
       });
-      await renderAndSave(response.backgroundUrl, suggested, notes[step] || current?.notes || '');
+      await renderAndSave(response.backgroundUrl, suggested, notes[step] || current?.notes || '', styleTokens);
       if (layoutWarning) setMessage('Image saved as draft. ' + layoutWarning);
     } catch (error) { setMessage('Generation failed: ' + (error instanceof Error ? error.message : String(error))); }
     finally { setWorking(''); }
