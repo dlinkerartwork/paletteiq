@@ -72,7 +72,7 @@ test('real UI has per-image count, visual asset picker, multi-select, add/remove
 test('Auto Arrange uses actual background Vision, with larger-count fallback and critique feedback',()=>{
   assert.match(ui,/const autoArrangeArtwork = async \(\)/);
   assert.doesNotMatch(ui,/positions\.length > 24/); // all chosen originals now eligible for Vision free layout
-  assert.match(ui,/await arrangeWithAI\(current\.backgroundUrl, positions/);
+  assert.match(ui,/await arrangeWithAI\(current\.backgroundUrl, sourcePositions/);
   assert.match(ui,/existingPlacements:arranged, totalSelected:initial\.length/);
   assert.match(ui,/current\.finalReview\?\.improvements\.join\('; '\)/);
   assert.match(api,/input\.critiqueFeedback\s*\? 'PREVIOUS FINAL COMPOSITION REVIEW FEEDBACK/);
