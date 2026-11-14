@@ -189,7 +189,7 @@ export async function POST(req: Request) {
     subtitle: input.subtitle || brief.subtitle,
     typography: mode === 'background-only' ? 'editable' : 'ai-artwork',
     textDisabled: mode === 'background-only',
-    badge: mode === 'background-only' ? '' : (input.badge || ''),
+    badge: input.badge || '',
     quality: String(input.quality || brief.quality),
     coverStyle, boldness: designBoldness,
     backgroundStyle, intensity: backgroundIntensity,
@@ -203,6 +203,7 @@ export async function POST(req: Request) {
     : [
       'Produce a 1:1 square GRAPHIC DESIGN BACKDROP for an Etsy listing. Deliver only abstract background shapes and' + (mode === 'background-only' ? ' NO text.' : ' artistic typography.'),
       'THIS IS NOT AN ILLUSTRATION JOB. Output ZERO standalone objects, icons, illustrations, characters, food, products, photos, drawings or imitations of clipart. Do not visualize the collection, its subject, its category, the title meaning, or the asset slot contents.',
+      ...(input.badge?.trim() ? ['EXACT BADGE CONTENT PROVIDED BY USER (CONTEXT FOR SPACING ONLY): ' + JSON.stringify(safeText(input.badge)) + '. Reserve appropriate pale badge backing/quiet space close to the title for this text, but DO NOT render these badge letters; PaletteIQ overlays them exactly as a separate editable text layer.'] : []),
       'ONLY authorized visual materials: abstract color fields, watercolor pigment strokes, soft gradients, paper collage textures, thin graphic rules, elegant geometric ornaments, abstract painted swashes, ribbons without pictorial motifs and type (when requested).',
       'Never create even tiny pictorial decorations or theme-related objects in corners, title panels, badges, circles or along the edges. The entire canvas is non-figurative.',
       typographyInstruction,
