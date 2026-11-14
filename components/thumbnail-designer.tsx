@@ -650,7 +650,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
       const exactLayers = (currentDesign.elements.some(e => e.type === 'image')
         ? currentDesign.elements.filter(e => e.type === 'image') : imageLayers)
         .map(e => ({ ...e, source: 'original' as const }));
-      let positioned = exactLayers;
+      let positioned: ThumbnailElement[] = exactLayers;
       let usedFallback = false;
       if (!result.qcRejected && layoutMode === 'ai') {
         setPackStatus('AI Vision arranging original clipart around the actual background and reference typography...');
