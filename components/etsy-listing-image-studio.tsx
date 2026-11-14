@@ -271,6 +271,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     currentLettering.subtitle !== (current.subtitle ?? seoText.subtitle) ||
     currentLettering.badge !== (current.badge ?? seoText.badge)
   ));
+  const compositionMode: ListingCompositionMode = compositionModes[String(step)] ?? defaultListingCompositionMode(step);
   const positions = changes[step] || current?.placements || preLayouts[String(step)] || planListingPlacements(step, categorizedAssets);
   // When any relevant generation input changes, an earlier preview cannot be
   // silently sent. Explicit refresh is free and restores the exact server prompt.
@@ -288,7 +289,6 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     name, theme, subtheme, style, seoTitle, primaryKeyword, collectionSize:assets.length
   }), [name,theme,subtheme,style,seoTitle,primaryKeyword,assets.length]);
   const titleAdvice = evaluateListingCoverTitle(currentLettering.title);
-  const compositionMode: ListingCompositionMode = compositionModes[String(step)] ?? defaultListingCompositionMode(step);
   const preLayoutSaved = JSON.stringify(preLayouts[String(step)] || []) === JSON.stringify(positions) &&
     (savedCompositionModes[String(step)] ?? defaultListingCompositionMode(step)) === compositionMode;
   const visibleAssetChoices = useMemo(() => categorizedAssets.filter(asset =>
