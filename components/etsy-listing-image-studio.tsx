@@ -273,7 +273,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
 
   return <div style={{ display: 'grid', gap: 18 }}>
     <div className="panel" style={{ padding: 20 }}>
-      <h2>Etsy Listing Image Studio</h2>
+      <h2>Etsy Clipart Listing Studio</h2>
       <p className="sub">Etsy Clipart Listing Studio v1.1 • 15 separate JPGs • 1024 × 1024 px (1:1 square) • automatic art direction • exact originals from the selected PaletteIQ collection, not ZIP.</p>
       <p className="sub">Creative direction: {artDirection.family} · {artDirection.palette} · AI artwork style follows the collection. {step === 1 ? 'Review the cover first to set the visual direction.' : 'Approved images remain saved; use the same visual language across the series.'}</p>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -317,18 +317,23 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           {(spec.kind === 'mockup') && <p className="sub">Application example: {listingMockupScene(step, artDirection.family)?.name}. Mockup is a demonstration, not included in the sold collection. Inspect printable placement: the photograph is AI-generated, while the featured clipart is composited from its original file.</p>}
         </div>
         <div style={{ display: 'grid', alignContent: 'start', gap: 10 }}>
-          <label className="input-label">OPENAI ARTISTIC BACKGROUND MODEL</label>
-          <select value={model} disabled={!!working} onChange={e => setModel(e.target.value)}>
-            {!availableModels.some(x => x.id === model) && <option value={model}>{model}</option>}
-            {availableModels.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
-          </select>
-          <label className="input-label">BACKGROUND QUALITY</label>
-          <select value={quality} disabled={!!working} onChange={e => setQuality(e.target.value as typeof quality)}>
-            <option value="low">Low — economical</option><option value="medium">Medium — recommended</option><option value="high">High</option>
-          </select>
+          <details style={{ border: '1px solid #e5d9cb', borderRadius: 9, padding: '9px 12px' }}>
+            <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>Advanced AI settings (optional)</summary>
+            <div style={{ display: 'grid', gap: 9, marginTop: 12 }}>
+              <label className="input-label">OPENAI ARTISTIC BACKGROUND MODEL</label>
+              <select value={model} disabled={!!working} onChange={e => setModel(e.target.value)}>
+                {!availableModels.some(x => x.id === model) && <option value={model}>{model}</option>}
+                {availableModels.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </select>
+              <label className="input-label">BACKGROUND QUALITY</label>
+              <select value={quality} disabled={!!working} onChange={e => setQuality(e.target.value as typeof quality)}>
+                <option value="low">Low — economical</option><option value="medium">Medium — recommended</option><option value="high">High</option>
+              </select>
+            </div>
+          </details>
           <button type="button" className="primary-btn" onClick={() => void generate()} disabled={!loaded || !assets.length || !!working || !precedingApproved}>
             {working === 'generate' ? <LoaderCircle className="spin" size={16}/> : <Sparkles size={16}/>}
-            {current?.backgroundUrl ? 'Regenerate AI background + lettering' : 'Generate Image ' + String(step).padStart(2,'0')}
+            {current?.backgroundUrl ? 'Revise Image ' + String(step).padStart(2,'0') + ' (AI background)' : step === 1 ? 'Start /new-listing — Generate Main Cover' : 'Generate Image ' + String(step).padStart(2,'0')}
           </button>
           {!precedingApproved && <small style={{ color: '#94502e' }}>Approve the earlier images in order before generating this image.</small>}
           {(step === 3 || step === 5) && <button className="outline-btn" type="button" onClick={() => void categorize()} disabled={!!working}>Analyze collection categories (optional)</button>}
@@ -356,7 +361,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           <small style={{ color: '#74695e' }}>Your revision notes are included in the next paid AI background regeneration for this image only. To adjust original clipart positions without AI charges, use Apply layout & save JPG. Review spelling, crop, verified facts and mockup realism before approving.</small>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button type="button" className="outline-btn" disabled={!current?.renderedImageUrl || !!working} onClick={() => void review('needs_revision')}>Needs revision</button>
-            <button type="button" className="primary-btn" disabled={!current?.renderedImageUrl || !!working || current.width !== LISTING_WIDTH || current.height !== LISTING_HEIGHT} onClick={() => void review('approved')}><Check size={16}/> Approve & Next <ArrowRight size={15}/></button>
+            <button type="button" className="primary-btn" disabled={!current?.renderedImageUrl || !!working || current.width !== LISTING_WIDTH || current.height !== LISTING_HEIGHT} onClick={() => void review('approved')}><Check size={16}/> Approve & Next (/next) <ArrowRight size={15}/></button>
           </div>
         </div>
       </div>
