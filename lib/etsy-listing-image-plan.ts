@@ -1,5 +1,7 @@
-export const LISTING_WIDTH = 3000;
-export const LISTING_HEIGHT = 2250;
+// Etsy Clipart Listing Studio v1.1: fixed square images. This is distinct
+// from legacy 3000 × 2250 exports and must never silently mix with them.
+export const LISTING_WIDTH = 1024;
+export const LISTING_HEIGHT = 1024;
 
 export const LISTING_IMAGE_SPECS = [
   { number: 1, key: 'Main_Cover', title: 'Main Cover', headline: 'The Clipart Collection', purpose: 'Hero cover with standout original artwork', kind: 'gallery' },
@@ -25,9 +27,17 @@ export type ListingAsset = { id: string; name: string; imageUrl?: string; catego
 export type ListingPlacement = { assetId: string; x: number; y: number; width: number; height: number; rotation?: number };
 export type ListingImageRecord = {
   number: number; status: ListingImageStatus; backgroundUrl?: string; renderedImageUrl?: string;
-  placements?: ListingPlacement[]; notes?: string; reviewWarning?: string; updatedAt: number;
+  placements?: ListingPlacement[]; notes?: string; reviewWarning?: string;
+  width?: number; height?: number; // Missing size = legacy 4:3, pending square re-render.
+  updatedAt: number;
 };
 export type ListingImageKind = typeof LISTING_IMAGE_SPECS[number]['kind'];
+/** Old 4:3 approved JPGs remain stored but cannot count toward square exports. */
+export function isSquareListingApproved(record?: ListingImageRecord): boolean {
+  return Boolean(record && record.status === 'approved' && record.renderedImageUrl &&
+    record.width === LISTING_WIDTH && record.height === LISTING_HEIGHT);
+}
+
 
 export function originalAssets(assets: ListingAsset[]): ListingAsset[] {
   const urls = new Set<string>();
