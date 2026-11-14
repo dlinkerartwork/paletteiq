@@ -408,8 +408,9 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       });
       const scored = await renderAndSave(response.backgroundUrl, suggested, notes[step] || current?.notes || '', response.reviewWarning || '', lettering);
       setMessage('Image ' + String(step).padStart(2, '0') + ' saved as draft.' +
-        (scored ? ' Final design critique: ' + scored.score.toFixed(1) + '/10. ' + (scored.improvements[0] || '') : '') +
-        (layoutWarning ? ' Layout note: ' + layoutWarning : ' Check original clipart placement.') + styleFallback);
+        (scored ? ' Final design critique: ' + scored.score.toFixed(1) + '/10. ' + (scored.improvements[0] || '') :
+          autoFinalCritique ? ' Final Vision critique unavailable; inspect the result manually or use Recheck Final Quality.' : '') +
+        (layoutWarning ? ' Layout note: ' + layoutWarning : ' Check original clipart placement.' : '') + styleFallback);
     } catch (error) { setMessage('Generation failed: ' + (error instanceof Error ? error.message : String(error))); }
     finally { setWorking(''); }
   };
@@ -625,6 +626,10 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
             </div>
             {current.finalReview.strengths.length > 0 && <div style={{ fontSize: 12 }}><strong>What works:</strong><ul>{current.finalReview.strengths.map((v,i)=><li key={i}>{v}</li>)}</ul></div>}
             {current.finalReview.improvements.length > 0 && <div style={{ fontSize: 12 }}><strong>Suggestions for a stronger cover:</strong><ol>{current.finalReview.improvements.map((v,i)=><li key={i}>{v}</li>)}</ol></div>}
+            {current.finalReview.improvements.length > 0 && <button type="button" className="outline-btn" disabled={!!working}
+              onClick={() => setNotes(old => ({
+                ...old, [step]: [old[step] ?? current.notes ?? '', ...current.finalReview!.improvements].filter(Boolean).join('\n').slice(0,800)
+              }))}>Use AI Suggestions as Revision Notes</button>}
             <button type="button" className="outline-btn" disabled={!!working}
               onClick={()=>void recheckFinalQuality()}>Recheck Final Quality (Vision API cost)</button>
             <small>Adjust source PNG positions/number, choose Auto Arrange (uses feedback above), then re-render the final JPG without paying image-generation fees. AI cannot edit the original PNG artwork.</small>
