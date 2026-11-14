@@ -1087,16 +1087,16 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
                 }
               }}>
               <option value="free">Free Composition — OpenAI chooses sizes and positions (Main Cover default)</option>
-              {!(step >= 8 && step <= 12) && <option value="ai-first">AI-First Composition — Vision selects original PNGs; AI designs typography and background</option>}
+              {!(step >= 8 && step <= 12) && <option value="ai-first">AI-First Composition — OpenAI generates complete creative thumbnail</option>}
               <option value="structured">Structured — preserve my white-canvas arrangement</option>
             </select>
             <small>{compositionMode === 'ai-first'
-              ? 'AI-First: Choose original clipart, optionally download the exact selected-source ZIP with its editable prompt and manifest. OpenAI Vision receives matching numbered reference images (the API cannot visually unpack ZIP input). It chooses the original PNG assets and freely directs their composition; the image generator draws typography/background ONLY, never replacement clipart.'
+              ? 'AI-First: Pick clipart references, title, subtitle, badge and creative prompt. OpenAI directly generates ONE finished artistic thumbnail from numbered visual reference sheets. No geometry extraction, original PNG paste or second generation step. AI illustration details may differ from the source files.'
               : compositionMode === 'free'
                 ? 'AI Vision acts as the art director after the background is generated: it can resize, move, rotate, overlap or partially crop any selected ORIGINAL clipart. White-canvas positions are inspiration only, NOT a constraint. Clipart selection and identity remain unchanged.'
                 : 'PaletteIQ preserves the composition you created on the white canvas. You can still choose optional AI Vision refinement or Auto Arrange.'}</small>
             <small>{compositionMode === 'ai-first'
-              ? 'These originals are the SOURCE POOL, not fixed canvas objects. OpenAI chooses which files to feature and how many; it can repeat an original PNG without creating a new character. No placement slots are sent to OpenAI.'
+              ? 'These images are visual REFERENCES, not fixed canvas positions. OpenAI freely determines which subjects to depict and how they appear. A generative result is not a pixel-identical copy of the original clipart.'
               : 'Choose how many ORIGINAL collection assets appear in this listing image. Main Cover defaults to '+DEFAULT_MAIN_COVER_CLIPART_COUNT+' but you can choose any count up to your collection size.'}</small>
             <label className="input-label" htmlFor="listing-clipart-count">{compositionMode === 'ai-first'
               ? 'ELIGIBLE ORIGINAL CLIPART SOURCES'
@@ -1111,7 +1111,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
                 onClick={() => {
                   setChanges(old => ({...old,[step]:planListingPlacements(step,categorizedAssets,{count:assets.length})}));
                   setSelectedIndex(0);
-                  setMessage('All '+assets.length+' original collection assets are eligible. OpenAI decides which to feature in its final thumbnail.');
+                  setMessage('All '+assets.length+' collection clipart images are eligible as visual references for a complete AI-generated thumbnail.');
                 }}>Use Entire Collection as Sources</button>}
               {step === 1 && compositionMode !== 'ai-first' && <button type="button" className="outline-btn"
                 disabled={!assets.length || !!working}
@@ -1148,12 +1148,12 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
                 {!visibleAssetChoices.length && <small>No matching original clipart.</small>}
               </div>
               <small>{compositionMode === 'ai-first'
-                ? 'Source pool: '+new Set(positions.map(p=>p.assetId)).size+' of '+assets.length+' original PNGs; Vision chooses the final count. Reusing originals in the final layout is allowed.'
-                : 'Checked: '+positions.length+' / '+assets.length+'. Each selected original appears once.'} Originals are never redrawn.</small>
+                ? 'Source references: '+new Set(positions.map(p=>p.assetId)).size+' of '+assets.length+' original images. OpenAI directly designs the whole thumbnail and may reinterpret illustrations.'
+                : 'Checked: '+positions.length+' / '+assets.length+'. Each selected original appears once.'}</small>
             </div>}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button type="button" className="outline-btn" disabled={!!working || !positions.length}
-                onClick={() => void autoArrangeArtwork()}>Auto Arrange ({positions.length})</button>
+              {compositionMode !== 'ai-first' && <button type="button" className="outline-btn" disabled={!!working || !positions.length}
+                onClick={() => void autoArrangeArtwork()}>Auto Arrange ({positions.length})</button>}
               <button type="button" className="outline-btn" disabled={!!working || !selected || positions.length <= 1}
                 onClick={() => {
                   if(!selected)return;
@@ -1163,9 +1163,14 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
                   }else toggleArtwork(selected.assetId,false);
                 }}>Remove Selected Clipart</button>
             </div>
-            <small>Change clipart count/selection, then use Auto Arrange or adjust directly. In Free Mode OpenAI Vision can reposition every selected original clipart, without enforcing PaletteIQ's initial slots. Apply layout &amp; save JPG without another image-generation charge.</small>
-            <small>There is no preset maximum number of canvas objects. You can select every distinct original in the collection; larger selections are composed by AI Vision in batches. Very dense covers may need a manual readability check.</small>
+            <small>{compositionMode === 'ai-first'
+              ? 'Change source references, refresh the creative prompt and Generate Full Creative Thumbnail. Every new version is a paid image request, not a free PNG layer edit.'
+              : 'Change source selection, then use Auto Arrange or adjust the PNG layers directly. Apply layout & save JPG without another image-generation charge.'}</small>
+            <small>{compositionMode === 'ai-first'
+              ? 'Large source selections are sampled into up to eight reference boards; boards are visual input, not enforced object counts or canvas geometry.'
+              : 'There is no preset maximum number of canvas objects. You can select every distinct original; larger selections are arranged by AI Vision in batches.'}</small>
           </div>
+          {compositionMode !== 'ai-first' && <>
           <strong>Original asset placement ({positions.length})</strong>
           {listingAllowsBleed(step) && <small>Canvas bleed is allowed: X/Y may be negative and artwork may extend beyond edges. The final 1024×1024 JPG crops only the overflow, preserving original artwork pixels inside.</small>}
           <label className="input-label">SELECT ARTWORK TO ADJUST</label>
@@ -1196,10 +1201,13 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
               disabled={!!working} onChange={e => setAllowVisionRefinement(e.target.checked)}/>
             Let AI Vision refine my clipart positions after generating the background (optional paid Vision request). Off by default — my white-canvas arrangement is preserved.
           </label>}
+          </>}
           <label style={{ display: 'flex', gap: 9, alignItems: 'center', fontSize: 12, color: '#564d43' }}>
             <input type="checkbox" aria-label="Automatically critique final JPG" checked={autoFinalCritique}
               disabled={!!working} onChange={e=>setAutoFinalCritique(e.target.checked)}/>
-            Automatically critique the FINAL composited JPG (recommended, additional paid Vision API request)
+            {compositionMode === 'ai-first'
+              ? 'Optionally critique the finished AI-generated JPG (additional paid Vision API request)'
+              : 'Automatically critique the FINAL composited JPG (recommended, additional paid Vision API request)'}
           </label>
           <section data-listing-openai-prompt-editor="true" style={{ border:'1px solid #e5d9cb',
             borderRadius:10, padding:12, display:'grid', gap:9 }}>
