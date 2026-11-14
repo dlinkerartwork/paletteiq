@@ -63,7 +63,7 @@ test('Vision style analysis is user-owned, sample-limited, validates original as
   assert.match(styleApi,/samples\.length > 6/);
   assert.match(styleApi,/sample\.dataUrl\.length > 230_000/);
   assert.match(styleApi,/totalChars > 1_350_000/);
-  assert.match(styleApi,/data:image\/jpeg;base64,/);
+  assert.match(styleApi,/data:image\\\/jpeg;base64,/);
   assert.match(styleApi,/model:'gpt-4\.1-mini'/);
   assert.match(styleApi,/type:'input_image',image_url:sample\.dataUrl/);
   assert.match(styleApi,/Inspect the real image pixels/);
