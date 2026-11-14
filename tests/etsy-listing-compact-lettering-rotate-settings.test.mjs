@@ -18,7 +18,7 @@ test('source collection art dominates thumbnail: prompt uses scaled compact arti
   assert.match(backend,/authentic original artwork must dominate/);
   assert.match(backend,/Do not make every line equally large/);
   assert.match(backend,/Optional badge must remain modest/);
-  assert.match(backend,/user-selected genuine layers/);
+  assert.match(backend,/user-selected genuine original layers/);
   assert.match(backend,/No generated imitation clipart or substitute objects/);
   assert.match(backend,/if \(input\.textScale !== undefined && !\['compact','balanced','statement'\]\.includes\(input\.textScale\)\)/);
   assert.match(ui,/<option value="compact">Compact — extra-small title, artwork first \(recommended\)<\/option>/);
