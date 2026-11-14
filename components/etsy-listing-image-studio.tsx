@@ -544,7 +544,6 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
    */
   const downloadAiFirstSourceZip = async () => {
     if(working||!positions.length)return;
-    if(!promptsReady) return setMessage('Prepare and review the OpenAI creative prompt before exporting the ZIP so the package contains the exact edited instructions.');
     setWorking('source-zip');
     setMessage('Packaging selected original clipart PNGs/JPGs and the current creative prompt into a source ZIP...');
     try{
@@ -553,7 +552,8 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
         body:JSON.stringify({action:'source-zip',projectId,number:step,
           selectedAssetIds:[...new Set(positions.map(p=>p.assetId))],
           title:currentLettering.title,subtitle:currentLettering.subtitle,badge:currentLettering.badge,
-          backgroundPrompt:promptDraft!.backgroundPrompt
+          backgroundPrompt:compositionMode === 'ai-first' && promptsReady
+            ? promptDraft!.backgroundPrompt : undefined
         })
       });
       if(!response.ok){
@@ -570,7 +570,8 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
         document.body.appendChild(a);a.click();a.remove();
       }finally{window.setTimeout(()=>URL.revokeObjectURL(url),60000);}
       setMessage('Downloaded '+new Set(positions.map(p=>p.assetId)).size+
-        ' selected original artwork files in a ZIP, with the edited prompt and source manifest. OpenAI Vision will receive the same sources as numbered images (ZIP itself is not a visual API input).');
+        ' original artwork files in a ZIP with a '+(compositionMode === 'ai-first' && promptsReady ? 'user-edited' : 'theme-adapted default')+
+        ' creative prompt and manifest. OpenAI receives separate image references, not the ZIP itself.');
     }catch(error){
       setMessage('Original source ZIP failed: '+(error instanceof Error?error.message:String(error)));
     }finally{setWorking('');}
@@ -1065,6 +1066,16 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           </div>
           <div style={{ border: '1px solid #eadfce', padding: 12, borderRadius: 10, display: 'grid', gap: 9 }}>
             <strong>Original clipart selection — Image {String(step).padStart(2,'0')}</strong>
+            <div data-listing-source-zip-download="always-visible" style={{display:'grid',gap:5}}>
+              <button type="button" className="outline-btn"
+                style={{display:'flex',gap:8,alignItems:'center',justifyContent:'center',minHeight:40}}
+                disabled={!!working || !positions.length}
+                onClick={() => void downloadAiFirstSourceZip()}>
+                <Download size={16}/>
+                Download selected source ZIP ({new Set(positions.map(p=>p.assetId)).size} originals)
+              </button>
+              <small>Available in every composition mode. Packages your selected original images, Title, Subtitle, Badge and a theme-adapted premium Etsy prompt. No OpenAI payment or prompt preparation needed. In AI-First, a prepared edited prompt is included instead.</small>
+            </div>
             <label className="input-label" htmlFor="listing-composition-mode">COMPOSITION MODE</label>
             <select id="listing-composition-mode" aria-label="Listing composition mode" value={compositionMode}
               disabled={!!working}
@@ -1097,11 +1108,6 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
                 disabled={!assets.length || !!working} onChange={e => changeArtworkCount(Number(e.target.value))}
                 style={{ width: 105, flexShrink: 0 }}/>
               <button type="button" className="outline-btn" disabled={!!working || !assets.length} onClick={autoSelectArtwork}>Auto Select ({positions.length})</button>
-              {compositionMode === 'ai-first' && <button type="button" className="outline-btn"
-                disabled={!!working || !positions.length}
-                onClick={() => void downloadAiFirstSourceZip()}>
-                <Download size={15}/> Download selected source ZIP ({new Set(positions.map(p=>p.assetId)).size} originals)
-              </button>}
               {compositionMode === 'ai-first' && <button type="button" className="outline-btn"
                 disabled={!!working || !assets.length}
                 onClick={() => {
