@@ -21,7 +21,7 @@ type Props = {
   characters: ListingAsset[];
   onSaved?: (images: ListingImageRecord[]) => void;
 };
-type ListResponse = { images?: ListingImageRecord[]; backgroundUrl?: string; placements?: ListingPlacement[]; fallback?: string; error?: string };
+type ListResponse = { images?: ListingImageRecord[]; backgroundUrl?: string; placements?: ListingPlacement[]; fallback?: string; reviewWarning?: string; error?: string };
 const apiUrl = '/api/listing-image-studio';
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Number.isFinite(n) ? n : lo));
 const fileName = (number: number) => listingFilename(number);
@@ -173,18 +173,18 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     const result = await send({ action: 'save', projectId, number: step, image });
     receive(result.images || []);
   };
-  const renderAndSave = async (background: string, layout: ListingPlacement[], info: string) => {
+  const renderAndSave = async (background: string, layout: ListingPlacement[], info: string, reviewWarning = '') => {
     setWorking('render'); setMessage('Compositing ' + layout.length + ' exact original clipart images at 3000 × 2250 px...');
     const file = await compose(background, layout, assets);
     setMessage('Saving JPG preview to the collection in safe upload chunks...');
     const renderedImageUrl = await upload(projectId, step, file, (done, total) => setMessage('Uploading original-asset JPG: ' + done + '/' + total + ' parts...'));
     const image: ListingImageRecord = {
       number: step, status: 'draft', backgroundUrl: background, renderedImageUrl, placements: layout,
-      notes: info, updatedAt: Date.now()
+      notes: info, reviewWarning, updatedAt: Date.now()
     };
     await saveRecord(image);
     setChanges(old => { const next = { ...old }; delete next[step]; return next; });
-    setMessage('Image ' + String(step).padStart(2, '0') + ' saved as a draft. Review the actual pixels and approve or revise.');
+    setMessage('Image ' + String(step).padStart(2, '0') + ' saved as a draft. ' + (reviewWarning ? 'Background flagged for visual review: ' + reviewWarning : 'Review the actual pixels, spelling and crop before approving.'));
   };
   const generate = async () => {
     if (working) return;
@@ -229,9 +229,9 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       await saveRecord({
         number: step, status: 'draft', backgroundUrl: response.backgroundUrl,
         renderedImageUrl: '', placements: suggested,
-        notes: notes[step] || current?.notes || '', updatedAt: Date.now()
+        notes: notes[step] || current?.notes || '', reviewWarning: response.reviewWarning || '', updatedAt: Date.now()
       });
-      await renderAndSave(response.backgroundUrl, suggested, notes[step] || current?.notes || '');
+      await renderAndSave(response.backgroundUrl, suggested, notes[step] || current?.notes || '', response.reviewWarning || '');
       if (layoutWarning) setMessage('Image saved as draft. ' + layoutWarning);
     } catch (error) { setMessage('Generation failed: ' + (error instanceof Error ? error.message : String(error))); }
     finally { setWorking(''); }
@@ -240,12 +240,14 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     if (working) return;
     if (!current?.backgroundUrl) return setMessage('Generate the background first.');
     if (current.status === 'approved' && !window.confirm('Revise this approved image and reset approval?')) return;
-    try { await renderAndSave(current.backgroundUrl, positions, notes[step] || current.notes || ''); }
+    try { await renderAndSave(current.backgroundUrl, positions, notes[step] || current.notes || '', current.reviewWarning || ''); }
     catch (error) { setMessage('Could not save revised image: ' + (error instanceof Error ? error.message : String(error))); }
     finally { setWorking(''); }
   };
   const review = async (status: 'approved' | 'needs_revision') => {
     if (!current?.renderedImageUrl || working) return;
+    if (status === 'approved' && current.reviewWarning &&
+        !window.confirm('Automatic review flagged a possible issue:\n' + current.reviewWarning + '\n\nHave you carefully checked the artwork, mockup, text and verified facts and want to approve this JPG anyway?')) return;
     if (changes[step]) return setMessage('You changed the layout. Click Apply layout & save JPG before approval.');
     setWorking('review');
     try {
@@ -308,6 +310,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
             <a className="outline-btn" href={current.renderedImageUrl} download={fileName(step)}><Download size={15}/> Download JPG</a>
             <span className="sub">{LISTING_WIDTH} × {LISTING_HEIGHT} • {current.status === 'approved' ? 'Approved' : 'Awaiting approval'}</span>
           </div>}
+          {current?.reviewWarning && <p role="alert" style={{ border: '1px solid #d48c48', borderRadius: 8, padding: 10, color: '#7b431b', background: '#fff6e9' }}>Manual quality review required: {current.reviewWarning}. Approval requires your explicit confirmation.</p>}
           {(spec.kind === 'mockup') && <p className="sub">Application example: {listingMockupScene(step, artDirection.family)?.name}. Mockup is a demonstration, not included in the sold collection. Inspect printable placement: the photograph is AI-generated, while the featured clipart is composited from its original file.</p>}
         </div>
         <div style={{ display: 'grid', alignContent: 'start', gap: 10 }}>
