@@ -62,7 +62,8 @@ test('AI free composition does NOT force previous PaletteIQ coordinates into the
   assert.match(api,/STRUCTURED COMPOSITION: honor user-arranged WHITE CANVAS positions/);
   assert.match(api,/compositionMode \?\? defaultListingCompositionMode\(input\.number\)/);
   assert.match(api,/input\.compositionMode !== undefined && !\['free','structured','ai-first'\]/);
-  assert.match(ui,/featuredCount: effectivePositions\.length, placements: effectivePositions, textScale, backgroundStyle, compositionMode/);
+  assert.match(ui,/featuredCount: effectivePositions\.length, placements: effectivePositions, compositionMode/);
+  assert.doesNotMatch(ui,/setTextScale|setBackgroundStyle/);
 });
 
 test('OpenAI Vision sees numbered thumbnails from actual original clipart and freely chooses layout geometry',()=>{
@@ -112,7 +113,7 @@ test('Free Composition excludes PaletteIQ starter geometry and can arrange all u
   assert.match(ui,/offset < initial\.length; offset \+= batchSize/);
   assert.match(ui,/existingPlacements:arranged, totalSelected:initial\.length/);
   assert.match(ui,/await arrangeWithAI\(response\.backgroundUrl, effectivePositions/);
-  assert.match(ui,/await arrangeWithAI\(current\.backgroundUrl, positions/);
+  assert.match(ui,/await arrangeWithAI\(current\.backgroundUrl, sourcePositions/);
   assert.doesNotMatch(api,/\.slice\(0, 300\)/);
   assert.doesNotMatch(api,/length > 300/);
   assert.match(ui,/There is no preset maximum number of canvas objects/);
