@@ -23,6 +23,8 @@ type Props = {
   texture?: string;
   seoTitle?: string;
   primaryKeyword?: string;
+  defaultImageModel?: string;
+  defaultImageQuality?: string;
   characters: ListingAsset[];
   onSaved?: (images: ListingImageRecord[]) => void;
 };
@@ -175,7 +177,7 @@ async function upload(projectId: string, number: number, blob: Blob, onProgress?
   return uploadListingJpg(projectId, fileName(number), blob, fetch, onProgress);
 }
 
-export default function EtsyListingImageStudio({ projectId, name, theme, subtheme, style, palette, texture, seoTitle, primaryKeyword, characters, onSaved }: Props) {
+export default function EtsyListingImageStudio({ projectId, name, theme, subtheme, style, palette, texture, seoTitle, primaryKeyword, defaultImageModel = 'gpt-image-1-mini', defaultImageQuality = 'low', characters, onSaved }: Props) {
   const artDirection = useMemo(() => listingCreativeDirection({ name, theme, subtheme, style, palette, texture, listing: { title: seoTitle } }), [name, theme, subtheme, style, palette, texture, seoTitle]);
   const seoText = useMemo(() => listingImageTextDefaults({ title: seoTitle, primaryKeyword }, artDirection.title), [seoTitle, primaryKeyword, artDirection.title]);
   const assets = useMemo(() => originalAssets(characters), [characters]);
@@ -184,8 +186,11 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   const [step, setStep] = useState(1);
   const [working, setWorking] = useState('');
   const [message, setMessage] = useState('');
-  const [quality, setQuality] = useState<'low' | 'medium' | 'high'>('medium');
-  const [model, setModel] = useState('gpt-image-1-mini');
+  const [quality, setQuality] = useState<'low' | 'medium' | 'high'>(() =>
+    defaultImageQuality === 'medium' || defaultImageQuality === 'high' ? defaultImageQuality : 'low');
+  const [model, setModel] = useState(() =>
+    /^gpt-image-[a-z0-9.-]{1,80}$/.test(defaultImageModel) ? defaultImageModel : 'gpt-image-1-mini');
+  const [textScale, setTextScale] = useState<'compact' | 'balanced' | 'statement'>('compact');
   const [availableModels, setAvailableModels] = useState<Array<{id: string; name: string}>>([]);
   const [changes, setChanges] = useState<Record<number, ListingPlacement[]>>({});
   const [preLayouts, setPreLayouts] = useState<Record<string, ListingPlacement[]>>({});
@@ -265,6 +270,16 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       .catch(() => { /* The initial read is optional; generate will retry. */ });
     return () => { live = false; };
   }, [projectId]);
+  // The saved Settings preferences may load after this tab mounts.
+  // Keep the initial model/quality in sync with Settings, while leaving both
+  // editable locally in the always-visible Advanced AI settings panel.
+  useEffect(() => {
+    if (/^gpt-image-[a-z0-9.-]{1,80}$/.test(defaultImageModel)) setModel(defaultImageModel);
+  }, [defaultImageModel]);
+  useEffect(() => {
+    if (['low','medium','high'].includes(defaultImageQuality))
+      setQuality(defaultImageQuality as 'low' | 'medium' | 'high');
+  }, [defaultImageQuality]);
   useEffect(() => {
     let live = true;
     void request('/api/settings?models=openai').then(data => {
@@ -412,7 +427,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       await savePreLayout(effectivePositions);
       setMessage('Generating the AI graphic background and artistic typography using the saved white canvas composition...');
       const response = await send({ action: 'generate', projectId, number: step, model, quality,
-        featuredCount: effectivePositions.length, placements: effectivePositions,
+        featuredCount: effectivePositions.length, placements: effectivePositions, textScale,
         title: lettering.title, subtitle: lettering.subtitle, badge: lettering.badge,
         revisionNotes: (notes[step] ?? current?.notes ?? '').trim() });
       if (!response.backgroundUrl) throw Error('OpenAI did not return the background');
@@ -517,7 +532,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       const list = [...(prev[step] || current?.placements || preLayouts[String(step)] || planListingPlacements(step, categorizedAssets))];
       const target = list[selectedIndex];
       if (!target) return prev;
-      list[selectedIndex] = { ...target, [field]: field === 'assetId' ? value : clamp(Number(value), field === 'rotation' ? -30 : field === 'width' || field === 'height' ? 2 : 0, field === 'rotation' ? 30 : 100) };
+      list[selectedIndex] = { ...target, [field]: field === 'assetId' ? value : clamp(Number(value), field === 'rotation' ? -180 : field === 'width' || field === 'height' ? 2 : 0, field === 'rotation' ? 180 : 100) };
       return { ...prev, [step]: list };
     });
   };
@@ -694,8 +709,9 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           {(spec.kind === 'mockup') && <p className="sub">Application example: {listingMockupScene(step, artDirection.family)?.name}. Mockup is a demonstration, not included in the sold collection. Inspect printable placement: the photograph is AI-generated, while the featured clipart is composited from its original file.</p>}
         </div>
         <div style={{ display: 'grid', alignContent: 'start', gap: 10 }}>
-          <details style={{ border: '1px solid #e5d9cb', borderRadius: 9, padding: '9px 12px' }}>
-            <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>Advanced AI settings (optional)</summary>
+          <section data-listing-advanced-settings="always-visible" aria-label="Advanced AI settings (optional)"
+            style={{ border: '1px solid #e5d9cb', borderRadius: 9, padding: '9px 12px' }}>
+            <strong style={{ fontSize: 13 }}>Advanced AI settings (optional)</strong>
             <div style={{ display: 'grid', gap: 9, marginTop: 12 }}>
               <label className="input-label">OPENAI ARTISTIC BACKGROUND MODEL</label>
               <select value={model} disabled={!!working} onChange={e => setModel(e.target.value)}>
@@ -706,8 +722,17 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
               <select value={quality} disabled={!!working} onChange={e => setQuality(e.target.value as typeof quality)}>
                 <option value="low">Low — economical</option><option value="medium">Medium — recommended</option><option value="high">High</option>
               </select>
+              <label className="input-label" htmlFor="listing-lettering-scale">ARTISTIC LETTERING SIZE</label>
+              <select id="listing-lettering-scale" aria-label="Artistic lettering size"
+                value={textScale} disabled={!!working}
+                onChange={e => setTextScale(e.target.value as typeof textScale)}>
+                <option value="compact">Compact — smaller title, more artwork (recommended)</option>
+                <option value="balanced">Balanced — moderate title</option>
+                <option value="statement">Statement — larger expressive lettering</option>
+              </select>
+              <small style={{color:'#75695e'}}>Lettering size guides the AI for the next background generation; it cannot resize text already baked into an existing background JPG.</small>
             </div>
-          </details>
+          </section>
           <div style={{ border: '1px solid #eadfce', borderRadius: 10, padding: 12, display: 'grid', gap: 9 }}>
             <strong>Title, Subtitle &amp; Badge for Image {String(step).padStart(2,'0')}</strong>
             <small style={{ color: '#75695e' }}>Default Title = SEO Title, Subtitle = Primary Keyword from Etsy Listing Draft. Both can be edited. Badge is optional and empty by default.</small>
@@ -805,7 +830,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
               </label>)}
             </div>
             <label style={{ fontSize:12, display:'grid',gap:3 }}>ROTATION (°)
-              <input type="number" min={-30} max={30} step={1} value={selected.rotation || 0}
+              <input type="number" min={-180} max={180} step={1} value={selected.rotation || 0}
                 disabled={!!working} onChange={e => move('rotation',e.target.value)}/>
             </label>
             <button type="button" className="outline-btn" disabled={!!working || !current?.backgroundUrl} onClick={() => void rerender()}><RotateCcw size={15}/> {current?.renderedImageUrl ? 'Apply layout & save JPG (no AI cost)' : 'Retry save JPG (no AI cost)'}</button>
