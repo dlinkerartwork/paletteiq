@@ -1,4 +1,13 @@
-import { originalAssets, type ListingAsset } from '@/lib/etsy-listing-image-plan';
+export type StyleSourceAsset = { id: string; imageUrl?: string };
+/** Match source artwork de-duplication without server or runtime module aliases. */
+function uniqueStyleSources(assets: StyleSourceAsset[]): StyleSourceAsset[] {
+  const urls = new Set<string>();
+  return assets.filter(a => {
+    if (!a.id || !a.imageUrl || urls.has(a.imageUrl)) return false;
+    urls.add(a.imageUrl);
+    return true;
+  });
+}
 
 /**
  * A real Vision observation of the original collection artwork — NOT a request
@@ -20,8 +29,8 @@ export type ListingStyleSample = { assetId: string; dataUrl: string };
 
 /** Stable lightweight change detector; includes original asset URLs so regenerating
  * a collection image invalidates a previous style analysis. Not a security hash. */
-export function listingStyleSignature(characters: ListingAsset[]): string {
-  const source = originalAssets(characters);
+export function listingStyleSignature(characters: StyleSourceAsset[]): string {
+  const source = uniqueStyleSources(characters);
   const items = source.map(a => a.id + '\u001f' + a.imageUrl).sort();
   let hash = 2166136261;
   for (const item of items) {
@@ -37,7 +46,7 @@ export function listingStyleSignature(characters: ListingAsset[]): string {
 
 export function currentListingVisualStyle(
   profile: ListingVisualStyleProfile | undefined,
-  characters: ListingAsset[]
+  characters: StyleSourceAsset[]
 ): ListingVisualStyleProfile | null {
   return profile && profile.signature === listingStyleSignature(characters)
     && typeof profile.summary === 'string' && profile.summary.trim()
