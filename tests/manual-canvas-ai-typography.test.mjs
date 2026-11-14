@@ -30,7 +30,9 @@ test('Reference & Assets uses a manual canvas workflow instead of showing either
 test('custom canvas generates graphics only, then Vision fits exact original PNGs to the reference', () => {
   const method = editor.slice(editor.indexOf('  const generateCanvasArtwork = async () => {'),
     editor.indexOf('  // Create the background and artistic lettering FIRST'));
-  assert.match(method, /const imageLayers = source\.elements\.filter/);
+  assert.match(method, /const originalLayers = source\.elements\.filter/);
+  assert.match(method, /filterThemeCharacters\(title,characters\)/);
+  assert.match(method, /slice\(0,9\)\.map\(\(c,i\)=>newImage\(c,i,'original'\)\)/);
   assert.match(method, /assetMap\.get\(e\.characterId\)\?\.imageUrl/);
   assert.match(method, /layout: imageLayers\.map\(e => \(\{ type: 'image' as const/);
   assert.match(method, /mode: hasLettering \? 'background-with-typography'/);
@@ -72,4 +74,11 @@ test('AI image backend accepts optional badge and honors absence of badges', () 
   assert.match(api, /NO BADGE: do not invent a badge/);
   assert.match(api, /\(input\.badge \|\| ''\)\.length > 60/);
   assert.doesNotMatch(api, /mode !== 'full-thumbnail' && input\.provider !== 'openai'/);
+});
+
+test('empty canvas can generate an exact-asset reference-based composition', () => {
+  assert.match(editor, /layoutMode === 'ai' && characters\.some\(c => c\.imageUrl\)/);
+  assert.match(editor, /currentDesign\.elements\.some\(e => e\.type === 'image'\)/);
+  assert.match(editor, /: imageLayers\)/);
+  assert.match(editor, /const badgeTextLayers = hasLettering \? badgeOverlay\(zone,badge\) : \[\]/);
 });
