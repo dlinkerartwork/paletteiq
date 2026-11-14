@@ -71,11 +71,11 @@ test('real UI has per-image count, visual asset picker, multi-select, add/remove
 
 test('Auto Arrange uses actual background Vision, with larger-count fallback and critique feedback',()=>{
   assert.match(ui,/const autoArrangeArtwork = async \(\)/);
-  assert.match(ui,/positions\.length > 24/);
+  assert.doesNotMatch(ui,/positions\.length > 24/); // all chosen originals now eligible for Vision free layout
   assert.match(ui,/action:'layout', projectId, number:step, backgroundUrl:current\.backgroundUrl/);
   assert.match(ui,/critiqueFeedback: current\.finalReview\?\.improvements\.join\('; '\)/);
-  assert.match(api,/input\.critiqueFeedback \? 'FINAL-COMPOSITION REVIEW FEEDBACK/);
-  assert.match(api,/p\.x>=0 && p\.y>=0/);
+  assert.match(api,/input\.critiqueFeedback\s*\? 'PREVIOUS FINAL COMPOSITION REVIEW FEEDBACK/);
+  assert.match(api,/validListingPlacement\(p,input\.number!\)/);
   assert.match(api,/Return each listed assetId EXACTLY ONCE/);
 });
 

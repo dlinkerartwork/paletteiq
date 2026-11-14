@@ -27,6 +27,30 @@ export type ListingImageNumber = number;
 export type ListingImageStatus = 'draft' | 'approved' | 'needs_revision';
 export type ListingAsset = { id: string; name: string; imageUrl?: string; category?: string; subtheme?: string; group?: string };
 export type ListingPlacement = { assetId: string; x: number; y: number; width: number; height: number; rotation?: number };
+/** Main Cover defaults to AI-led free composition; other stages remain structured. */
+export type ListingCompositionMode = 'free' | 'structured';
+export function defaultListingCompositionMode(number: number): ListingCompositionMode {
+  return number === 1 ? 'free' : 'structured';
+}
+/** Images may bleed beyond the canvas; final JPG crops the overflow at export.
+ * Other listing pages (especially product mockups) keep their safe-area bounds.
+ */
+export function listingAllowsBleed(number: number): boolean {
+  // Mockups require accurate artwork on the physical product surface.
+  // Every other listing design can use clipped, editorial collage composition.
+  return number < 8 || number > 12;
+}
+export function validListingPlacement(p: ListingPlacement, number: number): boolean {
+  if (!p || typeof p.assetId !== 'string' ||
+      ![p.x,p.y,p.width,p.height,p.rotation ?? 0].every(n => typeof n === 'number' && Number.isFinite(n)) ||
+      p.width < 1 || p.height < 1 || Math.abs(p.rotation ?? 0) > 180) return false;
+  if (listingAllowsBleed(number)) return p.x >= -100 && p.y >= -100 &&
+    p.x < 100 && p.y < 100 && p.width <= 200 && p.height <= 200 &&
+    p.x + p.width > 0 && p.y + p.height > 0;
+  return p.x >= 0 && p.y >= 0 && p.x <= 100 && p.y <= 100 &&
+    p.width <= 100 && p.height <= 100 && p.x + p.width <= 100 && p.y + p.height <= 100;
+}
+
 export type ListingFinalReview = {
   score: number; titleReadability: number; artworkProminence: number;
   visualBalance: number; styleHarmony: number; strengths: string[];

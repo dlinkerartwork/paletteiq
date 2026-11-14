@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 const ui=readFileSync(new URL('../components/etsy-listing-image-studio.tsx',import.meta.url),'utf8');
 const editor=readFileSync(new URL('../components/etsy-listing-layout-canvas.tsx',import.meta.url),'utf8');
 const backend=readFileSync(new URL('../app/api/listing-image-studio/route.ts',import.meta.url),'utf8');
+const plan=readFileSync(new URL('../lib/etsy-listing-image-plan.ts',import.meta.url),'utf8');
 const page=readFileSync(new URL('../app/page.tsx',import.meta.url),'utf8');
 const settings=readFileSync(new URL('../components/studio-settings.tsx',import.meta.url),'utf8');
 
@@ -65,9 +66,9 @@ test('user can rotate original artwork directly on canvas, not only via numeric 
 });
 
 test('backend accepts and persists full manual original-clipart rotation with safe bounds',()=>{
-  assert.match(backend,/Math\.abs\(p\.rotation \?\? 0\) <= 180/);
-  assert.match(backend,/Math\.abs\(p\.rotation \?\? 0\) > 180/);
-  assert.match(backend,/Math\.abs\(p\.rotation\?\?0\)<=180/);
+  assert.match(plan,/Math\.abs\(p\.rotation \?\? 0\) > 180/);
+  assert.match(backend,/validListingPlacement\(p, input\.number!\)/);
+  assert.match(backend,/validListingPlacement\(p,input\.number!\)/);
   assert.match(backend,/new Set\(placements\.map\(p => p\.assetId\)\)\.size !== placements\.length/);
   assert.match(backend,/originalAssets\(project\.characters \|\| \[\]\)/);
   assert.match(backend,/input\.textScale \?\? 'compact'/);

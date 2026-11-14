@@ -59,7 +59,7 @@ test('white pre-layout and post-generation layered canvas use only original PNG 
 
 test('save white canvas snapshots per step, prevent stale full-collection saves overwriting them', () => {
   assert.match(api,/listingPreLayouts\?: Record<string, ListingPlacement\[\]>/);
-  assert.match(api,/Response\.json\(\{ images, preLayouts: project\.listingPreLayouts \|\| \{\} \}\)/);
+  assert.match(api,/Response\.json\(\{ images, preLayouts: project\.listingPreLayouts \|\| \{\}, compositionModes: project\.listingCompositionModes \|\| \{\} \}\)/);
   assert.match(api,/if \(input\.action === 'prelayout'\)/);
   assert.match(api,/new Set\(placements\.map\(p => p\.assetId\)\)\.size !== placements\.length/);
   assert.match(api,/project\.listingPreLayouts = \{ \.\.\.\(project\.listingPreLayouts \|\| \{\}\), \[String\(input\.number\)\]: placements \}/);
@@ -71,13 +71,14 @@ test('save white canvas snapshots per step, prevent stale full-collection saves 
   assert.match(studio,/const savedLayouts = \(old as \{ listingPreLayouts\?: Record<string, unknown> \}\)\.listingPreLayouts/);
 });
 
-test('generation honors chosen pre-layout; Vision cannot secretly rearrange clipart', () => {
-  assert.match(api,/USER-ARRANGED WHITE CANVAS PRE-LAYOUT/);
+test('structured mode honors the pre-layout, while Free Mode deliberately authorizes AI rearrangement', () => {
+  assert.match(api,/STRUCTURED COMPOSITION: honor user-arranged WHITE CANVAS positions/);
   assert.match(api,/do not draw the assets/);
   assert.match(api,/preLayout\?: ListingPlacement\[\]/);
   assert.match(api,/Invalid pre-layout/);
   assert.match(ui,/placements: effectivePositions/);
-  assert.match(ui,/allowVisionRefinement && effectivePositions\.length <= 24/);
+  assert.match(ui,/compositionMode === 'free' \|\| allowVisionRefinement/);
+  assert.doesNotMatch(ui,/effectivePositions\.length <= 24/);
   assert.match(ui,/\[allowVisionRefinement, setAllowVisionRefinement\] = useState\(false\)/);
   assert.match(ui,/aria-label="Let AI Vision refine pre-layout"/);
   assert.match(ui,/The current white-canvas pre-layout is saved before paid generation/);
