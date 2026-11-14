@@ -492,13 +492,16 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       if (compositionMode === 'free' || allowVisionRefinement) {
         setMessage('OpenAI Vision is designing original artwork positions, sizes, layer hierarchy and tasteful edge bleed...');
         try {
-          const artworkContactSheets = compositionMode === 'free'
-            ? await createArtworkContactSheets(effectivePositions, assets) : undefined;
+          let artworkContactSheets: string[] | undefined;
+          if (compositionMode === 'free') {
+            try { artworkContactSheets = await createArtworkContactSheets(effectivePositions, assets); }
+            catch { layoutWarning = 'Some clipart previews could not be sampled; Vision will use source asset names.'; }
+          }
           const vision = await send({ action: 'layout', projectId, number: step,
             backgroundUrl: response.backgroundUrl, placements: effectivePositions,
             compositionMode, artworkContactSheets });
           if (vision.placements?.length === effectivePositions.length) suggested = vision.placements;
-          layoutWarning = vision.fallback || '';
+          layoutWarning = [layoutWarning, vision.fallback || ''].filter(Boolean).join(' ');
         } catch { layoutWarning = 'AI Vision composition unavailable; your editable original selections were retained.'; }
       }
       // Free Mode uses an independent AI layout; Structured Mode retains the
@@ -722,6 +725,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
               onSelect={setSelectedIndex}
               onChange={layout => setChanges(old => ({ ...old, [step]: layout }))}
               backgroundUrl={current?.backgroundUrl}
+              allowBleed={step === 1}
               disabled={!!working}
             />
             {!current?.backgroundUrl && <div style={{ display:'grid',gap:7 }}>
