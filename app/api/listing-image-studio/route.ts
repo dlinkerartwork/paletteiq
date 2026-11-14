@@ -9,7 +9,7 @@ import { zipStream, type ZipEntry } from '@/lib/zip-stream';
 import { listingCreativeDirection, listingCreativeSummary, listingMockupScene } from '@/lib/etsy-listing-creative-direction';
 import {
   LISTING_IMAGE_SPECS, LISTING_HEIGHT, LISTING_WIDTH, listingFilename, listingTitle,
-  originalAssets, isSquareListingApproved, type ListingImageRecord, type ListingPlacement, type ListingAsset, type ListingImageStatus
+  originalAssets, isSquareListingApproved, listingImageTextDefaults, type ListingImageText, type ListingImageRecord, type ListingPlacement, type ListingAsset, type ListingImageStatus
 } from '@/lib/etsy-listing-image-plan';
 
 const bad = (message: string, status = 400) => Response.json({ error: message }, { status });
@@ -59,7 +59,10 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
   const height = value.height ?? previous?.height;
   if (status === 'approved' && (!renderedImageUrl || !placements.length || width !== LISTING_WIDTH || height !== LISTING_HEIGHT))
     throw Error('Save a 1024 × 1024 JPG using original collection artwork before approval. Legacy 4:3 renders must be remade.');
-  return { number: value.number, status, backgroundUrl, renderedImageUrl, placements, width, height, notes: sanitizedText(value.notes || '', 800),
+  const title = typeof value.title === 'string' ? sanitizedText(value.title, 140) : previous?.title;
+  const subtitle = typeof value.subtitle === 'string' ? sanitizedText(value.subtitle, 140) : previous?.subtitle;
+  const badge = typeof value.badge === 'string' ? sanitizedText(value.badge, 60) : previous?.badge;
+  return { number: value.number, status, backgroundUrl, renderedImageUrl, placements, width, height, title, subtitle, badge, notes: sanitizedText(value.notes || '', 800),
     reviewWarning: typeof value.reviewWarning === 'string' ? sanitizedText(value.reviewWarning, 280) : '',
     updatedAt: Date.now() };
 }
@@ -73,6 +76,39 @@ async function updateImage(project: StoredProject, number: number, patch: Listin
   await getDb().update(projects).set({ data: JSON.stringify(project), updatedAt: Date.now() })
     .where(and(eq(projects.id, project.id), eq(projects.owner, owner)));
   return project.listingImages;
+}
+
+/**
+ * Reject only one listing-image generation. Remove its DB record first, then
+ * delete the associated AI background and composed JPG from owned storage.
+ * Other approved images, collection originals and thumbnail designs are untouched.
+ */
+async function rejectImage(project: StoredProject, number: number, owner: string) {
+  const existing = normalizedImages(project);
+  const rejected = existing.find(item => item.number === number);
+  if (!rejected) return { images: existing, warning: '' };
+  project.listingImages = existing.filter(item => item.number !== number);
+  await getDb().update(projects).set({ data: JSON.stringify(project), updatedAt: Date.now() })
+    .where(and(eq(projects.id, project.id), eq(projects.owner, owner)));
+
+  // Never delete an object referenced anywhere else in the saved collection.
+  const stillInUse = JSON.stringify(project);
+  const urls = [rejected.backgroundUrl, rejected.renderedImageUrl]
+    .filter((url): url is string => Boolean(url));
+  const uniqueKeys = [...new Set(urls.filter(url => !stillInUse.includes(url))
+    .map(url => savedAssetKey(url, project.id, owner)).filter((key): key is string => Boolean(key)))];
+  const storage = bucket();
+  if (!uniqueKeys.length) return { images: project.listingImages, warning: '' };
+  if (!storage) return { images: project.listingImages,
+    warning: 'Listing result was removed, but image storage is unavailable for physical cleanup.' };
+  const errors: string[] = [];
+  for (const key of uniqueKeys) {
+    try { await storage.delete(key); }
+    catch { errors.push(key); }
+  }
+  return { images: project.listingImages, warning: errors.length
+    ? 'Listing result was removed, but ' + errors.length + ' generated file(s) could not be deleted from storage.'
+    : '' };
 }
 
 export async function GET(request: Request) {
@@ -106,9 +142,10 @@ export async function GET(request: Request) {
 }
 
 type Input = {
-  action?: 'generate' | 'save' | 'layout'; projectId?: string; number?: number;
+  action?: 'generate' | 'save' | 'layout' | 'reject'; projectId?: string; number?: number;
   image?: ListingImageRecord; model?: string; quality?: string;
   backgroundUrl?: string; placements?: ListingPlacement[]; revisionNotes?: string;
+  title?: string; subtitle?: string; badge?: string;
 };
 /**
  * Generate only a decorative image/typographic background. Collection originals
@@ -181,6 +218,15 @@ export async function POST(request: Request) {
   const stored = await findProject(input.projectId, user.userId);
   if (!stored) return bad('Collection not found', 404);
   const project = JSON.parse(stored.data) as StoredProject;
+  if (input.action === 'reject') {
+    try {
+      const result = await rejectImage(project, input.number, user.userId);
+      return Response.json({ ...result, deleted: true });
+    } catch (error) {
+      return bad('Could not reject and delete listing image: ' +
+        (error instanceof Error ? error.message : String(error)).slice(0, 180), 500);
+    }
+  }
   if (input.action === 'save') {
     if (!input.image || input.image.number !== input.number) return bad('Invalid image record');
     try {
