@@ -6,7 +6,7 @@ import { readApiJson, uploadListingJpg } from '@/lib/listing-image-upload';
 import { listingCreativeDirection, listingMockupScene } from '@/lib/etsy-listing-creative-direction';
 import {
   LISTING_IMAGE_SPECS, LISTING_WIDTH, LISTING_HEIGHT, originalAssets,
-  planListingPlacements, listingFilename, isSquareListingApproved, type ListingAsset, type ListingImageRecord, type ListingPlacement
+  planListingPlacements, listingFilename, listingImageTextDefaults, isSquareListingApproved, type ListingImageText, type ListingAsset, type ListingImageRecord, type ListingPlacement
 } from '@/lib/etsy-listing-image-plan';
 
 type Props = {
@@ -18,10 +18,11 @@ type Props = {
   palette?: string;
   texture?: string;
   seoTitle?: string;
+  primaryKeyword?: string;
   characters: ListingAsset[];
   onSaved?: (images: ListingImageRecord[]) => void;
 };
-type ListResponse = { images?: ListingImageRecord[]; backgroundUrl?: string; placements?: ListingPlacement[]; fallback?: string; reviewWarning?: string; error?: string };
+type ListResponse = { images?: ListingImageRecord[]; backgroundUrl?: string; placements?: ListingPlacement[]; fallback?: string; reviewWarning?: string; warning?: string; deleted?: boolean; error?: string };
 const apiUrl = '/api/listing-image-studio';
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Number.isFinite(n) ? n : lo));
 const fileName = (number: number) => listingFilename(number);
@@ -132,8 +133,9 @@ async function upload(projectId: string, number: number, blob: Blob, onProgress?
   return uploadListingJpg(projectId, fileName(number), blob, fetch, onProgress);
 }
 
-export default function EtsyListingImageStudio({ projectId, name, theme, subtheme, style, palette, texture, seoTitle, characters, onSaved }: Props) {
+export default function EtsyListingImageStudio({ projectId, name, theme, subtheme, style, palette, texture, seoTitle, primaryKeyword, characters, onSaved }: Props) {
   const artDirection = useMemo(() => listingCreativeDirection({ name, theme, subtheme, style, palette, texture, listing: { title: seoTitle } }), [name, theme, subtheme, style, palette, texture, seoTitle]);
+  const seoText = useMemo(() => listingImageTextDefaults({ title: seoTitle, primaryKeyword }, artDirection.title), [seoTitle, primaryKeyword, artDirection.title]);
   const assets = useMemo(() => originalAssets(characters), [characters]);
   const [records, setRecords] = useState<ListingImageRecord[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -145,12 +147,23 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   const [availableModels, setAvailableModels] = useState<Array<{id: string; name: string}>>([]);
   const [changes, setChanges] = useState<Record<number, ListingPlacement[]>>({});
   const [notes, setNotes] = useState<Record<number, string>>({});
+  const [letteringChanges, setLetteringChanges] = useState<Record<number, ListingImageText>>({});
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [categories, setCategories] = useState<Record<string,string>>({});
   const [inspection, setInspection] = useState<CollectionInspection | null>(null);
 
   const categorizedAssets = useMemo(() => assets.map(a => ({ ...a, category: categories[a.id] || a.category })), [assets, categories]);
   const current = records.find(item => item.number === step);
+  const currentLettering: ListingImageText = letteringChanges[step] ?? {
+    title: current?.title ?? seoText.title,
+    subtitle: current?.subtitle ?? seoText.subtitle,
+    badge: current?.badge ?? seoText.badge
+  };
+  const letteringDirty = Boolean(current?.backgroundUrl && (
+    currentLettering.title !== (current.title ?? seoText.title) ||
+    currentLettering.subtitle !== (current.subtitle ?? seoText.subtitle) ||
+    currentLettering.badge !== (current.badge ?? seoText.badge)
+  ));
   const positions = changes[step] || current?.placements || planListingPlacements(step, categorizedAssets);
   const selected = positions[selectedIndex] || positions[0];
   const approved = LISTING_IMAGE_SPECS.filter(s => records.some(r => r.number === s.number && isSquareListingApproved(r))).length;
