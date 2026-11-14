@@ -753,24 +753,6 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
             </button>
             {letteringDirty && <small role="alert" style={{ color: '#a04c22' }}>Title, Subtitle or Badge has changed since this background was generated. Click Regenerate AI background + lettering to apply the new text. A layout-only re-render cannot change AI lettering.</small>}
           </div>
-          <label style={{ display: 'flex', gap: 9, alignItems: 'center', fontSize: 12, color: '#564d43' }}>
-            <input type="checkbox" aria-label="Let AI Vision refine pre-layout" checked={allowVisionRefinement}
-              disabled={!!working} onChange={e => setAllowVisionRefinement(e.target.checked)}/>
-            Let AI Vision refine my clipart positions after generating the background (optional paid Vision request). Off by default — my white-canvas arrangement is preserved.
-          </label>
-          <label style={{ display: 'flex', gap: 9, alignItems: 'center', fontSize: 12, color: '#564d43' }}>
-            <input type="checkbox" aria-label="Automatically critique final JPG" checked={autoFinalCritique}
-              disabled={!!working} onChange={e=>setAutoFinalCritique(e.target.checked)}/>
-            Automatically critique the FINAL composited JPG (recommended, additional paid Vision API request)
-          </label>
-          <button type="button" className="primary-btn" onClick={() => void generate()} disabled={!loaded || !assets.length || !!working || !precedingApproved}>
-            {working === 'generate' ? <LoaderCircle className="spin" size={16}/> : <Sparkles size={16}/>}
-            {current?.backgroundUrl ? 'Revise Image ' + String(step).padStart(2,'0') + ' (AI background)' : step === 1 ? 'Start /new-listing — Generate Main Cover' : 'Generate Image ' + String(step).padStart(2,'0')}
-          </button>
-          {!precedingApproved && <small style={{ color: '#94502e' }}>Approve the earlier images in order before generating this image.</small>}
-          {(step === 3 || step === 5) && <button className="outline-btn" type="button" onClick={() => void categorize()} disabled={!!working}>Analyze collection categories (optional)</button>}
-          <small style={{ color: '#74695e' }}>The current white-canvas pre-layout is saved before paid generation and its coordinates guide AI typography. Only the graphic background, lettering and blank mockup environment are AI-generated. Original collection clipart remains editable after generation.</small>
-          <hr style={{ width: '100%', border: 0, borderTop: '1px solid #eee4d9' }}/>
           <div style={{ border: '1px solid #eadfce', padding: 12, borderRadius: 10, display: 'grid', gap: 9 }}>
             <strong>Original clipart selection — Image {String(step).padStart(2,'0')}</strong>
             <small>Choose how many ORIGINAL collection assets appear in this listing image. Main Cover defaults to 7, but you can use any count up to the collection size. Larger covers may reduce title readability; check the final critique.</small>
@@ -828,6 +810,24 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
             </label>
             <button type="button" className="outline-btn" disabled={!!working || !current?.backgroundUrl} onClick={() => void rerender()}><RotateCcw size={15}/> {current?.renderedImageUrl ? 'Apply layout & save JPG (no AI cost)' : 'Retry save JPG (no AI cost)'}</button>
           </>}
+          <label style={{ display: 'flex', gap: 9, alignItems: 'center', fontSize: 12, color: '#564d43' }}>
+            <input type="checkbox" aria-label="Let AI Vision refine pre-layout" checked={allowVisionRefinement}
+              disabled={!!working} onChange={e => setAllowVisionRefinement(e.target.checked)}/>
+            Let AI Vision refine my clipart positions after generating the background (optional paid Vision request). Off by default — my white-canvas arrangement is preserved.
+          </label>
+          <label style={{ display: 'flex', gap: 9, alignItems: 'center', fontSize: 12, color: '#564d43' }}>
+            <input type="checkbox" aria-label="Automatically critique final JPG" checked={autoFinalCritique}
+              disabled={!!working} onChange={e=>setAutoFinalCritique(e.target.checked)}/>
+            Automatically critique the FINAL composited JPG (recommended, additional paid Vision API request)
+          </label>
+          <button type="button" className="primary-btn" onClick={() => void generate()} disabled={!loaded || !assets.length || !!working || !precedingApproved}>
+            {working === 'generate' ? <LoaderCircle className="spin" size={16}/> : <Sparkles size={16}/>}
+            {current?.backgroundUrl ? 'Revise Image ' + String(step).padStart(2,'0') + ' (AI background)' : step === 1 ? 'Start /new-listing — Generate Main Cover' : 'Generate Image ' + String(step).padStart(2,'0')}
+          </button>
+          {!precedingApproved && <small style={{ color: '#94502e' }}>Approve the earlier images in order before generating this image.</small>}
+          {(step === 3 || step === 5) && <button className="outline-btn" type="button" onClick={() => void categorize()} disabled={!!working}>Analyze collection categories (optional)</button>}
+          <small style={{ color: '#74695e' }}>The current white-canvas pre-layout is saved before paid generation and its coordinates guide AI typography. Only the graphic background, lettering and blank mockup environment are AI-generated. Original collection clipart remains editable after generation.</small>
+          <hr style={{ width: '100%', border: 0, borderTop: '1px solid #eee4d9' }}/>
           <label className="input-label">REVISION NOTES</label>
           <textarea rows={3} maxLength={800} value={notes[step] ?? current?.notes ?? ''} onChange={e => setNotes(old => ({ ...old, [step]: e.target.value }))} placeholder="Specify desired revision to the current image, if any."/>
           <small style={{ color: '#74695e' }}>Your revision notes are included in the next paid AI background regeneration for this image only. To adjust original clipart positions without AI charges, use Apply layout & save JPG. Review spelling, crop, verified facts and mockup realism before approving.</small>
