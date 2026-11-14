@@ -298,7 +298,8 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   });
   const promptDraft = promptDrafts[step];
   const promptsReady = Boolean(promptDraft && promptDraft.context === promptContext &&
-    promptDraft.backgroundPrompt.trim() && promptDraft.layoutPrompt.trim());
+    promptDraft.backgroundPrompt.trim() &&
+    (compositionMode === 'ai-first' || promptDraft.layoutPrompt.trim()));
   const selected = positions[selectedIndex] || positions[0];
   const selectedAssetIds = useMemo(() => positions.map(p=>p.assetId), [positions]);
   const coverCopy = useMemo(() => suggestListingCoverCopy({
@@ -934,18 +935,13 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
               <img key={current.renderedImageUrl} src={current.renderedImageUrl} alt={'Saved listing image '+step} style={{ width: '100%', height: '100%', objectFit: 'contain' }}/>
             </div>
           </div>}
-          {compositionMode === 'ai-first' && current?.backgroundUrl && !current.renderedImageUrl && <section data-ai-first-background-preview="true"
-            style={{marginTop:12,border:'1px solid #dcc9b7',borderRadius:10,padding:12,display:'grid',gap:10}}>
-            <strong>AI-First typography &amp; background — no generated clipart</strong>
-            <img src={current.backgroundUrl} alt="AI designed lettering and illustration-free background" style={{width:'100%',aspectRatio:'1 / 1',objectFit:'contain',borderRadius:8}}/>
-            <small>OpenAI selected {current.selectedSourceIds?.length||0} original cliparts. It generated the typography and background only. These exact PNG illustrations will be added by PaletteIQ in the next step.</small>
-            {current.creativeBrief && <div style={{fontSize:12,whiteSpace:'pre-wrap'}}><strong>OpenAI creative direction:</strong> {current.creativeBrief}</div>}
-            <button type="button" className="primary-btn" disabled={!!working||!promptsReady}
-              onClick={() => void finalizeAiFirstConcept()}>
-              Build final JPG with original PNGs (paid Vision placement)
-            </button>
-          </section>}
-          {(compositionMode !== 'ai-first' || !current?.backgroundUrl || !!current.renderedImageUrl) && <section style={{ marginTop: current?.renderedImageUrl ? 16 : 0, display: 'grid', gap: 8 }}>
+          {compositionMode === 'ai-first' && <div data-ai-first-full-cover-notice="true"
+            style={{marginTop:10,padding:12,border:'1px solid #e5dacb',borderRadius:10,fontSize:12}}>
+            <strong>One-step OpenAI full thumbnail</strong>
+            <p style={{margin:'6px 0 0'}}>Generate a COMPLETE image with clipart collage, artistic typography, badge and background together. No PNG positioning, mapping or second generation step.</p>
+            <p style={{margin:'6px 0 0'}}>This mode uses source art as visual references. Generated subjects can differ from the original PNGs; inspect every character, word and bundle claim before approval.</p>
+          </div>}
+          {compositionMode !== 'ai-first' && <section style={{ marginTop: current?.renderedImageUrl ? 16 : 0, display: 'grid', gap: 8 }}>
             <strong>{current?.backgroundUrl ? 'Editable Original Clipart Layers (post-generate)' : 'White Canvas Pre-Layout — arrange before AI generation'}</strong>
             <EtsyListingLayoutCanvas
               assets={assets} placements={positions} selectedIndex={selectedIndex}
@@ -976,7 +972,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           {current?.reviewWarning && <p role="alert" style={{ border: '1px solid #d48c48', borderRadius: 8, padding: 10, color: '#7b431b', background: '#fff6e9' }}>Manual quality review required: {current.reviewWarning}. Approval requires your explicit confirmation.</p>}
           {current?.finalReview && <div data-final-design-critique="true" style={{ border: '1px solid #e2d6c7', borderRadius: 10, background: '#faf9f4', padding: 13, marginTop: 12, display: 'grid', gap: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-              <strong>AI Final Design Critique (after clipart compositing)</strong>
+              <strong>{current.aiGeneratedFullCover ? 'AI Full Cover Design Critique' : 'AI Final Design Critique (after clipart compositing)'}</strong>
               <span style={{ fontWeight: 750, color: current.finalReview.score >= 8.5 ? '#247046' : '#9c4c29', fontSize: 20 }}>
                 {current.finalReview.score.toFixed(1)}/10
               </span>
@@ -996,7 +992,9 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
               }))}>Use AI Suggestions as Revision Notes</button>}
             <button type="button" className="outline-btn" disabled={!!working}
               onClick={()=>void recheckFinalQuality()}>Recheck Final Quality (Vision API cost)</button>
-            <small>Adjust source PNG positions/number, choose Auto Arrange (uses feedback above), then re-render the final JPG without paying image-generation fees. AI cannot edit the original PNG artwork.</small>
+            <small>{current.aiGeneratedFullCover
+              ? 'To revise this single-layer artwork, change your prompt or reference selection and regenerate the whole image (paid).'
+              : 'Adjust source PNG positions/number, choose Auto Arrange (uses feedback above), then re-render the final JPG without paying image-generation fees. AI cannot edit the original PNG artwork.'}</small>
           </div>}
           {current?.renderedImageUrl && !current.finalReview && <button type="button" className="outline-btn" disabled={!!working}
             style={{ marginTop: 8 }} onClick={()=>void recheckFinalQuality()}>Analyze final JPG quality (Vision API cost)</button>}
