@@ -231,6 +231,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
     const renderedImageUrl = await upload(projectId, step, file, (done, total) => setMessage('Uploading original-asset JPG: ' + done + '/' + total + ' parts...'));
     const image: ListingImageRecord = {
       number: step, status: 'draft', backgroundUrl: background, renderedImageUrl, placements: layout,
+      compositionMode: (step === 1 || step === 15) && config.referenceImage ? 'hero-center' : 'top-gallery',
       notes: info, updatedAt: Date.now()
     };
     await saveRecord(image);
@@ -309,6 +310,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
       await saveRecord({
         number: step, status: 'draft', backgroundUrl: response.backgroundUrl,
         renderedImageUrl: '', placements: suggested,
+        compositionMode: (step === 1 || step === 15) && config.referenceImage ? 'hero-center' : 'top-gallery',
         notes: notes[step] || current?.notes || '', updatedAt: Date.now()
       });
       await renderAndSave(response.backgroundUrl, suggested, notes[step] || current?.notes || '');
