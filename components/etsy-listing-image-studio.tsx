@@ -633,10 +633,32 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       <p className="sub">{spec.purpose}. Source: {smoothName(subtheme || theme || name)}.</p>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(300px,1fr))', gap: 18 }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ aspectRatio: '1 / 1', background: '#f7f1e9', border: '1px solid #e5dbcb', borderRadius: 10, overflow: 'hidden', display: 'grid', placeItems: 'center' }}>
-            {current?.renderedImageUrl ? <img key={current.renderedImageUrl} src={current.renderedImageUrl} alt={'Saved listing image '+step} style={{ width: '100%', height: '100%', objectFit: 'contain' }}/> :
-              <div style={{ textAlign: 'center', padding: 24, color: '#68594a' }}><ImageIcon size={40}/><p>Generate the AI graphic background, then PaletteIQ will composite original collection PNGs.</p></div>}
-          </div>
+          {current?.renderedImageUrl && <div>
+            <strong style={{ display: 'block', marginBottom: 8 }}>Saved JPG — last rendered composition</strong>
+            <div style={{ aspectRatio: '1 / 1', background: '#f7f1e9', border: '1px solid #e5dbcb', borderRadius: 10, overflow: 'hidden', display: 'grid', placeItems: 'center' }}>
+              <img key={current.renderedImageUrl} src={current.renderedImageUrl} alt={'Saved listing image '+step} style={{ width: '100%', height: '100%', objectFit: 'contain' }}/>
+            </div>
+          </div>}
+          <section style={{ marginTop: current?.renderedImageUrl ? 16 : 0, display: 'grid', gap: 8 }}>
+            <strong>{current?.backgroundUrl ? 'Editable Original Clipart Layers (post-generate)' : 'White Canvas Pre-Layout — arrange before AI generation'}</strong>
+            <EtsyListingLayoutCanvas
+              assets={assets} placements={positions} selectedIndex={selectedIndex}
+              onSelect={setSelectedIndex}
+              onChange={layout => setChanges(old => ({ ...old, [step]: layout }))}
+              backgroundUrl={current?.backgroundUrl}
+              disabled={!!working}
+            />
+            {!current?.backgroundUrl && <div style={{ display:'grid',gap:7 }}>
+              <button type="button" className="outline-btn" disabled={!!working || !positions.length || preLayoutSaved}
+                onClick={() => void saveWhiteCanvasLayout()}>
+                {preLayoutSaved ? 'Pre-Layout Saved ✓' : 'Save White Canvas Pre-Layout (no AI cost)'}
+              </button>
+              <small>Arrange original clipart on the white square first. Your layout is saved per image and the AI background will be designed around it. The composition is editable again after generation.</small>
+            </div>}
+            {current?.backgroundUrl && changes[step] && <small role="status" style={{ color:'#9a572a' }}>
+              Unsaved placement changes are visible above. Click Apply layout &amp; save JPG to update the final thumbnail without AI background generation.
+            </small>}
+          </section>
           {current?.renderedImageUrl && <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
             <a className="outline-btn" href={current.renderedImageUrl} download={fileName(step)}><Download size={15}/> Download JPG</a>
             <span className="sub">{current.width || 'Legacy'} × {current.height || '4:3'} • {isSquareListingApproved(current) ? 'Approved square JPG' : 'Awaiting square approval'}</span>
@@ -694,11 +716,32 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
               value={currentLettering.title} disabled={!!working}
               onChange={e => editLettering('title', e.target.value)}
               placeholder="Listing title"/>
+            <div role={titleAdvice.status !== 'good' ? 'alert' : 'status'} data-listing-title-length={titleAdvice.status}
+              style={{ border:'1px solid ' + (titleAdvice.status === 'too-long' ? '#d78b78' : titleAdvice.status === 'warning' ? '#e6c88f' : '#c9dbc6'),
+                background: titleAdvice.status === 'too-long' ? '#fff0ed' : titleAdvice.status === 'warning' ? '#fff8e8' : '#f5faf2',
+                padding:'8px 10px',borderRadius:8,fontSize:12,color:'#675143' }}>
+              <strong>{titleAdvice.status === 'good' ? 'Good cover title length' : titleAdvice.status === 'too-long' ? 'Title is too long for a thumbnail' : 'Title readability warning'}</strong>
+              <div>{titleAdvice.words} words · {titleAdvice.characters} characters. {titleAdvice.message}</div>
+            </div>
             <label className="input-label" htmlFor="listing-image-subtitle">SUBTITLE (PRIMARY KEYWORD DEFAULT)</label>
             <input id="listing-image-subtitle" aria-label="Listing image subtitle" type="text" maxLength={140}
               value={currentLettering.subtitle} disabled={!!working}
               onChange={e => editLettering('subtitle', e.target.value)}
               placeholder="Primary keyword"/>
+            <div style={{ border:'1px solid #e6e0d6',borderRadius:8,padding:10,display:'grid',gap:9 }}>
+              <strong style={{ fontSize:12 }}>Suggested Cover Copy — based on this collection</strong>
+              <small>Quick, cost-free suggestions based on your SEO Title, Primary Keyword, theme, style and verified collection size. These change only the words on this image, not your Etsy SEO listing.</small>
+              <span className="input-label">SUGGESTED TITLES</span>
+              <div style={{ display:'flex',gap:6,flexWrap:'wrap' }}>
+                {coverCopy.titles.map(option => <button key={option} type="button" className="outline-btn" disabled={!!working}
+                  style={{ padding:'6px 9px',fontSize:12 }} onClick={() => editLettering('title', option)}>{option}</button>)}
+              </div>
+              <span className="input-label">SUGGESTED SUBTITLES</span>
+              <div style={{ display:'flex',gap:6,flexWrap:'wrap' }}>
+                {coverCopy.subtitles.map(option => <button key={option} type="button" className="outline-btn" disabled={!!working}
+                  style={{ padding:'6px 9px',fontSize:12 }} onClick={() => editLettering('subtitle', option)}>{option}</button>)}
+              </div>
+            </div>
             <label className="input-label" htmlFor="listing-image-badge">BADGE (OPTIONAL)</label>
             <input id="listing-image-badge" aria-label="Listing image badge" type="text" maxLength={60}
               value={currentLettering.badge} disabled={!!working}
@@ -711,6 +754,11 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
             {letteringDirty && <small role="alert" style={{ color: '#a04c22' }}>Title, Subtitle or Badge has changed since this background was generated. Click Regenerate AI background + lettering to apply the new text. A layout-only re-render cannot change AI lettering.</small>}
           </div>
           <label style={{ display: 'flex', gap: 9, alignItems: 'center', fontSize: 12, color: '#564d43' }}>
+            <input type="checkbox" aria-label="Let AI Vision refine pre-layout" checked={allowVisionRefinement}
+              disabled={!!working} onChange={e => setAllowVisionRefinement(e.target.checked)}/>
+            Let AI Vision refine my clipart positions after generating the background (optional paid Vision request). Off by default — my white-canvas arrangement is preserved.
+          </label>
+          <label style={{ display: 'flex', gap: 9, alignItems: 'center', fontSize: 12, color: '#564d43' }}>
             <input type="checkbox" aria-label="Automatically critique final JPG" checked={autoFinalCritique}
               disabled={!!working} onChange={e=>setAutoFinalCritique(e.target.checked)}/>
             Automatically critique the FINAL composited JPG (recommended, additional paid Vision API request)
@@ -721,7 +769,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           </button>
           {!precedingApproved && <small style={{ color: '#94502e' }}>Approve the earlier images in order before generating this image.</small>}
           {(step === 3 || step === 5) && <button className="outline-btn" type="button" onClick={() => void categorize()} disabled={!!working}>Analyze collection categories (optional)</button>}
-          <small style={{ color: '#74695e' }}>Only the graphic background, premium lettering and blank mockup environment are AI-generated. PaletteIQ composites original collection assets, preserving their identity. Generation uses paid API requests.</small>
+          <small style={{ color: '#74695e' }}>The current white-canvas pre-layout is saved before paid generation and its coordinates guide AI typography. Only the graphic background, lettering and blank mockup environment are AI-generated. Original collection clipart remains editable after generation.</small>
           <hr style={{ width: '100%', border: 0, borderTop: '1px solid #eee4d9' }}/>
           <div style={{ border: '1px solid #eadfce', padding: 12, borderRadius: 10, display: 'grid', gap: 9 }}>
             <strong>Original clipart selection — Image {String(step).padStart(2,'0')}</strong>
