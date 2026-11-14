@@ -8,7 +8,7 @@ import type { ImageGenerationCostEstimate } from '@/lib/etsy-listing-image-cost'
 import { listingCreativeDirection, listingMockupScene } from '@/lib/etsy-listing-creative-direction';
 import {
   LISTING_IMAGE_SPECS, LISTING_WIDTH, LISTING_HEIGHT, originalAssets,
-  planListingPlacements, listingFilename, listingImageTextDefaults, isSquareListingApproved, type ListingImageText, type ListingAsset, type ListingImageRecord, type ListingPlacement
+  planListingPlacements, curatedListingHighlights, listingFilename, listingImageTextDefaults, isSquareListingApproved, type ListingImageText, type ListingFinalReview, type ListingAsset, type ListingImageRecord, type ListingPlacement
 } from '@/lib/etsy-listing-image-plan';
 
 type Props = {
@@ -24,7 +24,7 @@ type Props = {
   characters: ListingAsset[];
   onSaved?: (images: ListingImageRecord[]) => void;
 };
-type ListResponse = { images?: ListingImageRecord[]; backgroundUrl?: string; placements?: ListingPlacement[]; fallback?: string; reviewWarning?: string; costEstimate?: ImageGenerationCostEstimate | null; warning?: string; deleted?: boolean; error?: string };
+type ListResponse = { images?: ListingImageRecord[]; backgroundUrl?: string; placements?: ListingPlacement[]; finalReview?: ListingFinalReview | null; fallback?: string; reviewWarning?: string; costEstimate?: ImageGenerationCostEstimate | null; warning?: string; deleted?: boolean; error?: string };
 const apiUrl = '/api/listing-image-studio';
 const styleApiUrl = '/api/listing-style-analysis';
 type StyleResponse = { profile?: ListingVisualStyleProfile | null; cached?: boolean; error?: string };
@@ -189,6 +189,8 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   const [notes, setNotes] = useState<Record<number, string>>({});
   const [letteringChanges, setLetteringChanges] = useState<Record<number, ListingImageText>>({});
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [assetSearch, setAssetSearch] = useState('');
+  const [showAssetPicker, setShowAssetPicker] = useState(false);
   const [categories, setCategories] = useState<Record<string,string>>({});
   const [inspection, setInspection] = useState<CollectionInspection | null>(null);
   const [styleProfile, setStyleProfile] = useState<ListingVisualStyleProfile | null>(null);
@@ -209,6 +211,10 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   ));
   const positions = changes[step] || current?.placements || planListingPlacements(step, categorizedAssets);
   const selected = positions[selectedIndex] || positions[0];
+  const selectedAssetIds = useMemo(() => positions.map(p=>p.assetId), [positions]);
+  const visibleAssetChoices = useMemo(() => categorizedAssets.filter(asset =>
+    !assetSearch.trim() || (asset.name + ' ' + (asset.category || '')).toLowerCase().includes(assetSearch.trim().toLowerCase())),
+    [categorizedAssets, assetSearch]);
   const approved = LISTING_IMAGE_SPECS.filter(s => records.some(r => r.number === s.number && isSquareListingApproved(r))).length;
   const precedingApproved = LISTING_IMAGE_SPECS.slice(0, step - 1).every(s => records.some(r => r.number === s.number && isSquareListingApproved(r)));
 
@@ -440,12 +446,76 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       return { ...prev, [step]: list };
     });
   };
+  const changeArtworkSelection = (ids: string[], preservePositions = true) => {
+    const unique = [...new Set(ids)].filter(id => assets.some(a => a.id === id));
+    if (!unique.length) {
+      setMessage('At least one original collection clipart must remain selected.');
+      return;
+    }
+    const planned = planListingPlacements(step, categorizedAssets, { assetIds: unique });
+    const previous = new Map(positions.map(p => [p.assetId, p]));
+    const next = planned.map(p => preservePositions ? previous.get(p.assetId) || p : p);
+    setChanges(old => ({ ...old, [step]: next }));
+    setSelectedIndex(0);
+    setMessage(current?.backgroundUrl
+      ? 'Artwork selection updated. Apply layout & save JPG to refresh the exact original layers without another image-generation charge.'
+      : 'Artwork selection ready. Generate AI background to use these original collection images.');
+  };
+  const changeArtworkCount = (count: number) => {
+    if (!Number.isInteger(count) || count < 1 || count > assets.length) return;
+    const currentIds = selectedAssetIds.slice(0, count);
+    if (count > currentIds.length) {
+      for (const asset of curatedListingHighlights(categorizedAssets, assets.length)) {
+        if (!currentIds.includes(asset.id)) currentIds.push(asset.id);
+        if (currentIds.length >= count) break;
+      }
+    }
+    changeArtworkSelection(currentIds);
+  };
+  const autoSelectArtwork = () => {
+    const count = positions.length;
+    const planned = planListingPlacements(step, categorizedAssets, { count });
+    setChanges(old => ({ ...old, [step]: planned }));
+    setSelectedIndex(0);
+    setMessage('Automatically selected ' + planned.length + ' diverse ORIGINAL clipart layers. Positions can be adjusted before applying.');
+  };
+  const toggleArtwork = (assetId: string, checked: boolean) => {
+    changeArtworkSelection(checked
+      ? [...selectedAssetIds, assetId]
+      : selectedAssetIds.filter(id => id !== assetId));
+  };
+  const autoArrangeArtwork = async () => {
+    if (working) return;
+    if (current?.status === 'approved' && !window.confirm('Rearrange this approved image? Save the updated JPG to reset approval.')) return;
+    const localPlan = planListingPlacements(step, categorizedAssets, { assetIds: selectedAssetIds });
+    if (!current?.backgroundUrl || positions.length > 24) {
+      setChanges(old => ({ ...old, [step]: localPlan }));
+      setMessage(current?.backgroundUrl
+        ? 'Auto arranged with a local grid/perimeter layout (Vision supports up to 24 assets). Apply layout & save JPG to preview the result.'
+        : 'Starter layout arranged locally; AI Vision can refine it during image generation for up to 24 assets.');
+      return;
+    }
+    setWorking('layout');
+    setMessage('AI Vision is arranging the selected original PNGs around the actual lettering...');
+    try {
+      const answer = await send({
+        action:'layout', projectId, number:step, backgroundUrl:current.backgroundUrl,
+        placements:positions, critiqueFeedback: current.finalReview?.improvements.join('; ') || ''
+      });
+      setChanges(old => ({ ...old, [step]: answer.placements?.length === positions.length ? answer.placements : localPlan }));
+      setMessage(answer.fallback
+        ? answer.fallback + ' Apply layout & save JPG to preview the local arrangement.'
+        : 'AI Vision rearranged ' + positions.length + ' originals. Apply layout & save JPG (no image-generation cost), then review the final composition.');
+    } catch (error) { setMessage('Auto Arrange unavailable: ' + String(error)); }
+    finally { setWorking(''); }
+  };
+
   const editLettering = (field: keyof ListingImageText, value: string) => {
     setLetteringChanges(previous => ({
       ...previous, [step]: { ...currentLettering, [field]: value }
     }));
   };
-  const setPage = (number: number) => { setStep(number); setSelectedIndex(0); setMessage(''); setCostNotice(null); };
+  const setPage = (number: number) => { setStep(number); setSelectedIndex(0); setMessage(''); setAssetSearch(''); setShowAssetPicker(false); setCostNotice(null); };
   const spec = LISTING_IMAGE_SPECS[step - 1];
 
   return <div style={{ display: 'grid', gap: 18 }}>
