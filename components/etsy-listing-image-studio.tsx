@@ -855,8 +855,8 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   };
   const autoArrangeArtwork = async () => {
     if (working) return;
-    if (compositionMode === 'ai-first' && current?.backgroundUrl && !current.renderedImageUrl)
-      return setMessage('AI-First art direction is ready. Use Build final JPG with original PNGs to apply OpenAI placement to its selected source artwork.');
+    if (compositionMode === 'ai-first')
+      return setMessage('AI-First is a complete single-layer AI-generated image. Change source references or prompt, then generate a new full cover; no original-PNG layout action is available.');
     if (current?.backgroundUrl && !promptsReady)
       return setMessage('Prepare or refresh the OpenAI Vision prompt above before paid Auto Arrange. You can edit the composition instructions first.');
     if (current?.status === 'approved' && !window.confirm('Rearrange this approved image? Save the updated JPG to reset approval.')) return;
