@@ -168,10 +168,14 @@ test('Hero cover prompt includes the requested cream medallion, blush ring and e
   assert.match(generator, /isHeroCover \? \['HERO ART DIRECTION PRIORITY:'/);
 });
 
-test('Manual approval also runs background-first Vision before applying original layers', () => {
+test('Manual approval runs background-first Vision for custom canvas and original asset layers', () => {
   const part = designer.slice(designer.indexOf('const approveReviewedBackground'),designer.indexOf('const onReferenceUpload'));
   assert.match(part, /if \(target\.packSlideKey === 'custom-canvas'\)/);
-  assert.match(part, /hand-arranged slots with AI Vision coordinates/);
+  const custom = part.slice(part.indexOf("if (target.packSlideKey === 'custom-canvas')"), part.indexOf("setMessage('AI Vision analyzing approved background"));
+  assert.match(custom, /await placeOriginalsOverBackground/);
+  assert.match(custom, /badgeOverlay\(zone,target\.packBadge \|\| ''\)/);
+  assert.match(custom, /source: 'original' as const/);
+  assert.ok(custom.indexOf('await placeOriginalsOverBackground') < custom.indexOf('backgroundImageUrl:d.rejectedBackgroundUrl'));
   const legacy = part.slice(part.indexOf("setMessage('AI Vision analyzing approved background"));
   assert.match(legacy, /await placeOriginalsOverBackground/);
   assert.ok(legacy.indexOf('await placeOriginalsOverBackground') < legacy.indexOf('backgroundImageUrl: d.rejectedBackgroundUrl'));
