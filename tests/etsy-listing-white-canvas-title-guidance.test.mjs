@@ -81,7 +81,7 @@ test('structured mode honors the pre-layout, while Free Mode deliberately author
   assert.doesNotMatch(ui,/effectivePositions\.length <= 24/);
   assert.match(ui,/\[allowVisionRefinement, setAllowVisionRefinement\] = useState\(false\)/);
   assert.match(ui,/aria-label="Let AI Vision refine pre-layout"/);
-  assert.match(ui,/The current white-canvas pre-layout is saved before paid generation/);
+  assert.match(ui,/Free Composition ignores starter canvas coordinates/);
   assert.match(ui,/const file = await compose\(background, layout, assets\)/);
   assert.doesNotMatch(editor,/fetch\(|generations|gpt-image|redraw/);
 });
