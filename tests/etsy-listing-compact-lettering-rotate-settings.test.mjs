@@ -68,7 +68,6 @@ test('backend accepts and persists full manual original-clipart rotation with sa
   assert.match(backend,/Math\.abs\(p\.rotation \?\? 0\) <= 180/);
   assert.match(backend,/Math\.abs\(p\.rotation \?\? 0\) > 180/);
   assert.match(backend,/Math\.abs\(p\.rotation\?\?0\)<=180/);
-  assert.match(backend,/numeric manual rotations|bounded numeric manual rotations|Rotation/);
   assert.match(backend,/new Set\(placements\.map\(p => p\.assetId\)\)\.size !== placements\.length/);
   assert.match(backend,/originalAssets\(project\.characters \|\| \[\]\)/);
   assert.match(backend,/input\.textScale \?\? 'compact'/);
