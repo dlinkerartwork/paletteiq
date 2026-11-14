@@ -87,11 +87,11 @@ function acceptAtSlot(original:ListingPlacement, slot:ListingTextZone,
  */
 export function fitListingPlacementsToReference(
   number:number, originals:ListingPlacement[], hasReference:boolean,
-  layout?:ListingReferenceLayout
+  layout?:ListingReferenceLayout, preserveSafe=false
 ):ListingPlacement[] {
   if (!hasReference) return fitListingPlacementsBelowText(originals);
   if (!originals.length) return [];
-  if (originals.every(p=>isListingPlacementSafe(p,number,true,layout)))
+  if ((preserveSafe || !(layout?.slots?.length)) && originals.every(p=>isListingPlacementSafe(p,number,true,layout)))
     return originals.map(p=>({...p}));
 
   const output:ListingPlacement[]=[];
