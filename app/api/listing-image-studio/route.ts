@@ -48,6 +48,9 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
     p.width > 0 && p.width <= 100 && p.height > 0 && p.height <= 100 &&
     Math.abs(p.rotation ?? 0) <= 30
   ) : previous?.placements || [];
+  if (value.renderedImageUrl && Array.isArray(value.placements) &&
+      placements.length !== value.placements.length)
+    throw Error('One or more clipart files are missing, duplicated or disallowed; refresh the collection before saving.');
   if (value.renderedImageUrl && (duplicateListingAssetIds(placements).length ||
       !placements.every(p => isListingPlacementTextSafe(p))))
     throw Error('Clipart must be distinct and stay below the protected title/subtitle area before saving.');
