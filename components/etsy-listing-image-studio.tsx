@@ -320,6 +320,28 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     } catch (error) { setMessage('Could not save review: ' + String(error)); }
     finally { setWorking(''); }
   };
+  const rejectAndDelete = async () => {
+    if (working || !current || (!current.backgroundUrl && !current.renderedImageUrl)) return;
+    if (!window.confirm('Reject & permanently delete generated Image ' + String(step).padStart(2,'0') +
+      '? The AI background, saved JPG and approval for this image will be removed. This cannot be undone; other listing images and collection clipart remain untouched.')) return;
+    setWorking('reject');
+    setMessage('Deleting this generated listing image and its saved background...');
+    try {
+      const result = await send({ action: 'reject', projectId, number: step });
+      if (!result.deleted) throw Error('The server did not confirm deletion.');
+      receive(result.images || []);
+      setChanges(old => { const next = { ...old }; delete next[step]; return next; });
+      setNotes(old => { const next = { ...old }; delete next[step]; return next; });
+      setLetteringChanges(old => { const next = { ...old }; delete next[step]; return next; });
+      setSelectedIndex(0);
+      setMessage(result.warning
+        ? 'Image rejected and removed from the collection. ' + result.warning
+        : 'Image ' + String(step).padStart(2,'0') + ' rejected and deleted. Title and Subtitle were reset to Etsy SEO defaults, Badge cleared. Generate from the beginning.');
+    } catch (error) {
+      setMessage('Reject & Delete failed: ' + (error instanceof Error ? error.message : String(error)));
+    } finally { setWorking(''); }
+  };
+
   const move = (field: 'assetId' | 'x' | 'y' | 'width' | 'height' | 'rotation', value: string) => {
     setChanges(prev => {
       const list = [...(prev[step] || current?.placements || planListingPlacements(step, categorizedAssets))];
@@ -328,6 +350,11 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       list[selectedIndex] = { ...target, [field]: field === 'assetId' ? value : clamp(Number(value), field === 'rotation' ? -30 : field === 'width' || field === 'height' ? 2 : 0, field === 'rotation' ? 30 : 100) };
       return { ...prev, [step]: list };
     });
+  };
+  const editLettering = (field: keyof ListingImageText, value: string) => {
+    setLetteringChanges(previous => ({
+      ...previous, [step]: { ...currentLettering, [field]: value }
+    }));
   };
   const setPage = (number: number) => { setStep(number); setSelectedIndex(0); setMessage(''); };
   const spec = LISTING_IMAGE_SPECS[step - 1];
