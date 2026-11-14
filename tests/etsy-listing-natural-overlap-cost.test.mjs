@@ -9,12 +9,12 @@ const client = readFileSync(new URL('../components/etsy-listing-image-studio.tsx
 const pricing = readFileSync(new URL('../lib/etsy-listing-image-cost.ts', import.meta.url), 'utf8');
 
 test('OpenAI Vision arranges actual clipart around visible lettering naturally without rigid exclusion or AI redraw', () => {
-  assert.match(backend, /Read the ACTUAL title, subtitle and badge positions from the background pixels/);
-  assert.match(backend, /Partial overlap near outer edges, swashes and decorative lettering is welcome/);
-  assert.match(backend, /do not obscure central strokes or whole words of the main title/);
-  assert.match(backend, /do not treat partial text overlap as unsafe by itself/);
-  assert.match(backend, /p\.x>=0 && p\.y>=0/);
-  assert.match(backend, /p\.x\+p\.width<=100 && p\.y\+p\.height<=100/);
+  assert.match(backend, /Use actual title\/subtitle\/badge locations and colors on the generated background/);
+  assert.match(backend, /tasteful overlap near swashes, letter edges and decorations is encouraged/);
+  assert.match(backend, /Protect essential full word shapes/);
+  assert.match(backend, /FREE COMPOSITION: Disregard ALL suggested x\/y\/width\/height/);
+  assert.match(backend, /validListingPlacement\(p,input\.number!\)/);
+  assert.match(backend, /isMockup \|\| \(p\.x\+p\.width<=100 && p\.y\+p\.height<=100\)/);
   assert.doesNotMatch(backend, /The title and subtitle must remain unobstructed, usually in the upper 23%/);
   assert.doesNotMatch(backend, /p\.x>=0 && p\.y>=23/);
   assert.match(backend, /The actual collection images are NOT provided to you/);
