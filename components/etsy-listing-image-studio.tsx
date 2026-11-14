@@ -6,6 +6,8 @@ import { readApiJson, uploadListingJpg } from '@/lib/listing-image-upload';
 import type { ListingStyleSample, ListingVisualStyleProfile } from '@/lib/etsy-listing-visual-style';
 import type { ImageGenerationCostEstimate } from '@/lib/etsy-listing-image-cost';
 import { listingCreativeDirection, listingMockupScene } from '@/lib/etsy-listing-creative-direction';
+import EtsyListingLayoutCanvas from '@/components/etsy-listing-layout-canvas';
+import { evaluateListingCoverTitle, suggestListingCoverCopy } from '@/lib/etsy-listing-cover-copy';
 import {
   LISTING_IMAGE_SPECS, LISTING_WIDTH, LISTING_HEIGHT, originalAssets,
   planListingPlacements, curatedListingHighlights, listingFilename, listingImageTextDefaults, isSquareListingApproved, type ListingImageText, type ListingFinalReview, type ListingAsset, type ListingImageRecord, type ListingPlacement
@@ -24,7 +26,7 @@ type Props = {
   characters: ListingAsset[];
   onSaved?: (images: ListingImageRecord[]) => void;
 };
-type ListResponse = { images?: ListingImageRecord[]; backgroundUrl?: string; placements?: ListingPlacement[]; finalReview?: ListingFinalReview | null; fallback?: string; reviewWarning?: string; costEstimate?: ImageGenerationCostEstimate | null; warning?: string; deleted?: boolean; error?: string };
+type ListResponse = { images?: ListingImageRecord[]; preLayouts?: Record<string, ListingPlacement[]>; saved?: boolean; backgroundUrl?: string; placements?: ListingPlacement[]; finalReview?: ListingFinalReview | null; fallback?: string; reviewWarning?: string; costEstimate?: ImageGenerationCostEstimate | null; warning?: string; deleted?: boolean; error?: string };
 const apiUrl = '/api/listing-image-studio';
 const styleApiUrl = '/api/listing-style-analysis';
 type StyleResponse = { profile?: ListingVisualStyleProfile | null; cached?: boolean; error?: string };
@@ -186,6 +188,8 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   const [model, setModel] = useState('gpt-image-1-mini');
   const [availableModels, setAvailableModels] = useState<Array<{id: string; name: string}>>([]);
   const [changes, setChanges] = useState<Record<number, ListingPlacement[]>>({});
+  const [preLayouts, setPreLayouts] = useState<Record<string, ListingPlacement[]>>({});
+  const [allowVisionRefinement, setAllowVisionRefinement] = useState(false);
   const [notes, setNotes] = useState<Record<number, string>>({});
   const [letteringChanges, setLetteringChanges] = useState<Record<number, ListingImageText>>({});
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -210,9 +214,14 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     currentLettering.subtitle !== (current.subtitle ?? seoText.subtitle) ||
     currentLettering.badge !== (current.badge ?? seoText.badge)
   ));
-  const positions = changes[step] || current?.placements || planListingPlacements(step, categorizedAssets);
+  const positions = changes[step] || current?.placements || preLayouts[String(step)] || planListingPlacements(step, categorizedAssets);
   const selected = positions[selectedIndex] || positions[0];
   const selectedAssetIds = useMemo(() => positions.map(p=>p.assetId), [positions]);
+  const coverCopy = useMemo(() => suggestListingCoverCopy({
+    name, theme, subtheme, style, seoTitle, primaryKeyword, collectionSize:assets.length
+  }), [name,theme,subtheme,style,seoTitle,primaryKeyword,assets.length]);
+  const titleAdvice = evaluateListingCoverTitle(currentLettering.title);
+  const preLayoutSaved = JSON.stringify(preLayouts[String(step)] || []) === JSON.stringify(positions);
   const visibleAssetChoices = useMemo(() => categorizedAssets.filter(asset =>
     !assetSearch.trim() || (asset.name + ' ' + (asset.category || '')).toLowerCase().includes(assetSearch.trim().toLowerCase())),
     [categorizedAssets, assetSearch]);
@@ -226,6 +235,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       if (live) {
         const images = response.images || [];
         setRecords(images);
+        setPreLayouts(response.preLayouts || {});
         // Resume the first unapproved image on return/reload, instead of always
         // restarting visually at step 01 (approved JPGs are never regenerated).
         setStep(LISTING_IMAGE_SPECS.find(s => !images.some(r => r.number === s.number && isSquareListingApproved(r)))?.number || 15);
@@ -305,6 +315,22 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     finally { setWorking(''); }
   };
 
+  const savePreLayout = async (layout: ListingPlacement[] = positions) => {
+    const result = await send({ action:'prelayout', projectId, number:step, placements:layout });
+    if (!result.saved || !result.preLayouts) throw Error('Server did not confirm the pre-layout save');
+    setPreLayouts(result.preLayouts);
+    return result;
+  };
+  const saveWhiteCanvasLayout = async () => {
+    if (working || !positions.length) return;
+    setWorking('prelayout');
+    try {
+      await savePreLayout();
+      setMessage('White canvas pre-layout saved for Image ' + String(step).padStart(2,'0') + '. No AI generation or charges.');
+    } catch (error) {
+      setMessage('Could not save pre-layout: ' + (error instanceof Error ? error.message : String(error)));
+    } finally { setWorking(''); }
+  };
   const saveRecord = async (image: ListingImageRecord) => {
     const result = await send({ action: 'save', projectId, number: step, image });
     receive(result.images || []);
@@ -349,6 +375,10 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     if (!assets.length) return setMessage('Generate collection clipart in Image Production first.');
     if (!precedingApproved) return setMessage('Approve all preceding listing images before generating this one.');
     if (current?.status === 'approved' && !window.confirm('Regenerate an approved image? Its approval will be reset to Draft.')) return;
+    const evaluation = evaluateListingCoverTitle(currentLettering.title);
+    if (evaluation.status === 'too-long' && !window.confirm(
+      'Your cover title has ' + evaluation.words + ' words (' + evaluation.characters +
+      ' characters). It may be difficult to read at Etsy thumbnail size. Generate anyway?')) return;
     const lettering = { ...currentLettering };
     setCostNotice(null);
     setWorking('generate');
@@ -379,9 +409,10 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           }
         } catch { /* Continue with a neutral collection gallery rather than invent categories. */ }
       }
-      setMessage('Generating the AI graphic background and artistic typography...');
+      await savePreLayout(effectivePositions);
+      setMessage('Generating the AI graphic background and artistic typography using the saved white canvas composition...');
       const response = await send({ action: 'generate', projectId, number: step, model, quality,
-        featuredCount: effectivePositions.length,
+        featuredCount: effectivePositions.length, placements: effectivePositions,
         title: lettering.title, subtitle: lettering.subtitle, badge: lettering.badge,
         revisionNotes: (notes[step] ?? current?.notes ?? '').trim() });
       if (!response.backgroundUrl) throw Error('OpenAI did not return the background');
@@ -389,7 +420,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       setCostNotice({ step, model, quality, estimate: response.costEstimate ?? null });
       let suggested = effectivePositions;
       let layoutWarning = '';
-      if (effectivePositions.length <= 24) {
+      if (allowVisionRefinement && effectivePositions.length <= 24) {
         setMessage('AI Vision is arranging original artwork around the real lettering with natural partial overlap...');
         try {
           const vision = await send({ action: 'layout', projectId, number: step, backgroundUrl: response.backgroundUrl, placements: effectivePositions });
@@ -397,6 +428,8 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           layoutWarning = vision.fallback || '';
         } catch { layoutWarning = 'Vision placement unavailable; original image placements retained.'; }
       }
+      // Preserve the user-created pre-layout. AI Vision may refine it ONLY when
+      // the user has explicitly enabled that option before generation.
       // The paid AI background is recorded before JPG transfer so a failed
       // upload can be retried without generating and paying for the AI again.
       // An empty renderedImageUrl intentionally invalidates prior approved pixels.
@@ -481,7 +514,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
 
   const move = (field: 'assetId' | 'x' | 'y' | 'width' | 'height' | 'rotation', value: string) => {
     setChanges(prev => {
-      const list = [...(prev[step] || current?.placements || planListingPlacements(step, categorizedAssets))];
+      const list = [...(prev[step] || current?.placements || preLayouts[String(step)] || planListingPlacements(step, categorizedAssets))];
       const target = list[selectedIndex];
       if (!target) return prev;
       list[selectedIndex] = { ...target, [field]: field === 'assetId' ? value : clamp(Number(value), field === 'rotation' ? -30 : field === 'width' || field === 'height' ? 2 : 0, field === 'rotation' ? 30 : 100) };
