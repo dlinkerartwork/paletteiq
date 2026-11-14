@@ -270,7 +270,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               projectId, imageUrl: config.referenceImage, provider: config.analysisProvider,
-              model: config.analysisModel, count: Math.min(assets.length, 12), referenceStyle: config.referenceStyle
+              model: config.analysisModel, count: Math.min(assets.length, 12), referenceStyle: 'similar'
             })
           });
           styleTokens = refResult.layout;
@@ -334,7 +334,8 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
       const list = [...(prev[step] || current?.placements || initialPlacements(step))];
       const target = list[selectedIndex];
       if (!target) return prev;
-      list[selectedIndex] = { ...target, [field]: field === 'assetId' ? value : clamp(Number(value), field === 'rotation' ? -30 : field === 'width' || field === 'height' ? 2 : 0, field === 'rotation' ? 30 : 100) };
+      if (field === 'assetId' && list.some((p,i) => i !== selectedIndex && p.assetId === value)) return prev;
+      list[selectedIndex] = { ...target, [field]: field === 'assetId' ? value : clamp(Number(value), field === 'rotation' ? -15 : field === 'width' || field === 'height' ? 2 : 0, field === 'rotation' ? 15 : 100) };
       return { ...prev, [step]: list };
     });
   };
@@ -457,7 +458,8 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
           {(step === 3 || step === 5) && <button className="outline-btn" type="button" onClick={() => void categorize()} disabled={!!working}>Analyze collection categories (optional)</button>}
           <small style={{ color: '#74695e' }}>Only the graphic background, premium lettering and blank mockup environment are AI-generated. PaletteIQ composites original collection assets, preserving their identity. Generation uses paid API requests.</small>
           <hr style={{ width: '100%', border: 0, borderTop: '1px solid #eee4d9' }}/>
-          <strong>Original asset placement ({positions.length})</strong>
+          <strong>Original asset placement ({positions.length}) — text-safe, distinct originals</strong>
+          <small>Title/subtitle occupy the protected top 38% of this square. Art cannot overlap the text; repeated assets are unavailable in the replacement selector.</small>
           <label className="input-label">SELECT ARTWORK TO ADJUST</label>
           <select value={selectedIndex < positions.length ? selectedIndex : 0} disabled={!positions.length || !!working} onChange={e => setSelectedIndex(Number(e.target.value))}>
             {positions.map((p, i) => <option key={i} value={i}>{i + 1}. {assets.find(a => a.id === p.assetId)?.name || 'Original artwork'}</option>)}
@@ -465,7 +467,8 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
           {selected && <>
             <label className="input-label">REPLACE WITH ORIGINAL COLLECTION ASSET</label>
             <select value={selected.assetId} disabled={!!working} onChange={e => move('assetId', e.target.value)}>
-              {assets.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              {assets.map(a => <option key={a.id} value={a.id}
+                disabled={a.id !== selected.assetId && positions.some(p => p.assetId === a.id)}>{a.name}</option>)}
             </select>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 8 }}>
               {(['x','y','width','height'] as const).map(field => <label key={field} style={{ fontSize: 12, display: 'grid', gap: 3 }}>{field.toUpperCase()} (%)
