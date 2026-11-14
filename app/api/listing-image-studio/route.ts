@@ -67,10 +67,17 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
     rawZone.x >= 15 && rawZone.y >= 12 && rawZone.width >= 35 && rawZone.height >= 30 &&
     rawZone.x+rawZone.width <= 85 && rawZone.y+rawZone.height <= 90
     ? rawZone : heroReference ? heroTextZone() : undefined;
-  if (value.renderedImageUrl && (duplicateListingAssetIds(placements).length ||
-      !placements.every(p => isListingPlacementSafe(p,value.number,heroReference,
-        protectedTextZones?.length ? {texts:protectedTextZones} : undefined,protectedTextZone))))
-    throw Error('Clipart must be distinct and stay outside every protected reference text area before saving.');
+  // Visual composition checks inform the user's review, rather than losing
+  // a paid background/JPG because Vision could not arrange every layer perfectly.
+  // Invalid, unowned or malformed source assets remain rejected above.
+  const reviewWarnings: string[] = [];
+  if (value.renderedImageUrl) {
+    if (duplicateListingAssetIds(placements).length)
+      reviewWarnings.push('Some original clipart appears more than once. Review and replace repeated artwork if needed.');
+    if (!placements.every(p => isListingPlacementSafe(p,value.number,heroReference,
+        protectedTextZones?.length ? {texts:protectedTextZones} : undefined,protectedTextZone)))
+      reviewWarnings.push('Some clipart may overlap or extend into text areas. Adjust the layout if necessary.');
+  }
   const status: ListingImageStatus = value.status === 'approved' || value.status === 'needs_revision' ? value.status : 'draft';
   // An explicitly empty renderedImageUrl invalidates an older render when a
   // new paid background is generated. Do not silently re-approve stale pixels.
@@ -80,7 +87,7 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
   if (backgroundUrl && !savedAssetKey(backgroundUrl, project.id, 'owner-placeholder')) throw Error('Invalid AI background reference');
   if (status === 'approved' && (!renderedImageUrl || !placements.length)) throw Error('Render an image with original collection artwork before approval');
   return { number: value.number, status, backgroundUrl, renderedImageUrl, placements,
-    compositionMode, protectedTextZone, protectedTextZones,
+    compositionMode, protectedTextZone, protectedTextZones, reviewWarnings,
     notes: sanitizedText(value.notes || '', 800), updatedAt: Date.now() };
 }
 async function updateImage(project: StoredProject, number: number, patch: ListingImageRecord, owner: string) {

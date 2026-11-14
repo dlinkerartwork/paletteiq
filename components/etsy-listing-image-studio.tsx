@@ -230,9 +230,13 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
       ? (layoutReference ? heroTextZone(layoutReference) : current?.protectedTextZone || heroTextZone())
       : undefined;
     setWorking('render'); setMessage('Compositing ' + layout.length + ' exact original clipart images at 1024 × 1024 px...');
-    if (!layout.length || duplicateListingAssetIds(layout).length ||
-        !layout.every(p => isListingPlacementSafe(p,step,heroReference,layoutReference,protectedZone)))
-      throw Error('One or more original PNGs overlap the reference-guided text area, or repeat an asset. Adjust the layout before saving.');
+    if (!layout.length)
+      throw Error('No original clipart is available to render for this image.');
+    const reviewWarnings: string[] = [];
+    if (duplicateListingAssetIds(layout).length)
+      reviewWarnings.push('Repeated original clipart detected. Replace duplicates if you want a more distinct composition.');
+    if (!layout.every(p => isListingPlacementSafe(p,step,heroReference,layoutReference,protectedZone)))
+      reviewWarnings.push('Some original clipart may overlap the text area. Review the saved image and adjust placements if needed.');
     const file = await compose(background, layout, assets);
     setMessage('Saving JPG preview to the collection in safe upload chunks...');
     const renderedImageUrl = await upload(projectId, step, file, (done, total) => setMessage('Uploading original-asset JPG: ' + done + '/' + total + ' parts...'));
@@ -241,11 +245,12 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
       compositionMode: protectedZone ? 'reference-guided' : 'top-gallery',
       protectedTextZone: protectedZone,
       protectedTextZones: layoutReference ? referenceTextZones(layoutReference) : current?.protectedTextZones,
-      notes: info, updatedAt: Date.now()
+      reviewWarnings, notes: info, updatedAt: Date.now()
     };
     await saveRecord(image);
     setChanges(old => { const next = { ...old }; delete next[step]; return next; });
-    setMessage('Image ' + String(step).padStart(2, '0') + ' saved as a draft. Review the actual pixels and approve or revise.');
+    setMessage('Image ' + String(step).padStart(2, '0') + ' saved as a draft. Review or request revisions.' +
+      (reviewWarnings.length ? ' ' + reviewWarnings.join(' ') : ''));
   };
   const generate = async () => {
     if (working || settingsBusy) return;
@@ -258,7 +263,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
       let effectivePositions = config.layoutMode === 'manual' ? positions :
         fitListingPlacementsToReference(step,positions,Boolean(config.referenceImage),referenceDesign);
       if (duplicateListingAssetIds(effectivePositions).length)
-        throw Error('Duplicate clipart is selected. Replace repeated artwork with distinct collection PNGs.');
+        setMessage('Some selected clipart repeats; the image can still be saved as draft and revised later.');
       if ((step === 3 || step === 5) && !current?.placements && !changes[step] &&
           !Object.keys(categories).length && !assets.some(a => a.category || a.subtheme || a.group)) {
         setMessage('Organizing the collection into honest categories before designing...');
@@ -469,6 +474,15 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
             <a className="outline-btn" href={current.renderedImageUrl} download={fileName(step)}><Download size={15}/> Download JPG</a>
             <span className="sub">{LISTING_WIDTH} × {LISTING_HEIGHT} • {current.status === 'approved' ? 'Approved' : 'Awaiting approval'}</span>
           </div>}
+          {!!current?.renderedImageUrl && !!current.reviewWarnings?.length && (
+            <div role="status" style={{padding:12,marginTop:10,background:'#fff7ed',border:'1px solid #f5c28b',borderRadius:8,color:'#784421'}}>
+              <strong>Draft saved — suggested revisions</strong>
+              <ul style={{margin:'6px 0 0',paddingLeft:18}}>
+                {current.reviewWarnings.map((warning,i)=><li key={i}>{warning}</li>)}
+              </ul>
+              <small>You can keep this draft, adjust the layout without another AI generation, or click Needs revision.</small>
+            </div>
+          )}
           {(spec.kind === 'mockup') && <p className="sub">Mockup is a demonstration, not included in the sold collection. Inspect printable placement: the photograph is AI-generated, while the featured clipart is composited from its original file.</p>}
         </div>
         <div style={{ display: 'grid', alignContent: 'start', gap: 10 }}>
@@ -484,8 +498,8 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
           {(step === 3 || step === 5) && <button className="outline-btn" type="button" onClick={() => void categorize()} disabled={!!working}>Analyze collection categories (optional)</button>}
           <small style={{ color: '#74695e' }}>Only the graphic background, premium lettering and blank mockup environment are AI-generated. PaletteIQ composites original collection assets, preserving their identity. Generation uses paid API requests.</small>
           <hr style={{ width: '100%', border: 0, borderTop: '1px solid #eee4d9' }}/>
-          <strong>Original asset placement ({positions.length}) — text-safe, distinct originals</strong>
-          <small>{(step === 1 || step === 15) && config.referenceImage ? 'Reference selected: the detected title zones and original artwork positions determine the composition.' : 'Gallery: lettering stays in a protected top band.'} Text and clipart may not overlap; repeated assets are unavailable.</small>
+          <strong>Original asset placement ({positions.length}) — review before approval</strong>
+          <small>{(step === 1 || step === 15) && config.referenceImage ? 'Reference selected: the detected title zones and original artwork positions determine the composition.' : 'Gallery: lettering stays in a protected top band.'} Clipart and text collisions or repeated art will be flagged for review, not block draft saving.</small>
           <label className="input-label">SELECT ARTWORK TO ADJUST</label>
           <select value={selectedIndex < positions.length ? selectedIndex : 0} disabled={!positions.length || !!working} onChange={e => setSelectedIndex(Number(e.target.value))}>
             {positions.map((p, i) => <option key={i} value={i}>{i + 1}. {assets.find(a => a.id === p.assetId)?.name || 'Original artwork'}</option>)}
