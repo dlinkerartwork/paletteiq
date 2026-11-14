@@ -219,6 +219,18 @@ async function compose(backgroundUrl: string, placements: ListingPlacement[], as
   return await new Promise<Blob>((resolve, reject) =>
     canvas.toBlob(blob => blob ? resolve(blob) : reject(Error('Could not render JPG image.')), 'image/jpeg', 0.92));
 }
+/** Save an AI-generated full cover as JPG WITHOUT overlaying any collection PNGs. */
+async function flattenAiFullCover(fullCoverUrl: string): Promise<Blob> {
+  const canvas=document.createElement('canvas');
+  canvas.width=LISTING_WIDTH;canvas.height=LISTING_HEIGHT;
+  const ctx=canvas.getContext('2d',{alpha:false});
+  if(!ctx)throw Error('Cannot render full-cover JPG');
+  ctx.fillStyle='#fffaf4';ctx.fillRect(0,0,LISTING_WIDTH,LISTING_HEIGHT);
+  cropDraw(ctx,await imageFromUrl(fullCoverUrl));
+  return new Promise<Blob>((resolve,reject)=>canvas.toBlob(
+    blob=>blob?resolve(blob):reject(Error('Could not encode AI-first JPG')),'image/jpeg',0.94));
+}
+
 async function upload(projectId: string, number: number, blob: Blob, onProgress?: (done: number, total: number) => void): Promise<string> {
   // Preserve the working fix for Payload Too Large (HTTP 413).
   return uploadListingJpg(projectId, fileName(number), blob, fetch, onProgress);
@@ -271,10 +283,12 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     currentLettering.badge !== (current.badge ?? seoText.badge)
   ));
   const compositionMode: ListingCompositionMode = compositionModes[String(step)] ?? defaultListingCompositionMode(step);
-  const positions = changes[step] || current?.placements || preLayouts[String(step)] ||
+  const positions = changes[step] ||
     (compositionMode === 'ai-first'
-      ? planListingPlacements(step, categorizedAssets, {count:assets.length})
-      : planListingPlacements(step, categorizedAssets));
+      ? current?.selectedSourceIds?.length
+        ? planListingPlacements(step,categorizedAssets,{assetIds:current.selectedSourceIds})
+        : preLayouts[String(step)] || planListingPlacements(step,categorizedAssets,{count:assets.length})
+      : current?.placements || preLayouts[String(step)] || planListingPlacements(step,categorizedAssets));
   // When any relevant generation input changes, an earlier preview cannot be
   // silently sent. Explicit refresh is free and restores the exact server prompt.
   const promptContext = JSON.stringify({
@@ -577,77 +591,63 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     }finally{setWorking('');}
   };
 
+  /** One paid image edit: selected clipart references + prompt -> entire full cover. */
   const generateAiFirstConcept = async () => {
-    if (!promptsReady || working) return;
+    if(!promptsReady||working)return;
+    setCostNotice(null);
     setWorking('concept');
-    setMessage('Preparing reference boards from the collection PNGs (no geometry or redraw)...');
-    try {
-      const sample=aiFirstSampleIndices(positions.length).map(index=>positions[index]);
+    setMessage('Preparing numbered reference images of selected clipart. No pre-layout geometry is sent...');
+    const lettering={...currentLettering};
+    try{
+      const sourceIds=[...new Set(positions.map(p=>p.assetId))];
+      const sample=aiFirstSampleIndices(sourceIds.length).map(index=>({assetId:sourceIds[index]} as ListingPlacement));
       const referenceSheets=await createArtworkContactSheets(sample,assets);
-      if(!referenceSheets.length) throw Error('Unable to preview original PNGs');
-      await savePreLayout(positions);
-      setMessage('OpenAI Vision is art-directing from original artwork; image generator creates ONLY background and typography...');
+      if(!referenceSheets.length)throw Error('Cannot decode the selected source artwork references');
+      setMessage('OpenAI is generating the ENTIRE artistic Etsy cover: original-reference subjects, typography, badge and background together...');
       const response=await send({
         action:'generate-concept',projectId,number:step,model,quality,
-        selectedAssetIds:positions.map(p=>p.assetId),
-        sampledAssetIds:sample.map(p=>p.assetId),referenceSheets,
-        backgroundPrompt:promptDraft!.backgroundPrompt,
-        title:currentLettering.title,subtitle:currentLettering.subtitle,badge:currentLettering.badge
+        selectedAssetIds:sourceIds,sampledAssetIds:sample.map(p=>p.assetId),
+        referenceSheets,backgroundPrompt:promptDraft!.backgroundPrompt,
+        title:lettering.title,subtitle:lettering.subtitle,badge:lettering.badge
       });
-      if(!response.backgroundUrl||!response.creativeBrief||!response.selectedSourceIds?.length)
-        throw Error('OpenAI returned no valid background and selected original assets');
+      if(!response.backgroundUrl)throw Error('OpenAI returned no full cover');
       setCostNotice({step,model,quality,estimate:response.costEstimate??null});
+      const warning=response.reviewWarning||
+        'This full cover was generated by AI from visual references. Clipart may be reinterpreted; review every subject and all lettering.';
+      // Do not call compose(), arrangeWithAI(), or paste any original layers.
+      // The OpenAI image is already the COMPLETE thumbnail.
+      setMessage('Saving the single AI-generated full cover as 1024 × 1024 JPG...');
+      const file=await flattenAiFullCover(response.backgroundUrl);
+      const renderedImageUrl=await upload(projectId,step,file,
+        (done,total)=>setMessage('Uploading AI full-cover JPG '+done+'/'+total+' parts...'));
       await saveRecord({
-        number:step,status:'draft',backgroundUrl:response.backgroundUrl,conceptUrl:'',
-        renderedImageUrl:'',placements:positions,
-        selectedSourceIds:response.selectedSourceIds,creativeBrief:response.creativeBrief,
-        title:currentLettering.title,subtitle:currentLettering.subtitle,badge:currentLettering.badge,
+        number:step,status:'draft',backgroundUrl:response.backgroundUrl,
+        renderedImageUrl,aiGeneratedFullCover:true,placements:[],
+        selectedSourceIds:sourceIds,creativeBrief:'',
+        title:lettering.title,subtitle:lettering.subtitle,badge:lettering.badge,
         width:LISTING_WIDTH,height:LISTING_HEIGHT,
-        notes:notes[step]??current?.notes??'',
-        reviewWarning:response.reviewWarning??'',updatedAt:Date.now()
+        notes:notes[step]??current?.notes??'',reviewWarning:warning,updatedAt:Date.now()
       });
-      setMessage('OpenAI chose '+response.selectedSourceIds.length+
-        ' actual originals and generated a lettering/background plate without intentionally generating clipart. '+
-        'Review the creative brief and background, then build the final JPG with the exact original PNGs. '+
+      setChanges(old=>{const next={...old};delete next[step];return next;});
+      let qualityMessage='';
+      if(autoFinalCritique){
+        setWorking('critique');
+        try{
+          setMessage('Reviewing the finished OpenAI full cover for artistic quality and title readability...');
+          const critique=await send({action:'critique',projectId,number:step});
+          if(critique.finalReview){
+            if(critique.images)receive(critique.images);
+            qualityMessage=' Final Vision score '+critique.finalReview.score.toFixed(1)+'/10.';
+          }
+        }catch(error){qualityMessage=' Optional final review unavailable: '+String(error);}
+      }
+      setMessage('AI-First full thumbnail saved as JPG. No PNG positioning, mapping or post-compositing was performed.'+
         (response.sampledSourceCount && response.selectedSourceCount &&
-          response.sampledSourceCount<response.selectedSourceCount
-          ? 'Vision visually sampled '+response.sampledSourceCount+' of '+response.selectedSourceCount+' eligible originals. ' : ''));
+        response.sampledSourceCount<response.selectedSourceCount
+          ? ' Reference boards sampled '+response.sampledSourceCount+' of '+response.selectedSourceCount+' selected assets.' : '')+
+        qualityMessage+' Inspect text and illustrations before approving.');
     }catch(error){
-      setMessage('AI-first art direction failed: '+(error instanceof Error?error.message:String(error)));
-    }finally{setWorking('');}
-  };
-
-  /** AI-first phase 2: Vision chooses actual original PNG placement geometry. */
-  const finalizeAiFirstConcept = async () => {
-    if(!current?.backgroundUrl||!current.selectedSourceIds?.length||!promptsReady||working||
-        compositionMode!=='ai-first') return;
-    if(!window.confirm('Arrange the original PNGs around the prepared typography using a paid OpenAI Vision request? OpenAI will NOT redraw any clipart.'))return;
-    setWorking('concept-final');
-    try{
-      const shortlisted=planListingPlacements(step, categorizedAssets, {assetIds:current.selectedSourceIds});
-      if(!shortlisted.length) throw Error('The selected originals are missing from this collection');
-      setMessage('OpenAI Vision arranging real collection PNGs around the background and exact text...');
-      const arranged=await arrangeWithAI(current.backgroundUrl,shortlisted,'',
-        promptDraft!.layoutPrompt,current.creativeBrief);
-      // Save expensive intermediate results before JPG upload, preserving
-      // the art director source-ID shortlist and reusable background.
-      await saveRecord({
-        number:step,status:'draft',backgroundUrl:current.backgroundUrl,conceptUrl:'',
-        renderedImageUrl:'',placements:arranged.placements,
-        selectedSourceIds:current.selectedSourceIds,creativeBrief:current.creativeBrief,
-        title:currentLettering.title,subtitle:currentLettering.subtitle,badge:currentLettering.badge,
-        width:LISTING_WIDTH,height:LISTING_HEIGHT,notes:notes[step]??current.notes??'',
-        reviewWarning:[current.reviewWarning,arranged.warning].filter(Boolean).join(' '),
-        updatedAt:Date.now()
-      });
-      const scored=await renderAndSave(current.backgroundUrl,arranged.placements,
-        notes[step]??current.notes??'',
-        [current.reviewWarning,arranged.warning].filter(Boolean).join(' '),currentLettering);
-      setMessage('Saved final JPG with '+arranged.placements.length+
-        ' unchanged original PNG placements. '+(scored?'Vision score '+scored.score.toFixed(1)+'/10. ':'')+
-        'Inspect text and layout before approval. '+arranged.warning);
-    }catch(error){setMessage('Final original-asset composition failed; typography background remains saved: '+
-      (error instanceof Error?error.message:String(error)));
+      setMessage('AI-First full-cover generation failed: '+(error instanceof Error?error.message:String(error)));
     }finally{setWorking('');}
   };
 
