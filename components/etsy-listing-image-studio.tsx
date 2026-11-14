@@ -578,5 +578,33 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       </div>
       {!!message && <p role="status" className="notice" style={{ marginTop: 12 }}>{working ? <LoaderCircle className="spin" size={16}/> : null}{message}</p>}
     </div>
+    {costNotice && <aside role="status" aria-live="polite" aria-label="Estimated image generation cost"
+      data-listing-floating-cost="true" style={{
+        position: 'fixed', bottom: 20, right: 20, zIndex: 1100,
+        width: 'min(405px, calc(100vw - 32px))', maxHeight: 'min(65vh, 430px)',
+        overflowY: 'auto', boxSizing: 'border-box',
+        background: '#fffaf0', border: '1px solid #e8bc7b', borderRadius: 12,
+        padding: '13px 15px', boxShadow: '0 10px 32px rgba(51,40,29,.19)',
+        color: '#604526', fontSize: 13, lineHeight: 1.5
+      }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: 12 }}>
+        <strong>Estimated OpenAI Image Cost — Image {String(costNotice.step).padStart(2,'0')}</strong>
+        <button type="button" className="outline-btn" aria-label="Dismiss image cost notice"
+          onClick={() => setCostNotice(null)}
+          style={{ padding: '1px 7px', fontSize: 18, lineHeight: 1.3, minWidth: 28 }}>×</button>
+      </div>
+      {costNotice.estimate
+        ? <div style={{ marginTop: 8, fontSize: 18, fontWeight: 750 }}>{'US$' + costNotice.estimate.usd.toFixed(5)}</div>
+        : <div style={{ marginTop: 8 }}>Price estimate unavailable for this model.</div>}
+      <div style={{ marginTop: 4 }}>{costNotice.model} · {costNotice.quality} quality · 1024 × 1024 px</div>
+      <small style={{ display: 'block', marginTop: 5, color: '#806b51' }}>
+        {costNotice.estimate?.basis === 'reported-usage'
+          ? 'Estimated from provider-reported image generation tokens.'
+          : costNotice.estimate?.basis === 'published-square-output'
+            ? 'Published square-image output estimate; prompt tokens not included.'
+            : 'No reliable pricing information returned for this model.'}
+        {' '}Additional Vision (style/layout), QC and other API requests are not included. This is not the final OpenAI invoice.
+      </small>
+    </aside>}
   </div>;
 }
