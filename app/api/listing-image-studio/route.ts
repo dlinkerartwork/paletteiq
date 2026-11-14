@@ -56,7 +56,9 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
   if (renderedImageUrl && !savedAssetKey(renderedImageUrl, project.id, 'owner-placeholder')) throw Error('Invalid composed image reference');
   if (backgroundUrl && !savedAssetKey(backgroundUrl, project.id, 'owner-placeholder')) throw Error('Invalid AI background reference');
   if (status === 'approved' && (!renderedImageUrl || !placements.length)) throw Error('Render an image with original collection artwork before approval');
-  return { number: value.number, status, backgroundUrl, renderedImageUrl, placements, notes: sanitizedText(value.notes || '', 800), updatedAt: Date.now() };
+  return { number: value.number, status, backgroundUrl, renderedImageUrl, placements, notes: sanitizedText(value.notes || '', 800),
+    reviewWarning: typeof value.reviewWarning === 'string' ? sanitizedText(value.reviewWarning, 280) : '',
+    updatedAt: Date.now() };
 }
 async function updateImage(project: StoredProject, number: number, patch: ListingImageRecord, owner: string) {
   const existing = normalizedImages(project);
@@ -255,7 +257,7 @@ export async function POST(request: Request) {
   if (!['low', 'medium', 'high'].includes(quality)) return bad('Invalid image quality');
   const key = await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
   if (!key) return bad('Configure OpenAI API key in Settings', 503);
-  const prompt = artPrompt(input.number, project, count, input.revisionNotes || '');
+  const prompt = artPrompt(input.number, project, count, typeof input.revisionNotes === 'string' ? input.revisionNotes : '');
   try {
     const response = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
@@ -270,30 +272,43 @@ export async function POST(request: Request) {
     const bytes = Uint8Array.from(atob(b64), ch => ch.charCodeAt(0));
     if (bytes.length < 8 || bytes[0] !== 137 || bytes[1] !== 80 || bytes[2] !== 78 || bytes[3] !== 71 || bytes.length > 20_000_000)
       return bad('AI did not return a valid PNG image', 502);
-    // Product mockup objects are permitted only in mockup steps. Generated clipart artwork is not.
-    const q = await fetch('https://api.openai.com/v1/responses', {
-      method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'gpt-4.1-mini',
-        input: [{ role: 'user', content: [
-          { type: 'input_text', text: 'Inspect this Etsy listing BACKGROUND, not a final listing. Return JSON ONLY: {"inventedClipart":boolean,"printedProductArtwork":boolean,"reason":string}. Any standalone cartoon/watercolor/illustrated clipart animal, food, flower, icon or miniature product art means inventedClipart=true. Abstract painterly textures and script/serif lettering are permitted. Mockup number is ' + input.number + '. For numbers 8-12, an empty realistic physical product/blank sticker sheet/blank garment/blank tote/blank label/blank scrapbook is allowed, but no illustrations or printed graphics on its printable area. For all other numbers only abstract artwork and typography are allowed. Be specific and conservative; do not reject brush strokes or paper texture as objects.' },
-          { type: 'input_image', image_url: 'data:image/png;base64,' + b64 }
-        ]}], text: { format: { type: 'json_object' } }
-      }),
-      signal: AbortSignal.timeout(60000)
-    });
-    if (!q.ok) return bad('AI art validation failed (HTTP ' + q.status + '); no image accepted', 502);
-    const validation = await q.json() as { output?: Array<{ content?: Array<{ text?: string }> }> };
-    const parsed = JSON.parse(validation.output?.flatMap(o => o.content || []).map(c => c.text || '').join('') || '{}') as {
-      inventedClipart?: boolean; printedProductArtwork?: boolean; reason?: string;
-    };
-    if (parsed.inventedClipart !== false || parsed.printedProductArtwork !== false)
-      return bad('AI background contains possible invented art: ' + sanitizedText(parsed.reason || 'Manual review required', 180), 422);
+    // A false-positive QC result must not discard paid AI artwork. Flag the
+    // saved background and require explicit human review before approving.
+    // Original collection PNGs remain the only source of PRODUCT art.
+    let reviewWarning = '';
+    try {
+      const scene = listingMockupScene(input.number, listingCreativeDirection(project).family);
+      const q = await fetch('https://api.openai.com/v1/responses', {
+        method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gpt-4.1-mini',
+          input: [{ role: 'user', content: [
+            { type: 'input_text', text: 'Inspect this Etsy listing BACKGROUND (not yet a final listing). Return JSON ONLY: {"inventedClipart":boolean,"printedProductArtwork":boolean,"reason":string}. Any standalone illustrated clipart subject, character, animal, food, flower, or small decorative product-object illustration means inventedClipart=true. Abstract watercolor washes, handwritten letters and textures are allowed. Step ' + input.number + '. ' + (scene ? 'The ONLY intended realistic product environment is a BLANK ' + scene.name + ' mockup; no printed artwork on it is allowed.' : 'Only abstract graphical design and artistic lettering, NO product mockup objects.') + ' Be conservative about inventing artwork; if uncertain, explain why. No additional product art was supplied to this image generator.' },
+            { type: 'input_image', image_url: 'data:image/png;base64,' + b64 }
+          ]}], text: { format: { type: 'json_object' } }
+        }),
+        signal: AbortSignal.timeout(60000)
+      });
+      if (!q.ok) {
+        reviewWarning = 'AI visual validation unavailable (HTTP ' + q.status + '). Inspect the background for invented artwork, printed mockups and spelling before approval.';
+      } else {
+        const validation = await q.json() as { output?: Array<{ content?: Array<{ text?: string }> }> };
+        const parsed = JSON.parse(validation.output?.flatMap(o => o.content || []).map(c => c.text || '').join('') || '{}') as {
+          inventedClipart?: boolean; printedProductArtwork?: boolean; reason?: string;
+        };
+        if (parsed.inventedClipart !== false || parsed.printedProductArtwork !== false) {
+          reviewWarning = 'Potential invented art or printed mockup: ' +
+            sanitizedText(parsed.reason || 'Visually inspect this background before approving.', 175);
+        }
+      }
+    } catch {
+      reviewWarning = 'AI background inspection unavailable. Visually check for invented clipart, text accuracy and mockup realism before approving.';
+    }
     const assetId = crypto.randomUUID();
     await storage.put('generated/' + user.userId + '/' + assetId + '.png', bytes);
     const backgroundUrl = '/api/thumbnail-background?projectId=' + encodeURIComponent(input.projectId) +
       '&assetId=' + assetId + '&format=png';
-    return Response.json({ backgroundUrl, number: input.number, width: LISTING_WIDTH, height: LISTING_HEIGHT });
+    return Response.json({ backgroundUrl, number: input.number, width: LISTING_WIDTH, height: LISTING_HEIGHT, reviewWarning });
   } catch (error) {
     return bad('Could not generate listing background: ' + (error instanceof Error ? error.message : String(error)).slice(0,180), 502);
   }
