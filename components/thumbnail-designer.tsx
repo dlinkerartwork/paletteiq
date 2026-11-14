@@ -967,17 +967,30 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     setBackgroundRetryId(target.id);
     try {
       if (target.packSlideKey === 'custom-canvas') {
+        const original = target.elements.filter(e => e.type === 'image').map(e => ({ ...e, source: 'original' as const }));
+        const zone = target.packTextZone || { x:22, y:30, width:56, height:34 };
+        const baseSlide = buildPack('complete-10',title,characters)[0];
+        const slide: PackSlide | undefined = baseSlide && {
+          ...baseSlide, key:'custom-canvas', name:'Reference-guided canvas',
+          headline:target.packHeadline || '', subtitle:target.packSubtitle || '', textZone:zone,
+          limit:original.length
+        };
+        const placement = slide
+          ? await placeOriginalsOverBackground(slide,target.rejectedBackgroundUrl,original,characters,
+              target.packHierarchy || 'dramatic','editorial',[],target.referenceDesign?.compositionGuide || '')
+          : { elements:original, usedFallback:true };
+        const badgeLayers = target.packAiTypographyEnabled !== false
+          ? badgeOverlay(zone,target.packBadge || '') : [];
         const next = latestDesignsRef.current.map(d => d.id === target.id ? {
-          ...d, backgroundImageUrl: d.rejectedBackgroundUrl,
-          rejectedBackgroundUrl: undefined, rejectedBackgroundReason: undefined,
-          generationError: undefined, updatedAt: Date.now(),
-          // Never replace the hand-arranged slots with AI Vision coordinates.
-          elements: d.elements.filter(e => e.type === 'image').map(e => ({ ...e, source: 'original' as const }))
+          ...d, backgroundImageUrl:d.rejectedBackgroundUrl,
+          rejectedBackgroundUrl:undefined, rejectedBackgroundReason:undefined,
+          generationError:placement.usedFallback ? 'Reference-guided safe layout used.' : undefined,
+          updatedAt:Date.now(), elements:[...placement.elements,...badgeLayers]
         } : d);
         latestDesignsRef.current = next;
         onChange(next);
         setShowTypographyGuide(false);
-        setMessage('Reviewed AI lettering and background applied without moving any original collection PNGs.');
+        setMessage('Reviewed background applied. Vision-fitted original PNGs and exact badge text are editable.');
         return;
       }
       setMessage('AI Vision analyzing approved background before overlaying original collection PNGs...');
