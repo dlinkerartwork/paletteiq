@@ -1,5 +1,5 @@
-export const LISTING_WIDTH = 3000;
-export const LISTING_HEIGHT = 2250;
+export const LISTING_WIDTH = 1024;
+export const LISTING_HEIGHT = 1024;
 
 export const LISTING_IMAGE_SPECS = [
   { number: 1, key: 'Main_Cover', title: 'Main Cover', headline: 'The Clipart Collection', purpose: 'Hero cover with standout original artwork', kind: 'gallery' },
