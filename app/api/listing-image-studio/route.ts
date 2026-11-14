@@ -65,17 +65,19 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
   const title = typeof value.title === 'string' ? sanitizedText(value.title, 140) : previous?.title;
   const subtitle = typeof value.subtitle === 'string' ? sanitizedText(value.subtitle, 140) : previous?.subtitle;
   const badge = typeof value.badge === 'string' ? sanitizedText(value.badge, 60) : previous?.badge;
-  const finalReview = value.finalReview && value.finalReview.analyzedImageUrl === renderedImageUrl
-    ? value.finalReview
-    : previous?.renderedImageUrl === renderedImageUrl ? previous?.finalReview : undefined;
+  // Client-provided ratings are never trusted. A score is server-owned and
+  // remains valid only while the EXACT reviewed JPG URL is unchanged.
+  const finalReview = previous?.renderedImageUrl === renderedImageUrl ? previous?.finalReview : undefined;
   return { number: value.number, status, backgroundUrl, renderedImageUrl, placements, width, height, title, subtitle, badge, finalReview, notes: sanitizedText(value.notes || '', 800),
     reviewWarning: typeof value.reviewWarning === 'string' ? sanitizedText(value.reviewWarning, 280) : '',
     updatedAt: Date.now() };
 }
-async function updateImage(project: StoredProject, number: number, patch: ListingImageRecord, owner: string) {
+async function updateImage(project: StoredProject, number: number, patch: ListingImageRecord, owner: string, serverReview?: ListingFinalReview) {
   const existing = normalizedImages(project);
   const previous = existing.find(x => x.number === number);
   const normalized = preparedRecord({ ...patch, number }, project, previous);
+  if (serverReview && serverReview.analyzedImageUrl === normalized.renderedImageUrl)
+    normalized.finalReview = serverReview;
   if (normalized.renderedImageUrl && !savedAssetKey(normalized.renderedImageUrl, project.id, owner)) throw Error('Invalid image URL');
   // Only update this one image, preserving every other collection field and all thumbnail designs.
   project.listingImages = [...existing.filter(x => x.number !== number), normalized].sort((a,b) => a.number - b.number);
@@ -196,7 +198,7 @@ async function critiqueFinalImage(project: StoredProject, number: number, owner:
   const latest=normalizedImages(current).find(item=>item.number===number);
   if(!latest || latest.renderedImageUrl!==imageUrl)
     throw Error('The saved JPG changed during review. Review the latest render instead.');
-  const images=await updateImage(current,number,{...latest,finalReview:review},owner);
+  const images=await updateImage(current,number,latest,owner,review);
   return {images,finalReview:review};
 }
 
