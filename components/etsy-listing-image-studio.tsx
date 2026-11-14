@@ -769,7 +769,9 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     if (status === 'approved' && current.reviewWarning &&
         !window.confirm('Automatic review flagged a possible issue:\n' + current.reviewWarning + '\n\nHave you carefully checked the artwork, mockup, text and verified facts and want to approve this JPG anyway?')) return;
     if (letteringDirty) return setMessage('Title, Subtitle, or Badge changed. Regenerate the AI artwork before approving the new text.');
-    if (changes[step]) return setMessage('You changed the layout. Click Apply layout & save JPG before approval.');
+    if (changes[step]) return setMessage(compositionMode === 'ai-first'
+      ? 'Your selected reference clipart changed. Generate a NEW full creative thumbnail before approving.'
+      : 'You changed the layout. Click Apply layout & save JPG before approval.');
     setWorking('review');
     try {
       await saveRecord({ ...current, status, title: currentLettering.title, subtitle: currentLettering.subtitle,
