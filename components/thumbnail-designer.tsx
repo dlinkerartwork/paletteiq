@@ -25,7 +25,7 @@ export type ThumbnailDesign = {
   backgroundOpacity?: number; // 0..1; applies to the full backdrop composite, never to original PNG layers.
   packAiTypographyEnabled?: boolean; packLetteringStyle?: 'auto' | 'arched' | 'flowing' | 'stacked' | 'hand-painted';
   packHierarchy?: ClipartHierarchy; packBoldness?: 'soft' | 'balanced' | 'bold'; packCoverStyle?: 'editorial' | 'boutique' | 'storybook' | 'modern' | 'watercolor';
-  referenceDesign?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string };
+  referenceDesign?: { graphicMotif?: string; letteringStyle?: string; paletteMood?: string; compositionGuide?: string };
 };
 type Character = { id: string; name: string; imageUrl?: string; upscaledImageUrl?: string; category?: string; subtheme?: string; group?: string };
 export type ThumbnailSaveControls = { save: () => Promise<void>; hasUnsaved: () => boolean };
@@ -396,7 +396,8 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
   // never receives original PNGs and never draws their substitutes.
   const placeOriginalsOverBackground = async (
     slide: PackSlide, imageUrl: string, fallback: ThumbnailElement[],
-    available: Character[], hierarchy: ClipartHierarchy, coverStyle: typeof packCoverStyle
+    available: Character[], hierarchy: ClipartHierarchy, coverStyle: typeof packCoverStyle,
+    referenceHints: Array<{x:number;y:number;width:number;height:number;rotation?:number}> = []
   ): Promise<{ elements: ThumbnailElement[]; usedFallback: boolean }> => {
     const imageElements = fallback.filter(e => e.type === 'image' && e.characterId);
     if (!imageElements.length) return { elements: fallback, usedFallback: true };
@@ -419,8 +420,11 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
             return { id: e.characterId, name: character?.name || e.characterId };
           }),
           hierarchy, coverStyle,
-          suggestedSlots: imageElements.map(e => ({
-            characterId: e.characterId, x: e.x, y: e.y, width: e.width, height: e.height
+          referenceCompositionGuide: (referenceDesign?.compositionGuide || '').slice(0, 450),
+          suggestedSlots: imageElements.map((e,i) => ({
+            characterId: e.characterId,
+            x: referenceHints[i]?.x ?? e.x, y: referenceHints[i]?.y ?? e.y,
+            width: referenceHints[i]?.width ?? e.width, height: referenceHints[i]?.height ?? e.height
           }))
         })
       });
@@ -506,6 +510,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
   // Unlike the legacy pack generator, this must never overwrite manual positions.
   const generateCanvasArtwork = async () => {
     if (!design || aiBusy || backgroundRetryId) return;
+    if (layoutMode === 'ai' && !reference) { setMessage('Select or upload a reference image before reference-guided generation.'); return; }
     const source = design;
     const imageLayers = source.elements.filter(e => e.type === 'image' && e.characterId && assetMap.get(e.characterId)?.imageUrl);
     if (!imageLayers.length) { setMessage('Add original clipart from Reference & Assets to the canvas first.'); return; }
@@ -540,6 +545,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     setPackStatus('Analyzing the selected graphic reference and preserving manual artwork placement...');
     try {
       let referenceDesign = source.referenceDesign;
+      let referenceSlots: Array<{x:number;y:number;width:number;height:number;rotation?:number}> = [];
       if (reference) {
         try {
           const response = await fetch('/api/thumbnail-layout', {
@@ -549,16 +555,18 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
               referenceStyle, count: Math.min(imageLayers.length, 24)
             })
           });
-          const result = await readApiJson<{ layout?: ThumbnailDesign['referenceDesign']; error?: string }>(
+          const result = await readApiJson<{ layout?: ThumbnailDesign['referenceDesign'] & {slots?: typeof referenceSlots}; error?: string }>(
             response, 'Reference analysis');
-          if (result.layout) referenceDesign = {
-            graphicMotif: result.layout.graphicMotif,
-            letteringStyle: result.layout.letteringStyle,
-            paletteMood: result.layout.paletteMood
-          };
+          if (result.layout) {
+            referenceSlots = result.layout.slots || [];
+            referenceDesign = { graphicMotif: result.layout.graphicMotif,
+              letteringStyle: result.layout.letteringStyle, paletteMood: result.layout.paletteMood,
+              compositionGuide: result.layout.compositionGuide };
+          }
         } catch (error) {
-          setPackStatus('Reference analysis unavailable; using your selected art preferences without repositioning clipart. ' +
-            (error instanceof Error ? error.message.slice(0, 100) : ''));
+          if (layoutMode === 'ai') throw Error('Reference analysis failed; no paid background generated: ' +
+            (error instanceof Error ? error.message.slice(0, 150) : String(error)));
+          setPackStatus('Reference analysis unavailable; keeping manual layout.');
         }
       }
       setPackStatus('Creating AI ' + (hasLettering ? 'background and artistic lettering' : 'background with no typography') + '. Original collection PNGs stay in place...');
@@ -567,11 +575,11 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         projectId, provider: imageProvider, model: imageModelChoice, quality: packQuality,
         mode: hasLettering ? 'background-with-typography' as const : 'background-only' as const,
         width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE,
-        headline: hasLettering ? heading : '', subtitle: hasLettering ? subtitle : '', badge: hasLettering ? badge : '',
-        letteringStyle: source.packLetteringStyle || 'auto',
+        headline: hasLettering ? heading : '', subtitle: hasLettering ? subtitle : '', badge: '',
+        letteringStyle: 'auto' as const,
         slideName: 'Custom Canvas Artwork',
-        backgroundStyle, backgroundIntensity, designBoldness: packBoldness,
-        coverStyle: packCoverStyle, referenceDesign,
+        backgroundStyle, backgroundIntensity: 'soft' as const, designBoldness: 'balanced' as const,
+        coverStyle: 'editorial' as const, referenceDesign,
         textZone: zone,
         // Image rectangles may intersect the text zone intentionally.
         // Exact source files, their contents, character names, and reference
@@ -581,7 +589,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         designBriefSettings: {
           ...currentBriefSettings(), scope: 'single' as const, slide: 'Custom Canvas Artwork',
           headline: hasLettering ? heading : '', subtitle: hasLettering ? subtitle : '',
-          badge: hasLettering ? badge : '',
+          badge: '',
           typography: hasLettering ? 'ai-artwork' as const : 'editable' as const,
           textDisabled: !hasLettering,
           imageModel: imageModelChoice
@@ -603,9 +611,9 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         originalAssetsOnly: true, packSlideKey: 'custom-canvas',
         packTypography: hasLettering ? 'ai-artwork' : 'editable', packHeadline: heading, packSubtitle: subtitle,
         packBadge: badge, packTextZone: zone, packAiTypographyEnabled: enabled,
-        packLetteringStyle: source.packLetteringStyle || 'auto',
+        packLetteringStyle: 'auto',
         packImageProvider: imageProvider, packImageModel: imageModelChoice,
-        packBoldness, packHierarchy, packCoverStyle, referenceDesign,
+        packBoldness: 'balanced', packHierarchy, packCoverStyle: 'editorial', referenceDesign,
         referenceUrl: reference.startsWith('https://') ? reference : undefined,
         aiImagePrompt: result.prompt, aiImageUrl: undefined,
         renderedImageUrl: undefined, upscaledImageUrl: undefined,
