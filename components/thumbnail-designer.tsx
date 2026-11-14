@@ -399,7 +399,8 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
   const placeOriginalsOverBackground = async (
     slide: PackSlide, imageUrl: string, fallback: ThumbnailElement[],
     available: Character[], hierarchy: ClipartHierarchy, coverStyle: typeof packCoverStyle,
-    referenceHints: Array<{x:number;y:number;width:number;height:number;rotation?:number}> = [], referenceGuide = ''
+    referenceHints: Array<{x:number;y:number;width:number;height:number;rotation?:number}> = [],
+    referenceGuide = '', referenceImageUrl = ''
   ): Promise<{ elements: ThumbnailElement[]; usedFallback: boolean }> => {
     const imageElements = fallback.filter(e => e.type === 'image' && e.characterId);
     if (!imageElements.length) return { elements: fallback, usedFallback: true };
@@ -435,6 +436,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           }),
           hierarchy, coverStyle,
           referenceCompositionGuide: referenceGuide.slice(0, 450),
+          referenceImageUrl,
           suggestedSlots: imageElements.map((e,i) => ({
             characterId: e.characterId,
             x: referenceHints[i]?.x ?? e.x, y: referenceHints[i]?.y ?? e.y,
@@ -452,13 +454,24 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
       const selected = result.slots
         .map(slot => {
           const element = imageElements.find(e => e.characterId === slot.characterId);
-          return element ? { ...element, ...slot, source: 'original' as const } : null;
+          if (!element) return null;
+          // The compositor draws the selected original PNG inside its bounding box.
+          // Keep each layer's width:height ratio when adapting Vision's proposed slot.
+          const scale = Math.min(slot.width / Math.max(element.width, .01),
+            slot.height / Math.max(element.height, .01));
+          const width = element.width * scale, height = element.height * scale;
+          return {
+            ...element, x:slot.x+(slot.width-width)/2, y:slot.y+(slot.height-height)/2,
+            width, height, rotation:slot.rotation, source:'original' as const
+          };
         })
         .filter(element => element !== null) as ThumbnailElement[];
-      if (selected.length < expectedMin) throw Error('Vision returned insufficient valid original PNGs');
+      if (selected.length !== imageElements.length)
+        throw Error('Vision did not return every selected original PNG; use local reference-safe fitting instead');
       const fitted = fit(selected, [slide.textZone, ...(result.detectedTitleZone ? [result.detectedTitleZone] : [])],
         result.detectedSubtitleZone ? [result.detectedSubtitleZone] : []);
-      if (fitted.length < Math.min(expectedMin, safeFallback.length)) throw Error('Vision layout collides with typography after fitting');
+      if (fitted.length < imageElements.length)
+        throw Error('Vision positions could not fit every selected clipart without covering typography; use safe fallback');
       return { elements: fitted, usedFallback: false };
     } catch {
       // Background generation is paid. Never discard it because vision layout failed.
@@ -540,12 +553,16 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     if (originalLayers.some(e => !e.characterId || !assetMap.get(e.characterId)?.imageUrl)) {
       setMessage('An image layer has no original collection PNG. Replace it before generating.'); return;
     }
-    const imageLayers = originalLayers.length
-      ? originalLayers
-      : layoutMode === 'ai'
-        ? filterThemeCharacters(title,characters).filter(c => c.imageUrl).slice(0,9).map((c,i)=>newImage(c,i,'original'))
-        : [];
-    if (!imageLayers.length) { setMessage('No usable original collection PNGs; add assets or choose reference-guided mode.'); return; }
+    // Only the explicitly added canvas elements are eligible. Do not add extras.
+    const imageLayers = originalLayers;
+    if (!imageLayers.length) {
+      setMessage('Choose original clipart from the Characters list and add them to the canvas before generating.');
+      return;
+    }
+    if (imageLayers.length > 36) {
+      setMessage('AI Vision can arrange up to 36 selected original PNGs per thumbnail. Remove some canvas layers first.');
+      return;
+    }
     let zone = source.packTextZone || { x: 22, y: 30, width: 56, height: 34 };
     // Deliberate bleed beyond the canvas is allowed. Only the visible area is
     // composited and reserved; the full source PNG is never resized or redrawn.
@@ -675,7 +692,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           };
           const placement = await placeOriginalsOverBackground(
             guidedSlide, result.imageUrl, exactLayers, characters,
-            packHierarchy, 'editorial', referenceSlots, referenceDesign?.compositionGuide || ''
+            packHierarchy, 'editorial', referenceSlots, referenceDesign?.compositionGuide || '', reference
           );
           positioned = placement.elements;
           usedFallback = placement.usedFallback;
@@ -704,7 +721,12 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           : { ...d, ...common, elements: [...positioned, ...badgeTextLayers],
               backgroundImageUrl: result.imageUrl, rejectedBackgroundUrl: undefined,
               rejectedBackgroundReason: undefined,
-              generationError: usedFallback ? 'AI Vision used reference-guided safe fallback positions.' : undefined }
+              generationError: usedFallback
+            ? ('AI Vision used safe fallback positions. ' +
+              (positioned.length < exactLayers.length
+                ? (exactLayers.length-positioned.length) + ' selected clipart could not fit safely; adjust them manually.'
+                : 'Please review the reference composition.'))
+            : undefined }
         : d);
       latestDesignsRef.current = next;
       onChange(next);
@@ -988,7 +1010,8 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
       setMessage('AI Vision inspecting saved background and adjusting original PNG positions...');
       const result = await placeOriginalsOverBackground(
         slide, target.backgroundImageUrl, originals, available,
-        target.packHierarchy || packHierarchy, 'editorial', [], target.referenceDesign?.compositionGuide || ''
+        target.packHierarchy || packHierarchy, 'editorial', [], target.referenceDesign?.compositionGuide || '',
+        reference || target.referenceUrl || ''
       );
       const next = latestDesignsRef.current.map(d => d.id === target.id ? {
         ...d, elements: [...result.elements, ...(d.packSlideKey === 'custom-canvas' && d.packAiTypographyEnabled !== false
@@ -1023,7 +1046,8 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         };
         const placement = slide
           ? await placeOriginalsOverBackground(slide,target.rejectedBackgroundUrl,original,characters,
-              target.packHierarchy || 'dramatic','editorial',[],target.referenceDesign?.compositionGuide || '')
+              target.packHierarchy || 'dramatic','editorial',[],target.referenceDesign?.compositionGuide || '',
+              reference || target.referenceUrl || '')
           : { elements:original, usedFallback:true };
         const badgeLayers = target.packAiTypographyEnabled !== false
           ? badgeOverlay(zone,target.packBadge || '') : [];
@@ -1422,7 +1446,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     <AutoDismissNotice message={message} onClose={() => setMessage('')} />
     {!design ? <div className="panel empty-state" style={{ display: 'grid', gap: 12, maxWidth: 520, margin: '20px auto', padding: 24 }}>
       <h2>Start with your own canvas</h2>
-      <p>Create a blank 1024 × 1024 canvas, add exact original collection clipart from Reference &amp; Assets, then arrange and resize it yourself. Choose a reference template, enter a title, subtitle and optional badge, and let AI generate only the background and artistic lettering.</p>
+      <p>Create a blank 1024 × 1024 canvas, choose the original collection clipart to include, and select a reference template. AI makes background and typography first; Vision arranges ONLY your chosen PNGs afterwards.</p>
       <button type="button" className="primary-btn" onClick={create}><Plus size={15}/> Create blank canvas</button>
     </div> :
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(190px, 245px) minmax(0, 1fr) minmax(245px, 290px)', gap: 12, alignItems: 'start' }}>
@@ -1440,7 +1464,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         <h3>Reference & assets</h3>
         <label className="input-label">LAYOUT MODE</label>
         <select value={layoutMode} onChange={e => setLayoutMode(e.target.value as 'ai' | 'manual')}><option value="ai">AI + manual</option><option value="manual">Manual only</option></select>
-        <small>Choose a design reference to guide background, typography and asset layout. AI Vision may reposition and proportionally resize ORIGINAL collection PNG layers after generation; manual editing remains available.</small>
+        <small>Add the exact collection clipart you want into the canvas below. AI uses ONLY those selected assets: it analyzes the reference, generates background and typography, then Vision repositions and proportionally resizes the same original PNGs. Manual editing remains available.</small>
         <label className="input-label">REFERENCE ANALYSIS PROVIDER</label>
         <select value={provider} disabled={aiBusy} onChange={e => { const next = e.target.value as 'openai' | 'gemini'; setProvider(next); setModel(next === 'openai' ? aiDefaults.openaiModel : aiDefaults.geminiModel); }}>
           <option value="openai">OpenAI Vision</option><option value="gemini">Google Gemini Vision</option>
@@ -1507,13 +1531,13 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           <select aria-label="Custom canvas background quality" value={packQuality} disabled={aiBusy} onChange={e => setPackQuality(e.target.value as typeof packQuality)}>
             <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
           </select>
-          <button type="button" className="primary-btn" disabled={aiBusy || Boolean(backgroundRetryId) || (!design.elements.some(e => e.type === 'image') && !(layoutMode === 'ai' && characters.some(c => c.imageUrl)))} onClick={() => void generateCanvasArtwork()}>
+          <button type="button" className="primary-btn" disabled={aiBusy || Boolean(backgroundRetryId) || !design.elements.some(e => e.type === 'image')} onClick={() => void generateCanvasArtwork()}>
             <WandSparkles size={15}/> {aiBusy ? 'Generating AI artwork...' : 'Generate AI Background & Typography'}
           </button>
           {packStatus && <small role="status">{packStatus}</small>}
-          <small>Background, lettering and original-PNG placement now follow the chosen reference image. The four experimental art-style controls are temporarily disabled. Badge text is a precise editable overlay. API charges apply.</small>
+          <small>Background and typography are designed from the selected reference. Vision inspects BOTH the reference and generated background, then rearranges ONLY the PNGs you placed in this canvas. Badge text is a precise editable overlay. API charges apply.</small>
         </div>
-        <h3>Characters</h3>
+        <h3>Characters — click to include in canvas ({design.elements.filter(e => e.type === 'image').length} selected)</h3>
         <div style={{ maxHeight: 400, overflowY: 'auto', display: 'grid', gap: 8 }}>
           {characters.filter(c => c.imageUrl).map(c => <button type="button" key={c.id} onClick={() => add(newImage(c, design.elements.filter(e => e.type === 'image').length))} style={{ textAlign: 'left', display: 'flex', gap: 8, alignItems: 'center', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: 6 }}>
             <img src={c.imageUrl} alt="" style={{ width: 45, height: 45, objectFit: 'contain' }}/>

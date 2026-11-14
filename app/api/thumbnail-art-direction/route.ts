@@ -30,6 +30,7 @@ export async function POST(request: Request) {
     subtitle?: string; textZone?: Box; characters?: Array<{ id: string; name: string }>; suggestedSlots?: Array<{ characterId: string; x: number; y: number; width: number; height: number }>;
     referenceStyle?: string; hierarchy?: 'soft' | 'medium' | 'dramatic'; coverStyle?: string;
     referenceCompositionGuide?: string;
+    referenceImageUrl?: string;
     backgroundImageUrl?: string;
   } | null;
   if (!body?.projectId || !/^[\w-]{8,80}$/.test(body.projectId)) return fail('Invalid collection');
@@ -37,7 +38,9 @@ export async function POST(request: Request) {
   const records = await getDb().select().from(projects)
     .where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId))).limit(1);
   if (!records.length) return fail('Collection not found', 404);
-  const collection = JSON.parse(records[0].data) as { theme?: string; subtheme?: string; characters?: Artwork[] };
+  const collection = JSON.parse(records[0].data) as {
+    theme?: string; subtheme?: string; images?: string[]; characters?: Artwork[];
+  };
   const originals = new Map((collection.characters || []).filter(c => !!c.imageUrl).map(c => [c.id, c.name]));
   const selected = body.characters.filter(c => originals.has(c.id)).slice(0, 36)
     .map(c => ({ id: c.id, name: originals.get(c.id) }));
@@ -69,11 +72,30 @@ export async function POST(request: Request) {
       binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
     backgroundDataUrl = 'data:image/' + (format === 'png' ? 'png' : 'jpeg') + ';base64,' + btoa(binary);
   }
+  // This separate Vision request may inspect the design reference. It is NEVER
+  // passed to the image generator and must belong to the owner's collection,
+  // or be an explicitly uploaded PNG/JPG/WebP data image.
+  let referenceDataUrl: string | undefined;
+  if (body.referenceImageUrl) {
+    const reference = body.referenceImageUrl;
+    const uploaded = /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(reference) &&
+      reference.length <= 5_500_000;
+    const listed = (collection.images || []).includes(reference) && (() => {
+      try {
+        const u = new URL(reference);
+        return u.protocol === 'https:' &&
+          (u.hostname === 'etsystatic.com' || u.hostname.endsWith('.etsystatic.com'));
+      } catch { return false; }
+    })();
+    if (!uploaded && !listed) return fail('Reference image must be selected from this collection or uploaded for this session.', 403);
+    referenceDataUrl = reference;
+  }
   const key = await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
   if (!key) return fail('Configure OpenAI key in Settings', 503);
   const prompt = [
     'You are an expert premium Etsy listing art director. Return ONLY JSON; do not generate an image.',
-    backgroundDataUrl ? 'BACKGROUND-FIRST VISION: inspect the attached GENERATED BACKGROUND, locate actual title lettering and decorative shapes, and arrange original assets in visually quiet regions. Do not rely solely on the prior textZone: expand title protection if rendered lettering extends beyond it. The outer margins can have large hero artwork. Your positions must match the ACTUAL existing image.' : 'No background yet. Design an elegant initial layout.',
+    backgroundDataUrl ? 'BACKGROUND-FIRST VISION: inspect the GENERATED BACKGROUND, locate actual title/subtitle lettering and decorative shapes, and place originals in its visual quiet regions. Protect visible lettering even if it differs from textZone.' : 'No background yet. Design an elegant initial layout.',
+    referenceDataUrl ? 'REFERENCE IMAGE IS ALSO ATTACHED: use its background color hierarchy, typographic structure, and relative object position/size rhythm, but NEVER copy or regenerate pictured objects. Resolve conflicts in favor of readable text in the actual GENERATED BACKGROUND.' : 'If reference analysis failed, use the saved background image and safe regions for your art direction.',
     'Design a visually compelling premium Etsy product cover, not a generic vintage certificate. Choose asymmetry, bold visual rhythm, layered depth, expressive yet legible type space and a dominant illustration focal point. Adapt composition specifically to the slide intent; avoid excessive borders, tiny equal-sized clipart and bland symmetry.',
     'You must place ONLY provided ORIGINAL CLIPART ASSET IDs. The thumbnail compositor will use exact original PNG files. Never create, rename or invent characters.',
     'Return JSON: {"artDirection":"short coherent descriptive direction","detectedTitleZone":{"x":20,"y":29,"width":60,"height":25},"detectedSubtitleZone":{"x":25,"y":57,"width":50,"height":12},"slots":[{"characterId":"EXACT_ID","x":0,"y":0,"width":15,"height":18,"rotation":0}]}',
@@ -98,7 +120,17 @@ export async function POST(request: Request) {
   try {
     const response = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model:'gpt-4.1-mini', input: backgroundDataUrl ? [{ role:'user', content:[{type:'input_text',text:prompt}, {type:'input_image',image_url:backgroundDataUrl}] }] : prompt, text:{format:{type:'json_object'}} }),
+      body: JSON.stringify({
+        model:'gpt-4.1-mini',
+        input: backgroundDataUrl || referenceDataUrl ? [{
+          role:'user', content: [
+            {type:'input_text',text:prompt},
+            ...(backgroundDataUrl ? [{type:'input_image' as const,image_url:backgroundDataUrl}] : []),
+            ...(referenceDataUrl ? [{type:'input_image' as const,image_url:referenceDataUrl}] : [])
+          ]
+        }] : prompt,
+        text:{format:{type:'json_object'}}
+      }),
       signal:AbortSignal.timeout(60000)
     });
     if (!response.ok) return fail('AI art direction unavailable (HTTP ' + response.status + ')', 502);
