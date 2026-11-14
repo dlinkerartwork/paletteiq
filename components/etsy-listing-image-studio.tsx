@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Check, Download, Image as ImageIcon, LoaderCircle, RotateCcw, Sparkles } from 'lucide-react';
 import { readApiJson, uploadListingJpg } from '@/lib/listing-image-upload';
+import type { ImageGenerationCostEstimate } from '@/lib/etsy-listing-image-cost';
 import { listingCreativeDirection, listingMockupScene } from '@/lib/etsy-listing-creative-direction';
 import {
   LISTING_IMAGE_SPECS, LISTING_WIDTH, LISTING_HEIGHT, originalAssets,
@@ -22,7 +23,7 @@ type Props = {
   characters: ListingAsset[];
   onSaved?: (images: ListingImageRecord[]) => void;
 };
-type ListResponse = { images?: ListingImageRecord[]; backgroundUrl?: string; placements?: ListingPlacement[]; fallback?: string; reviewWarning?: string; warning?: string; deleted?: boolean; error?: string };
+type ListResponse = { images?: ListingImageRecord[]; backgroundUrl?: string; placements?: ListingPlacement[]; fallback?: string; reviewWarning?: string; costEstimate?: ImageGenerationCostEstimate | null; warning?: string; deleted?: boolean; error?: string };
 const apiUrl = '/api/listing-image-studio';
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Number.isFinite(n) ? n : lo));
 const fileName = (number: number) => listingFilename(number);
@@ -247,6 +248,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     if (!precedingApproved) return setMessage('Approve all preceding listing images before generating this one.');
     if (current?.status === 'approved' && !window.confirm('Regenerate an approved image? Its approval will be reset to Draft.')) return;
     const lettering = { ...currentLettering };
+    let imageCostNotice = '';
     setWorking('generate'); setMessage('Generating artistic background + exact typography with OpenAI (no clipart regeneration)...');
     try {
       let effectivePositions = positions;
@@ -270,10 +272,18 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
         title: lettering.title, subtitle: lettering.subtitle, badge: lettering.badge,
         revisionNotes: (notes[step] ?? current?.notes ?? '').trim() });
       if (!response.backgroundUrl) throw Error('OpenAI did not return the background');
+      imageCostNotice = response.costEstimate
+        ? 'Estimated OpenAI image cost (' + model + ', ' + quality + '): US$' +
+          response.costEstimate.usd.toFixed(5) +
+          (response.costEstimate.basis === 'reported-usage'
+            ? ' (based on reported image-generation tokens)'
+            : ' (published square-image output estimate; prompt tokens excluded)') +
+          '. Additional Vision/QC API charges not included; actual billing may differ.'
+        : 'Estimated image-generation cost unavailable for this model; actual billing and Vision/QC charges may differ.';
       let suggested = effectivePositions;
       let layoutWarning = '';
       if (effectivePositions.length <= 24) {
-        setMessage('AI Vision is finding typography-safe original artwork slots on the actual generated background...');
+        setMessage('AI Vision is arranging original artwork around the real lettering with natural partial overlap... ' + imageCostNotice);
         try {
           const vision = await send({ action: 'layout', projectId, number: step, backgroundUrl: response.backgroundUrl, placements: effectivePositions });
           if (vision.placements?.length === effectivePositions.length) suggested = vision.placements;
@@ -290,8 +300,9 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
         notes: notes[step] || current?.notes || '', reviewWarning: response.reviewWarning || '', updatedAt: Date.now()
       });
       await renderAndSave(response.backgroundUrl, suggested, notes[step] || current?.notes || '', response.reviewWarning || '', lettering);
-      if (layoutWarning) setMessage('Image saved as draft. ' + layoutWarning);
-    } catch (error) { setMessage('Generation failed: ' + (error instanceof Error ? error.message : String(error))); }
+      setMessage('Image ' + String(step).padStart(2, '0') + ' saved as draft. ' + imageCostNotice +
+        (layoutWarning ? ' Layout note: ' + layoutWarning : ' Review lettering legibility and clipart overlap before approving.'));
+    } catch (error) { setMessage('Generation failed: ' + (error instanceof Error ? error.message : String(error)) + (imageCostNotice ? ' ' + imageCostNotice : '')); }
     finally { setWorking(''); }
   };
   const rerender = async () => {
