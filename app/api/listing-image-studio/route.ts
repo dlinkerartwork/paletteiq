@@ -363,7 +363,7 @@ export async function POST(request: Request) {
     const valid = new Set(originalAssets(project.characters || []).map(asset => asset.id));
     const placements = input.placements;
     if (!Array.isArray(placements) || !placements.length || placements.length > 300 ||
-        placements.some(p => !p || !valid.has(p.assetId) || !validListingPlacement(p, input.number)) ||
+        placements.some(p => !p || !valid.has(p.assetId) || !validListingPlacement(p, input.number!)) ||
         new Set(placements.map(p => p.assetId)).size !== placements.length ||
         (input.compositionMode !== undefined && !['free','structured'].includes(input.compositionMode)))
       return bad('Select one or more unique original cliparts with valid canvas coordinates.');
@@ -389,7 +389,7 @@ export async function POST(request: Request) {
     const originals = originalAssets(project.characters || []);
     const valid = new Map(originals.map(asset => [asset.id, asset.name]));
     if (!fallback.length || fallback.length > 300 ||
-        fallback.some(p => !p || !valid.has(p.assetId) || !validListingPlacement(p,input.number)) ||
+        fallback.some(p => !p || !valid.has(p.assetId) || !validListingPlacement(p,input.number!)) ||
         new Set(fallback.map(p=>p.assetId)).size !== fallback.length)
       return bad('Invalid original collection placement plan');
     const key = savedAssetKey(input.backgroundUrl || '', input.projectId, user.userId);
@@ -467,7 +467,7 @@ export async function POST(request: Request) {
       const correct = !parsed.unsafe && candidates.length === fallback.length && candidates.every(p=>{
         if (!p || !ids.has(p.assetId) || seen.has(p.assetId)) return false;
         seen.add(p.assetId);
-        return validListingPlacement(p,input.number) &&
+        return validListingPlacement(p,input.number!) &&
           (!isMockup || (p.x+p.width<=100 && p.y+p.height<=100)) &&
           (free || (p.x+p.width<=100 && p.y+p.height<=100));
       });
@@ -516,7 +516,7 @@ export async function POST(request: Request) {
     !Array.isArray(preLayout) || !preLayout.length || preLayout.length > 300 ||
     preLayout.some(p => !p || typeof p.assetId !== 'string' ||
       !originalAssets(project.characters || []).some(a => a.id === p.assetId) ||
-      !validListingPlacement(p, input.number)) ||
+      !validListingPlacement(p, input.number!)) ||
     new Set(preLayout.map(p => p.assetId)).size !== preLayout.length))
     return bad('Invalid pre-layout: select valid original collection artwork and arrange it on the white canvas.');
   const prompt = artPrompt(input.number,
