@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {originalAssetStorageKey,sourceZipFilename,selectedSourceManifest} from '../lib/etsy-listing-source-zip.ts';
-import {aiFirstConceptPrompt,aiFirstBackgroundPrompt} from '../lib/etsy-listing-ai-first.ts';
+import {aiFirstConceptPrompt} from '../lib/etsy-listing-ai-first.ts';
 
 const backend=readFileSync(new URL('../app/api/listing-image-studio/route.ts',import.meta.url),'utf8');
 const frontend=readFileSync(new URL('../components/etsy-listing-image-studio.tsx',import.meta.url),'utf8');
@@ -73,11 +73,9 @@ test('the user-approved premium prompt adapts the theme and selected actual clip
   assert.match(prompt,/Hand-painted botanical watercolor/);
   assert.doesNotMatch(prompt,/cranberry-red|Christmas woodland clipart illustrations/i);
   assert.doesNotMatch(prompt,/\bx\s*:\s*\d|\by\s*:\s*\d/);
-  const background=aiFirstBackgroundPrompt({userDirection:prompt,creativeBrief:'Botanical art direction',
-    title:'Wildflower Garden',subtitle:'BOTANICAL CLIPART',badge:'120 PNGs'});
-  assert.match(background,/ABSOLUTE PRODUCT ARTWORK RULE/);
-  assert.match(background,/Only lettering, nonfigurative shapes/);
-  assert.doesNotMatch(backend,/form\.append\('image\[\]'/);
+  assert.match(prompt,/Generate the complete finished 1024 × 1024 Etsy cover directly/);
+  assert.match(prompt,/pixel-identical copying is not guaranteed/);
+  assert.match(backend,/form\.append\('image\[\]'/);
 });
 
 
