@@ -55,8 +55,8 @@ test('AI free composition does NOT force previous PaletteIQ coordinates into the
   assert.match(api,/compositionMode === 'free'/);
   assert.match(api,/Any positions from PaletteIQ are ONLY an optional selection sketch, never a placement constraint/);
   assert.match(api,/An independent AI Vision art director will decide all clipart positions/);
-  assert.match(api,/Text colors MUST differ/);
-  assert.match(api,/TWO OR THREE DISTINCT harmonious lettering colors/);
+  assert.match(api,/TYPOGRAPHY COLOR DIRECTION/);
+  assert.match(api,/You choose the number, distribution, accents and palette freely/);
   assert.match(api,/main title block only about 10–13%/);
   assert.match(api,/preLayout\?\.length/);
   assert.match(api,/STRUCTURED COMPOSITION: honor user-arranged WHITE CANVAS positions/);
@@ -75,10 +75,10 @@ test('OpenAI Vision sees numbered thumbnails from actual original clipart and fr
   assert.match(api,/contactSheets\.length > Math\.ceil\(fallback\.length \/ 24\)/);
   assert.match(ui,/compositionMode === 'free'/);
   assert.match(api,/contactSheets\.map\(image_url => \(\{type:'input_image',image_url\}\)\)/);
-  assert.match(api,/DISREGARD ALL suggested x\/y\/width\/height values|Disregard ALL suggested x\/y\/width\/height values/);
-  assert.match(api,/rich editorial collage/);
+  assert.match(api,/Ignore PaletteIQ starter geometry completely/);
+  assert.match(api,/professionally art-directed collage/);
   assert.match(api,/CANVAS BLEED IS ALLOWED/);
-  assert.match(api,/2–4 big hero elements/);
+  assert.match(api,/no mandatory grid, center, perimeter, hero count/);
   assert.match(api,/Return each listed assetId EXACTLY ONCE/);
   assert.match(api,/validListingPlacement\(p,input\.number!\)/);
   assert.match(api,/candidates\.length === fallback\.length/);
