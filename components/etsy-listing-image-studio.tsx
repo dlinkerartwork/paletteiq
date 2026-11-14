@@ -39,6 +39,36 @@ async function imageFromUrl(url: string): Promise<HTMLImageElement> {
   await image.decode();
   return image;
 }
+type CollectionInspection = { sampled: number; checked: number; transparent: number; dimensionSummary: string; failed: number };
+async function inspectOriginalCollectionSample(assets: ListingAsset[]): Promise<CollectionInspection> {
+  // The full collection remains the source of truth. Limit automatic image decode
+  // work so a 120+ asset bundle doesn't download every full-res PNG on page entry.
+  const sample = assets.slice(0, 12);
+  const results = await Promise.all(sample.map(async asset => {
+    try {
+      const image = await imageFromUrl(asset.imageUrl!);
+      const canvas = document.createElement('canvas');
+      canvas.width = 48; canvas.height = 48;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) throw Error('Canvas inspection unavailable');
+      ctx.clearRect(0, 0, 48, 48);
+      ctx.drawImage(image, 0, 0, 48, 48);
+      const data = ctx.getImageData(0, 0, 48, 48).data;
+      let hasAlpha = false;
+      for (let i = 3; i < data.length; i += 4) {
+        if (data[i] < 255) { hasAlpha = true; break; }
+      }
+      return { width: image.naturalWidth, height: image.naturalHeight, hasAlpha };
+    } catch { return null; }
+  }));
+  const succeeded = results.filter((x): x is NonNullable<typeof x> => Boolean(x));
+  const sizes = [...new Set(succeeded.map(x => x.width + '×' + x.height))];
+  return { sampled: sample.length, checked: succeeded.length,
+    transparent: succeeded.filter(x => x.hasAlpha).length,
+    dimensionSummary: sizes.slice(0, 4).join(', ') + (sizes.length > 4 ? ', …' : ''),
+    failed: sample.length - succeeded.length };
+}
+
 function imageBounds(image: HTMLImageElement): { sx: number; sy: number; sw: number; sh: number } {
   // Detect transparent margins in a small temporary raster. The source pixels remain
   // untouched; clipping whitespace only improves sizing of the original PNG layer.
@@ -117,6 +147,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   const [notes, setNotes] = useState<Record<number, string>>({});
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [categories, setCategories] = useState<Record<string,string>>({});
+  const [inspection, setInspection] = useState<CollectionInspection | null>(null);
 
   const categorizedAssets = useMemo(() => assets.map(a => ({ ...a, category: categories[a.id] || a.category })), [assets, categories]);
   const current = records.find(item => item.number === step);
@@ -141,6 +172,16 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     }).catch(error => { if (live) { setLoaded(true); setMessage('Could not load saved listing images: ' + String(error)); } });
     return () => { live = false; };
   }, [projectId]);
+  useEffect(() => {
+    let live = true;
+    setInspection(null);
+    if (assets.length) {
+      void inspectOriginalCollectionSample(assets).then(data => {
+        if (live) setInspection(data);
+      }).catch(() => { if (live) setInspection(null); });
+    }
+    return () => { live = false; };
+  }, [projectId, assets]);
   useEffect(() => {
     let live = true;
     void request('/api/settings?models=openai').then(data => {
@@ -275,6 +316,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     <div className="panel" style={{ padding: 20 }}>
       <h2>Etsy Clipart Listing Studio</h2>
       <p className="sub">Etsy Clipart Listing Studio v1.1 • 15 separate JPGs • 1024 × 1024 px (1:1 square) • automatic art direction • exact originals from the selected PaletteIQ collection, not ZIP.</p>
+      {inspection && <p className="sub">Original collection check: {assets.length} distinct source-image references; {inspection.checked}/{inspection.sampled} sampled images decoded{inspection.dimensionSummary ? ' (dimensions: ' + inspection.dimensionSummary + ')' : ''}; {inspection.transparent} show transparency in the sample{inspection.failed ? '; ' + inspection.failed + ' could not be inspected' : ''}. Counts exclude duplicate URLs. Other image formats, dimensions, DPI and licensing are not assumed.</p>}
       <p className="sub">Creative direction: {artDirection.family} · {artDirection.palette} · AI artwork style follows the collection. {step === 1 ? 'Review the cover first to set the visual direction.' : 'Approved images remain saved; use the same visual language across the series.'}</p>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         <strong>{approved}/15 approved • {assets.length} original images available</strong>
