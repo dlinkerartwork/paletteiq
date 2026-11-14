@@ -35,7 +35,7 @@ test('custom canvas generates graphics only, then Vision fits exact original PNG
   assert.match(method, /slice\(0,9\)\.map\(\(c,i\)=>newImage\(c,i,'original'\)\)/);
   assert.match(method, /assetMap\.get\(e\.characterId\)\?\.imageUrl/);
   assert.match(method, /layout: imageLayers\.map\(e => \(\{ type: 'image' as const/);
-  assert.match(method, /mode: hasLettering \? 'background-with-typography'/);
+  assert.match(method, /mode: needsAiLettering \? 'background-with-typography'/);
   assert.match(method, /referenceSlots = result\.layout\.slots \|\| \[\]/);
   assert.match(method, /referenceDesign = \{ graphicMotif: result\.layout\.graphicMotif/);
   assert.match(method, /await placeOriginalsOverBackground\(/);
