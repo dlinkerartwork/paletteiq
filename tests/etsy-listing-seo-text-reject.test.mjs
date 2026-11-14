@@ -60,7 +60,7 @@ test('Reject & Delete is a confirmed action restricted to the selected stored li
   assert.match(client,/setChanges\(old => \{ const next = \{ \.\.\.old \}; delete next\[step\]/);
   assert.match(client,/setNotes\(old => \{ const next = \{ \.\.\.old \}; delete next\[step\]/);
   assert.match(client,/Reject &amp; Delete/);
-  assert.match(backend,/action\?: 'generate' \| 'preview-prompt' \| 'generate-concept' \| 'clean-concept' \| 'save' \| 'layout' \| 'reject'/);
+  assert.match(backend,/action\?: 'generate' \| 'preview-prompt' \| 'generate-concept' \| 'save' \| 'layout' \| 'reject'/);
   assert.match(backend,/if \(input\.action === 'reject'\)/);
   assert.match(backend,/const rejected = existing\.find\(item => item\.number === number\)/);
   assert.match(backend,/project\.listingImages = existing\.filter\(item => item\.number !== number\)/);
