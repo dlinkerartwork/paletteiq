@@ -28,7 +28,7 @@ type Props = {
   characters: ListingAsset[];
   onSaved?: (images: ListingImageRecord[]) => void;
 };
-type ListResponse = { images?: ListingImageRecord[]; preLayouts?: Record<string, ListingPlacement[]>; compositionModes?: Record<string, ListingCompositionMode>; saved?: boolean; backgroundUrl?: string; placements?: ListingPlacement[]; finalReview?: ListingFinalReview | null; fallback?: string; reviewWarning?: string; costEstimate?: ImageGenerationCostEstimate | null; warning?: string; deleted?: boolean; error?: string };
+type ListResponse = { backgroundPrompt?: string; layoutPrompt?: string; images?: ListingImageRecord[]; preLayouts?: Record<string, ListingPlacement[]>; compositionModes?: Record<string, ListingCompositionMode>; saved?: boolean; backgroundUrl?: string; placements?: ListingPlacement[]; finalReview?: ListingFinalReview | null; fallback?: string; reviewWarning?: string; costEstimate?: ImageGenerationCostEstimate | null; warning?: string; deleted?: boolean; error?: string };
 const apiUrl = '/api/listing-image-studio';
 const styleApiUrl = '/api/listing-style-analysis';
 type StyleResponse = { profile?: ListingVisualStyleProfile | null; cached?: boolean; error?: string };
@@ -244,6 +244,9 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   const [compositionModes, setCompositionModes] = useState<Record<string, ListingCompositionMode>>({});
   const [savedCompositionModes, setSavedCompositionModes] = useState<Record<string, ListingCompositionMode>>({});
   const [allowVisionRefinement, setAllowVisionRefinement] = useState(false);
+  const [promptDrafts, setPromptDrafts] = useState<Record<number, {
+    context: string; backgroundPrompt: string; layoutPrompt: string
+  }>>({});
   const [notes, setNotes] = useState<Record<number, string>>({});
   const [letteringChanges, setLetteringChanges] = useState<Record<number, ListingImageText>>({});
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -269,6 +272,16 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     currentLettering.badge !== (current.badge ?? seoText.badge)
   ));
   const positions = changes[step] || current?.placements || preLayouts[String(step)] || planListingPlacements(step, categorizedAssets);
+  // When any relevant generation input changes, an earlier preview cannot be
+  // silently sent. Explicit refresh is free and restores the exact server prompt.
+  const promptContext = JSON.stringify({
+    projectId, step, textScale, backgroundStyle, compositionMode,
+    lettering: currentLettering, revisionNotes: notes[step] ?? current?.notes ?? '',
+    placements: compositionMode === 'free' ? positions.map(p => p.assetId) : positions
+  });
+  const promptDraft = promptDrafts[step];
+  const promptsReady = Boolean(promptDraft && promptDraft.context === promptContext &&
+    promptDraft.backgroundPrompt.trim() && promptDraft.layoutPrompt.trim());
   const selected = positions[selectedIndex] || positions[0];
   const selectedAssetIds = useMemo(() => positions.map(p=>p.assetId), [positions]);
   const coverCopy = useMemo(() => suggestListingCoverCopy({
@@ -446,11 +459,12 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
    * not a clipart limit or a source of fixed PaletteIQ positions.
    */
   const arrangeWithAI = async (
-    backgroundUrl: string, initial: ListingPlacement[], critiqueFeedback = ''
+    backgroundUrl: string, initial: ListingPlacement[], critiqueFeedback = '',
+    visionArtPrompt = promptDraft?.layoutPrompt
   ): Promise<{ placements: ListingPlacement[]; warning: string }> => {
     if (compositionMode !== 'free') {
       const vision = await send({ action:'layout', projectId, number:step,
-        backgroundUrl, placements:initial, compositionMode, critiqueFeedback });
+        backgroundUrl, placements:initial, compositionMode, critiqueFeedback, layoutPrompt:visionArtPrompt });
       return { placements:vision.placements?.length === initial.length ? vision.placements : initial,
         warning:vision.fallback || '' };
     }
@@ -471,7 +485,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
         const vision = await send({ action:'layout', projectId, number:step,
           backgroundUrl, placements:batch, compositionMode:'free',
           artworkContactSheets, existingPlacements:arranged, totalSelected:initial.length,
-          critiqueFeedback });
+          critiqueFeedback, layoutPrompt:visionArtPrompt });
         if (vision.fallback || !vision.placements || vision.placements.length !== batch.length) {
           arranged.push(...batch);
           warnings.push('Objects ' + (offset + 1) + '–' + (offset + batch.length) +
@@ -487,8 +501,40 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     return { placements:arranged, warning:warnings.join(' ') };
   };
 
+  const prepareOpenAiPrompts = async () => {
+    if (working || !positions.length) return;
+    setWorking('prompt');
+    setMessage('Preparing the exact OpenAI background prompt and Vision art-direction text (no paid generation)...');
+    try {
+      // Source-style analysis is cached server-side. Fetch before preparing
+      // the prompt so the text matches what the actual generation would use.
+      try { await ensureSourceStyle(); }
+      catch (error) {
+        setStyleWarning('Visual style could not be sampled: ' +
+          (error instanceof Error ? error.message : String(error)) +
+          '. Using saved collection theme and style instead.');
+      }
+      const response = await send({
+        action:'preview-prompt', projectId, number:step, featuredCount:positions.length,
+        placements:positions, textScale, backgroundStyle, compositionMode,
+        title:currentLettering.title, subtitle:currentLettering.subtitle, badge:currentLettering.badge,
+        revisionNotes:notes[step] ?? current?.notes ?? ''
+      });
+      if (!response.backgroundPrompt || !response.layoutPrompt)
+        throw Error('Server did not return both OpenAI prompts');
+      setPromptDrafts(prev => ({...prev, [step]:{
+        context:promptContext, backgroundPrompt:response.backgroundPrompt!, layoutPrompt:response.layoutPrompt!
+      }}));
+      setMessage('OpenAI prompts are ready for review. Edit either textarea freely, then generate. No paid image or Vision request has been sent.');
+    } catch(error) {
+      setMessage('Could not prepare OpenAI prompts: ' +
+        (error instanceof Error ? error.message : String(error)));
+    } finally { setWorking(''); }
+  };
+
   const generate = async () => {
     if (working) return;
+    if (!promptsReady) return setMessage('Prepare and review both OpenAI prompts before paid generation. Refresh prompts after changing settings or selected originals.');
     if (!assets.length) return setMessage('Generate collection clipart in Image Production first.');
     if (!precedingApproved) return setMessage('Approve all preceding listing images before generating this one.');
     if (current?.status === 'approved' && !window.confirm('Regenerate an approved image? Its approval will be reset to Draft.')) return;
@@ -530,6 +576,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       setMessage(compositionMode === 'free' ? 'Generating free-composition background and artistic lettering; original clipart positions will be designed independently by AI Vision...' : 'Generating AI background and lettering using your structured white-canvas composition...');
       const response = await send({ action: 'generate', projectId, number: step, model, quality,
         featuredCount: effectivePositions.length, placements: effectivePositions, textScale, backgroundStyle, compositionMode,
+        backgroundPrompt:promptDraft!.backgroundPrompt,
         title: lettering.title, subtitle: lettering.subtitle, badge: lettering.badge,
         revisionNotes: (notes[step] ?? current?.notes ?? '').trim() });
       if (!response.backgroundUrl) throw Error('OpenAI did not return the background');
@@ -540,7 +587,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       if (compositionMode === 'free' || allowVisionRefinement) {
         setMessage('OpenAI Vision is designing original artwork positions, sizes, layer hierarchy and tasteful edge bleed...');
         try {
-          const vision = await arrangeWithAI(response.backgroundUrl, effectivePositions);
+          const vision = await arrangeWithAI(response.backgroundUrl, effectivePositions, '', promptDraft!.layoutPrompt);
           suggested = vision.placements;
           layoutWarning = vision.warning;
         } catch (error) {
@@ -685,6 +732,8 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   };
   const autoArrangeArtwork = async () => {
     if (working) return;
+    if (current?.backgroundUrl && !promptsReady)
+      return setMessage('Prepare or refresh the OpenAI Vision prompt above before paid Auto Arrange. You can edit the composition instructions first.');
     if (current?.status === 'approved' && !window.confirm('Rearrange this approved image? Save the updated JPG to reset approval.')) return;
     const localPlan = planListingPlacements(step, categorizedAssets, { assetIds: selectedAssetIds });
     if (!current?.backgroundUrl) {
@@ -696,7 +745,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     setMessage('AI Vision is arranging the selected original PNGs around the actual lettering...');
     try {
       const answer = await arrangeWithAI(current.backgroundUrl, positions,
-        current.finalReview?.improvements.join('; ') || '');
+        current.finalReview?.improvements.join('; ') || '', promptDraft!.layoutPrompt);
       setChanges(old => ({ ...old, [step]: answer.placements }));
       setMessage(answer.warning
         ? answer.warning + ' Review the updated preview; retry Auto Arrange for any fallback objects.'
@@ -994,13 +1043,41 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
               disabled={!!working} onChange={e=>setAutoFinalCritique(e.target.checked)}/>
             Automatically critique the FINAL composited JPG (recommended, additional paid Vision API request)
           </label>
-          <button type="button" className="primary-btn" onClick={() => void generate()} disabled={!loaded || !assets.length || !!working || !precedingApproved}>
+          <section data-listing-openai-prompt-editor="true" style={{ border:'1px solid #e5d9cb',
+            borderRadius:10, padding:12, display:'grid', gap:9 }}>
+            <strong>OpenAI prompt editor — review before sending</strong>
+            <small style={{ color:'#75695e' }}>Prepare the real server-generated prompts at no image-generation cost. Edit freely before clicking Generate or Auto Arrange. PaletteIQ will still paste ONLY your original clipart files.</small>
+            <button type="button" className="outline-btn" disabled={!!working || !positions.length}
+              onClick={() => void prepareOpenAiPrompts()}>
+              {promptsReady ? 'Reset / refresh both OpenAI prompts' : 'Prepare OpenAI prompts (no generation cost)'}
+            </button>
+            {!promptsReady && <small role="status" style={{ color:'#96501f' }}>Prompts have not been prepared for the current collection selection and settings. Refresh them before generating; any previous draft for this image remains saved in this session.</small>}
+            <label className="input-label" htmlFor="listing-background-prompt">OPENAI IMAGE GENERATION — BACKGROUND &amp; TYPOGRAPHY PROMPT</label>
+            <textarea id="listing-background-prompt" aria-label="Editable OpenAI background and typography prompt"
+              rows={10} maxLength={24000} spellCheck={false}
+              value={promptsReady ? promptDraft!.backgroundPrompt : ''}
+              onChange={e => setPromptDrafts(old => ({...old,[step]:{...old[step]!,backgroundPrompt:e.target.value}}))}
+              disabled={!!working || !promptsReady}
+              placeholder="Click Prepare OpenAI prompts to see the exact text that will be sent to the image-generation API."
+              style={{ width:'100%', boxSizing:'border-box', resize:'vertical', fontFamily:'inherit', fontSize:12, lineHeight:1.55 }}/>
+            <small style={{ color:'#75695e' }}>This entire text is sent unchanged as the image-generation prompt. You may rewrite or remove any artistic recommendations, including font and layout preferences. Exact title/subtitle words and source-art authenticity remain your responsibility to review.</small>
+            <label className="input-label" htmlFor="listing-vision-prompt">OPENAI VISION — ORIGINAL CLIPART COMPOSITION PROMPT</label>
+            <textarea id="listing-vision-prompt" aria-label="Editable OpenAI Vision composition prompt"
+              rows={8} maxLength={12000} spellCheck={false}
+              value={promptsReady ? promptDraft!.layoutPrompt : ''}
+              onChange={e => setPromptDrafts(old => ({...old,[step]:{...old[step]!,layoutPrompt:e.target.value}}))}
+              disabled={!!working || !promptsReady}
+              placeholder="Click Prepare OpenAI prompts to see and edit Vision's artistic composition instructions."
+              style={{ width:'100%', boxSizing:'border-box', resize:'vertical', fontFamily:'inherit', fontSize:12, lineHeight:1.55 }}/>
+            <small style={{ color:'#75695e' }}>This is the exact editable Vision art-direction text. PaletteIQ appends the mandatory output JSON schema, selected original asset IDs, existing batch positions, background image and reference contact sheets so no asset identity is lost. Each Vision batch uses your edited instructions.</small>
+          </section>
+          <button type="button" className="primary-btn" onClick={() => void generate()} disabled={!loaded || !assets.length || !!working || !precedingApproved || !promptsReady}>
             {working === 'generate' ? <LoaderCircle className="spin" size={16}/> : <Sparkles size={16}/>}
             {current?.backgroundUrl ? 'Revise Image ' + String(step).padStart(2,'0') + ' (AI background)' : step === 1 ? 'Start /new-listing — Generate Main Cover' : 'Generate Image ' + String(step).padStart(2,'0')}
           </button>
           {!precedingApproved && <small style={{ color: '#94502e' }}>Approve the earlier images in order before generating this image.</small>}
           {(step === 3 || step === 5) && <button className="outline-btn" type="button" onClick={() => void categorize()} disabled={!!working}>Analyze collection categories (optional)</button>}
-          <small style={{ color: '#74695e' }}>The current white-canvas pre-layout is saved before paid generation and its coordinates guide AI typography. Only the graphic background, lettering and blank mockup environment are AI-generated. Original collection clipart remains editable after generation.</small>
+          <small style={{ color: '#74695e' }}>Free Composition ignores starter canvas coordinates in the AI background prompt. After background generation, OpenAI Vision chooses positions for the selected originals using your edited composition instructions. PaletteIQ composites the unchanged source PNGs over the result.</small>
           <hr style={{ width: '100%', border: 0, borderTop: '1px solid #eee4d9' }}/>
           <label className="input-label">REVISION NOTES</label>
           <textarea rows={3} maxLength={800} value={notes[step] ?? current?.notes ?? ''} onChange={e => setNotes(old => ({ ...old, [step]: e.target.value }))} placeholder="Specify desired revision to the current image, if any."/>
