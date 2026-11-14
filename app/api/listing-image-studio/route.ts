@@ -456,7 +456,7 @@ export async function POST(request: Request) {
       {name:'paletteiq-source-manifest.json',stream:async()=>new Blob([meta],{type:'application/json'}).stream()},
       ...refs.map(({name,key}):ZipEntry=>({name,stream:async()=> (await storage.get(key))?.body||null}))
     ];
-    const safe=(project.name||'collection').replace(/[^a-zA-Z0-9-_ ]/g,'').replace(/\\s+/g,'-').slice(0,64)||'collection';
+    const safe=(project.name||'collection').replace(/[^a-zA-Z0-9-_ ]/g,'').replace(/\s+/g,'-').slice(0,64)||'collection';
     return new Response(zipStream(entries),{headers:{
       'Content-Type':'application/zip','Content-Disposition':'attachment; filename="'+safe+'-original-clipart-source.zip"',
       'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'
