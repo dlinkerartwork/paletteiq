@@ -6,7 +6,7 @@ import { readApiJson, uploadListingJpg } from '@/lib/listing-image-upload';
 import { listingCreativeDirection, listingMockupScene } from '@/lib/etsy-listing-creative-direction';
 import {
   LISTING_IMAGE_SPECS, LISTING_WIDTH, LISTING_HEIGHT, originalAssets,
-  planListingPlacements, listingFilename, isSquareListingApproved, type ListingAsset, type ListingImageRecord, type ListingPlacement
+  planListingPlacements, listingFilename, listingImageTextDefaults, isSquareListingApproved, type ListingImageText, type ListingAsset, type ListingImageRecord, type ListingPlacement
 } from '@/lib/etsy-listing-image-plan';
 
 type Props = {
@@ -18,10 +18,11 @@ type Props = {
   palette?: string;
   texture?: string;
   seoTitle?: string;
+  primaryKeyword?: string;
   characters: ListingAsset[];
   onSaved?: (images: ListingImageRecord[]) => void;
 };
-type ListResponse = { images?: ListingImageRecord[]; backgroundUrl?: string; placements?: ListingPlacement[]; fallback?: string; reviewWarning?: string; error?: string };
+type ListResponse = { images?: ListingImageRecord[]; backgroundUrl?: string; placements?: ListingPlacement[]; fallback?: string; reviewWarning?: string; warning?: string; deleted?: boolean; error?: string };
 const apiUrl = '/api/listing-image-studio';
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Number.isFinite(n) ? n : lo));
 const fileName = (number: number) => listingFilename(number);
@@ -132,8 +133,9 @@ async function upload(projectId: string, number: number, blob: Blob, onProgress?
   return uploadListingJpg(projectId, fileName(number), blob, fetch, onProgress);
 }
 
-export default function EtsyListingImageStudio({ projectId, name, theme, subtheme, style, palette, texture, seoTitle, characters, onSaved }: Props) {
+export default function EtsyListingImageStudio({ projectId, name, theme, subtheme, style, palette, texture, seoTitle, primaryKeyword, characters, onSaved }: Props) {
   const artDirection = useMemo(() => listingCreativeDirection({ name, theme, subtheme, style, palette, texture, listing: { title: seoTitle } }), [name, theme, subtheme, style, palette, texture, seoTitle]);
+  const seoText = useMemo(() => listingImageTextDefaults({ title: seoTitle, primaryKeyword }, artDirection.title), [seoTitle, primaryKeyword, artDirection.title]);
   const assets = useMemo(() => originalAssets(characters), [characters]);
   const [records, setRecords] = useState<ListingImageRecord[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -145,12 +147,23 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   const [availableModels, setAvailableModels] = useState<Array<{id: string; name: string}>>([]);
   const [changes, setChanges] = useState<Record<number, ListingPlacement[]>>({});
   const [notes, setNotes] = useState<Record<number, string>>({});
+  const [letteringChanges, setLetteringChanges] = useState<Record<number, ListingImageText>>({});
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [categories, setCategories] = useState<Record<string,string>>({});
   const [inspection, setInspection] = useState<CollectionInspection | null>(null);
 
   const categorizedAssets = useMemo(() => assets.map(a => ({ ...a, category: categories[a.id] || a.category })), [assets, categories]);
   const current = records.find(item => item.number === step);
+  const currentLettering: ListingImageText = letteringChanges[step] ?? {
+    title: current?.title ?? seoText.title,
+    subtitle: current?.subtitle ?? seoText.subtitle,
+    badge: current?.badge ?? seoText.badge
+  };
+  const letteringDirty = Boolean(current?.backgroundUrl && (
+    currentLettering.title !== (current.title ?? seoText.title) ||
+    currentLettering.subtitle !== (current.subtitle ?? seoText.subtitle) ||
+    currentLettering.badge !== (current.badge ?? seoText.badge)
+  ));
   const positions = changes[step] || current?.placements || planListingPlacements(step, categorizedAssets);
   const selected = positions[selectedIndex] || positions[0];
   const approved = LISTING_IMAGE_SPECS.filter(s => records.some(r => r.number === s.number && isSquareListingApproved(r))).length;
@@ -214,14 +227,15 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     const result = await send({ action: 'save', projectId, number: step, image });
     receive(result.images || []);
   };
-  const renderAndSave = async (background: string, layout: ListingPlacement[], info: string, reviewWarning = '') => {
+  const renderAndSave = async (background: string, layout: ListingPlacement[], info: string, reviewWarning = '', lettering: ListingImageText = currentLettering) => {
     setWorking('render'); setMessage('Compositing ' + layout.length + ' exact original collection clipart images at 1024 × 1024 px...');
     const file = await compose(background, layout, assets);
     setMessage('Saving JPG preview to the collection in safe upload chunks...');
     const renderedImageUrl = await upload(projectId, step, file, (done, total) => setMessage('Uploading original-asset JPG: ' + done + '/' + total + ' parts...'));
     const image: ListingImageRecord = {
       number: step, status: 'draft', backgroundUrl: background, renderedImageUrl, placements: layout,
-      width: LISTING_WIDTH, height: LISTING_HEIGHT, notes: info, reviewWarning, updatedAt: Date.now()
+      width: LISTING_WIDTH, height: LISTING_HEIGHT, title: lettering.title, subtitle: lettering.subtitle,
+      badge: lettering.badge, notes: info, reviewWarning, updatedAt: Date.now()
     };
     await saveRecord(image);
     setChanges(old => { const next = { ...old }; delete next[step]; return next; });
@@ -232,6 +246,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     if (!assets.length) return setMessage('Generate collection clipart in Image Production first.');
     if (!precedingApproved) return setMessage('Approve all preceding listing images before generating this one.');
     if (current?.status === 'approved' && !window.confirm('Regenerate an approved image? Its approval will be reset to Draft.')) return;
+    const lettering = { ...currentLettering };
     setWorking('generate'); setMessage('Generating artistic background + exact typography with OpenAI (no clipart regeneration)...');
     try {
       let effectivePositions = positions;
@@ -252,6 +267,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       }
       setMessage('Generating the AI graphic background and artistic typography...');
       const response = await send({ action: 'generate', projectId, number: step, model, quality,
+        title: lettering.title, subtitle: lettering.subtitle, badge: lettering.badge,
         revisionNotes: (notes[step] ?? current?.notes ?? '').trim() });
       if (!response.backgroundUrl) throw Error('OpenAI did not return the background');
       let suggested = effectivePositions;
@@ -270,9 +286,10 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       await saveRecord({
         number: step, status: 'draft', backgroundUrl: response.backgroundUrl,
         renderedImageUrl: '', placements: suggested, width: LISTING_WIDTH, height: LISTING_HEIGHT,
+        title: lettering.title, subtitle: lettering.subtitle, badge: lettering.badge,
         notes: notes[step] || current?.notes || '', reviewWarning: response.reviewWarning || '', updatedAt: Date.now()
       });
-      await renderAndSave(response.backgroundUrl, suggested, notes[step] || current?.notes || '', response.reviewWarning || '');
+      await renderAndSave(response.backgroundUrl, suggested, notes[step] || current?.notes || '', response.reviewWarning || '', lettering);
       if (layoutWarning) setMessage('Image saved as draft. ' + layoutWarning);
     } catch (error) { setMessage('Generation failed: ' + (error instanceof Error ? error.message : String(error))); }
     finally { setWorking(''); }
@@ -281,6 +298,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     if (working) return;
     if (!current?.backgroundUrl) return setMessage('Generate the background first.');
     if (current.status === 'approved' && !window.confirm('Revise this approved image and reset approval?')) return;
+    if (letteringDirty) return setMessage('Title, Subtitle, or Badge changed. Regenerate AI background & typography to apply the new lettering before saving.');
     try { await renderAndSave(current.backgroundUrl, positions, notes[step] || current.notes || '', current.reviewWarning || ''); }
     catch (error) { setMessage('Could not save revised image: ' + (error instanceof Error ? error.message : String(error))); }
     finally { setWorking(''); }
@@ -291,15 +309,39 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       return setMessage('Render a new 1024 × 1024 square JPG before approval. Your older 4:3 image remains saved.');
     if (status === 'approved' && current.reviewWarning &&
         !window.confirm('Automatic review flagged a possible issue:\n' + current.reviewWarning + '\n\nHave you carefully checked the artwork, mockup, text and verified facts and want to approve this JPG anyway?')) return;
+    if (letteringDirty) return setMessage('Title, Subtitle, or Badge changed. Regenerate the AI artwork before approving the new text.');
     if (changes[step]) return setMessage('You changed the layout. Click Apply layout & save JPG before approval.');
     setWorking('review');
     try {
-      await saveRecord({ ...current, status, notes: notes[step] || current.notes || '', updatedAt: Date.now() });
+      await saveRecord({ ...current, status, title: currentLettering.title, subtitle: currentLettering.subtitle,
+        badge: currentLettering.badge, notes: notes[step] || current.notes || '', updatedAt: Date.now() });
       setMessage(status === 'approved' ? 'Image ' + step + ' approved and saved.' : 'Image marked for revision. Edit placement for a free JPG re-render, or write feedback and regenerate the AI background to apply those notes.');
       if (status === 'approved' && step < 15) { setStep(step + 1); setSelectedIndex(0); }
     } catch (error) { setMessage('Could not save review: ' + String(error)); }
     finally { setWorking(''); }
   };
+  const rejectAndDelete = async () => {
+    if (working || !current || (!current.backgroundUrl && !current.renderedImageUrl)) return;
+    if (!window.confirm('Reject & permanently delete generated Image ' + String(step).padStart(2,'0') +
+      '? The AI background, saved JPG and approval for this image will be removed. This cannot be undone; other listing images and collection clipart remain untouched.')) return;
+    setWorking('reject');
+    setMessage('Deleting this generated listing image and its saved background...');
+    try {
+      const result = await send({ action: 'reject', projectId, number: step });
+      if (!result.deleted) throw Error('The server did not confirm deletion.');
+      receive(result.images || []);
+      setChanges(old => { const next = { ...old }; delete next[step]; return next; });
+      setNotes(old => { const next = { ...old }; delete next[step]; return next; });
+      setLetteringChanges(old => { const next = { ...old }; delete next[step]; return next; });
+      setSelectedIndex(0);
+      setMessage(result.warning
+        ? 'Image rejected and removed from the collection. ' + result.warning
+        : 'Image ' + String(step).padStart(2,'0') + ' rejected and deleted. Title and Subtitle were reset to Etsy SEO defaults, Badge cleared. Generate from the beginning.');
+    } catch (error) {
+      setMessage('Reject & Delete failed: ' + (error instanceof Error ? error.message : String(error)));
+    } finally { setWorking(''); }
+  };
+
   const move = (field: 'assetId' | 'x' | 'y' | 'width' | 'height' | 'rotation', value: string) => {
     setChanges(prev => {
       const list = [...(prev[step] || current?.placements || planListingPlacements(step, categorizedAssets))];
@@ -308,6 +350,11 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       list[selectedIndex] = { ...target, [field]: field === 'assetId' ? value : clamp(Number(value), field === 'rotation' ? -30 : field === 'width' || field === 'height' ? 2 : 0, field === 'rotation' ? 30 : 100) };
       return { ...prev, [step]: list };
     });
+  };
+  const editLettering = (field: keyof ListingImageText, value: string) => {
+    setLetteringChanges(previous => ({
+      ...previous, [step]: { ...currentLettering, [field]: value }
+    }));
   };
   const setPage = (number: number) => { setStep(number); setSelectedIndex(0); setMessage(''); };
   const spec = LISTING_IMAGE_SPECS[step - 1];
@@ -373,6 +420,30 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
               </select>
             </div>
           </details>
+          <div style={{ border: '1px solid #eadfce', borderRadius: 10, padding: 12, display: 'grid', gap: 9 }}>
+            <strong>Title, Subtitle &amp; Badge for Image {String(step).padStart(2,'0')}</strong>
+            <small style={{ color: '#75695e' }}>Default Title = SEO Title, Subtitle = Primary Keyword from Etsy Listing Draft. Both can be edited. Badge is optional and empty by default.</small>
+            <label className="input-label" htmlFor="listing-image-title">TITLE (SEO TITLE DEFAULT)</label>
+            <input id="listing-image-title" aria-label="Listing image title" type="text" maxLength={140}
+              value={currentLettering.title} disabled={!!working}
+              onChange={e => editLettering('title', e.target.value)}
+              placeholder="Listing title"/>
+            <label className="input-label" htmlFor="listing-image-subtitle">SUBTITLE (PRIMARY KEYWORD DEFAULT)</label>
+            <input id="listing-image-subtitle" aria-label="Listing image subtitle" type="text" maxLength={140}
+              value={currentLettering.subtitle} disabled={!!working}
+              onChange={e => editLettering('subtitle', e.target.value)}
+              placeholder="Primary keyword"/>
+            <label className="input-label" htmlFor="listing-image-badge">BADGE (OPTIONAL)</label>
+            <input id="listing-image-badge" aria-label="Listing image badge" type="text" maxLength={60}
+              value={currentLettering.badge} disabled={!!working}
+              onChange={e => editLettering('badge', e.target.value)}
+              placeholder="e.g. 80 CLIPART • Leave blank for no badge"/>
+            <button type="button" className="outline-btn" disabled={!!working}
+              onClick={() => setLetteringChanges(prev => ({ ...prev, [step]: { ...seoText } }))}>
+              Reset text to Etsy SEO defaults
+            </button>
+            {letteringDirty && <small role="alert" style={{ color: '#a04c22' }}>Title, Subtitle or Badge has changed since this background was generated. Click Regenerate AI background + lettering to apply the new text. A layout-only re-render cannot change AI lettering.</small>}
+          </div>
           <button type="button" className="primary-btn" onClick={() => void generate()} disabled={!loaded || !assets.length || !!working || !precedingApproved}>
             {working === 'generate' ? <LoaderCircle className="spin" size={16}/> : <Sparkles size={16}/>}
             {current?.backgroundUrl ? 'Revise Image ' + String(step).padStart(2,'0') + ' (AI background)' : step === 1 ? 'Start /new-listing — Generate Main Cover' : 'Generate Image ' + String(step).padStart(2,'0')}
@@ -403,7 +474,10 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           <small style={{ color: '#74695e' }}>Your revision notes are included in the next paid AI background regeneration for this image only. To adjust original clipart positions without AI charges, use Apply layout & save JPG. Review spelling, crop, verified facts and mockup realism before approving.</small>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button type="button" className="outline-btn" disabled={!current?.renderedImageUrl || !!working} onClick={() => void review('needs_revision')}>Needs revision</button>
-            <button type="button" className="primary-btn" disabled={!current?.renderedImageUrl || !!working || current.width !== LISTING_WIDTH || current.height !== LISTING_HEIGHT} onClick={() => void review('approved')}><Check size={16}/> Approve & Next (/next) <ArrowRight size={15}/></button>
+            <button type="button" className="outline-btn" disabled={!loaded || !!working || (!current?.backgroundUrl && !current?.renderedImageUrl)}
+              style={{ color: '#a8342b', borderColor: '#d7a19c' }}
+              onClick={() => void rejectAndDelete()}>Reject &amp; Delete</button>
+            <button type="button" className="primary-btn" disabled={!current?.renderedImageUrl || !!working || letteringDirty || current.width !== LISTING_WIDTH || current.height !== LISTING_HEIGHT} onClick={() => void review('approved')}><Check size={16}/> Approve & Next (/next) <ArrowRight size={15}/></button>
           </div>
         </div>
       </div>

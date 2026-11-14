@@ -9,7 +9,7 @@ import { zipStream, type ZipEntry } from '@/lib/zip-stream';
 import { listingCreativeDirection, listingCreativeSummary, listingMockupScene } from '@/lib/etsy-listing-creative-direction';
 import {
   LISTING_IMAGE_SPECS, LISTING_HEIGHT, LISTING_WIDTH, listingFilename, listingTitle,
-  originalAssets, isSquareListingApproved, type ListingImageRecord, type ListingPlacement, type ListingAsset, type ListingImageStatus
+  originalAssets, isSquareListingApproved, listingImageTextDefaults, type ListingImageText, type ListingImageRecord, type ListingPlacement, type ListingAsset, type ListingImageStatus
 } from '@/lib/etsy-listing-image-plan';
 
 const bad = (message: string, status = 400) => Response.json({ error: message }, { status });
@@ -59,7 +59,10 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
   const height = value.height ?? previous?.height;
   if (status === 'approved' && (!renderedImageUrl || !placements.length || width !== LISTING_WIDTH || height !== LISTING_HEIGHT))
     throw Error('Save a 1024 × 1024 JPG using original collection artwork before approval. Legacy 4:3 renders must be remade.');
-  return { number: value.number, status, backgroundUrl, renderedImageUrl, placements, width, height, notes: sanitizedText(value.notes || '', 800),
+  const title = typeof value.title === 'string' ? sanitizedText(value.title, 140) : previous?.title;
+  const subtitle = typeof value.subtitle === 'string' ? sanitizedText(value.subtitle, 140) : previous?.subtitle;
+  const badge = typeof value.badge === 'string' ? sanitizedText(value.badge, 60) : previous?.badge;
+  return { number: value.number, status, backgroundUrl, renderedImageUrl, placements, width, height, title, subtitle, badge, notes: sanitizedText(value.notes || '', 800),
     reviewWarning: typeof value.reviewWarning === 'string' ? sanitizedText(value.reviewWarning, 280) : '',
     updatedAt: Date.now() };
 }
@@ -73,6 +76,39 @@ async function updateImage(project: StoredProject, number: number, patch: Listin
   await getDb().update(projects).set({ data: JSON.stringify(project), updatedAt: Date.now() })
     .where(and(eq(projects.id, project.id), eq(projects.owner, owner)));
   return project.listingImages;
+}
+
+/**
+ * Reject only one listing-image generation. Remove its DB record first, then
+ * delete the associated AI background and composed JPG from owned storage.
+ * Other approved images, collection originals and thumbnail designs are untouched.
+ */
+async function rejectImage(project: StoredProject, number: number, owner: string) {
+  const existing = normalizedImages(project);
+  const rejected = existing.find(item => item.number === number);
+  if (!rejected) return { images: existing, warning: '' };
+  project.listingImages = existing.filter(item => item.number !== number);
+  await getDb().update(projects).set({ data: JSON.stringify(project), updatedAt: Date.now() })
+    .where(and(eq(projects.id, project.id), eq(projects.owner, owner)));
+
+  // Never delete an object referenced anywhere else in the saved collection.
+  const stillInUse = JSON.stringify(project);
+  const urls = [rejected.backgroundUrl, rejected.renderedImageUrl]
+    .filter((url): url is string => Boolean(url));
+  const uniqueKeys = [...new Set(urls.filter(url => !stillInUse.includes(url))
+    .map(url => savedAssetKey(url, project.id, owner)).filter((key): key is string => Boolean(key)))];
+  const storage = bucket();
+  if (!uniqueKeys.length) return { images: project.listingImages, warning: '' };
+  if (!storage) return { images: project.listingImages,
+    warning: 'Listing result was removed, but image storage is unavailable for physical cleanup.' };
+  const errors: string[] = [];
+  for (const key of uniqueKeys) {
+    try { await storage.delete(key); }
+    catch { errors.push(key); }
+  }
+  return { images: project.listingImages, warning: errors.length
+    ? 'Listing result was removed, but ' + errors.length + ' generated file(s) could not be deleted from storage.'
+    : '' };
 }
 
 export async function GET(request: Request) {
@@ -106,35 +142,36 @@ export async function GET(request: Request) {
 }
 
 type Input = {
-  action?: 'generate' | 'save' | 'layout'; projectId?: string; number?: number;
+  action?: 'generate' | 'save' | 'layout' | 'reject'; projectId?: string; number?: number;
   image?: ListingImageRecord; model?: string; quality?: string;
   backgroundUrl?: string; placements?: ListingPlacement[]; revisionNotes?: string;
+  title?: string; subtitle?: string; badge?: string;
 };
 /**
  * Generate only a decorative image/typographic background. Collection originals
  * are composited by the client AFTER this call; the image model never receives
  * a copy of the PNGs and cannot replace or redraw them.
  */
-function artPrompt(number: number, project: StoredProject, count: number, revisionNotes = ''): string {
+function artPrompt(number: number, project: StoredProject, count: number, revisionNotes = '', text?: ListingImageText): string {
   const spec = LISTING_IMAGE_SPECS[number - 1];
   const direction = listingCreativeDirection(project);
-  const title = number === 1 ? direction.title : listingTitle(number, direction.identity);
-  // Counts refer to unique saved ORIGINAL artwork image URLs. Do not infer a
-  // particular file format, alpha channel, DPI, licensing or original pixel size.
-  const subtitle = number === 1 || number === 6 || number === 13
-    ? count + ' original clipart illustrations'
-    : number === 2 || number === 3 || number === 5
-      ? count + ' original collection images'
-      : number === 14 ? 'Purchase • Download • Create'
-      : 'Ideas using original clipart';
+  const defaults = listingImageTextDefaults(project.listing, direction.title);
+  const title = text?.title ?? defaults.title;
+  const subtitle = text?.subtitle ?? defaults.subtitle;
+  const badge = text?.badge ?? '';
+  // Counts refer to unique saved ORIGINAL artwork image URLs. Never infer formats
+  // or DPI, and never add quantity claims unless explicitly supported.
   const core = [
     'You are an Etsy visual merchandiser and expert creative director. Produce a conversion-focused image BACKGROUND plus exact artistic lettering for ONE image in a cohesive 15-image listing sequence.',
     'Image ' + number + ' of 15 — ' + spec.title + '. Its purpose is ' + spec.purpose + '.',
     'FINAL CANVAS IS 1024 x 1024 pixels, 1:1 SQUARE JPG. Your source is already 1024 x 1024. No landscape crop, no black bars. Place all lettering within the square safe margin (minimum 6% from all sides).',
-    'Display EXACT main title ' + JSON.stringify(title) + ' and EXACT subtitle ' + JSON.stringify(subtitle) + '. No additional claims or marketing copy. Spell every character correctly.',
+    title ? 'Render EXACT user-supplied MAIN TITLE as bespoke artistic lettering: ' + JSON.stringify(title) + '.' : 'No main title; never invent headline text.',
+    subtitle ? 'Render EXACT user-supplied SUBTITLE as readable artistic lettering: ' + JSON.stringify(subtitle) + '.' : 'No subtitle; do not invent extra supporting words.',
+    badge ? 'Render this OPTIONAL BADGE as premium graphic typography with EXACT words: ' + JSON.stringify(badge) + '. Decorative outlines are permitted, but no illustrated objects.' : 'NO BADGE: do not invent a badge, sticker label or other words.',
+    'The text above is the COMPLETE allowed wording. No additional claims or marketing copy. Spell every requested character correctly.',
     listingCreativeSummary(direction),
     'Design typography for quick readability on a small Etsy search-result thumbnail: bold but friendly high-contrast custom lettering, artistically curved or hand-painted where appropriate, with restrained supporting text.',
-    'Keep main title and subtitle entirely within the upper 24% of the FINAL 1:1 square canvas. The original artwork will occupy most of the remaining region; keep mobile thumbnail readability.',
+    'Place the exact requested main title and subtitle within the upper 24% of the FINAL 1:1 square canvas, and optional badge in a visually balanced non-overlapping position. The original artwork occupies most of the remaining region; keep mobile readability.',
     'The actual collection images are NOT provided to you. PaletteIQ will composite the exact originals later. Do NOT generate clipart, animal/food/flower drawings, icons, logos, product print art, or stand-in illustrations.',
     'Only verified count of unique original images is ' + count + '. Never claim PNG, transparency, ZIP contents, DPI, license, print resolution, or asset dimensions without verified metadata.',
     'Use clean commercial visual hierarchy, artwork-first layout, consistent recognizable product identity and elegant foreground/background separation.',
@@ -181,6 +218,15 @@ export async function POST(request: Request) {
   const stored = await findProject(input.projectId, user.userId);
   if (!stored) return bad('Collection not found', 404);
   const project = JSON.parse(stored.data) as StoredProject;
+  if (input.action === 'reject') {
+    try {
+      const result = await rejectImage(project, input.number, user.userId);
+      return Response.json({ ...result, deleted: true });
+    } catch (error) {
+      return bad('Could not reject and delete listing image: ' +
+        (error instanceof Error ? error.message : String(error)).slice(0, 180), 500);
+    }
+  }
   if (input.action === 'save') {
     if (!input.image || input.image.number !== input.number) return bad('Invalid image record');
     try {
@@ -260,7 +306,19 @@ export async function POST(request: Request) {
   if (!['low', 'medium', 'high'].includes(quality)) return bad('Invalid image quality');
   const key = await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
   if (!key) return bad('Configure OpenAI API key in Settings', 503);
-  const prompt = artPrompt(input.number, project, count, typeof input.revisionNotes === 'string' ? input.revisionNotes : '');
+  // Type and length validation happens BEFORE any paid image generation.
+  for (const [key, limit] of [['title', 140], ['subtitle', 140], ['badge', 60]] as const) {
+    const raw = input[key];
+    if (raw !== undefined && (typeof raw !== 'string' || raw.length > limit))
+      return bad('Invalid ' + key + ': expected text of at most ' + limit + ' characters.');
+  }
+  const defaults = listingImageTextDefaults(project.listing, listingCreativeDirection(project).title);
+  const text: ListingImageText = {
+    title: typeof input.title === 'string' ? sanitizedText(input.title, 140) : defaults.title.slice(0, 140),
+    subtitle: typeof input.subtitle === 'string' ? sanitizedText(input.subtitle, 140) : defaults.subtitle.slice(0, 140),
+    badge: typeof input.badge === 'string' ? sanitizedText(input.badge, 60) : ''
+  };
+  const prompt = artPrompt(input.number, project, count, typeof input.revisionNotes === 'string' ? input.revisionNotes : '', text);
   try {
     const response = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
