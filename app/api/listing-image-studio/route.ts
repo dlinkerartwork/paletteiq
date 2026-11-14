@@ -9,7 +9,7 @@ import { zipStream, type ZipEntry } from '@/lib/zip-stream';
 import { listingCreativeDirection, listingCreativeSummary, listingMockupScene } from '@/lib/etsy-listing-creative-direction';
 import { currentListingVisualStyle, listingStyleDirection, type ListingVisualStyleProfile } from '@/lib/etsy-listing-visual-style';
 import { estimateListingImageGenerationCost, type GeneratedImageUsage } from '@/lib/etsy-listing-image-cost';
-import { aiFirstConceptPrompt, aiFirstBackgroundPrompt, AI_FIRST_MAX_REFERENCE_SHEETS, AI_FIRST_MAX_REFERENCE_ASSETS } from '@/lib/etsy-listing-ai-first';
+import { aiFirstConceptPrompt, AI_FIRST_MAX_REFERENCE_SHEETS, AI_FIRST_MAX_REFERENCE_ASSETS } from '@/lib/etsy-listing-ai-first';
 import { originalAssetStorageKey, sourceZipFilename, selectedSourceManifest } from '@/lib/etsy-listing-source-zip';
 import {
   LISTING_IMAGE_SPECS, LISTING_HEIGHT, LISTING_WIDTH, listingFilename, listingTitle,
@@ -62,7 +62,7 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
   if (conceptUrl && !savedAssetKey(conceptUrl, project.id, 'owner-placeholder')) throw Error('Invalid AI concept reference');
   const width = value.width ?? previous?.width;
   const height = value.height ?? previous?.height;
-  if (status === 'approved' && (!renderedImageUrl || !placements.length || width !== LISTING_WIDTH || height !== LISTING_HEIGHT))
+  if (status === 'approved' && (!renderedImageUrl || (!placements.length && !value.aiGeneratedFullCover) || width !== LISTING_WIDTH || height !== LISTING_HEIGHT))
     throw Error('Save a 1024 × 1024 JPG using original collection artwork before approval. Legacy 4:3 renders must be remade.');
   const selectedSourceIds = Array.isArray(value.selectedSourceIds)
     ? [...new Set(value.selectedSourceIds.filter(id => allowed.has(id)))].slice(0,allowed.size)
@@ -75,7 +75,7 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
   // Client-provided ratings are never trusted. A score is server-owned and
   // remains valid only while the EXACT reviewed JPG URL is unchanged.
   const finalReview = previous?.renderedImageUrl === renderedImageUrl ? previous?.finalReview : undefined;
-  return { number: value.number, status, backgroundUrl, conceptUrl, renderedImageUrl, placements, selectedSourceIds, creativeBrief, width, height, title, subtitle, badge, finalReview, notes: sanitizedText(value.notes || '', 800),
+  return { number: value.number, status, backgroundUrl, conceptUrl, renderedImageUrl, placements, aiGeneratedFullCover: value.aiGeneratedFullCover === true, selectedSourceIds, creativeBrief, width, height, title, subtitle, badge, finalReview, notes: sanitizedText(value.notes || '', 800),
     reviewWarning: typeof value.reviewWarning === 'string' ? sanitizedText(value.reviewWarning, 280) : '',
     updatedAt: Date.now() };
 }
@@ -133,7 +133,7 @@ async function rejectImage(project: StoredProject, number: number, owner: string
  */
 async function critiqueFinalImage(project: StoredProject, number: number, owner: string) {
   const record = normalizedImages(project).find(item=>item.number===number);
-  if (!record?.renderedImageUrl || !record.placements?.length)
+  if (!record?.renderedImageUrl || (!record.placements?.length && !record.aiGeneratedFullCover))
     throw Error('Save a composited JPG before requesting final visual critique');
   const imageUrl = record.renderedImageUrl;
   const key = savedAssetKey(imageUrl,project.id,owner);
@@ -151,7 +151,9 @@ async function critiqueFinalImage(project: StoredProject, number: number, owner:
     (env as unknown as Record<string,string|undefined>).OPENAI_API_KEY;
   if (!keyOpenAi) throw Error('Configure OpenAI API key for final composition review');
   const instruction = [
-    'You are an exacting Etsy listing cover art director. Evaluate THIS FINAL JPG after all real source PNG cliparts have been composited.',
+    record.aiGeneratedFullCover
+      ? 'You are an exacting Etsy listing cover art director. Evaluate this completed AI-GENERATED FULL COVER JPG. Illustrations are generated from visual references; assess realism/fidelity of depicted subjects, typography and product claims.'
+      : 'You are an exacting Etsy listing cover art director. Evaluate THIS FINAL JPG after all real source PNG cliparts have been composited.',
     'This is not just a background inspection: examine whether individual cliparts COVER LETTERS, obscure the subtitle, crowd the center, clash with the underlying style or visually overpower/underrepresent the authentic artwork.',
     'Assess strictly as a 128px Etsy search thumbnail, not just a full-size poster. Be candid: a pretty design is not necessarily a readable selling thumbnail.',
     'Weighted visual criteria: headline readability 30%, authentic artwork prominence 20%, visual balance and spacing 20%, coherent original collection art style 15%, immediate shopping clarity 15%.',
@@ -500,100 +502,105 @@ export async function POST(request: Request) {
     } catch (error) { return bad(error instanceof Error ? error.message : 'Could not save listing image'); }
   }
   if (input.action === 'generate-concept') {
-    // AI-First never sends original reference pixels to an IMAGE generator.
-    // Vision reads contact sheets and produces a JSON creative brief + source IDs;
-    // a separate text-to-image call draws typography/background ONLY.
+    // AI-First is intentionally a SINGLE image model call, NOT a two-stage
+    // Vision JSON plan followed by background/PNG compositing.
+    // The numbered contact boards are visual references from the same genuine
+    // collection files users can export as a ZIP. The ZIP itself is NOT an
+    // accepted image input. OpenAI generates the entire artwork and lettering.
     if (input.number >= 8 && input.number <= 12)
-      return bad('AI-first is supported on artwork pages, not product mockups.');
-    const model=input.model || 'gpt-image-1-mini';
-    const quality=input.quality || 'medium';
-    if (!/^gpt-image-[a-z0-9.-]{1,80}$/.test(model) || !['low','medium','high'].includes(quality))
-      return bad('Choose a valid OpenAI model and quality');
-    const openai=await userCredential(user.userId,'openai') ||
+      return bad('AI-first full images are supported for listing artwork, not product mockups.');
+    const model = input.model || 'gpt-image-1-mini';
+    const quality = input.quality || 'medium';
+    if (!/^gpt-image-[a-z0-9.-]{1,80}$/.test(model) ||
+        !['low','medium','high'].includes(quality))
+      return bad('Choose a valid GPT image model and quality.');
+    const apiKey = await userCredential(user.userId, 'openai') ||
       (env as unknown as Record<string,string|undefined>).OPENAI_API_KEY;
-    if(!openai) return bad('Configure an OpenAI API key',503);
-    const all=originalAssets(project.characters || []);
-    const allowed=new Set(all.map(a=>a.id));
-    const ids=input.selectedAssetIds, sampled=input.sampledAssetIds;
-    const sheets=input.referenceSheets;
-    if(!Array.isArray(ids)||!ids.length||ids.length>allowed.size||
-        ids.some(id=>typeof id!=='string'||!allowed.has(id)) ||
-        new Set(ids).size!==ids.length)
-      return bad('Choose collection originals for AI-first design');
-    if(!Array.isArray(sampled)||!sampled.length||sampled.length>AI_FIRST_MAX_REFERENCE_ASSETS||
-        sampled.some(id=>typeof id!=='string'||!allowed.has(id)||!ids.includes(id))||
-        new Set(sampled).size!==sampled.length)
-      return bad('Invalid numbered original contact-sheet reference IDs');
-    if(!Array.isArray(sheets)||sheets.length!==Math.ceil(sampled.length/24)||
-        sheets.length>AI_FIRST_MAX_REFERENCE_SHEETS||
-        sheets.some(sheet=>typeof sheet!=='string'||sheet.length>1_800_000||
+    if (!apiKey) return bad('Configure OpenAI API key in Settings.',503);
+    const originals = originalAssets(project.characters || []);
+    const allowed = new Set(originals.map(a=>a.id));
+    const ids = input.selectedAssetIds;
+    const sampled = input.sampledAssetIds;
+    const sheets = input.referenceSheets;
+    if (!Array.isArray(ids) || !ids.length || ids.length > originals.length ||
+        ids.some(id=>typeof id!=='string' || !allowed.has(id)) ||
+        new Set(ids).size !== ids.length)
+      return bad('Choose one or more valid original cliparts.');
+    if (!Array.isArray(sampled) || !sampled.length ||
+        sampled.length > AI_FIRST_MAX_REFERENCE_ASSETS ||
+        sampled.some(id=>typeof id!=='string' || !allowed.has(id) || !ids.includes(id)) ||
+        new Set(sampled).size !== sampled.length)
+      return bad('Invalid reference source selection.');
+    if (!Array.isArray(sheets) || !sheets.length ||
+        sheets.length !== Math.ceil(sampled.length / 24) ||
+        sheets.length > AI_FIRST_MAX_REFERENCE_SHEETS ||
+        sheets.some(sheet=>typeof sheet!=='string' || sheet.length > 1_800_000 ||
           !/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(sheet)))
-      return bad('Invalid contact-sheet image references',413);
-    if(typeof input.backgroundPrompt!=='string'||!input.backgroundPrompt.trim()||
-        input.backgroundPrompt.length>24000)
-      return bad('Review the art-direction prompt before generation');
-    const title=typeof input.title==='string'?sanitizedText(input.title,140):'';
-    const subtitle=typeof input.subtitle==='string'?sanitizedText(input.subtitle,140):'';
-    const badge=typeof input.badge==='string'?sanitizedText(input.badge,60):'';
-    if ((input.title?.length||0)>140||(input.subtitle?.length||0)>140||(input.badge?.length||0)>60)
-      return bad('Title, subtitle or badge exceeds the supported length');
+      return bad('Invalid clipart reference boards.',413);
+    if (typeof input.backgroundPrompt !== 'string' || !input.backgroundPrompt.trim() ||
+        input.backgroundPrompt.length > 24000)
+      return bad('Prepare and review the creative thumbnail prompt before generating.');
+    for (const [field,max] of [['title',140],['subtitle',140],['badge',60]] as const) {
+      const value = input[field];
+      if (value!==undefined && (typeof value!=='string' || value.length>max))
+        return bad('Invalid '+field);
+    }
+    const title=sanitizedText(input.title||'',140);
+    const subtitle=sanitizedText(input.subtitle||'',140);
+    const badge=sanitizedText(input.badge||'',60);
+    const fullPrompt = [
+      input.backgroundPrompt,
+      '',
+      'Generate ONE complete finished square Etsy listing thumbnail. All illustration, typography, badge and background must appear in the SAME final 1024×1024 image.',
+      'The supplied source-image boards are unordered visual references, NOT fixed layouts. Use them to inspire the actual illustrated objects. You may choose, scale, rotate, repeat and arrange subjects freely; do not preserve board grids or source ordering.',
+      'Use only subject types seen in the selected collection references; do not add unrelated characters or product claims. Preserve recognizable visual traits as closely as the image model can.',
+      'FINAL TEXT (these exact strings override any conflicting prompt wording):',
+      'MAIN TITLE: '+JSON.stringify(title),
+      'SUBTITLE: '+JSON.stringify(subtitle),
+      'BADGE: '+JSON.stringify(badge)+' (omit when empty).',
+      'Keep complete lettering readable at small Etsy thumbnail size; do not produce a contact sheet or JSON.',
+      'IMPORTANT: This is a GENERATIVE image. It can reinterpret source clipart; pixel-identical preservation is not guaranteed. Do not claim that artwork pixels are exact.'
+    ].join('\n');
     try {
-      const directionPrompt=[
-        input.backgroundPrompt,
-        'TECHNICAL TASK: Return ONLY JSON {"chosenIndices":[1,2],"creativeBrief":"..."} with exact 1-based indices from the attached numbered reference boards (1 through '+sampled.length+').',
-        'The boards are reference images of real source PNGs, not a starting canvas. YOU choose how many and which ORIGINAL source illustrations will feature. Do not invent assets or replace any with generated art.',
-        'Your creativeBrief must describe exceptionally attractive aesthetic art direction, free typography/background and how the originals should balance around the exact title, subtitle, badge. Do not choose a specific font unless the user asks. Nothing in this step draws an illustration.',
-        'ALL artwork is placed later from source PNG bytes by PaletteIQ. Image generation will create BACKGROUND AND TYPOGRAPHY ONLY. Never ask it to recreate the clipart.',
-        'Board ordinal -> actual asset ID map (no placement geometry): '+JSON.stringify(sampled.map((id,i)=>({index:i+1,assetId:id,name:all.find(a=>a.id===id)?.name||''})))
-      ].join('\n');
-      const vision=await fetch('https://api.openai.com/v1/responses',{
-        method:'POST',headers:{Authorization:'Bearer '+openai,'Content-Type':'application/json'},
-        body:JSON.stringify({model:'gpt-4.1-mini',
-          input:[{role:'user',content:[
-            {type:'input_text',text:directionPrompt},
-            ...sheets.map(image_url=>({type:'input_image',image_url}))
-          ]}],
-          text:{format:{type:'json_object'}}}),
-        signal:AbortSignal.timeout(120000)
+      const form=new FormData();
+      form.append('model',model);
+      form.append('quality',quality);
+      form.append('size','1024x1024');
+      form.append('output_format','png');
+      form.append('prompt',fullPrompt);
+      for(let i=0;i<sheets.length;i++){
+        const bytes=Uint8Array.from(atob(sheets[i].slice('data:image/jpeg;base64,'.length)),
+          (ch:string)=>ch.charCodeAt(0));
+        if(bytes.length<100||bytes.length>1_350_000||bytes[0]!==255||bytes[1]!==216)
+          return bad('Invalid reference board '+(i+1),413);
+        form.append('image[]',new Blob([new Uint8Array(bytes)],{type:'image/jpeg'}),
+          'selected-clipart-reference-'+String(i+1)+'.jpg');
+      }
+      const response=await fetch('https://api.openai.com/v1/images/edits',{
+        method:'POST',headers:{Authorization:'Bearer '+apiKey},
+        body:form,signal:AbortSignal.timeout(180000)
       });
-      if(!vision.ok) return bad('OpenAI source-art Vision failed (HTTP '+vision.status+')',502);
-      const v=await vision.json() as {output?:Array<{content?:Array<{text?:string}>}>};
-      const raw=v.output?.flatMap(x=>x.content||[]).map(x=>x.text||'').join('')||'{}';
-      const parsed=JSON.parse(raw) as {chosenIndices?:unknown;creativeBrief?:unknown};
-      if(!Array.isArray(parsed.chosenIndices)||!parsed.chosenIndices.length||
-          parsed.chosenIndices.some(index=>!Number.isInteger(index)||index<1||index>sampled.length)||
-          typeof parsed.creativeBrief!=='string'||!parsed.creativeBrief.trim())
-        return bad('OpenAI art director returned an incomplete source-asset plan; retry with revised prompt.',502);
-      // Stable de-duplication for the shortlist; artwork repetition is allowed in
-      // final Vision geometry where the same original PNG can appear twice.
-      const chosenIds=[...new Set((parsed.chosenIndices as number[]).map(index=>sampled[index-1]))];
-      const creativeBrief=sanitizedText(parsed.creativeBrief,2200);
-      const backgroundPrompt=aiFirstBackgroundPrompt({
-        userDirection:input.backgroundPrompt, creativeBrief,title,subtitle,badge
-      });
-      const generated=await fetch('https://api.openai.com/v1/images/generations',{
-        method:'POST',headers:{Authorization:'Bearer '+openai,'Content-Type':'application/json'},
-        body:JSON.stringify({model,prompt:backgroundPrompt,size:'1024x1024',quality,output_format:'png',n:1}),
-        signal:AbortSignal.timeout(120000)
-      });
-      if(!generated.ok) return bad('OpenAI typography background failed (HTTP '+generated.status+'): '+
-        (await generated.text()).slice(0,150),502);
-      const result=await generated.json() as {data?:Array<{b64_json?:string}>;usage?:GeneratedImageUsage};
+      if(!response.ok)
+        return bad('OpenAI full-cover image generation failed (HTTP '+response.status+'): '+
+          (await response.text()).slice(0,200),502);
+      const result=await response.json() as {data?:Array<{b64_json?:string}>;usage?:GeneratedImageUsage};
       const b64=result.data?.[0]?.b64_json||'';
-      if(!b64||b64.length>28_000_000) return bad('OpenAI did not return the background PNG',502);
-      const bytes=Uint8Array.from(atob(b64),char=>char.charCodeAt(0));
-      if(bytes.length<8||bytes.length>20_000_000||bytes[0]!==137||bytes[1]!==80||bytes[2]!==78||bytes[3]!==71)
-        return bad('OpenAI did not return a valid PNG background',502);
+      if(!b64||b64.length>28_000_000) return bad('OpenAI did not return a complete image',502);
+      const bytes=Uint8Array.from(atob(b64),(ch:string)=>ch.charCodeAt(0));
+      if(bytes.length<100||bytes.length>20_000_000||bytes[0]!==137||
+          bytes[1]!==80||bytes[2]!==78||bytes[3]!==71)
+        return bad('OpenAI did not return a valid full-cover PNG',502);
       const backgroundUrl=await storeListingPng(user.userId,input.projectId,bytes);
       return Response.json({
-        backgroundUrl, creativeBrief, selectedSourceIds:chosenIds, selectedSourceCount:ids.length,
+        backgroundUrl,
         sampledSourceCount:sampled.length,
-        reviewWarning:'AI-first background should contain typography and nonfigurative decoration only. Verify there are no invented clipart elements before approval.',
+        selectedSourceCount:ids.length,
+        reviewWarning:'AI-generated full cover: subjects and details can differ from original collection clipart. Check visual accuracy, exact text and the claimed asset count before approval.',
         costEstimate:estimateListingImageGenerationCost(model,quality as 'low'|'medium'|'high',result.usage)
       });
     }catch(error){
-      return bad('AI-first art direction failed: '+
-        (error instanceof Error?error.message:String(error)).slice(0,220),502);
+      return bad('OpenAI full-cover generation unavailable: '+
+        (error instanceof Error?error.message:String(error)).slice(0,240),502);
     }
   }
   if (input.action === 'layout') {
