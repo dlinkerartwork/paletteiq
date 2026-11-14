@@ -157,7 +157,7 @@ async function createArtworkContactSheets(
 ): Promise<string[]> {
   const byId = new Map(assets.map(asset => [asset.id,asset]));
   const sheets: string[] = [];
-  const perSheet = 64, columns = 8, cell = 128;
+  const perSheet = 24, columns = 8, cell = 128;
   for (let offset=0;offset<placements.length;offset+=perSheet) {
     const slice = placements.slice(offset,offset+perSheet);
     const canvas=document.createElement('canvas');
@@ -439,6 +439,54 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       (reviewWarning ? ' Background QC: ' + reviewWarning : '') + critiqueProblem);
     return finalReview;
   };
+  /**
+   * Every selected original is eligible for AI composition. For large collections
+   * Vision plans small batches against the SAME background, using previously
+   * arranged layers as context. These batches are an API payload strategy,
+   * not a clipart limit or a source of fixed PaletteIQ positions.
+   */
+  const arrangeWithAI = async (
+    backgroundUrl: string, initial: ListingPlacement[], critiqueFeedback = ''
+  ): Promise<{ placements: ListingPlacement[]; warning: string }> => {
+    if (compositionMode !== 'free') {
+      const vision = await send({ action:'layout', projectId, number:step,
+        backgroundUrl, placements:initial, compositionMode, critiqueFeedback });
+      return { placements:vision.placements?.length === initial.length ? vision.placements : initial,
+        warning:vision.fallback || '' };
+    }
+    const batchSize = 24;
+    const arranged: ListingPlacement[] = [];
+    const warnings: string[] = [];
+    for (let offset = 0; offset < initial.length; offset += batchSize) {
+      const batch = initial.slice(offset, offset + batchSize);
+      setMessage('OpenAI Vision designing artwork ' + (offset + 1) + '–' +
+        (offset + batch.length) + ' of ' + initial.length + ' (no fixed canvas object limit)...');
+      let artworkContactSheets: string[] | undefined;
+      try {
+        artworkContactSheets = await createArtworkContactSheets(batch, assets);
+      } catch {
+        warnings.push('Some original previews could not be sampled; Vision used source names.');
+      }
+      try {
+        const vision = await send({ action:'layout', projectId, number:step,
+          backgroundUrl, placements:batch, compositionMode:'free',
+          artworkContactSheets, existingPlacements:arranged, totalSelected:initial.length,
+          critiqueFeedback });
+        if (vision.fallback || !vision.placements || vision.placements.length !== batch.length) {
+          arranged.push(...batch);
+          warnings.push('Objects ' + (offset + 1) + '–' + (offset + batch.length) +
+            ': ' + (vision.fallback || 'AI returned an incomplete layout; starter positions retained.'));
+        } else arranged.push(...vision.placements);
+      } catch (error) {
+        arranged.push(...batch);
+        warnings.push('Objects ' + (offset + 1) + '–' + (offset + batch.length) +
+          ': AI Vision failed (' + (error instanceof Error ? error.message : String(error)) +
+          '); starter positions retained.');
+      }
+    }
+    return { placements:arranged, warning:warnings.join(' ') };
+  };
+
   const generate = async () => {
     if (working) return;
     if (!assets.length) return setMessage('Generate collection clipart in Image Production first.');
@@ -492,17 +540,14 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       if (compositionMode === 'free' || allowVisionRefinement) {
         setMessage('OpenAI Vision is designing original artwork positions, sizes, layer hierarchy and tasteful edge bleed...');
         try {
-          let artworkContactSheets: string[] | undefined;
-          if (compositionMode === 'free') {
-            try { artworkContactSheets = await createArtworkContactSheets(effectivePositions, assets); }
-            catch { layoutWarning = 'Some clipart previews could not be sampled; Vision will use source asset names.'; }
-          }
-          const vision = await send({ action: 'layout', projectId, number: step,
-            backgroundUrl: response.backgroundUrl, placements: effectivePositions,
-            compositionMode, artworkContactSheets });
-          if (vision.placements?.length === effectivePositions.length) suggested = vision.placements;
-          layoutWarning = [layoutWarning, vision.fallback || ''].filter(Boolean).join(' ');
-        } catch { layoutWarning = 'AI Vision composition unavailable; your editable original selections were retained.'; }
+          const vision = await arrangeWithAI(response.backgroundUrl, effectivePositions);
+          suggested = vision.placements;
+          layoutWarning = vision.warning;
+        } catch (error) {
+          layoutWarning = 'AI Vision composition failed (' +
+            (error instanceof Error ? error.message : String(error)) +
+            '); PaletteIQ starter positions were kept. Use Auto Arrange to retry.';
+        }
       }
       // Free Mode uses an independent AI layout; Structured Mode retains the
       // white pre-layout unless the user explicitly enables AI refinement.
@@ -650,16 +695,12 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     setWorking('layout');
     setMessage('AI Vision is arranging the selected original PNGs around the actual lettering...');
     try {
-      const answer = await send({
-        action:'layout', projectId, number:step, backgroundUrl:current.backgroundUrl,
-        placements:positions, compositionMode,
-        artworkContactSheets: compositionMode === 'free' ? await createArtworkContactSheets(positions, assets) : undefined,
-        critiqueFeedback: current.finalReview?.improvements.join('; ') || ''
-      });
-      setChanges(old => ({ ...old, [step]: answer.placements?.length === positions.length ? answer.placements : localPlan }));
-      setMessage(answer.fallback
-        ? answer.fallback + ' Adjust manually or retry Auto Arrange; apply and save JPG to preview.'
-        : 'AI Vision rearranged ' + positions.length + ' originals. Apply layout & save JPG (no image-generation cost), then review the final composition.');
+      const answer = await arrangeWithAI(current.backgroundUrl, positions,
+        current.finalReview?.improvements.join('; ') || '');
+      setChanges(old => ({ ...old, [step]: answer.placements }));
+      setMessage(answer.warning
+        ? answer.warning + ' Review the updated preview; retry Auto Arrange for any fallback objects.'
+        : 'AI Vision independently rearranged ' + positions.length + ' originals. Apply layout & save JPG (no image-generation cost), then review the final composition.');
     } catch (error) { setMessage('Auto Arrange unavailable: ' + String(error)); }
     finally { setWorking(''); }
   };
@@ -916,7 +957,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
                 onClick={() => selected && toggleArtwork(selected.assetId, false)}>Remove Selected Clipart</button>
             </div>
             <small>Change clipart count/selection, then use Auto Arrange or adjust directly. In Free Mode OpenAI Vision can reposition every selected original clipart, without enforcing PaletteIQ's initial slots. Apply layout &amp; save JPG without another image-generation charge.</small>
-            {step === 1 && positions.length > 14 && <small role="alert" style={{ color: '#9f581b' }}>More than 14 cover elements may reduce readability at Etsy search size. Adjust hero/medium/accent sizes and review the final critique before approval.</small>}
+            <small>There is no preset maximum number of canvas objects. You can select every distinct original in the collection; larger selections are composed by AI Vision in batches. Very dense covers may need a manual readability check.</small>
           </div>
           <strong>Original asset placement ({positions.length})</strong>
           {listingAllowsBleed(step) && <small>Canvas bleed is allowed: X/Y may be negative and artwork may extend beyond edges. The final 1024×1024 JPG crops only the overflow, preserving original artwork pixels inside.</small>}
