@@ -53,9 +53,16 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
   if (value.renderedImageUrl && Array.isArray(value.placements) &&
       placements.length !== value.placements.length)
     throw Error('One or more clipart files are missing, duplicated or disallowed; refresh the collection before saving.');
-  const heroReference = value.compositionMode === 'hero-center' || previous?.compositionMode === 'hero-center';
+  const compositionMode = value.compositionMode ?? previous?.compositionMode ?? 'top-gallery';
+  const heroReference = compositionMode === 'hero-center';
+  const rawZone = value.protectedTextZone || previous?.protectedTextZone;
+  const protectedTextZone = heroReference && rawZone &&
+    [rawZone.x,rawZone.y,rawZone.width,rawZone.height].every(Number.isFinite) &&
+    rawZone.x >= 15 && rawZone.y >= 12 && rawZone.width >= 35 && rawZone.height >= 30 &&
+    rawZone.x+rawZone.width <= 85 && rawZone.y+rawZone.height <= 90
+    ? rawZone : heroReference ? heroTextZone() : undefined;
   if (value.renderedImageUrl && (duplicateListingAssetIds(placements).length ||
-      !placements.every(p => isListingPlacementSafe(p,value.number,heroReference))))
+      !placements.every(p => isListingPlacementSafe(p,value.number,heroReference,undefined,protectedTextZone))))
     throw Error('Clipart must be distinct and stay below the protected title/subtitle area before saving.');
   const status: ListingImageStatus = value.status === 'approved' || value.status === 'needs_revision' ? value.status : 'draft';
   // An explicitly empty renderedImageUrl invalidates an older render when a
@@ -66,7 +73,7 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
   if (backgroundUrl && !savedAssetKey(backgroundUrl, project.id, 'owner-placeholder')) throw Error('Invalid AI background reference');
   if (status === 'approved' && (!renderedImageUrl || !placements.length)) throw Error('Render an image with original collection artwork before approval');
   return { number: value.number, status, backgroundUrl, renderedImageUrl, placements,
-    compositionMode: value.compositionMode || previous?.compositionMode || 'top-gallery',
+    compositionMode, protectedTextZone,
     notes: sanitizedText(value.notes || '', 800), updatedAt: Date.now() };
 }
 async function updateImage(project: StoredProject, number: number, patch: ListingImageRecord, owner: string) {
