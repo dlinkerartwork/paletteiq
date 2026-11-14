@@ -65,7 +65,7 @@ test('small art-first typography and quiet theme-matched background are default 
   assert.match(api,/BACKGROUND STYLE — SOFT TEXTURE/);
   assert.match(api,/no strong frames, layered geometries, golden swirls or large decoration/);
   assert.match(api,/Never enlarge the heading merely to fill empty space/);
-  assert.match(api,/no prescribed number of hero pieces/);
+  assert.match(api,/without a prescribed number of hero pieces/);
   assert.match(api,/The actual collection images are NOT provided to you/);
   assert.match(api,/Do NOT generate clipart/);
   assert.match(api,/input\.backgroundStyle \?\? 'minimal'/);
