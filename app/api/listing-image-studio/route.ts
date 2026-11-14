@@ -6,6 +6,7 @@ import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { userCredential } from '@/lib/credentials';
 import { nativeAssetBucket } from '@/lib/native-bridge';
 import { zipStream, type ZipEntry } from '@/lib/zip-stream';
+import { listingCreativeDirection, listingCreativeSummary, listingMockupScene } from '@/lib/etsy-listing-creative-direction';
 import {
   LISTING_IMAGE_SPECS, LISTING_HEIGHT, LISTING_WIDTH, listingFilename, listingTitle,
   originalAssets, type ListingImageRecord, type ListingPlacement, type ListingAsset, type ListingImageStatus
@@ -16,7 +17,8 @@ const bucket = () => nativeAssetBucket() ?? env.BUCKET;
 const validId = (id: unknown): id is string => typeof id === 'string' && /^[\w-]{8,80}$/.test(id);
 const validNumber = (n: unknown): n is number => typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= 15;
 type StoredProject = {
-  id: string; name: string; theme?: string; subtheme?: string; palette?: string;
+  id: string; name: string; theme?: string; subtheme?: string; palette?: string; style?: string; texture?: string;
+  listing?: { title?: string; primaryKeyword?: string };
   characters?: ListingAsset[]; listingImages?: ListingImageRecord[];
 };
 const sanitizedText = (s: string, limit: number) => s.replace(/[<>\r\n]/g, ' ').trim().slice(0, limit);
@@ -101,51 +103,68 @@ export async function GET(request: Request) {
 type Input = {
   action?: 'generate' | 'save' | 'layout'; projectId?: string; number?: number;
   image?: ListingImageRecord; model?: string; quality?: string;
-  backgroundUrl?: string; placements?: ListingPlacement[];
+  backgroundUrl?: string; placements?: ListingPlacement[]; revisionNotes?: string;
 };
-const blankScene: Record<number, string> = {
-  8: 'Premium realistic overhead flat-lay photograph of ONE blank, white sticker sheet on an elegant desk. The sticker sheet should have a broad clean unprinted center occupying 36%-66% horizontally and 38%-86% vertically, with soft natural shadows. Absolutely no stickers, illustrations or printed designs on the sheet.',
-  9: 'Premium realistic overhead flat-lay photograph of ONE plain, light-cream T-shirt laid perfectly flat, front side facing camera. Large smooth completely unprinted front chest around 40%-62% horizontal and 45%-75% vertical. No logos, graphics, embroidery or printed objects.',
-  10: 'Premium realistic straight-on photograph of ONE blank ivory canvas tote bag, front panel facing the camera almost perfectly flat, with large empty unprinted center around 40%-62% horizontal and 46%-76% vertical. No logo, no decorations, no product illustrations.',
-  11: 'Premium realistic overhead photograph of ONE kraft cardboard gift box with a large blank white rectangular paper label, flat to camera, in the lower middle; center label from around 40%-61% horizontal and 46%-74% vertical. All surfaces unprinted and free of illustrations.',
-  12: 'Premium realistic overhead flat-lay scrapbook spread on handmade paper with a large clean blank cream craft page in the lower middle. Leave 34%-69% horizontal and 42%-80% vertical clear for exact transparent artwork to be overlaid. No drawings, stickers, animals, flowers or printed pictures in the mockup.'
-};
-function artPrompt(number: number, project: StoredProject, count: number): string {
+/**
+ * Generate only a decorative image/typographic background. Collection originals
+ * are composited by the client AFTER this call; the image model never receives
+ * a copy of the PNGs and cannot replace or redraw them.
+ */
+function artPrompt(number: number, project: StoredProject, count: number, revisionNotes = ''): string {
   const spec = LISTING_IMAGE_SPECS[number - 1];
-  const title = listingTitle(number, project.subtheme || project.theme || project.name);
-  const subtitle = number === 6 || number === 13 ? count + ' original digital clipart illustrations'
-    : number === 14 ? 'Digital product • No physical item included'
-    : number === 2 || number === 3 || number === 5 ? count + ' original collection images'
-    : number === 1 ? 'Digital Clipart Collection' : 'Creative ideas using original clipart';
-  const palette = sanitizedText(project.palette || 'warm ivory, forest green, muted earthy accents', 180);
+  const direction = listingCreativeDirection(project);
+  const title = number === 1 ? direction.title : listingTitle(number, direction.identity);
+  // Counts refer to unique saved ORIGINAL artwork image URLs. Do not infer a
+  // particular file format, alpha channel, DPI, licensing or original pixel size.
+  const subtitle = number === 1 || number === 6 || number === 13
+    ? count + ' original clipart illustrations'
+    : number === 2 || number === 3 || number === 5
+      ? count + ' original collection images'
+      : number === 14 ? 'Digital download • No physical item included'
+      : 'Ideas using original clipart';
   const core = [
-    'Create a premium conversion-focused Etsy digital clipart listing IMAGE BACKGROUND with exact ARTISTIC TYPOGRAPHY.',
-    'Aspect: 3:2 landscape source, center-cropped to 4:3. All important lettering must be within the middle 82% of source width. Final composition is 3000 x 2250.',
-    'Render the exact main title: ' + JSON.stringify(title) + '. Render the exact subtitle: ' + JSON.stringify(subtitle) + '. No other writing, numerals, file specifications, licensing or marketing claims.',
-    'Typography: expressive premium artisanal brush-script plus clear editorial serif, refined and striking at Etsy mobile thumbnail size. Lettering must be correctly spelled and legible.',
-    'Visual continuity: warm ivory artisanal paper, gentle watercolor washes, forest or botanical dark lettering, elegant soft touches; suggested color direction: ' + JSON.stringify(palette) + '.',
-    'Reserve the top 23% of the image for the headline and subtitle. Place all essential text ONLY in the top 23%, with ample edge-safe spacing.',
-    'The actual digital clipart collection is NOT provided to you; original PNG assets will be composited later by PaletteIQ. Do not invent or paint any clipart artwork, characters, food, floral illustrations, miniature icons, badges depicting objects, or product substitutes.',
-    'Do not claim asset dimensions, DPI, license terms, digital file formats or asset counts other than the exact verified subtitle supplied.',
-    'Consistent tasteful professional photography/graphic design, high-key natural lighting, spacious graphic hierarchy.'
+    'You are an Etsy visual merchandiser and expert creative director. Produce a conversion-focused image BACKGROUND plus exact artistic lettering for ONE image in a cohesive 15-image listing sequence.',
+    'Image ' + number + ' of 15 — ' + spec.title + '. Its purpose is ' + spec.purpose + '.',
+    'Final file is 3000 × 2250 pixels, 4:3 landscape JPG. Your source image is 1536 × 1024 (3:2) and will be center-cropped to 4:3. Keep important text inside the middle 82% of the source width.',
+    'Display EXACT main title ' + JSON.stringify(title) + ' and EXACT subtitle ' + JSON.stringify(subtitle) + '. No additional claims or marketing copy. Spell every character correctly.',
+    listingCreativeSummary(direction),
+    'Design typography for quick readability on a small Etsy search-result thumbnail: bold but friendly high-contrast custom lettering, artistically curved or hand-painted where appropriate, with restrained supporting text.',
+    'Keep main title and subtitle entirely within the upper 23% of the FINAL 4:3 canvas. The original artwork will occupy most of the lower region.',
+    'The actual collection images are NOT provided to you. PaletteIQ will composite the exact originals later. Do NOT generate clipart, animal/food/flower drawings, icons, logos, product print art, or stand-in illustrations.',
+    'Only verified count of unique original images is ' + count + '. Never claim PNG, transparency, ZIP contents, DPI, license, print resolution, or asset dimensions without verified metadata.',
+    'Use clean commercial visual hierarchy, artwork-first layout, consistent recognizable product identity and elegant foreground/background separation.',
+    'No greeting cards, invitation cards, wedding stationery or card-based mockups by default. Those are NOT included in this workflow.',
+    number === 1
+      ? 'MAIN COVER PRIORITY: outstanding mobile readability, clear spacious focal title and space for 6–12 large standout genuine illustrations below. No tiny collage or extraneous badges.'
+      : number <= 5
+        ? 'Show diversity and collection breadth, with elegant but varied composition. Never add imaginary items.'
+        : number === 6 || number === 7 || number === 13
+          ? 'Present authentic artwork detail and verified product facts only; do not fabricate technical specifications.'
+          : number === 14
+            ? 'Explain the digital workflow simply without promising immediate availability, license rights or unsupported usage conditions.'
+            : number === 15
+              ? 'Create a premium cohesive closing showcase matching the already approved main cover.'
+              : 'Show a realistic relevant application; product mockups are demonstrations only, not included in downloadable artwork.',
+    revisionNotes.trim()
+      ? 'CURRENT IMAGE REVISION REQUEST from the user (apply only to this image, maintain consistent brand styling, never invent assets or product facts): ' + JSON.stringify(sanitizedText(revisionNotes,600))
+      : 'No revision requested.'
   ];
-  if (spec.kind === 'mockup') {
-    return [
-      ...core,
-      'Below the title area, create the following REALISTIC BLANK PRODUCT MOCKUP ENVIRONMENT, which is NOT included in the clipart bundle:',
-      blankScene[number],
-      'The featured product MUST REMAIN COMPLETELY BLANK. Do not put any artwork or illustrative subjects on or around the product. Original PNG designs will be placed on the precise printable area afterward.',
-      'Keep printable area front-facing and free of perspective distortion, hands, text, graphics, fingers, props covering the surface.'
-    ].join('\n');
-  }
+  const mockup = listingMockupScene(number, direction.family);
+  if (mockup) return [
+    ...core,
+    'Create a REALISTIC PREMIUM EMPTY ' + mockup.name + ' MOCKUP environment; leave the final printable surface completely unprinted.',
+    mockup.prompt,
+    'The environment and blank physical product are AI-generated demonstrations; the original clipart is placed in the indicated blank print area by PaletteIQ afterward.',
+    'No people holding the product, hands covering the region, distortion, folded printable surfaces, logos, illustrative decoration or fake printed assets.'
+  ].join('\n');
   return [
     ...core,
-    'Create ONLY a decorative NONFIGURATIVE graphic background and the requested exact title and subtitle. No photographs, product objects, illustrated figures, patterns depicting products, animals, plants, food, icons or silhouettes.',
+    'Make ONLY nonfigurative commercial art-direction: light neutral paper, compatible abstract colored washes, decorative graphic shapes and the exact words given above. DO NOT draw themed objects or real products.',
     spec.kind === 'all' || spec.kind === 'all-grouped' || spec.kind === 'categories'
-      ? 'Make the area below the top 23% mostly soft ivory with minimal low-contrast paper grain; many small original clipart assets will be arranged in a balanced gallery grid there.'
-      : spec.kind === 'information' ? 'Keep lower two thirds very clean and light for clear informational overlays and the original artworks.' :
-      'Keep the area beneath title open with gentle nonfigurative watercolor pigment edges, leaving generous room to showcase selected original clipart.',
-    'Design direction: ' + spec.purpose
+      ? 'Below upper 23% keep the image mostly light and low contrast for a real full collection gallery; avoid a dense decorated background that clashes with small original assets.'
+      : spec.kind === 'information'
+        ? 'Below title area reserve broad uncluttered space for genuine original clipart and readable verified information; use restrained ornamentation.'
+        : 'Below title area leave carefully balanced negative space for the authentic source illustrations, with abstract texture at the outer perimeter.',
   ].join('\n');
 }
 
@@ -236,7 +255,7 @@ export async function POST(request: Request) {
   if (!['low', 'medium', 'high'].includes(quality)) return bad('Invalid image quality');
   const key = await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
   if (!key) return bad('Configure OpenAI API key in Settings', 503);
-  const prompt = artPrompt(input.number, project, count);
+  const prompt = artPrompt(input.number, project, count, input.revisionNotes || '');
   try {
     const response = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
