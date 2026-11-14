@@ -6,14 +6,16 @@ const designer = readFileSync(new URL('../components/thumbnail-designer.tsx', im
 const selector = readFileSync(new URL('../components/thumbnail-style-preview-select.tsx', import.meta.url), 'utf8');
 const generator = readFileSync(new URL('../app/api/thumbnail-ai-image/route.ts', import.meta.url), 'utf8');
 
-test('experimental styling controls are hidden; only background material remains visible', () => {
+test('experimental style and background style controls are hidden and disabled', () => {
   assert.doesNotMatch(designer,/label="Artistic lettering composition"/);
   assert.doesNotMatch(designer,/label="Custom canvas cover style"/);
   assert.doesNotMatch(designer,/label="Custom canvas typography boldness"/);
   assert.doesNotMatch(designer,/label="Custom canvas decoration intensity"/);
   assert.doesNotMatch(designer,/aria-label="Background decoration intensity"/);
-  assert.match(designer,/label="Custom canvas background style"/);
-  assert.equal((designer.match(/<ThumbnailStylePreviewSelect /g) || []).length,1);
+  assert.doesNotMatch(designer,/label="Custom canvas background style"/);
+  assert.doesNotMatch(designer,/aria-label="Background style"/);
+  assert.doesNotMatch(designer,/<ThumbnailStylePreviewSelect /);
+  assert.match(designer,/const backgroundStyle = 'paper' as const/);
   assert.match(selector,/options\.map\(option =>/);
 });
 
