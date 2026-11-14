@@ -20,7 +20,7 @@ export function listingCreativeDirection(source: ListingArtSource): ListingArtDi
   const descriptor = [source.theme,source.subtheme,source.style,source.texture,source.listing?.primaryKeyword]
     .filter(Boolean).join(' ').toLowerCase();
   const family: ListingArtDirection['family'] =
-    /\b(floral|flower|rose|lavender|botanic|wildflower|blossom|garden)\b/.test(descriptor) ? 'floral' :
+    /\b(florals?|flowers?|roses?|lavender|botanic(?:al)?|wildflowers?|blossoms?|gardens?)\b/.test(descriptor) ? 'floral' :
     /\b(cute|kawaii|baby|cartoon|chibi|whimsical|adorable|kids|nursery)\b/.test(descriptor) ? 'cute' :
     /\b(christmas|winter|holiday|easter|halloween|autumn|fall|seasonal|festive)\b/.test(descriptor) ? 'seasonal' :
     /\b(vintage|retro|antique|nostalgic|americana|rustic)\b/.test(descriptor) ? 'vintage' :
