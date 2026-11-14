@@ -70,7 +70,7 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
   if (value.renderedImageUrl && (duplicateListingAssetIds(placements).length ||
       !placements.every(p => isListingPlacementSafe(p,value.number,heroReference,
         protectedTextZones?.length ? {texts:protectedTextZones} : undefined,protectedTextZone))))
-    throw Error('Clipart must be distinct and stay below the protected title/subtitle area before saving.');
+    throw Error('Clipart must be distinct and stay outside every protected reference text area before saving.');
   const status: ListingImageStatus = value.status === 'approved' || value.status === 'needs_revision' ? value.status : 'draft';
   // An explicitly empty renderedImageUrl invalidates an older render when a
   // new paid background is generated. Do not silently re-approve stale pixels.
