@@ -172,7 +172,6 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [backgroundUploading, setBackgroundUploading] = useState(false);
-  const [backgroundGenerating, setBackgroundGenerating] = useState(false);
   // Style selection is disabled: let analyzed reference determine the actual graphic treatment.
   const backgroundStyle = 'paper' as const;
   const [backgroundIntensity, setBackgroundIntensity] = useState<'soft' | 'balanced' | 'vibrant'>('balanced');
@@ -1099,36 +1098,6 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     setUploadedReference(data); setReference(data); setMessage('Reference loaded for this editing session. The uploaded reference is not embedded in the saved collection.');
   };
 
-  const generateReferenceBackground = async () => {
-    if (!design || backgroundGenerating) return;
-    if (!window.confirm('Generate a decorative background using OpenAI? This may incur API charges. Original collection clipart and text will remain separate editable layers.')) return;
-    setBackgroundGenerating(true); setMessage('');
-    try {
-      const response = await fetch('/api/thumbnail-ai-image', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId, provider: 'openai', model: imageModel.startsWith('gpt-image-') ? imageModel : 'gpt-image-1-mini', quality: packQuality, width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, mode: 'background-only', backgroundStyle, backgroundIntensity: 'soft',
-          designBriefSettings: { ...currentBriefSettings(), typography: 'editable', headline: design.packHeadline || title, subtitle: design.packSubtitle || 'CLIPART COLLECTION', slide: design.name },
-          layout: design.elements.map(e => ({ type: e.type, x: e.x, y: e.y, width: e.width, height: e.height })) })
-      });
-      const result = await response.json() as { error?: string; imageUrl?: string };
-      if (!response.ok || !result.imageUrl) throw Error(result.error || 'Background generation failed');
-      // API success alone does not guarantee the stored background is reachable.
-      // Check the authenticated image endpoint and decoding before modifying the design.
-      const imageResponse = await fetch(result.imageUrl, { credentials: 'same-origin', cache: 'no-store' });
-      if (!imageResponse.ok || !(imageResponse.headers.get('content-type') || '').startsWith('image/')) {
-        throw Error('Generated background is not accessible (HTTP ' + imageResponse.status + '). Check image storage and authentication.');
-      }
-      const imageBytes = await imageResponse.blob();
-      if (!imageBytes.size) throw Error('Generated background is empty.');
-      const previewUrl = URL.createObjectURL(imageBytes);
-      try { await loadForExport(previewUrl); }
-      finally { URL.revokeObjectURL(previewUrl); }
-      setBackgroundLoadError('');
-      commit({ ...design, backgroundImageUrl: result.imageUrl });
-      setMessage('Decorative background loaded and applied to the canvas. Original clipart and editable typography remain separate layers.');
-    } catch (error) { setMessage('Background generation failed: ' + (error instanceof Error ? error.message : String(error))); }
-    finally { setBackgroundGenerating(false); }
-  };
   const uploadBackground = async (file?: File) => {
     if (!file || !design) return;
     setBackgroundUploading(true); setMessage('');
@@ -1583,9 +1552,6 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           value={Math.round(backgroundAlpha(design) * 100)}
           onChange={e => mutate({ backgroundOpacity: Number(e.target.value) / 100, renderedImageUrl: undefined, upscaledImageUrl: undefined })}/>
         <small>0% = latar memudar putih, 100% = desain asli. PNG clipart dan teks editable tidak memudar. AI lettering yang menyatu dengan background ikut memudar karena masih satu gambar. Save, PNG, dan JPG memakai opacity yang sama.</small>
-        <label className="input-label">AI DECORATIVE BACKGROUND (OPENAI)</label>
-        <button className="outline-btn" type="button" disabled={backgroundGenerating || aiBusy} onClick={() => void generateReferenceBackground()}><WandSparkles size={15}/> {backgroundGenerating ? 'Generating background...' : 'Generate background (no clipart or text)'}</button>
-        <small>Generate visible decorative textures and color variations. Original clipart and typography stay on top as independent layers. Generating again may incur API charges.</small>
         <label className="input-label">BACKGROUND IMAGE (LOCAL PNG/JPG)</label>
         <input type="file" accept="image/png,image/jpeg" disabled={backgroundUploading} onChange={e => void uploadBackground(e.target.files?.[0])}/>
         {backgroundUploading && <small>Uploading background…</small>}
