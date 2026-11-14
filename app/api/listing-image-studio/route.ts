@@ -22,6 +22,7 @@ type StoredProject = {
   id: string; name: string; theme?: string; subtheme?: string; palette?: string; style?: string; texture?: string;
   listing?: { title?: string; primaryKeyword?: string };
   characters?: ListingAsset[]; listingImages?: ListingImageRecord[]; listingVisualStyle?: ListingVisualStyleProfile;
+  listingPreLayouts?: Record<string, ListingPlacement[]>;
   selectedArtworkCount?: number; // Transient generation-only prompt hint, never persisted.
 };
 const sanitizedText = (s: string, limit: number) => s.replace(/[<>\r\n]/g, ' ').trim().slice(0, limit);
@@ -212,7 +213,7 @@ export async function GET(request: Request) {
   if (!stored) return bad('Collection not found', 404);
   const project = JSON.parse(stored.data) as StoredProject;
   const images = normalizedImages(project);
-  if (url.searchParams.get('export') !== '1') return Response.json({ images });
+  if (url.searchParams.get('export') !== '1') return Response.json({ images, preLayouts: project.listingPreLayouts || {} });
   const selected = LISTING_IMAGE_SPECS.map(spec => images.find(item => item.number === spec.number));
   if (selected.some(item => !isSquareListingApproved(item)))
     return bad('Approve all 15 square 1024 × 1024 JPG listing images before exporting. Legacy 4:3 images are not eligible.', 409);
@@ -233,7 +234,7 @@ export async function GET(request: Request) {
 }
 
 type Input = {
-  action?: 'generate' | 'save' | 'layout' | 'reject' | 'critique'; projectId?: string; number?: number;
+  action?: 'generate' | 'save' | 'layout' | 'reject' | 'critique' | 'prelayout'; projectId?: string; number?: number;
   image?: ListingImageRecord; model?: string; quality?: string;
   backgroundUrl?: string; placements?: ListingPlacement[]; revisionNotes?: string;
   featuredCount?: number; critiqueFeedback?: string;
@@ -244,7 +245,7 @@ type Input = {
  * are composited by the client AFTER this call; the image model never receives
  * a copy of the PNGs and cannot replace or redraw them.
  */
-function artPrompt(number: number, project: StoredProject, count: number, revisionNotes = '', text?: ListingImageText): string {
+function artPrompt(number: number, project: StoredProject, count: number, revisionNotes = '', text?: ListingImageText, preLayout?: ListingPlacement[]): string {
   const spec = LISTING_IMAGE_SPECS[number - 1];
   const direction = listingCreativeDirection(project);
   const observed = currentListingVisualStyle(project.listingVisualStyle, project.characters || []);
@@ -271,6 +272,12 @@ function artPrompt(number: number, project: StoredProject, count: number, revisi
     'Design typography for quick readability on a small Etsy search-result thumbnail: bold but friendly high-contrast custom lettering, artistically curved or hand-painted where appropriate, with restrained supporting text.',
     'MERCHANDISING HIERARCHY: original collection artwork is the product and must remain prominent; no generic giant text wall. Keep a clear headline and smaller supporting subtitle. If both are long, prioritize visual clarity rather than inflating every word. Never add extra words or repeat the provided title in tiny ornamental lettering.',
     'Reduce ornamental noise. Use restrained background detailing and only the decorative accents needed to frame the source artwork, letting the collection illustration style carry the appeal.',
+    preLayout?.length
+      ? 'USER-ARRANGED WHITE CANVAS PRE-LAYOUT (spatial references ONLY; do not draw the assets): ' +
+        JSON.stringify(preLayout.map(p => ({x:p.x,y:p.y,width:p.width,height:p.height,rotation:p.rotation??0}))) +
+        '. Coordinates are percentages of the final 1024 square. The user has already chosen and arranged these ' + preLayout.length +
+        ' original PNG layers. Compose title, subtitle, badge and abstract background to harmonize with THIS planned composition; keep main words readable. Some decorative partial overlap is welcome. Do not move, recreate or imitate the cliparts in the AI output.'
+      : 'No user pre-layout was supplied; compose flexibly with room for authentic original artwork.',
     'Compose the exact requested lettering NATURALLY, following the visual hierarchy and available square space. The main title must be easily readable at Etsy thumbnail size and the subtitle should be reasonably legible. Do not force all text into a rigid 24% header or a hard no-overlap box. Use expressive curves, flowing hand-lettered forms and a balanced hierarchy.',
     'PaletteIQ will overlay authentic collection clipart afterwards. Allow tasteful partial overlap around outer letter edges, swashes or nonessential decoration, while giving the central strokes of the main headline enough contrast and space to read. No generated imitation clipart or substitute objects.',
     'The actual collection images are NOT provided to you. PaletteIQ will composite the exact originals later. Do NOT generate clipart, animal/food/flower drawings, icons, logos, product print art, or stand-in illustrations.',
@@ -332,6 +339,25 @@ export async function POST(request: Request) {
       return bad('Could not reject and delete listing image: ' +
         (error instanceof Error ? error.message : String(error)).slice(0, 180), 500);
     }
+  }
+  if (input.action === 'prelayout') {
+    // Pre-generation layout is independent of saved/approved JPGs.
+    // Reject invalid or duplicated asset IDs; never silently rewrite originals.
+    const valid = new Set(originalAssets(project.characters || []).map(asset => asset.id));
+    const placements = input.placements;
+    if (!Array.isArray(placements) || !placements.length || placements.length > 300 ||
+        placements.some(p => !p || !valid.has(p.assetId) ||
+          typeof p.assetId !== 'string' ||
+          ![p.x,p.y,p.width,p.height,p.rotation ?? 0].every(v => typeof v === 'number' && Number.isFinite(v)) ||
+          p.x < 0 || p.y < 0 || p.x > 100 || p.y > 100 ||
+          p.width < 1 || p.height < 1 || p.width > 100 || p.height > 100 ||
+          Math.abs(p.rotation ?? 0) > 30) ||
+        new Set(placements.map(p => p.assetId)).size !== placements.length)
+      return bad('Select one or more unique original cliparts with valid canvas coordinates.');
+    project.listingPreLayouts = { ...(project.listingPreLayouts || {}), [String(input.number)]: placements };
+    await getDb().update(projects).set({data: JSON.stringify(project), updatedAt: Date.now()})
+      .where(and(eq(projects.id,project.id),eq(projects.owner,user.userId)));
+    return Response.json({ saved: true, preLayouts: project.listingPreLayouts });
   }
   if (input.action === 'save') {
     if (!input.image || input.image.number !== input.number) return bad('Invalid image record');
@@ -428,9 +454,19 @@ export async function POST(request: Request) {
   if (input.featuredCount !== undefined &&
       (!Number.isInteger(input.featuredCount) || input.featuredCount < 1 || input.featuredCount > count))
     return bad('Choose a clipart count between 1 and the number of available originals.');
+  const preLayout = input.placements;
+  if (preLayout !== undefined && (
+    !Array.isArray(preLayout) || !preLayout.length || preLayout.length > 300 ||
+    preLayout.some(p => !p || typeof p.assetId !== 'string' ||
+      !originalAssets(project.characters || []).some(a => a.id === p.assetId) ||
+      ![p.x,p.y,p.width,p.height].every(v => typeof v === 'number' && Number.isFinite(v)) ||
+      p.x < 0 || p.y < 0 || p.x > 100 || p.y > 100 ||
+      p.width <= 0 || p.height <= 0 || p.width > 100 || p.height > 100) ||
+    new Set(preLayout.map(p => p.assetId)).size !== preLayout.length))
+    return bad('Invalid pre-layout: select valid original collection artwork and arrange it on the white canvas.');
   const prompt = artPrompt(input.number,
     { ...project, selectedArtworkCount: input.featuredCount },
-    count, typeof input.revisionNotes === 'string' ? input.revisionNotes : '', text);
+    count, typeof input.revisionNotes === 'string' ? input.revisionNotes : '', text, preLayout);
   try {
     const response = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
