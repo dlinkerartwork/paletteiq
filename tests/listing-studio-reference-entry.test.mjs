@@ -19,7 +19,7 @@ test('restored PR18 generator uses its original OpenAI prompt and Vision coordin
   assert.match(studio, /action: 'generate', projectId, number: step, model, quality/);
   assert.match(studio, /action: 'layout', projectId, number: step, backgroundUrl: response\.backgroundUrl, placements: effectivePositions/);
   assert.match(route, /function artPrompt\(number: number, project: StoredProject, count: number, revisionNotes = '', text\?: ListingImageText\)/);
-  assert.match(route, /artPrompt\(input\.number, project, count, typeof input\.revisionNotes === 'string'/);
+  assert.match(route, /artPrompt\(input\.number,\s*\{ \.\.\.project, selectedArtworkCount: input\.featuredCount \},\s*count, typeof input\.revisionNotes === 'string'/);
   assert.doesNotMatch(studio, /referenceDesign: styleTokens|settings: config/);
   assert.doesNotMatch(route, /input\.settings/);
 });

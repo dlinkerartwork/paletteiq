@@ -8,7 +8,7 @@ import type { ImageGenerationCostEstimate } from '@/lib/etsy-listing-image-cost'
 import { listingCreativeDirection, listingMockupScene } from '@/lib/etsy-listing-creative-direction';
 import {
   LISTING_IMAGE_SPECS, LISTING_WIDTH, LISTING_HEIGHT, originalAssets,
-  planListingPlacements, listingFilename, listingImageTextDefaults, isSquareListingApproved, type ListingImageText, type ListingAsset, type ListingImageRecord, type ListingPlacement
+  planListingPlacements, curatedListingHighlights, listingFilename, listingImageTextDefaults, isSquareListingApproved, type ListingImageText, type ListingFinalReview, type ListingAsset, type ListingImageRecord, type ListingPlacement
 } from '@/lib/etsy-listing-image-plan';
 
 type Props = {
@@ -24,7 +24,7 @@ type Props = {
   characters: ListingAsset[];
   onSaved?: (images: ListingImageRecord[]) => void;
 };
-type ListResponse = { images?: ListingImageRecord[]; backgroundUrl?: string; placements?: ListingPlacement[]; fallback?: string; reviewWarning?: string; costEstimate?: ImageGenerationCostEstimate | null; warning?: string; deleted?: boolean; error?: string };
+type ListResponse = { images?: ListingImageRecord[]; backgroundUrl?: string; placements?: ListingPlacement[]; finalReview?: ListingFinalReview | null; fallback?: string; reviewWarning?: string; costEstimate?: ImageGenerationCostEstimate | null; warning?: string; deleted?: boolean; error?: string };
 const apiUrl = '/api/listing-image-studio';
 const styleApiUrl = '/api/listing-style-analysis';
 type StyleResponse = { profile?: ListingVisualStyleProfile | null; cached?: boolean; error?: string };
@@ -189,6 +189,9 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   const [notes, setNotes] = useState<Record<number, string>>({});
   const [letteringChanges, setLetteringChanges] = useState<Record<number, ListingImageText>>({});
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [assetSearch, setAssetSearch] = useState('');
+  const [showAssetPicker, setShowAssetPicker] = useState(false);
+  const [autoFinalCritique, setAutoFinalCritique] = useState(true);
   const [categories, setCategories] = useState<Record<string,string>>({});
   const [inspection, setInspection] = useState<CollectionInspection | null>(null);
   const [styleProfile, setStyleProfile] = useState<ListingVisualStyleProfile | null>(null);
@@ -209,6 +212,10 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   ));
   const positions = changes[step] || current?.placements || planListingPlacements(step, categorizedAssets);
   const selected = positions[selectedIndex] || positions[0];
+  const selectedAssetIds = useMemo(() => positions.map(p=>p.assetId), [positions]);
+  const visibleAssetChoices = useMemo(() => categorizedAssets.filter(asset =>
+    !assetSearch.trim() || (asset.name + ' ' + (asset.category || '')).toLowerCase().includes(assetSearch.trim().toLowerCase())),
+    [categorizedAssets, assetSearch]);
   const approved = LISTING_IMAGE_SPECS.filter(s => records.some(r => r.number === s.number && isSquareListingApproved(r))).length;
   const precedingApproved = LISTING_IMAGE_SPECS.slice(0, step - 1).every(s => records.some(r => r.number === s.number && isSquareListingApproved(r)));
 
@@ -302,7 +309,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     const result = await send({ action: 'save', projectId, number: step, image });
     receive(result.images || []);
   };
-  const renderAndSave = async (background: string, layout: ListingPlacement[], info: string, reviewWarning = '', lettering: ListingImageText = currentLettering) => {
+  const renderAndSave = async (background: string, layout: ListingPlacement[], info: string, reviewWarning = '', lettering: ListingImageText = currentLettering): Promise<ListingFinalReview | null> => {
     setWorking('render'); setMessage('Compositing ' + layout.length + ' exact original collection clipart images at 1024 × 1024 px...');
     const file = await compose(background, layout, assets);
     setMessage('Saving JPG preview to the collection in safe upload chunks...');
@@ -314,7 +321,28 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     };
     await saveRecord(image);
     setChanges(old => { const next = { ...old }; delete next[step]; return next; });
-    setMessage('Image ' + String(step).padStart(2, '0') + ' saved as a draft. ' + (reviewWarning ? 'Background flagged for visual review: ' + reviewWarning : 'Review the actual pixels, spelling and crop before approving.'));
+    let finalReview: ListingFinalReview | null = null;
+    let critiqueProblem = '';
+    if (autoFinalCritique) {
+      setWorking('critique');
+      setMessage('Evaluating the FINAL composited JPG for covered lettering, artwork prominence and composition...');
+      try {
+        const critique = await send({ action: 'critique', projectId, number: step });
+        if (critique.finalReview) {
+          finalReview = critique.finalReview;
+          if (critique.images) receive(critique.images);
+        } else critiqueProblem = ' Vision did not return a quality score.';
+      } catch (error) {
+        critiqueProblem = ' Final composition critique unavailable (' +
+          (error instanceof Error ? error.message : String(error)) +
+          '); the JPG is still saved.';
+      }
+    }
+    setMessage('Image ' + String(step).padStart(2, '0') + ' saved as draft. ' +
+      (finalReview ? 'Final visual score ' + finalReview.score.toFixed(1) +
+        '/10 (subjective). ' + (finalReview.improvements[0] || 'Inspect readability before approval.') : '') +
+      (reviewWarning ? ' Background QC: ' + reviewWarning : '') + critiqueProblem);
+    return finalReview;
   };
   const generate = async () => {
     if (working) return;
@@ -353,6 +381,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       }
       setMessage('Generating the AI graphic background and artistic typography...');
       const response = await send({ action: 'generate', projectId, number: step, model, quality,
+        featuredCount: effectivePositions.length,
         title: lettering.title, subtitle: lettering.subtitle, badge: lettering.badge,
         revisionNotes: (notes[step] ?? current?.notes ?? '').trim() });
       if (!response.backgroundUrl) throw Error('OpenAI did not return the background');
@@ -377,9 +406,11 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
         title: lettering.title, subtitle: lettering.subtitle, badge: lettering.badge,
         notes: notes[step] || current?.notes || '', reviewWarning: response.reviewWarning || '', updatedAt: Date.now()
       });
-      await renderAndSave(response.backgroundUrl, suggested, notes[step] || current?.notes || '', response.reviewWarning || '', lettering);
+      const scored = await renderAndSave(response.backgroundUrl, suggested, notes[step] || current?.notes || '', response.reviewWarning || '', lettering);
       setMessage('Image ' + String(step).padStart(2, '0') + ' saved as draft.' +
-        (layoutWarning ? ' Layout note: ' + layoutWarning : ' Review lettering legibility and clipart overlap before approving.') + styleFallback);
+        (scored ? ' Final design critique: ' + scored.score.toFixed(1) + '/10. ' + (scored.improvements[0] || '') :
+          autoFinalCritique ? ' Final Vision critique unavailable; inspect the result manually or use Recheck Final Quality.' : '') +
+        (layoutWarning ? ' Layout note: ' + layoutWarning + ' Check original clipart placement.' : '') + styleFallback);
     } catch (error) { setMessage('Generation failed: ' + (error instanceof Error ? error.message : String(error))); }
     finally { setWorking(''); }
   };
@@ -392,10 +423,27 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     catch (error) { setMessage('Could not save revised image: ' + (error instanceof Error ? error.message : String(error))); }
     finally { setWorking(''); }
   };
+  const recheckFinalQuality = async () => {
+    if (!current?.renderedImageUrl || working) return;
+    setWorking('critique');
+    setMessage('Reviewing the actual final composited JPG (paid Vision request)...');
+    try {
+      const answer = await send({ action: 'critique', projectId, number: step });
+      if (!answer.finalReview) throw Error('No final review received');
+      if (answer.images) receive(answer.images);
+      setMessage('Final composition score: ' + answer.finalReview.score.toFixed(1) +
+        '/10. ' + (answer.finalReview.improvements.join(' • ') || 'Review the actual thumbnail visually.'));
+    } catch (error) { setMessage('Final critique unavailable: ' + String(error)); }
+    finally { setWorking(''); }
+  };
+
   const review = async (status: 'approved' | 'needs_revision') => {
     if (!current?.renderedImageUrl || working) return;
     if (status === 'approved' && (current.width !== LISTING_WIDTH || current.height !== LISTING_HEIGHT))
       return setMessage('Render a new 1024 × 1024 square JPG before approval. Your older 4:3 image remains saved.');
+    if (status === 'approved' && current.finalReview && current.finalReview.score < 8.5 &&
+      !window.confirm('Final design critique scored this JPG ' + current.finalReview.score + '/10. Suggested improvement: ' +
+        (current.finalReview.improvements[0] || 'Check text and visual balance') + '\nApprove anyway?')) return;
     if (status === 'approved' && current.reviewWarning &&
         !window.confirm('Automatic review flagged a possible issue:\n' + current.reviewWarning + '\n\nHave you carefully checked the artwork, mockup, text and verified facts and want to approve this JPG anyway?')) return;
     if (letteringDirty) return setMessage('Title, Subtitle, or Badge changed. Regenerate the AI artwork before approving the new text.');
@@ -440,12 +488,76 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
       return { ...prev, [step]: list };
     });
   };
+  const changeArtworkSelection = (ids: string[], preservePositions = true) => {
+    const unique = [...new Set(ids)].filter(id => assets.some(a => a.id === id));
+    if (!unique.length) {
+      setMessage('At least one original collection clipart must remain selected.');
+      return;
+    }
+    const planned = planListingPlacements(step, categorizedAssets, { assetIds: unique });
+    const previous = new Map(positions.map(p => [p.assetId, p]));
+    const next = planned.map(p => preservePositions ? previous.get(p.assetId) || p : p);
+    setChanges(old => ({ ...old, [step]: next }));
+    setSelectedIndex(0);
+    setMessage(current?.backgroundUrl
+      ? 'Artwork selection updated. Apply layout & save JPG to refresh the exact original layers without another image-generation charge.'
+      : 'Artwork selection ready. Generate AI background to use these original collection images.');
+  };
+  const changeArtworkCount = (count: number) => {
+    if (!Number.isInteger(count) || count < 1 || count > assets.length) return;
+    const currentIds = selectedAssetIds.slice(0, count);
+    if (count > currentIds.length) {
+      for (const asset of curatedListingHighlights(categorizedAssets, assets.length)) {
+        if (!currentIds.includes(asset.id)) currentIds.push(asset.id);
+        if (currentIds.length >= count) break;
+      }
+    }
+    changeArtworkSelection(currentIds);
+  };
+  const autoSelectArtwork = () => {
+    const count = positions.length;
+    const planned = planListingPlacements(step, categorizedAssets, { count });
+    setChanges(old => ({ ...old, [step]: planned }));
+    setSelectedIndex(0);
+    setMessage('Automatically selected ' + planned.length + ' diverse ORIGINAL clipart layers. Positions can be adjusted before applying.');
+  };
+  const toggleArtwork = (assetId: string, checked: boolean) => {
+    changeArtworkSelection(checked
+      ? [...selectedAssetIds, assetId]
+      : selectedAssetIds.filter(id => id !== assetId));
+  };
+  const autoArrangeArtwork = async () => {
+    if (working) return;
+    if (current?.status === 'approved' && !window.confirm('Rearrange this approved image? Save the updated JPG to reset approval.')) return;
+    const localPlan = planListingPlacements(step, categorizedAssets, { assetIds: selectedAssetIds });
+    if (!current?.backgroundUrl || positions.length > 24) {
+      setChanges(old => ({ ...old, [step]: localPlan }));
+      setMessage(current?.backgroundUrl
+        ? 'Auto arranged with a local grid/perimeter layout (Vision supports up to 24 assets). Apply layout & save JPG to preview the result.'
+        : 'Starter layout arranged locally; AI Vision can refine it during image generation for up to 24 assets.');
+      return;
+    }
+    setWorking('layout');
+    setMessage('AI Vision is arranging the selected original PNGs around the actual lettering...');
+    try {
+      const answer = await send({
+        action:'layout', projectId, number:step, backgroundUrl:current.backgroundUrl,
+        placements:positions, critiqueFeedback: current.finalReview?.improvements.join('; ') || ''
+      });
+      setChanges(old => ({ ...old, [step]: answer.placements?.length === positions.length ? answer.placements : localPlan }));
+      setMessage(answer.fallback
+        ? answer.fallback + ' Apply layout & save JPG to preview the local arrangement.'
+        : 'AI Vision rearranged ' + positions.length + ' originals. Apply layout & save JPG (no image-generation cost), then review the final composition.');
+    } catch (error) { setMessage('Auto Arrange unavailable: ' + String(error)); }
+    finally { setWorking(''); }
+  };
+
   const editLettering = (field: keyof ListingImageText, value: string) => {
     setLetteringChanges(previous => ({
       ...previous, [step]: { ...currentLettering, [field]: value }
     }));
   };
-  const setPage = (number: number) => { setStep(number); setSelectedIndex(0); setMessage(''); setCostNotice(null); };
+  const setPage = (number: number) => { setStep(number); setSelectedIndex(0); setMessage(''); setAssetSearch(''); setShowAssetPicker(false); setCostNotice(null); };
   const spec = LISTING_IMAGE_SPECS[step - 1];
 
   return <div style={{ display: 'grid', gap: 18 }}>
@@ -498,6 +610,32 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           </div>}
           {current?.renderedImageUrl && (current.width !== LISTING_WIDTH || current.height !== LISTING_HEIGHT) && <p role="alert" className="notice">This saved image was produced by the previous 4:3 workflow. It is preserved for reference; regenerate the AI background, or re-render its background as 1024 × 1024 before approving the square edition.</p>}
           {current?.reviewWarning && <p role="alert" style={{ border: '1px solid #d48c48', borderRadius: 8, padding: 10, color: '#7b431b', background: '#fff6e9' }}>Manual quality review required: {current.reviewWarning}. Approval requires your explicit confirmation.</p>}
+          {current?.finalReview && <div data-final-design-critique="true" style={{ border: '1px solid #e2d6c7', borderRadius: 10, background: '#faf9f4', padding: 13, marginTop: 12, display: 'grid', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+              <strong>AI Final Design Critique (after clipart compositing)</strong>
+              <span style={{ fontWeight: 750, color: current.finalReview.score >= 8.5 ? '#247046' : '#9c4c29', fontSize: 20 }}>
+                {current.finalReview.score.toFixed(1)}/10
+              </span>
+            </div>
+            <small>Subjective visual assessment of the saved JPG. Goal ≥8.5, not an automatic guarantee of 10/10.</small>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 6, fontSize: 12 }}>
+              <span>Headline readability: {current.finalReview.titleReadability.toFixed(1)}/10</span>
+              <span>Art prominence: {current.finalReview.artworkProminence.toFixed(1)}/10</span>
+              <span>Balance: {current.finalReview.visualBalance.toFixed(1)}/10</span>
+              <span>Style harmony: {current.finalReview.styleHarmony.toFixed(1)}/10</span>
+            </div>
+            {current.finalReview.strengths.length > 0 && <div style={{ fontSize: 12 }}><strong>What works:</strong><ul>{current.finalReview.strengths.map((v,i)=><li key={i}>{v}</li>)}</ul></div>}
+            {current.finalReview.improvements.length > 0 && <div style={{ fontSize: 12 }}><strong>Suggestions for a stronger cover:</strong><ol>{current.finalReview.improvements.map((v,i)=><li key={i}>{v}</li>)}</ol></div>}
+            {current.finalReview.improvements.length > 0 && <button type="button" className="outline-btn" disabled={!!working}
+              onClick={() => setNotes(old => ({
+                ...old, [step]: [old[step] ?? current.notes ?? '', ...current.finalReview!.improvements].filter(Boolean).join('\n').slice(0,800)
+              }))}>Use AI Suggestions as Revision Notes</button>}
+            <button type="button" className="outline-btn" disabled={!!working}
+              onClick={()=>void recheckFinalQuality()}>Recheck Final Quality (Vision API cost)</button>
+            <small>Adjust source PNG positions/number, choose Auto Arrange (uses feedback above), then re-render the final JPG without paying image-generation fees. AI cannot edit the original PNG artwork.</small>
+          </div>}
+          {current?.renderedImageUrl && !current.finalReview && <button type="button" className="outline-btn" disabled={!!working}
+            style={{ marginTop: 8 }} onClick={()=>void recheckFinalQuality()}>Analyze final JPG quality (Vision API cost)</button>}
           {(spec.kind === 'mockup') && <p className="sub">Application example: {listingMockupScene(step, artDirection.family)?.name}. Mockup is a demonstration, not included in the sold collection. Inspect printable placement: the photograph is AI-generated, while the featured clipart is composited from its original file.</p>}
         </div>
         <div style={{ display: 'grid', alignContent: 'start', gap: 10 }}>
@@ -539,6 +677,11 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
             </button>
             {letteringDirty && <small role="alert" style={{ color: '#a04c22' }}>Title, Subtitle or Badge has changed since this background was generated. Click Regenerate AI background + lettering to apply the new text. A layout-only re-render cannot change AI lettering.</small>}
           </div>
+          <label style={{ display: 'flex', gap: 9, alignItems: 'center', fontSize: 12, color: '#564d43' }}>
+            <input type="checkbox" aria-label="Automatically critique final JPG" checked={autoFinalCritique}
+              disabled={!!working} onChange={e=>setAutoFinalCritique(e.target.checked)}/>
+            Automatically critique the FINAL composited JPG (recommended, additional paid Vision API request)
+          </label>
           <button type="button" className="primary-btn" onClick={() => void generate()} disabled={!loaded || !assets.length || !!working || !precedingApproved}>
             {working === 'generate' ? <LoaderCircle className="spin" size={16}/> : <Sparkles size={16}/>}
             {current?.backgroundUrl ? 'Revise Image ' + String(step).padStart(2,'0') + ' (AI background)' : step === 1 ? 'Start /new-listing — Generate Main Cover' : 'Generate Image ' + String(step).padStart(2,'0')}
@@ -547,6 +690,42 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           {(step === 3 || step === 5) && <button className="outline-btn" type="button" onClick={() => void categorize()} disabled={!!working}>Analyze collection categories (optional)</button>}
           <small style={{ color: '#74695e' }}>Only the graphic background, premium lettering and blank mockup environment are AI-generated. PaletteIQ composites original collection assets, preserving their identity. Generation uses paid API requests.</small>
           <hr style={{ width: '100%', border: 0, borderTop: '1px solid #eee4d9' }}/>
+          <div style={{ border: '1px solid #eadfce', padding: 12, borderRadius: 10, display: 'grid', gap: 9 }}>
+            <strong>Original clipart selection — Image {String(step).padStart(2,'0')}</strong>
+            <small>Choose how many ORIGINAL collection assets appear in this listing image. Main Cover defaults to 7, but you can use any count up to the collection size. Larger covers may reduce title readability; check the final critique.</small>
+            <label className="input-label" htmlFor="listing-clipart-count">NUMBER OF CLIPARTS (1–{assets.length})</label>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <input id="listing-clipart-count" aria-label="Number of listing cliparts" type="number" min={1} max={assets.length} step={1} value={positions.length}
+                disabled={!assets.length || !!working} onChange={e => changeArtworkCount(Number(e.target.value))}
+                style={{ width: 105, flexShrink: 0 }}/>
+              <button type="button" className="outline-btn" disabled={!!working || !assets.length} onClick={autoSelectArtwork}>Auto Select ({positions.length})</button>
+              <button type="button" className="outline-btn" disabled={!!working} aria-expanded={showAssetPicker}
+                onClick={() => setShowAssetPicker(value => !value)}>{showAssetPicker ? 'Hide Clipart Picker' : 'Select Cliparts'}</button>
+            </div>
+            {showAssetPicker && <div style={{ display: 'grid', gap: 7 }}>
+              <input aria-label="Search original collection cliparts" type="search" placeholder="Search clipart names or categories..."
+                value={assetSearch} disabled={!!working} onChange={e => setAssetSearch(e.target.value)}/>
+              <div style={{ maxHeight: 300, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 7, border: '1px solid #eee7dc', padding: 8, borderRadius: 8 }}>
+                {visibleAssetChoices.map(asset => <label key={asset.id} style={{ display: 'flex', alignItems: 'center', gap: 8, border: '1px solid #eee4d8', borderRadius: 6, padding: 6, minWidth: 0, cursor: 'pointer' }}>
+                  <input type="checkbox" aria-label={'Include ' + asset.name} checked={selectedAssetIds.includes(asset.id)}
+                    disabled={!!working || (selectedAssetIds.length === 1 && selectedAssetIds.includes(asset.id))}
+                    onChange={e => toggleArtwork(asset.id, e.target.checked)}/>
+                  <img src={asset.imageUrl} alt="" loading="lazy" style={{ width: 36, height: 36, objectFit: 'contain', flexShrink: 0 }}/>
+                  <span style={{ fontSize: 11, overflowWrap: 'anywhere' }}>{asset.name}</span>
+                </label>)}
+                {!visibleAssetChoices.length && <small>No matching original clipart.</small>}
+              </div>
+              <small>Checked: {positions.length} / {assets.length}. Each selected original appears once; adding or removing clipart does not redraw the source.</small>
+            </div>}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button type="button" className="outline-btn" disabled={!!working || !positions.length}
+                onClick={() => void autoArrangeArtwork()}>Auto Arrange ({positions.length})</button>
+              <button type="button" className="outline-btn" disabled={!!working || !selected || positions.length <= 1}
+                onClick={() => selected && toggleArtwork(selected.assetId, false)}>Remove Selected Clipart</button>
+            </div>
+            <small>With an existing AI background, change clipart count/selection, Auto Arrange, then click Apply layout &amp; save JPG — no new image-generation charge. AI Vision handles up to 24 placements; larger selections use local arrangement.</small>
+            {step === 1 && positions.length > 12 && <small role="alert" style={{ color: '#9f581b' }}>More than 12 cover elements may make the headline difficult to read at Etsy search size. Consider fewer standout artworks or use the final critique before approval.</small>}
+          </div>
           <strong>Original asset placement ({positions.length})</strong>
           <label className="input-label">SELECT ARTWORK TO ADJUST</label>
           <select value={selectedIndex < positions.length ? selectedIndex : 0} disabled={!positions.length || !!working} onChange={e => setSelectedIndex(Number(e.target.value))}>
@@ -555,7 +734,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           {selected && <>
             <label className="input-label">REPLACE WITH ORIGINAL COLLECTION ASSET</label>
             <select value={selected.assetId} disabled={!!working} onChange={e => move('assetId', e.target.value)}>
-              {assets.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              {assets.map(a => <option key={a.id} value={a.id} disabled={positions.some(p => p.assetId === a.id && p.assetId !== selected.assetId)}>{a.name}</option>)}
             </select>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 8 }}>
               {(['x','y','width','height'] as const).map(field => <label key={field} style={{ fontSize: 12, display: 'grid', gap: 3 }}>{field.toUpperCase()} (%)
