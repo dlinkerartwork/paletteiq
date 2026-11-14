@@ -38,7 +38,7 @@ test('model selection is unique and in Reference & Assets for listing studio', (
 
 test('reference diversity is preferred to repetitive watercolor corners', () => {
   assert.match(listingApi, /Do not force watercolor corner washes/);
-  assert.match(listingApi, /different nonfigurative graphic structure/);
+  assert.match(listingApi, /distinct nonfigurative graphic structure/);
   assert.match(thumbnailApi, /Only use such motifs when the reference analysis explicitly supports them/);
-  assert.match(thumbnailApi, /avoid repeating the same four-corner watercolor motif/);
+  assert.match(thumbnailApi, /Avoid repeating the same four-corner watercolor motif/i);
 });
