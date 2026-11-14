@@ -76,7 +76,7 @@ test('OpenAI Vision sees numbered thumbnails from actual original clipart and fr
   assert.match(api,/CANVAS BLEED IS ALLOWED/);
   assert.match(api,/2–4 big hero elements/);
   assert.match(api,/Return each listed assetId EXACTLY ONCE/);
-  assert.match(api,/validListingPlacement\(p,input\.number\)/);
+  assert.match(api,/validListingPlacement\(p,input\.number!\)/);
   assert.match(api,/candidates\.length === fallback\.length/);
   assert.match(api,/const seen = new Set<string>\(\)/);
   assert.match(api,/never redraw|NEVER redraw/);
@@ -87,7 +87,7 @@ test('mode, bleed coordinates, and original PNG IDs survive server persistence a
   assert.match(api,/listingCompositionModes\?: Record<string, ListingCompositionMode>/);
   assert.match(api,/compositionModes: project\.listingCompositionModes \|\| \{\}/);
   assert.match(api,/project\.listingCompositionModes = \{/);
-  assert.match(api,/validListingPlacement\(p, input\.number\)/);
+  assert.match(api,/validListingPlacement\(p, input\.number!\)/);
   assert.match(api,/validListingPlacement\(p, value\.number\)/);
   assert.match(studio,/const savedCompositionModes =/);
   assert.match(ui,/setSavedCompositionModes\(result\.compositionModes\)/);
