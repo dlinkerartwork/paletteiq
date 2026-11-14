@@ -47,7 +47,7 @@ test('only image records with unique original URLs count as sellable assets', ()
 });
 test('each page has deterministic separate JPG name',()=>{
   assert.equal(listingFilename(1),'01_Main_Cover.jpg');
-  assert.equal(listingFilename(15),'15_Final_Bundle_Showcase.jpg');
+  assert.equal(listingFilename(15),'15_Final_Showcase.jpg');
   assert.equal(new Set(Array.from({length:15},(_,i)=>listingFilename(i+1))).size,15);
   assert.throws(()=>listingFilename(16));
 });
