@@ -459,6 +459,8 @@ export async function POST(request: Request) {
     subtitle: typeof input.subtitle === 'string' ? sanitizedText(input.subtitle, 140) : defaults.subtitle.slice(0, 140),
     badge: typeof input.badge === 'string' ? sanitizedText(input.badge, 60) : ''
   };
+  if (input.textScale !== undefined && !['compact','balanced','statement'].includes(input.textScale))
+    return bad('Choose a valid lettering size: compact, balanced or statement.');
   if (input.featuredCount !== undefined &&
       (!Number.isInteger(input.featuredCount) || input.featuredCount < 1 || input.featuredCount > count))
     return bad('Choose a clipart count between 1 and the number of available originals.');
@@ -467,9 +469,9 @@ export async function POST(request: Request) {
     !Array.isArray(preLayout) || !preLayout.length || preLayout.length > 300 ||
     preLayout.some(p => !p || typeof p.assetId !== 'string' ||
       !originalAssets(project.characters || []).some(a => a.id === p.assetId) ||
-      ![p.x,p.y,p.width,p.height].every(v => typeof v === 'number' && Number.isFinite(v)) ||
+      ![p.x,p.y,p.width,p.height,p.rotation ?? 0].every(v => typeof v === 'number' && Number.isFinite(v)) ||
       p.x < 0 || p.y < 0 || p.x > 100 || p.y > 100 ||
-      p.width <= 0 || p.height <= 0 || p.width > 100 || p.height > 100) ||
+      p.width <= 0 || p.height <= 0 || p.width > 100 || p.height > 100 || Math.abs(p.rotation ?? 0) > 180) ||
     new Set(preLayout.map(p => p.assetId)).size !== preLayout.length))
     return bad('Invalid pre-layout: select valid original collection artwork and arrange it on the white canvas.');
   const prompt = artPrompt(input.number,
