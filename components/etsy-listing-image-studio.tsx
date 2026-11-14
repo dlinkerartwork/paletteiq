@@ -10,7 +10,7 @@ import {
   planListingPlacements, listingFilename, type ListingAsset, type ListingImageRecord, type ListingPlacement
 } from '@/lib/etsy-listing-image-plan';
 import { duplicateListingAssetIds } from '@/lib/listing-text-safe';
-import { fitListingPlacementsToReference, isListingPlacementSafe, heroTextZone, type ListingReferenceLayout } from '@/lib/listing-reference-composition';
+import { fitListingPlacementsToReference, isListingPlacementSafe, heroTextZone, referenceTextZones, type ListingReferenceLayout } from '@/lib/listing-reference-composition';
 
 type Props = {
   projectId: string;
@@ -240,6 +240,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
       number: step, status: 'draft', backgroundUrl: background, renderedImageUrl, placements: layout,
       compositionMode: protectedZone ? 'reference-guided' : 'top-gallery',
       protectedTextZone: protectedZone,
+      protectedTextZones: layoutReference ? referenceTextZones(layoutReference) : current?.protectedTextZones,
       notes: info, updatedAt: Date.now()
     };
     await saveRecord(image);
@@ -324,6 +325,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
         renderedImageUrl: '', placements: suggested,
         compositionMode: config.referenceImage ? 'reference-guided' : 'top-gallery',
       protectedTextZone: config.referenceImage ? heroTextZone(styleTokens) : undefined,
+      protectedTextZones: config.referenceImage ? referenceTextZones(styleTokens) : undefined,
         notes: notes[step] || current?.notes || '', updatedAt: Date.now()
       });
       await renderAndSave(response.backgroundUrl, suggested, notes[step] || current?.notes || '', styleTokens,Boolean(config.referenceImage));
