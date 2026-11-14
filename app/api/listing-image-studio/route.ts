@@ -122,7 +122,7 @@ function artPrompt(number: number, project: StoredProject, count: number, revisi
     ? count + ' original clipart illustrations'
     : number === 2 || number === 3 || number === 5
       ? count + ' original collection images'
-      : number === 14 ? 'Digital download • No physical item included'
+      : number === 14 ? 'Purchase • Download • Create'
       : 'Ideas using original clipart';
   const core = [
     'You are an Etsy visual merchandiser and expert creative director. Produce a conversion-focused image BACKGROUND plus exact artistic lettering for ONE image in a cohesive 15-image listing sequence.',
