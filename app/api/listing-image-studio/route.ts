@@ -271,7 +271,7 @@ function artPrompt(number: number, project: StoredProject, count: number, revisi
       : 'No visual sample analysis of the real collection is available. Treat the stored collection style and theme as secondary descriptive hints, not visual evidence. Avoid imposing generic watercolor or retro aesthetics without support.',
     'CREATIVE FREEDOM: Design a fresh premium Etsy layout with bespoke expressive lettering, innovative balance and restrained nonfigurative details. Be imaginative with hierarchy but keep the BACKGROUND quiet and subordinate to the original clipart; match the OBSERVED source-art medium, softness, palette and mood when available.',
     'The collection theme guides the SUBJECT of the merchandising message, but is not permission to draw themed subjects. Original clipart will be composited later in exact original PNG pixels by PaletteIQ.',
-    'TYPOGRAPHY COLOR REQUIREMENT: use TWO OR THREE DISTINCT harmonious lettering colors coordinated with the collection palette. Do NOT render all words, title, subtitle and badge in one color. Use a contrasting accent on one word or intentional letterforms of the main title, another readable color for the subtitle, and a complementary badge color when present. Maintain contrast on the quiet background.',
+    'TYPOGRAPHY COLOR DIRECTION: Create a thoughtful visually harmonious use of multiple lettering colors coordinated with the collection artwork. You choose the number, distribution, accents and palette freely; avoid flat monotonous single-color treatment, and always maintain readability.',
     compositionMode === 'free'
       ? 'Choose any typography and layout you find beautiful and appropriate for the collection. NO prescribed font, font family, typeface, lettering treatment, color palette or text location. Make ALL supplied words readable and arrange them so the real clipart collage can surround rather than cover them.'
       : 'Design typography for quick readability on a small Etsy search-result thumbnail: elegant compact bespoke lettering with restrained supporting text. Original artwork dominates both in area and contrast.',
@@ -289,15 +289,21 @@ function artPrompt(number: number, project: StoredProject, count: number, revisi
     compositionMode === 'free'
       ? 'If a badge is supplied, integrate it creatively without obscuring other lettering; do not invent extra words.'
       : 'Optional badge must remain modest (about 8–12% of canvas width) and separated enough from critical title letters to stay legible after real clipart is composited. Never create a larger competing badge than the actual source illustrations.',
-    'BACKGROUND RULE: the background must support, never compete with, the ORIGINAL clipart. It must remain theme-matched but plain/minimal, with no elaborate frames, geometric gold lines, busy swirls, heavy watercolor blobs, repeated motifs or fake illustrative flowers/vehicles. Reserve most visual contrast and rich details for the pasted originals.',
+    compositionMode === 'free'
+      ? 'BACKGROUND ART DIRECTION: You are free to choose the creative treatment that best suits the collection. Coordinate with the existing artwork, use excellent taste and maintain readable text; do not render fake new clipart or substitute illustrations.'
+      : 'BACKGROUND RULE: the background must support, never compete with, the ORIGINAL clipart. It must remain theme-matched but plain/minimal, with no elaborate frames, geometric gold lines, busy swirls, heavy watercolor blobs, repeated motifs or fake illustrative flowers/vehicles. Reserve most visual contrast and rich details for the pasted originals.',
     number >= 8 && number <= 12
       ? 'MOCKUP EXCEPTION: retain a realistic uncluttered blank product environment; only the extra backdrop decorations should be minimal.'
+      : compositionMode === 'free'
+        ? 'BACKGROUND STYLE PREFERENCE — ' + backgroundStyle.toUpperCase() + ': Choose how to interpret this preference artistically (plain = spare, minimal = understated, soft-texture = gently tactile). No prescribed placement, decoration, color ratio or font style. Coordinate freely with the original collection.'
       : backgroundStyle === 'plain'
         ? 'BACKGROUND STYLE — PLAIN: use a nearly flat clean cream/white/light neutral color softly tinted toward the saved collection palette. No frames, patterns, decorative curves or visible washes. Keep ample negative space, with ONLY the exact requested lettering.'
         : backgroundStyle === 'soft-texture'
           ? 'BACKGROUND STYLE — SOFT TEXTURE: use a very light, low-contrast paper/pigment grain or faint edge wash, harmonized to the collection style. No hard graphic frames or dominant ornament. Keep at least 85% of the background quiet and nearly uniform.'
           : 'BACKGROUND STYLE — MINIMAL (default): a quiet clean white/cream/pale theme-aligned backdrop with only a whisper of paper texture or faint peripheral color accents. Keep about 90% visually simple; no strong frames, layered geometries, golden swirls or large decoration. The ORIGINAL clipart provides all the rich visual interest.',
-    'MAIN IMAGE TEXT must stay subordinate to the real artwork. Use more whitespace, a strong readable headline and smaller subtitle; do not fill the entire central region with text.',
+    compositionMode === 'free'
+      ? 'MAIN IMAGE TEXT: Keep every exact title and subtitle word legible and unobstructed. The AI decides hierarchy, negative space and balance with the actual clipart collage; do not prescribe a fixed central or edge position.'
+      : 'MAIN IMAGE TEXT must stay subordinate to the real artwork. Use more whitespace, a strong readable headline and smaller subtitle; do not fill the entire central region with text.',
     compositionMode === 'free'
       ? 'FREE ART DIRECTION: the AI layout planner makes independent artistic decisions for each selected original, using visual balance, negative space and clear lettering. Do not use the submitted white-canvas positions as constraints.'
       : 'STRUCTURED ART DIRECTION: keep the user chosen placement proportions with only requested refinements.',
@@ -339,7 +345,7 @@ function artPrompt(number: number, project: StoredProject, count: number, revisi
   ].join('\n');
   return [
     ...core,
-    'Make ONLY nonfigurative commercial art-direction: quiet theme-matched PLAIN or MINIMAL backdrop (as selected above), with no competing artwork or heavy decorative graphics, plus the exact requested words. DO NOT draw themed objects or real products.',
+    'Create a visually excellent, theme-coherent typographic background in your chosen aesthetic within the selected style preference. Keep all wording exact. Do not draw new standalone clipart, characters or real products.',
     spec.kind === 'all' || spec.kind === 'all-grouped' || spec.kind === 'categories'
       ? 'Provide a light, legible graphic hierarchy and adaptable negative space for the full collection gallery. Text can follow a natural position, not a fixed upper strip; avoid a dense decorated background that clashes with small originals.'
       : spec.kind === 'information'
