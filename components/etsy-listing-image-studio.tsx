@@ -869,12 +869,9 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     setWorking('layout');
     setMessage('AI Vision is arranging the selected original PNGs around the actual lettering...');
     try {
-      const sourcePositions=compositionMode === 'ai-first' && current.selectedSourceIds?.length
-        ? planListingPlacements(step,categorizedAssets,{assetIds:current.selectedSourceIds})
-        : positions;
+      const sourcePositions=positions;
       const answer = await arrangeWithAI(current.backgroundUrl, sourcePositions,
-        current.finalReview?.improvements.join('; ') || '', promptDraft!.layoutPrompt,
-        compositionMode === 'ai-first' ? current.creativeBrief : undefined);
+        current.finalReview?.improvements.join('; ') || '', promptDraft!.layoutPrompt);
       setChanges(old => ({ ...old, [step]: answer.placements }));
       setMessage(answer.warning
         ? answer.warning + ' Review the updated preview; retry Auto Arrange for any fallback objects.'
