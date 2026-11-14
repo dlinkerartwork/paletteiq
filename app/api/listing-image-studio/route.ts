@@ -7,6 +7,7 @@ import { userCredential } from '@/lib/credentials';
 import { nativeAssetBucket } from '@/lib/native-bridge';
 import { zipStream, type ZipEntry } from '@/lib/zip-stream';
 import { listingCreativeDirection, listingCreativeSummary, listingMockupScene } from '@/lib/etsy-listing-creative-direction';
+import { estimateListingImageGenerationCost, type GeneratedImageUsage } from '@/lib/etsy-listing-image-cost';
 import {
   LISTING_IMAGE_SPECS, LISTING_HEIGHT, LISTING_WIDTH, listingFilename, listingTitle,
   originalAssets, isSquareListingApproved, listingImageTextDefaults, type ListingImageText, type ListingImageRecord, type ListingPlacement, type ListingAsset, type ListingImageStatus
@@ -328,8 +329,9 @@ export async function POST(request: Request) {
       signal: AbortSignal.timeout(120000)
     });
     if (!response.ok) return bad('AI background failed (HTTP ' + response.status + '): ' + (await response.text()).slice(0, 250), 502);
-    const result = await response.json() as { data?: Array<{ b64_json?: string }> };
+    const result = await response.json() as { data?: Array<{ b64_json?: string }>; usage?: GeneratedImageUsage };
     const b64 = result.data?.[0]?.b64_json || '';
+    const costEstimate = estimateListingImageGenerationCost(model, quality as 'low' | 'medium' | 'high', result.usage);
     if (!b64) return bad('AI did not return an image', 502);
     const bytes = Uint8Array.from(atob(b64), ch => ch.charCodeAt(0));
     if (bytes.length < 8 || bytes[0] !== 137 || bytes[1] !== 80 || bytes[2] !== 78 || bytes[3] !== 71 || bytes.length > 20_000_000)
@@ -370,7 +372,7 @@ export async function POST(request: Request) {
     await storage.put('generated/' + user.userId + '/' + assetId + '.png', bytes);
     const backgroundUrl = '/api/thumbnail-background?projectId=' + encodeURIComponent(input.projectId) +
       '&assetId=' + assetId + '&format=png';
-    return Response.json({ backgroundUrl, number: input.number, width: LISTING_WIDTH, height: LISTING_HEIGHT, reviewWarning });
+    return Response.json({ backgroundUrl, number: input.number, width: LISTING_WIDTH, height: LISTING_HEIGHT, reviewWarning, costEstimate });
   } catch (error) {
     return bad('Could not generate listing background: ' + (error instanceof Error ? error.message : String(error)).slice(0,180), 502);
   }
