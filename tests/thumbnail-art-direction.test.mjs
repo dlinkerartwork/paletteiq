@@ -202,8 +202,19 @@ test('Optional reference layout timeout does not abort paid thumbnail generation
 
 test('Vision client performs local fitting, even when planner produced a layout', () => {
   assert.match(designer, /import \{ fitClipartAroundTypography/);
-  assert.match(designer, /const safeFallback = fit\(imageElements, \[slide\.textZone\], \[\]\)/);
+  assert.match(designer, /const safeFallback = fit\(hintedOriginals, \[slide\.textZone\], \[\]\)/);
   assert.match(designer, /result\.detectedSubtitleZone/);
   assert.match(designer, /const fitted = fit\(selected,/);
   assert.match(planner, /minScale:body\.hierarchy/);
+});
+
+test('Reference image controls background, typography and original PNG geometry', () => {
+  assert.match(designer, /compositionGuide: result\.layout\.compositionGuide/);
+  assert.match(designer, /referenceSlots = result\.layout\.slots \|\| \[\]/);
+  assert.match(designer, /referenceHints\[i\]\?\.x \?\? e\.x/);
+  assert.match(designer, /const scale = Math\.max\(\.45, Math\.min\(2\.5/);
+  assert.match(designer, /await placeOriginalsOverBackground\(/);
+  assert.match(planner, /referenceCompositionGuide\?: string/);
+  assert.match(planner, /REFERENCE-DRIVEN LAYOUT/);
+  assert.match(generator, /REFERENCE COMPOSITION HAS PRIORITY OVER DEFAULT ABSTRACT DECORATION/);
 });
