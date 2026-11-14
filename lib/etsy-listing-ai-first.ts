@@ -1,7 +1,7 @@
 /**
- * AI-First cover: asset reference boards are a visual stand-in for a ZIP.
- * They contain only original collection thumbnails, NEVER canvas coordinates.
- * No source image is rendered into the deliverable by an image model.
+ * AI-First thumbnail design. Contact sheets are source-asset INDEXES, not
+ * layouts. Vision sees the real collection; image generation NEVER draws
+ * product illustrations. Final assets are composited from original PNG bytes.
  */
 export const AI_FIRST_MAX_REFERENCE_SHEETS = 8;
 export const AI_FIRST_ASSETS_PER_SHEET = 24;
@@ -10,46 +10,46 @@ export const AI_FIRST_MAX_REFERENCE_ASSETS = AI_FIRST_MAX_REFERENCE_SHEETS * AI_
 export function aiFirstSampleIndices(total: number, max = AI_FIRST_MAX_REFERENCE_ASSETS): number[] {
   if (!Number.isSafeInteger(total) || total < 0 || !Number.isSafeInteger(max) || max < 1) return [];
   const count = Math.min(total, max);
-  if (count === total) return Array.from({ length: total }, (_, i) => i);
-  // Uniform coverage of the entire collection; no early-prefix bias.
-  return Array.from({ length: count }, (_, i) => Math.floor((i + 0.5) * total / count));
+  if (count === total) return Array.from({length:total},(_,i)=>i);
+  return Array.from({length:count},(_,i)=>Math.floor((i+0.5)*total/count));
 }
-
 type CreativeInput = {
   theme: string; title: string; subtitle: string; badge: string;
   selectedCount: number; revisionNotes?: string;
 };
 
+/** Editable instructions sent to multimodal Vision, not to image generation. */
 export function aiFirstConceptPrompt(input: CreativeInput): string {
   return [
-    'You are the sole creative director designing an outstanding square 1024×1024 Etsy clipart bundle thumbnail.',
-    'The attached numbered image boards show ACTUAL selected source artwork from one collection. They are a sample of individual PNG illustrations, NOT a canvas, collage to reproduce, or pre-existing placement layout.',
-    'Design a FULL premium thumbnail CONCEPT in one cohesive creative pass, including imaginative typography, background, color and an art-directed collage using the visual reference objects as inspiration.',
-    'You have complete freedom to invent the layout, font selection, styling, scale hierarchy, grouping, rotation, asymmetry, decorative treatments and text position. No prescribed grid, fonts, hero count or edge-only arrangement.',
-    'The final deliverable will use exact original PNG assets from the PaletteIQ collection. Your illustrated subjects in this concept are temporary PLACEHOLDERS for visual planning, never approved sellable art. Do not invent unrelated subjects or draw additional product characters.',
-    'Make an engaging, balanced composition without crowded typography: all complete title, subtitle and badge words must remain readable and have enough breathing room. Text must not be obscured by flowers, animals, leaves or other clipart.',
-    'Render these words exactly, without additions:',
-    'MAIN TITLE: ' + JSON.stringify(input.title),
-    'SUBTITLE: ' + JSON.stringify(input.subtitle),
-    'BADGE (empty means do not draw one): ' + JSON.stringify(input.badge),
+    'Act as an exceptional Etsy creative director designing an original premium 1024×1024 digital clipart bundle cover.',
+    'The numbered reference boards contain EXCLUSIVELY original collection artwork, each number identifying an existing source PNG. They are NOT a canvas and provide NO composition coordinates, scale or order.',
+    'Use these references to DIRECT a complete cohesive design. You choose which ORIGINAL objects to feature and how many, as well as the typography, background, colors, layout, scale variation, rotation, organic grouping and negative space. No mandatory font, font family, position, object count, focal count or grid.',
+    'Design with authentic artwork as the only figurative content. No new animals, flowers, clipart, accessories, character variations, regenerated objects or artificial substitutes are allowed.',
+    'Compose with strong artistic hierarchy and creative freedom. Let title, subtitle and badge stay readable at Etsy search size; arrange large and small objects around—not over—the lettering. Natural rotations and tasteful asset repetition are welcome when they improve the cover.',
+    'EXACT MAIN TITLE: ' + JSON.stringify(input.title),
+    'EXACT SUBTITLE: ' + JSON.stringify(input.subtitle),
+    'EXACT BADGE: ' + JSON.stringify(input.badge),
     'Collection theme: ' + JSON.stringify(input.theme),
-    'Original collection contains ' + input.selectedCount + ' selected source illustrations. Represent a beautiful editorial selection of their visual vocabulary; more originals can be arranged in the exact-asset final composite.',
-    input.revisionNotes?.trim() ? 'User artistic direction: ' + JSON.stringify(input.revisionNotes.trim().slice(0, 700)) : '',
-    'Return ONE finished-looking 1024×1024 full-cover concept image; do not return a JSON layout, a reference grid, or a contact sheet.'
+    'Collection includes ' + input.selectedCount + ' eligible originals (a representative subset may be visible in the reference boards). Choose a compelling selection without a prescribed count.',
+    input.revisionNotes?.trim() ? 'User creative direction: ' + JSON.stringify(input.revisionNotes.trim().slice(0,700)) : '',
+    'Return a JSON-only ART DIRECTION, not an image. Include "creativeBrief": concise actionable description of the artistic hierarchy, cohesive background and lettering, and intended original-art placement; include "chosenIndices": numbered reference-board indices for the original PNGs you want on the cover. You may select any number of referenced originals, but do not fabricate indices. Never draw or propose new clipart.'
   ].filter(Boolean).join('\n');
 }
 
-export function aiFirstCleanPlatePrompt(title: string, subtitle: string, badge: string): string {
+/** This is the ONLY prompt allowed to reach the image generation endpoint. */
+export function aiFirstBackgroundPrompt(input: {
+  userDirection: string; creativeBrief: string; title: string; subtitle: string; badge: string;
+}): string {
   return [
-    'Edit this square Etsy thumbnail concept into a CLEAN BACKGROUND AND TYPOGRAPHY PLATE for exact PNG compositing.',
-    'Keep the overall background design, artistic typography, colors, word positions and visual hierarchy as faithful to the supplied concept as possible.',
-    'REMOVE EVERY standalone illustrated clipart object, character, flower, plant, animal, product illustration and their shadows from the entire image, reconstructing the clean background beneath them.',
-    'Remove all temporary illustrated objects even when they cross letters; restore any obscured letters so the entire original wording becomes completely readable.',
-    'Preserve these exact requested words with no extras:',
-    'MAIN TITLE: ' + JSON.stringify(title),
-    'SUBTITLE: ' + JSON.stringify(subtitle),
-    'BADGE: ' + JSON.stringify(badge),
-    'Do not add replacement illustrations, silhouettes, ghosts, faded subjects or cutouts. PaletteIQ will paste the ORIGINAL collection PNGs after this step.',
-    'Nonfigurative texture, color washes, hand-created lettering and abstract graphic accents are permitted. Return exactly one square image.'
+    'Create a 1024×1024 square premium Etsy thumbnail BACKGROUND AND ARTISTIC TYPOGRAPHY ONLY.',
+    'ABSOLUTE PRODUCT ARTWORK RULE: DO NOT draw, recreate, trace, hallucinate, regenerate, imitate or include ANY standalone illustrated clipart, character, animal, flower, plant, ornament, object, icon, silhouette, sticker, or placeholder art. All such PNG illustrations will be placed separately by PaletteIQ from their ORIGINAL collection image files.',
+    'You are free to creatively design the typography and nonfigurative graphic background, with no required font, font size, text position, background style or color recipe.',
+    'Use the following creative-director brief (informed by the authentic source clipart): ' + input.creativeBrief,
+    'Treat the original user prompt as ART DIRECTION, not permission to generate the described illustrative objects. Render the actual clipart subjects ZERO times. USER ART DIRECTION: ' + JSON.stringify(input.userDirection.slice(0,10000)),
+    'Include EXACT MAIN TITLE: ' + JSON.stringify(input.title),
+    'Include EXACT SUBTITLE: ' + JSON.stringify(input.subtitle),
+    'Include EXACT BADGE (empty means omit): ' + JSON.stringify(input.badge),
+    'Render no extra words. Arrange the writing intentionally and leave room around it for a freely composed collage of original PNG images. No artwork may overlap the complete word shapes.',
+    'Only lettering, nonfigurative shapes, abstract color and texture are allowed. Return a SINGLE square illustration-free background image.'
   ].join('\n');
 }
