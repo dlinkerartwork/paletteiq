@@ -11,10 +11,14 @@ const finite = (n: number) => typeof n === 'number' && Number.isFinite(n);
 
 /** Width/height indicate a containing rectangle. The renderer preserves PNG aspect ratio. */
 export function isListingPlacementTextSafe(p: ListingPlacement, textBottom = ceil): boolean {
-  return Boolean(p) && [p.x,p.y,p.width,p.height,p.rotation ?? 0].every(finite) &&
-    p.width > 0 && p.height > 0 && p.x >= 0 && p.y >= textBottom &&
-    p.x+p.width <= 100 && p.y+p.height <= 100 &&
-    Math.abs(p.rotation || 0) <= 15;
+  if (!p || ![p.x,p.y,p.width,p.height,p.rotation ?? 0].every(finite) ||
+      p.width <= 0 || p.height <= 0 || Math.abs(p.rotation || 0) > 15) return false;
+  const theta = (p.rotation || 0) * Math.PI / 180;
+  const rotatedW = Math.abs(p.width * Math.cos(theta)) + Math.abs(p.height * Math.sin(theta));
+  const rotatedH = Math.abs(p.height * Math.cos(theta)) + Math.abs(p.width * Math.sin(theta));
+  const left = p.x+(p.width-rotatedW)/2;
+  const top = p.y+(p.height-rotatedH)/2;
+  return left >= 0 && top >= textBottom && left+rotatedW <= 100 && top+rotatedH <= 100;
 }
 
 /** Automatically rescales original slots below all typography; the clipart pixels stay unchanged.
