@@ -40,7 +40,7 @@ test('AI typography checkbox is enabled by default and gates all three text fiel
     assert.ok(line?.includes('disabled={aiBusy || !typographyEnabled}'),label);
   }
   assert.match(designer, /const hasLettering = enabled && Boolean\(heading \|\| subtitle \|\| badge\)/);
-  assert.match(designer, /mode: hasLettering \? 'background-with-typography' as const : 'background-only' as const/);
+  assert.match(designer, /mode: needsAiLettering \? 'background-with-typography' as const : 'background-only' as const/);
 });
 test('background-only brief contains absolutely no old SEO text when checkbox is disabled', () => {
   const source = {
