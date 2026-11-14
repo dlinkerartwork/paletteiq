@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowRight, Check, Download, Image as ImageIcon, LoaderCircle, RotateCcw, Sparkles } from 'lucide-react';
+import { ArrowRight, Check, Download, LoaderCircle, RotateCcw, Sparkles } from 'lucide-react';
 import { readApiJson, uploadListingJpg } from '@/lib/listing-image-upload';
 import type { ListingStyleSample, ListingVisualStyleProfile } from '@/lib/etsy-listing-visual-style';
 import type { ImageGenerationCostEstimate } from '@/lib/etsy-listing-image-cost';
@@ -394,7 +394,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
         setStyleWarning(styleFallback.trim());
       }
       let effectivePositions = positions;
-      if ((step === 3 || step === 5) && !current?.placements && !changes[step] &&
+      if ((step === 3 || step === 5) && !current?.placements && !changes[step] && !preLayouts[String(step)] &&
           !Object.keys(categories).length && !assets.some(a => a.category || a.subtheme || a.group)) {
         setMessage('Organizing the collection into honest categories before designing...');
         try {
@@ -822,6 +822,10 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
                 <input type="number" min={0} max={100} step={0.5} value={Number(selected[field]).toFixed(1)} disabled={!!working} onChange={e => move(field, e.target.value)}/>
               </label>)}
             </div>
+            <label style={{ fontSize:12, display:'grid',gap:3 }}>ROTATION (°)
+              <input type="number" min={-30} max={30} step={1} value={selected.rotation || 0}
+                disabled={!!working} onChange={e => move('rotation',e.target.value)}/>
+            </label>
             <button type="button" className="outline-btn" disabled={!!working || !current?.backgroundUrl} onClick={() => void rerender()}><RotateCcw size={15}/> {current?.renderedImageUrl ? 'Apply layout & save JPG (no AI cost)' : 'Retry save JPG (no AI cost)'}</button>
           </>}
           <label className="input-label">REVISION NOTES</label>
