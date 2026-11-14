@@ -169,7 +169,9 @@ function artPrompt(number: number, project: StoredProject, count: number, settin
     'Visual continuity comes from the actual collection palette and selected reference, not a hardcoded watercolor template: ' + JSON.stringify(palette) + '. Use restrained decorative color and plenty of clean readable space.',
     referenceDriven ? 'REFERENCE-DRIVEN TYPOGRAPHY: match the exact spatial distribution and hierarchy of the user-selected reference image. Detected typography zones (percent of the 1024 square): ' + textPlacement + '. Text may appear at the top, center, bottom, sides, or multiple locations. NEVER enforce a universal top-title or central-medallion layout. Keep each letter readable and allow original PNG assets to occupy the other regions.' : 'NO REFERENCE SELECTED: use a readable top headline and a separate original-artwork area below it.',
 
-    'The actual digital clipart collection is NOT provided to you; original PNG assets will be composited later by PaletteIQ. Do not invent or paint any clipart artwork, characters, food, floral illustrations, miniature icons, badges depicting objects, or product substitutes.',
+    'CRITICAL ASSET SEPARATION: the image you create is ONLY background DESIGN + exact typography. Never draw collection objects or any replacement subjects: NO cars, buses, caravans, scooters, road signs, Route 66 shields, gas pumps, suitcase icons, traffic signals, cartoon props, flowers, food dishes, animals, or mini clipart, regardless of the collection theme. Original PNG assets will be composited later by PaletteIQ.',
+    'ALLOWED FLAT DESIGN ORNAMENTS (not clipart): simple starburst lines, tiny four-point sparkle accents, continuous pinstripes, border filigree, plain empty label backing, geometric shapes and non-pictorial curves that are visually integrated into the background/lettering. These must not resemble independent collectible objects or be presented as cutout stickers.',
+    'If a reference contains illustrative objects, IGNORE THOSE OBJECTS in your generated background. Copy only graphic composition/hierarchy, typography treatment, nonfigurative color and negative-space structure. Leave those object locations completely empty for the ORIGINAL collection PNG assets.',
     'Do not claim asset dimensions, DPI, license terms, digital file formats or asset counts other than the exact verified subtitle supplied.',
     'Consistent tasteful professional photography/graphic design, high-key natural lighting, spacious graphic hierarchy.',
     'Design is determined automatically by the reference image, actual theme and purpose of this slide, not by disabled manual typography/cover/background/boldness/hierarchy/intensity controls.',
@@ -192,7 +194,7 @@ function artPrompt(number: number, project: StoredProject, count: number, settin
   }
   return [
     ...core,
-    'Create ONLY a decorative NONFIGURATIVE graphic background and the requested exact title and subtitle. No photographs, product objects, illustrated figures, patterns depicting products, animals, plants, food, icons or silhouettes.',
+    'Create ONLY a decorative NONFIGURATIVE graphic background and the requested exact title and subtitle. Flat ornamental stars, simple geometric line accents, sign-shaped EMPTY lettering borders and integrated abstract patterns are permitted; NO pictorial road signs, mini vehicle graphics, sticker-like objects or other independently recognizable clipart. An empty vintage-sign silhouette may frame the title, but do not turn it into a standalone road-sign illustration.',
     referenceDriven ? 'REFERENCE COMPOSITION HAS PRIORITY: position nonfigurative design and title treatment to match the chosen reference. Leave original-PNG slots empty for later compositing and allow varied subject sizes. Do not impose a title-at-top grid, central badge or border motif unless the reference actually has them.' :
       spec.kind === 'all' || spec.kind === 'all-grouped' || spec.kind === 'categories'
         ? 'Without a reference, protect the top headline and leave the lower artwork area open.'
@@ -318,7 +320,17 @@ export async function POST(request: Request) {
       body: JSON.stringify({
         model: 'gpt-4.1-mini',
         input: [{ role: 'user', content: [
-          { type: 'input_text', text: 'Inspect this Etsy listing BACKGROUND, not a final listing. Return JSON ONLY: {"inventedClipart":boolean,"printedProductArtwork":boolean,"reason":string}. Any standalone cartoon/watercolor/illustrated clipart animal, food, flower, icon or miniature product art means inventedClipart=true. Abstract painterly textures and script/serif lettering are permitted. Mockup number is ' + input.number + '. For numbers 8-12, an empty realistic physical product/blank sticker sheet/blank garment/blank tote/blank label/blank scrapbook is allowed, but no illustrations or printed graphics on its printable area. For all other numbers only abstract artwork and typography are allowed. Be specific and conservative; do not reject brush strokes or paper texture as objects.' },
+          { type: 'input_text', text: [
+            'You are validating ONLY the generated Etsy BACKGROUND + TYPOGRAPHY, before any original collection PNGs are composited.',
+            'Return JSON ONLY: {"inventedClipart":boolean,"printedProductArtwork":boolean,"reason":string}.',
+            'Set inventedClipart=true only when there is a DISTINCT, INDEPENDENT, RECOGNIZABLE illustrated subject that a buyer might mistake for an included clipart asset: vehicles, food, plants, animals, luggage, road signs or Route 66 sign illustrations, tiny cartoon objects, miniature collectible stickers, or similar product substitutes.',
+            'Set inventedClipart=false for ABSTRACT ORNAMENTS integrated into the design: geometric starbursts, tiny four-point sparkle accents, radial strokes, nonfigurative borders, pinstripes, plain empty sign-shaped TEXT FRAME around a title, outlines, flourishes, swashes, watercolor texture and typography. Decorative star shapes are NOT automatically clipart.',
+            'A standalone illustrated road sign with its own pictorial detail counts as inventedClipart. A simple unillustrated shield outline used solely as the title frame does NOT.',
+            'Distinguish a decorative integrated motif from a separate clipart item by whether it appears independently usable as a product illustration. Do not mark anything true merely because a line or texture vaguely resembles an object.',
+            'Mockup slide number: ' + input.number + '. For slides 8-12, realistic EMPTY product mockups are allowed; printable surfaces must remain blank with no printed product illustrations. For other slides, only typography and nonfigurative design are allowed.',
+            'Set printedProductArtwork=true ONLY when an illustration or printed graphic actually appears on the product print surface; do not confuse title lettering on the page with product artwork.',
+            'Explain the specific observable object when inventedClipart=true, not just generic stars or decorations. If no disallowed subject is visible, both booleans MUST be false.'
+          ].join(' ') },
           { type: 'input_image', image_url: 'data:image/png;base64,' + b64 }
         ]}], text: { format: { type: 'json_object' } }
       }),
