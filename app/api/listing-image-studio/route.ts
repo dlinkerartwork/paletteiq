@@ -11,6 +11,7 @@ import {
   LISTING_IMAGE_SPECS, LISTING_HEIGHT, LISTING_WIDTH, listingFilename, listingTitle,
   originalAssets, type ListingImageRecord, type ListingPlacement, type ListingAsset, type ListingImageStatus
 } from '@/lib/etsy-listing-image-plan';
+import { fitListingPlacementsBelowText, isListingPlacementTextSafe, duplicateListingAssetIds } from '@/lib/listing-text-safe';
 
 const bad = (message: string, status = 400) => Response.json({ error: message }, { status });
 const bucket = () => nativeAssetBucket() ?? env.BUCKET;
@@ -47,6 +48,9 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
     p.width > 0 && p.width <= 100 && p.height > 0 && p.height <= 100 &&
     Math.abs(p.rotation ?? 0) <= 30
   ) : previous?.placements || [];
+  if (value.renderedImageUrl && (duplicateListingAssetIds(placements).length ||
+      !placements.every(p => isListingPlacementTextSafe(p))))
+    throw Error('Clipart must be distinct and stay below the protected title/subtitle area before saving.');
   const status: ListingImageStatus = value.status === 'approved' || value.status === 'needs_revision' ? value.status : 'draft';
   // An explicitly empty renderedImageUrl invalidates an older render when a
   // new paid background is generated. Do not silently re-approve stale pixels.
@@ -122,10 +126,6 @@ function artPrompt(number: number, project: StoredProject, count: number, settin
   const palette = sanitizedText(project.palette || 'warm ivory, forest green, muted earthy accents', 180);
   // Only allow known style tokens from the Reference & Assets UI. Never treat
   // arbitrary uploaded reference pixels as clipart or additional product art.
-  const artStyle = ['editorial','boutique','storybook','modern','watercolor'].includes(settings?.coverStyle || '') ? settings?.coverStyle : 'editorial';
-  const backgroundStyle = ['watercolor','paper','gradient','botanical','vintage'].includes(settings?.backgroundStyle || '') ? settings?.backgroundStyle : 'watercolor';
-  const intensity = ['soft','balanced','vibrant'].includes(settings?.intensity || '') ? settings?.intensity : 'balanced';
-  const boldness = ['soft','balanced','bold'].includes(settings?.boldness || '') ? settings?.boldness : 'balanced';
   const motif = ['blush-brush-ring','split-panel','paper-collage','soft-wash','minimal-lines'].includes(referenceDesign?.graphicMotif || '') ? referenceDesign?.graphicMotif : 'none';
   const lettering = ['script-serif','editorial-serif','modern-display','hand-lettered'].includes(referenceDesign?.letteringStyle || '') ? referenceDesign?.letteringStyle : 'artistic brush script and editorial serif';
   const mood = ['blush-sage','earthy-warm','forest-cream','pastel','vibrant'].includes(referenceDesign?.paletteMood || '') ? referenceDesign?.paletteMood : 'collection colors';
@@ -135,11 +135,11 @@ function artPrompt(number: number, project: StoredProject, count: number, settin
     'Render the exact main title: ' + JSON.stringify(title) + '. Render the exact subtitle: ' + JSON.stringify(subtitle) + '. No other writing, numerals, file specifications, licensing or marketing claims.',
     'Typography: expressive premium artisanal brush-script plus clear editorial serif, refined and striking at Etsy mobile thumbnail size. Lettering must be correctly spelled and legible.',
     'Visual continuity comes from the actual collection palette and selected reference, not a hardcoded watercolor template: ' + JSON.stringify(palette) + '. Use restrained decorative color and plenty of clean readable space.',
-    'Reserve a clear title area sized for the headline and subtitle, usually near the top. Keep text safely inside square margins and allow the rest of the square for original clipart.',
+    'STRICT TEXT SAFETY: all title and subtitle letters must be entirely inside the TOP 30 PERCENT of the 1024x1024 square, with no text below y=30%. Reserve y=30-38% as empty whitespace for separation. Original clipart never overlaps a single letter. Do not put decorative copy or an extra caption below this text-only area.',
     'The actual digital clipart collection is NOT provided to you; original PNG assets will be composited later by PaletteIQ. Do not invent or paint any clipart artwork, characters, food, floral illustrations, miniature icons, badges depicting objects, or product substitutes.',
     'Do not claim asset dimensions, DPI, license terms, digital file formats or asset counts other than the exact verified subtitle supplied.',
     'Consistent tasteful professional photography/graphic design, high-key natural lighting, spacious graphic hierarchy.',
-    'REFERENCE & ASSETS DESIGN SETTINGS (abstract art and typography only): cover=' + artStyle + ', background=' + backgroundStyle + ', intensity=' + intensity + ', lettering emphasis=' + boldness + '.',
+    'Design is determined automatically by the reference image, actual theme and purpose of this slide, not by disabled manual typography/cover/background/boldness/hierarchy/intensity controls.',
     'Verified reference analysis GRAPHIC STYLE ONLY (not product depiction): motif=' + motif + ', lettering=' + lettering + ', palette mood=' + mood + '.',
     'Use the selected reference to guide design geometry, lettering scale, badge shape and palette, but keep the result original. Do not force watercolor corner washes, colored torn-paper patches, circular rings or multicolor corner gradients unless the reference specifically calls for them.',
     'Avoid the default repeated cream-center / turquoise-and-orange watercolor-corner motif. For each listing slide, design a distinct nonfigurative graphic structure matched to its purpose, while preserving collection coherence.',
@@ -158,7 +158,7 @@ function artPrompt(number: number, project: StoredProject, count: number, settin
     ...core,
     'Create ONLY a decorative NONFIGURATIVE graphic background and the requested exact title and subtitle. No photographs, product objects, illustrated figures, patterns depicting products, animals, plants, food, icons or silhouettes.',
     spec.kind === 'all' || spec.kind === 'all-grouped' || spec.kind === 'categories'
-      ? 'Make the area below the top 23% mostly soft ivory with minimal low-contrast paper grain; many small original clipart assets will be arranged in a balanced gallery grid there.'
+      ? 'Reserve y=0-38% for artistic typography and clear separation. From y=38-99% keep a calm unillustrated area for a dense grid of distinct original PNGs; never place text or miniature images there.'
       : spec.kind === 'information' ? 'Keep lower two thirds very clean and light for clear informational overlays and the original artworks.' :
       'Keep the artwork area beneath the title open and calm, using the selected reference\'s actual composition language. Do not add automatic corner pigment or watercolor borders.',
     'Design direction: ' + spec.purpose
@@ -210,7 +210,7 @@ export async function POST(request: Request) {
               'You are an expert graphic designer positioning EXISTING ORIGINAL PNG LAYERS on an AI-generated empty listing design. NEVER draw or regenerate clipart.',
               'Inspect the supplied BACKGROUND IMAGE PIXELS to locate the already-rendered artistic typography and unobstructed blank printable space.',
               'The supplied generated background and the final JPG are both exact 1:1 square at 1024x1024. Return position percentages relative to this square; there is no aspect-ratio crop.',
-              'The title and subtitle must remain unobstructed, usually in the upper 23% of the final canvas.',
+              'STRICT: title/subtitle occupy a protected TOP band y=0-38% of the square. Every original clipart must stay BELOW y=38%, even if Vision thinks a character can overlap blank pixels within the lettering zone. No text/clipart collision, including rotated artwork. Do not return duplicate or near-identical assets.',
               isMockup ? 'This is a realistic BLANK PRODUCT MOCKUP. All supplied original asset layers MUST fit on the blank flat printable area of the product and not float on table/background. Account for actual blank surface position in visible pixels. Do not cover straps, hands, folds, shadows or the product edge.' : 'Use intentional size hierarchy and negative space. For many gallery items keep original grid, adjust only to avoid title, maintain layout clarity.',
               'Return ONLY JSON: {"placements":[{"assetId":"source-id","x":30,"y":40,"width":18,"height":22,"rotation":0}],"unsafe":false,"notes":""}.',
               'Return each listed assetId EXACTLY ONCE and NO new IDs. Coordinate ranges 0–100. Retain approximate proportions of existing placement slots; never infer an object shape or invent an asset from its name.',
@@ -221,7 +221,7 @@ export async function POST(request: Request) {
           ]}],text:{format:{type:'json_object'}}
         }), signal:AbortSignal.timeout(60000)
       });
-      if (!response.ok) return Response.json({placements:fallback, fallback:'Vision layout unavailable; original asset-safe placement retained.'});
+      if (!response.ok) return Response.json({placements:fitListingPlacementsBelowText(fallback), fallback:'Vision layout unavailable; typography-safe original positioning retained.'});
       const answer = await response.json() as {output?:Array<{content?:Array<{text?:string}>}>};
       const raw = answer.output?.flatMap(a=>a.content||[]).map(c=>c.text||'').join('') || '{}';
       const parsed = JSON.parse(raw) as {placements?:ListingPlacement[]; unsafe?:boolean; notes?:string};
@@ -235,10 +235,13 @@ export async function POST(request: Request) {
           p.x>=0 && p.y>=23 && p.width>=2 && p.height>=2 &&
           p.x+p.width<=100 && p.y+p.height<=98 && Math.abs(p.rotation??0)<=15;
       });
-      if (!correct) return Response.json({placements:fallback, fallback:'Vision could not verify a safe layout. Review and adjust the original asset positions.'});
-      return Response.json({placements:candidates, note:sanitizedText(parsed.notes||'',180)});
+      if (!correct) return Response.json({placements:fitListingPlacementsBelowText(fallback), fallback:'Vision could not verify a safe layout. Retained a typography-safe original PNG layout.'});
+      const safe = fitListingPlacementsBelowText(candidates);
+      if (safe.length !== fallback.length || duplicateListingAssetIds(safe).length)
+        return Response.json({placements:fitListingPlacementsBelowText(fallback), fallback:'Vision returned unsafe or duplicated clipart positions. Used a safe original layout.'});
+      return Response.json({placements:safe, note:sanitizedText(parsed.notes||'',180)});
     } catch {
-      return Response.json({placements:fallback, fallback:'Vision layout timed out; safe original placement plan retained.'});
+      return Response.json({placements:fitListingPlacementsBelowText(fallback), fallback:'Vision layout timed out; typography-safe original positioning retained.'});
     }
   }
   if (input.action !== 'generate') return bad('Unknown listing image action');
