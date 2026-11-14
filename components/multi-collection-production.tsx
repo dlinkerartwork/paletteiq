@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, CircleAlert, LoaderCircle, RefreshCw, Sparkles } from 'lucide-react';
 import TablePagination from '@/components/table-pagination';
+import AutoDismissNotice from '@/components/auto-dismiss-notice';
 import { eligibleForBulk, retryableFailedImage, isActiveBatchStatus } from '@/lib/production-rules';
 import { isOpenAICreditError, primeProductionAudio, useProductionSounds } from '@/lib/production-sounds';
 import { inspectMockStorage, mockEligibleIds, mockRetryableIds, mockOutcomeCounts, writeMockJobs, type MockJob, type MockScenario } from '@/lib/mock-production';
@@ -293,8 +294,8 @@ export default function MultiCollectionProduction({ onGeneratePrompts }: { onGen
       <button className="outline-btn" onClick={() => setSelected([])}>Clear selection</button>
     </div>
     <p className="sub">{selected.length} collections selected · {requestCount} new prompts · {retryCount} safe failed-image retries · 50 images per OpenAI Batch job. For missing prompts, use the per-collection Generate Prompts button.</p>
-    {creditAlert && <div className="notice" role="alert"><CircleAlert size={16}/><strong>{creditAlert}</strong><button type="button" onClick={() => setCreditAlert('')}>Dismiss</button></div>}
-    {message && <div className="notice"><CircleAlert size={16}/>{message}</div>}
+    <AutoDismissNotice message={creditAlert || message} onClose={() => { setCreditAlert(''); setMessage(''); }} />
+    
     {working && <div className="production-progress"><span>Batch submission</span><b>{progress.submitted}/{progress.total}</b><div className="progress"><i style={{ width: (progress.total ? progress.submitted / progress.total * 100 : 0) + '%' }}/></div></div>}
     <div className="table-scroll" style={{ overflowX: 'auto' }}><table style={{ tableLayout: 'fixed', minWidth: 1120, width: '100%' }}><colgroup><col style={{ width: 60 }}/><col style={{ width: 350 }}/><col style={{ width: 100 }}/><col style={{ width: 120 }}/><col style={{ width: 100 }}/><col style={{ width: 100 }}/><col style={{ width: 115 }}/><col style={{ width: 175 }}/></colgroup><thead><tr><th>SELECT</th><th>COLLECTION</th><th>NEW PROMPTS</th><th>SUCCESSFUL</th><th>FAILED</th><th>PENDING</th><th>MISSING PROMPTS</th><th>BATCH JOBS</th></tr></thead><tbody>
       {pagedCollections.map(({ collection, eligible, retryable, successful, failed, pendingCount, missingPrompts, incomplete, simulated, jobs: batchJobs }) => <tr key={collection.id}>
