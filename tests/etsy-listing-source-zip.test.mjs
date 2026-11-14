@@ -79,3 +79,26 @@ test('the user-approved premium prompt adapts the theme and selected actual clip
   assert.match(background,/Only lettering, nonfigurative shapes/);
   assert.doesNotMatch(backend,/form\.append\('image\[\]'/);
 });
+
+
+test('selected source ZIP button is visible in every mode and works before preparing paid prompts',()=>{
+  const start=frontend.indexOf('const downloadAiFirstSourceZip = async () =>');
+  const end=frontend.indexOf('const generateAiFirstConcept = async () =>',start);
+  assert.ok(start>=0 && end>start);
+  const downloadHandler=frontend.slice(start,end);
+  assert.doesNotMatch(downloadHandler,/if\(!promptsReady\) return/);
+  assert.match(downloadHandler,/backgroundPrompt:compositionMode === 'ai-first' && promptsReady/);
+  assert.match(downloadHandler,/\? promptDraft!\.backgroundPrompt : undefined/);
+  assert.match(frontend,/data-listing-source-zip-download="always-visible"/);
+  const buttonStart=frontend.indexOf('data-listing-source-zip-download="always-visible"');
+  const buttonEnd=frontend.indexOf('COMPOSITION MODE',buttonStart);
+  assert.ok(buttonStart>=0 && buttonEnd>buttonStart);
+  const button=frontend.slice(buttonStart,buttonEnd);
+  assert.match(button,/Download selected source ZIP/);
+  assert.match(button,/onClick=\{\(\) => void downloadAiFirstSourceZip\(\)\}/);
+  assert.doesNotMatch(button,/compositionMode === 'ai-first' &&/);
+  assert.doesNotMatch(button,/disabled=\{!!working \|\| !positions\.length \|\| !promptsReady\}/);
+  assert.match(backend,/const creativePrompt=input\.backgroundPrompt\?\.trim\(\) \|\| aiFirstConceptPrompt\(/);
+  assert.match(backend,/sourceAssets:refs\.map/);
+  assert.match(backend,/prompt:creativePrompt/);
+});
