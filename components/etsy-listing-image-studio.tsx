@@ -10,7 +10,7 @@ import {
   planListingPlacements, listingFilename, type ListingAsset, type ListingImageRecord, type ListingPlacement
 } from '@/lib/etsy-listing-image-plan';
 import { duplicateListingAssetIds } from '@/lib/listing-text-safe';
-import { fitListingPlacementsToReference, isListingPlacementSafe, heroTextZone, type ListingReferenceLayout } from '@/lib/listing-reference-composition';
+import { fitListingPlacementsToReference, isListingPlacementSafe, heroTextZone, referenceTextZones, type ListingReferenceLayout } from '@/lib/listing-reference-composition';
 
 type Props = {
   projectId: string;
@@ -225,8 +225,8 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
   };
   const renderAndSave = async (background: string, layout: ListingPlacement[], info: string,
     layoutReference: ListingReferenceLayout | undefined = referenceDesign,
-    heroReference = Boolean(config.referenceImage) || current?.compositionMode === 'hero-center') => {
-    const protectedZone = heroReference && (step === 1 || step === 15)
+    heroReference = Boolean(config.referenceImage) || current?.compositionMode === 'reference-guided' || current?.compositionMode === 'hero-center') => {
+    const protectedZone = heroReference
       ? (layoutReference ? heroTextZone(layoutReference) : current?.protectedTextZone || heroTextZone())
       : undefined;
     setWorking('render'); setMessage('Compositing ' + layout.length + ' exact original clipart images at 1024 × 1024 px...');
@@ -238,8 +238,9 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
     const renderedImageUrl = await upload(projectId, step, file, (done, total) => setMessage('Uploading original-asset JPG: ' + done + '/' + total + ' parts...'));
     const image: ListingImageRecord = {
       number: step, status: 'draft', backgroundUrl: background, renderedImageUrl, placements: layout,
-      compositionMode: protectedZone ? 'hero-center' : 'top-gallery',
+      compositionMode: protectedZone ? 'reference-guided' : 'top-gallery',
       protectedTextZone: protectedZone,
+      protectedTextZones: layoutReference ? referenceTextZones(layoutReference) : current?.protectedTextZones,
       notes: info, updatedAt: Date.now()
     };
     await saveRecord(image);
@@ -271,7 +272,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
             setCategories(map);
             const categorized = planListingPlacements(step,assets.map(a => ({ ...a, category: map[a.id] || a.category })));
             effectivePositions = config.layoutMode === 'manual' ? categorized :
-              fitListingPlacementsToReference(step,categorized,Boolean(config.referenceImage),styleTokens);
+              fitListingPlacementsToReference(step,categorized,Boolean(config.referenceImage),referenceDesign);
           }
         } catch { /* Continue with a neutral collection gallery rather than invent categories. */ }
       }
@@ -311,7 +312,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
           const vision = await send({ action: 'layout', projectId, number: step, backgroundUrl: response.backgroundUrl, placements: effectivePositions,
             referenceDesign: styleTokens, settings: config ? { ...config, referenceImage: undefined, hasReference: Boolean(config.referenceImage) } : undefined });
           if (vision.placements?.length === effectivePositions.length) {
-            suggested = fitListingPlacementsToReference(step,vision.placements,Boolean(config.referenceImage),styleTokens);
+            suggested = fitListingPlacementsToReference(step,vision.placements,Boolean(config.referenceImage),styleTokens,true);
             if (!suggested.length) throw Error('Vision positions could not be kept outside the text zone.');
           }
           layoutWarning = vision.fallback || '';
@@ -322,8 +323,9 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
       await saveRecord({
         number: step, status: 'draft', backgroundUrl: response.backgroundUrl,
         renderedImageUrl: '', placements: suggested,
-        compositionMode: (step === 1 || step === 15) && config.referenceImage ? 'hero-center' : 'top-gallery',
-      protectedTextZone: (step === 1 || step === 15) && config.referenceImage ? heroTextZone(layoutReference) : undefined,
+        compositionMode: config.referenceImage ? 'reference-guided' : 'top-gallery',
+      protectedTextZone: config.referenceImage ? heroTextZone(styleTokens) : undefined,
+      protectedTextZones: config.referenceImage ? referenceTextZones(styleTokens) : undefined,
         notes: notes[step] || current?.notes || '', updatedAt: Date.now()
       });
       await renderAndSave(response.backgroundUrl, suggested, notes[step] || current?.notes || '', styleTokens,Boolean(config.referenceImage));
@@ -373,6 +375,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
             <option value="ai">AI + manual</option><option value="manual">Manual placement</option>
           </select>
         </label>
+        <div className="listing-vision-pair" style={{gridColumn:'1 / -1',display:'grid',gridTemplateColumns:'repeat(2,minmax(0,1fr))',gap:12,minWidth:0}}>
         <label style={{ display: 'grid', gap: 5 }}><span className="input-label">VISION PROVIDER</span>
           <select value={config.analysisProvider} disabled={!!working || settingsBusy} onChange={e => {
             const value = e.target.value as ListingStudioConfig['analysisProvider'];
@@ -380,19 +383,21 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
             setSettingsDirty(true);
           }}><option value="openai">OpenAI</option><option value="gemini">Gemini (reference analysis)</option></select>
         </label>
-        <label style={{ display: 'grid', gap: 5 }}><span className="input-label">OPENAI BACKGROUND GENERATION MODEL</span>
-          <select value={config.imageModel} disabled={!!working || settingsBusy} onChange={e => changeConfig('imageModel', e.target.value)}>
-            {!availableModels.some(x => x.id === config.imageModel) && <option value={config.imageModel}>{config.imageModel}</option>}
-            {availableModels.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
-          </select>
-          <small>For creating backgrounds and artistic lettering. Vision model above is for analyzing the reference image.</small>
-        </label>
         <label style={{ display: 'grid', gap: 5 }}><span className="input-label">VISION MODEL</span>
           <select value={config.analysisModel} disabled={!!working || settingsBusy} onChange={e => changeConfig('analysisModel', e.target.value)}>
             {!visionModels[config.analysisProvider].some(m => m.id === config.analysisModel) && <option value={config.analysisModel}>{config.analysisModel}</option>}
             {visionModels[config.analysisProvider].map(m => <option key={m.id} value={m.id}>{m.name} ({m.id})</option>)}
           </select>
         </label>
+        </div>
+        <label style={{ display: 'grid', gap: 5 }}><span className="input-label">OPENAI BACKGROUND GENERATION MODEL</span>
+          <select value={config.imageModel} disabled={!!working || settingsBusy} onChange={e => changeConfig('imageModel', e.target.value)}>
+            {!availableModels.some(x => x.id === config.imageModel) && <option value={config.imageModel}>{config.imageModel}</option>}
+            {availableModels.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
+          </select>
+          <small>For creating backgrounds and artistic lettering. The provider and model immediately above control reference analysis.</small>
+        </label>
+
 
 
 
@@ -480,7 +485,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
           <small style={{ color: '#74695e' }}>Only the graphic background, premium lettering and blank mockup environment are AI-generated. PaletteIQ composites original collection assets, preserving their identity. Generation uses paid API requests.</small>
           <hr style={{ width: '100%', border: 0, borderTop: '1px solid #eee4d9' }}/>
           <strong>Original asset placement ({positions.length}) — text-safe, distinct originals</strong>
-          <small>{(step === 1 || step === 15) && config.referenceImage ? 'Hero Cover: lettering is centered and original PNGs arranged around the perimeter, inspired by the reference.' : 'Gallery: lettering stays in a protected top band.'} Text and clipart may not overlap; repeated assets are unavailable.</small>
+          <small>{(step === 1 || step === 15) && config.referenceImage ? 'Reference selected: the detected title zones and original artwork positions determine the composition.' : 'Gallery: lettering stays in a protected top band.'} Text and clipart may not overlap; repeated assets are unavailable.</small>
           <label className="input-label">SELECT ARTWORK TO ADJUST</label>
           <select value={selectedIndex < positions.length ? selectedIndex : 0} disabled={!positions.length || !!working} onChange={e => setSelectedIndex(Number(e.target.value))}>
             {positions.map((p, i) => <option key={i} value={i}>{i + 1}. {assets.find(a => a.id === p.assetId)?.name || 'Original artwork'}</option>)}

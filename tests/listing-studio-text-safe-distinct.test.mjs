@@ -53,10 +53,10 @@ test('all seven experimental selectors are absent from Listing Image Studio',()=
     'CLIPART HIERARCHY','DECORATION INTENSITY','REFERENCE INTERPRETATION'])
     assert.doesNotMatch(studio,new RegExp('>'+label+'</span>'));
   assert.doesNotMatch(route,/settings\?\.(?:coverStyle|backgroundStyle|intensity|boldness|hierarchy|referenceStyle)/);
-  assert.match(studio,/fitListingPlacementsToReference\(number,planListingPlacements/);
+  assert.match(studio,/fitListingPlacementsToReference\(number,planned/);
   assert.match(studio,/isListingPlacementSafe\(p,step/);
   assert.match(studio,/disabled=\{a\.id !== selected\.assetId && positions\.some/);
-  assert.match(route,/GALLERY TEXT SAFETY/);
-  assert.match(route,/REFERENCE-LED CENTRAL HERO COMPOSITION/);
-  assert.match(route,/Clipart must be distinct and stay below the protected title\/subtitle area/);
+  assert.match(route,/REFERENCE-DRIVEN TYPOGRAPHY/);
+  assert.match(route,/Text may appear at the top, center, bottom, sides/);
+  assert.match(route,/Clipart must be distinct and stay outside every protected reference text area/);
 });
