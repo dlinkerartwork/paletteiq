@@ -527,6 +527,82 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     } finally { setWorking(''); }
   };
 
+
+  /** Step 1: the image model sees reference boards, NEVER pre-layout geometry. */
+  const generateAiFirstConcept = async () => {
+    if (!promptsReady || working) return;
+    setWorking('concept');
+    setMessage('Building visual reference sheets from selected collection originals (no placement geometry)...');
+    try {
+      const sample = aiFirstSampleIndices(positions.length).map(index => positions[index]);
+      const referenceSheets = await createArtworkContactSheets(sample, assets);
+      if (!referenceSheets.length) throw Error('Original clipart previews were unavailable');
+      setMessage('OpenAI is designing the complete concept using real collection clipart reference boards...');
+      const response = await send({
+        action:'generate-concept', projectId, number:step, model, quality,
+        selectedAssetIds:positions.map(p=>p.assetId), referenceSheets,
+        backgroundPrompt:promptDraft!.backgroundPrompt,
+        title:currentLettering.title, subtitle:currentLettering.subtitle, badge:currentLettering.badge
+      });
+      if (!response.conceptUrl) throw Error('OpenAI returned no concept image');
+      setCostNotice({step,model,quality,estimate:response.costEstimate ?? null});
+      await saveRecord({
+        number:step,status:'draft',conceptUrl:response.conceptUrl,
+        backgroundUrl:'',renderedImageUrl:'',placements:positions,
+        title:currentLettering.title,subtitle:currentLettering.subtitle,badge:currentLettering.badge,
+        width:LISTING_WIDTH,height:LISTING_HEIGHT,
+        notes:notes[step] ?? current?.notes ?? '',
+        reviewWarning:'AI-first concept uses temporary AI-drawn placeholders; it is not the final exact-asset JPG.',
+        updatedAt:Date.now()
+      });
+      setMessage('Full AI-first concept saved for review. ' +
+        (response.selectedSourceCount && response.sampledSourceCount && response.sampledSourceCount < response.selectedSourceCount
+          ? response.sampledSourceCount + ' of ' + response.selectedSourceCount + ' originals were visually sampled; ALL selected originals remain eligible for final Vision placement. '
+          : '') +
+        'Inspect the concept, then click Build final JPG with original clipart. The next steps use additional paid image edit and Vision requests.');
+    } catch(error) {
+      setMessage('AI-first concept failed: ' + (error instanceof Error ? error.message : String(error)));
+    } finally {setWorking('');}
+  };
+
+  /** Step 2: remove all concept placeholder objects, then compose actual PNGs. */
+  const finalizeAiFirstConcept = async () => {
+    if (!current?.conceptUrl || !promptsReady || working || compositionMode !== 'ai-first') return;
+    if (!window.confirm('Create a clean typography plate from this AI concept, then position the original PNGs with OpenAI Vision? This makes additional paid API requests.')) return;
+    setWorking('concept-final');
+    try {
+      setMessage('OpenAI is removing ALL temporary concept clipart, preserving only background and typography...');
+      const cleaned = await send({
+        action:'clean-concept', projectId, number:step,
+        conceptUrl:current.conceptUrl, model, quality,
+        title:currentLettering.title,subtitle:currentLettering.subtitle,badge:currentLettering.badge
+      });
+      if (!cleaned.backgroundUrl) throw Error('No clean typography plate returned');
+      setCostNotice({step,model,quality,estimate:cleaned.costEstimate ?? null});
+      setMessage('OpenAI Vision matching original collection PNGs to the full design concept...');
+      const arranged=await arrangeWithAI(cleaned.backgroundUrl,positions,'',promptDraft!.layoutPrompt,current.conceptUrl);
+      const warning=[cleaned.reviewWarning,arranged.warning].filter(Boolean).join(' ');
+      // Persist expensive intermediate results BEFORE JPG upload so a failed
+      // upload does not destroy the clean plate or original concept.
+      await saveRecord({
+        number:step,status:'draft',conceptUrl:current.conceptUrl,
+        backgroundUrl:cleaned.backgroundUrl,renderedImageUrl:'',
+        placements:arranged.placements,width:LISTING_WIDTH,height:LISTING_HEIGHT,
+        title:currentLettering.title,subtitle:currentLettering.subtitle,badge:currentLettering.badge,
+        notes:notes[step] ?? current?.notes ?? '',reviewWarning:warning,updatedAt:Date.now()
+      });
+      const scored=await renderAndSave(cleaned.backgroundUrl,arranged.placements,
+        notes[step] ?? current?.notes ?? '',warning,currentLettering);
+      setMessage('AI-first final JPG saved with ' + arranged.placements.length +
+        ' original collection PNGs, not AI-generated placeholders. ' +
+        (scored ? 'Vision score: ' + scored.score.toFixed(1) + '/10. ' : '') +
+        'Inspect text, object fidelity and any remnant placeholder art before approval. ' + arranged.warning);
+    } catch(error) {
+      setMessage('AI-first finalization failed; your original concept remains saved. ' +
+        (error instanceof Error ? error.message : String(error)));
+    } finally {setWorking('');}
+  };
+
   const generate = async () => {
     if (working) return;
     if (!promptsReady) return setMessage('Prepare and review both OpenAI prompts before paid generation. Refresh prompts after changing settings or selected originals.');
@@ -807,6 +883,18 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
               <img key={current.renderedImageUrl} src={current.renderedImageUrl} alt={'Saved listing image '+step} style={{ width: '100%', height: '100%', objectFit: 'contain' }}/>
             </div>
           </div>}
+          {compositionMode === 'ai-first' && current?.conceptUrl && <section data-ai-first-concept-preview="true"
+            style={{ marginTop:12, border:'1px solid #dcc9b7',borderRadius:10,padding:12,display:'grid',gap:10 }}>
+            <strong>AI-First full cover concept (temporary illustrated placeholders)</strong>
+            <img src={current.conceptUrl} alt="OpenAI full cover composition concept"
+              style={{width:'100%',aspectRatio:'1 / 1',objectFit:'contain',borderRadius:8}}/>
+            <small>This image is creative guidance only. It is NOT a sellable exact-original JPG. The next step removes its temporary illustrations and replaces them with PNG originals from this collection. Check the final background for ghost objects or changed text.</small>
+            <button type="button" className="primary-btn" disabled={!!working || !promptsReady}
+              onClick={() => void finalizeAiFirstConcept()}>
+              Build final JPG with original clipart (paid clean plate + Vision)
+            </button>
+            {!promptsReady && <small>Refresh both OpenAI prompts before finalization.</small>}
+          </section>}
           <section style={{ marginTop: current?.renderedImageUrl ? 16 : 0, display: 'grid', gap: 8 }}>
             <strong>{current?.backgroundUrl ? 'Editable Original Clipart Layers (post-generate)' : 'White Canvas Pre-Layout — arrange before AI generation'}</strong>
             <EtsyListingLayoutCanvas
@@ -1048,7 +1136,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           <section data-listing-openai-prompt-editor="true" style={{ border:'1px solid #e5d9cb',
             borderRadius:10, padding:12, display:'grid', gap:9 }}>
             <strong>OpenAI prompt editor — review before sending</strong>
-            <small style={{ color:'#75695e' }}>Prepare the real server-generated prompts at no image-generation cost. Edit freely before clicking Generate or Auto Arrange. PaletteIQ will still paste ONLY your original clipart files.</small>
+            <small style={{ color:'#75695e' }}>Prepare the real prompts at no generation cost. AI-First makes a complete concept from collection reference images, then prepares a CLEAN artwork-free typography plate so only original PNGs are composited into the final deliverable. Review/edit both prompts before paid requests.</small>
             <button type="button" className="outline-btn" disabled={!!working || !positions.length}
               onClick={() => {
                 if (promptsReady && !window.confirm('Replace your edited OpenAI prompt drafts with fresh defaults?')) return;
