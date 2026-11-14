@@ -1212,17 +1212,21 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           <section data-listing-openai-prompt-editor="true" style={{ border:'1px solid #e5d9cb',
             borderRadius:10, padding:12, display:'grid', gap:9 }}>
             <strong>OpenAI prompt editor — review before sending</strong>
-            <small style={{ color:'#75695e' }}>AI-First: OpenAI Vision receives original clipart reference sheets and your design direction; image generation creates only typography/background. PaletteIQ renders original PNGs. Edit the two prompts before sending.</small>
+            <small style={{ color:'#75695e' }}>{compositionMode === 'ai-first'
+              ? 'OpenAI receives the selected reference images and your creative prompt, then produces the ENTIRE thumbnail directly. No coordinate mapping, original PNG overlay or second stage.'
+              : 'Edit the background and optional Vision art direction. PaletteIQ then composes original PNGs.'}</small>
             <button type="button" className="outline-btn" disabled={!!working || !positions.length}
               onClick={() => {
                 if (promptsReady && !window.confirm('Replace your edited OpenAI prompt drafts with fresh defaults?')) return;
                 void prepareOpenAiPrompts();
               }}>
-              {promptsReady ? 'Reset / refresh both OpenAI prompts' : 'Prepare OpenAI prompts (no generation cost)'}
+              {promptsReady
+                ? compositionMode === 'ai-first' ? 'Reset / refresh full-cover creative prompt' : 'Reset / refresh both OpenAI prompts'
+                : 'Prepare OpenAI prompts (no generation cost)'}
             </button>
             {!promptsReady && <small role="status" style={{ color:'#96501f' }}>Prompts have not been prepared for the current collection selection and settings. Refresh them before generating; any previous draft for this image remains saved in this session.</small>}
             <label className="input-label" htmlFor="listing-background-prompt">{compositionMode === 'ai-first'
-              ? 'OPENAI VISION — FREE CREATIVE ART-DIRECTION PROMPT'
+              ? 'OPENAI IMAGE EDIT — COMPLETE THUMBNAIL PROMPT'
               : 'OPENAI IMAGE GENERATION — BACKGROUND & TYPOGRAPHY PROMPT'}</label>
             <textarea id="listing-background-prompt" aria-label="Editable OpenAI background and typography prompt"
               rows={10} maxLength={24000} spellCheck={false}
@@ -1231,7 +1235,10 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
               disabled={!!working || !promptsReady}
               placeholder="Click Prepare OpenAI prompts to review the art direction sent to OpenAI."
               style={{ width:'100%', boxSizing:'border-box', resize:'vertical', fontFamily:'inherit', fontSize:12, lineHeight:1.55 }}/>
-            <small style={{ color:'#75695e' }}>This text is sent unchanged to {compositionMode === 'ai-first' ? 'OpenAI Vision together with authentic visual references from the selected clipart ZIP source set' : 'the image-generation model'}. Review and edit it before paid requests; technical instructions still forbid generated clipart in the final image.</small>
+            <small style={{ color:'#75695e' }}>This creative prompt is sent to {compositionMode === 'ai-first'
+              ? 'OpenAI image editing together with selected clipart visual references. OpenAI generates ALL art and typography; source clipart is not pixel-exactly preserved'
+              : 'the image-generation model for a background without replacement clipart'}. Review and edit before paying.</small>
+            {compositionMode !== 'ai-first' && <>
             <label className="input-label" htmlFor="listing-vision-prompt">OPENAI VISION — ORIGINAL CLIPART COMPOSITION PROMPT</label>
             <textarea id="listing-vision-prompt" aria-label="Editable OpenAI Vision composition prompt"
               rows={8} maxLength={12000} spellCheck={false}
@@ -1240,21 +1247,26 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
               disabled={!!working || !promptsReady}
               placeholder="Click Prepare OpenAI prompts to see and edit Vision's artistic composition instructions."
               style={{ width:'100%', boxSizing:'border-box', resize:'vertical', fontFamily:'inherit', fontSize:12, lineHeight:1.55 }}/>
-            <small style={{ color:'#75695e' }}>Vision uses your art direction, the typography-only background, source asset IDs and reference sheets to choose PNG geometry. No source images are redrawn or replaced.</small>
+            <small style={{ color:'#75695e' }}>Vision chooses geometry for original PNG layers in Free and Structured modes.</small>
+            </>}
           </section>
           <button type="button" className="primary-btn" onClick={() => void generate()} disabled={!loaded || !assets.length || !!working || !precedingApproved || !promptsReady}>
             {working === 'generate' ? <LoaderCircle className="spin" size={16}/> : <Sparkles size={16}/>}
             {compositionMode === 'ai-first'
-              ? 'Generate AI-First Art Direction & Typography (paid)'
+              ? 'Generate Full Creative Thumbnail (OpenAI paid)'
               : current?.backgroundUrl ? 'Revise Image ' + String(step).padStart(2,'0') + ' (AI background)' : step === 1 ? 'Start /new-listing — Generate Main Cover' : 'Generate Image ' + String(step).padStart(2,'0')}
           </button>
           {!precedingApproved && <small style={{ color: '#94502e' }}>Approve the earlier images in order before generating this image.</small>}
           {(step === 3 || step === 5) && <button className="outline-btn" type="button" onClick={() => void categorize()} disabled={!!working}>Analyze collection categories (optional)</button>}
-          <small style={{ color: '#74695e' }}>Free Composition ignores starter canvas coordinates in the AI background prompt. After background generation, OpenAI Vision chooses positions for the selected originals using your edited composition instructions. PaletteIQ composites the unchanged source PNGs over the result.</small>
+          <small style={{ color: '#74695e' }}>{compositionMode === 'ai-first'
+            ? 'The OpenAI image is the complete SINGLE-LAYER cover. No mapping, image replacement or PNG compositing. Some depicted details may differ from the original references.'
+            : 'Free Composition ignores starter canvas coordinates in the AI background prompt. OpenAI Vision chooses original asset positions, and PaletteIQ composites the source PNGs.'}</small>
           <hr style={{ width: '100%', border: 0, borderTop: '1px solid #eee4d9' }}/>
           <label className="input-label">REVISION NOTES</label>
           <textarea rows={3} maxLength={800} value={notes[step] ?? current?.notes ?? ''} onChange={e => setNotes(old => ({ ...old, [step]: e.target.value }))} placeholder="Specify desired revision to the current image, if any."/>
-          <small style={{ color: '#74695e' }}>Your revision notes are included in the next paid AI background regeneration for this image only. To adjust original clipart positions without AI charges, use Apply layout & save JPG. Review spelling, crop, verified facts and mockup realism before approving.</small>
+          <small style={{ color: '#74695e' }}>{compositionMode === 'ai-first'
+            ? 'Revision notes apply on the NEXT paid full-cover generation. This artwork has no separately editable source layers. Review all source subjects, spelling and claims.'
+            : 'Revision notes are included in the next paid AI background regeneration. Original clipart positions can be adjusted with a free JPG re-render.'}</small>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button type="button" className="outline-btn" disabled={!current?.renderedImageUrl || !!working} onClick={() => void review('needs_revision')}>Needs revision</button>
             <button type="button" className="outline-btn" disabled={!loaded || !!working || (!current?.backgroundUrl && !current?.renderedImageUrl)}
