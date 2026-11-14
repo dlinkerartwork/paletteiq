@@ -80,6 +80,7 @@ export function fitListingPlacementsToReference(
 ): ListingPlacement[] {
   if (!isCentralHero(number,hasReference)) return fitListingPlacementsBelowText(originals);
   if (!originals.length) return [];
+  if (originals.every(p => isListingPlacementSafe(p,number,hasReference,layout))) return originals.map(p=>({...p}));
   // Dynamic reference slots only apply if they do not collide with the title.
   const referenceSlots = (layout?.slots || []).filter(slot =>
     [slot.x,slot.y,slot.width,slot.height].every(finite) &&
