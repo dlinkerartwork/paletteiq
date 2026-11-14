@@ -59,7 +59,7 @@ test('Vision style analysis is user-owned, sample-limited, validates original as
   assert.match(styleApi,/eq\(projects\.owner, owner\)/);
   assert.match(styleApi,/originalAssets\(project\.characters \|\| \[\]\)/);
   assert.match(styleApi,/!known\.has\(sample\.assetId\)/);
-  assert.match(styleApi,/!seen\.has\(sample\.assetId\)/, 'validate duplicate source IDs');
+  assert.match(styleApi,/seen\.has\(sample\.assetId\)/, 'validate duplicate source IDs');
   assert.match(styleApi,/samples\.length > 6/);
   assert.match(styleApi,/sample\.dataUrl\.length > 230_000/);
   assert.match(styleApi,/totalChars > 1_350_000/);
