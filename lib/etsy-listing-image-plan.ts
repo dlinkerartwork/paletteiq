@@ -2,6 +2,8 @@
 // from legacy 3000 × 2250 exports and must never silently mix with them.
 export const LISTING_WIDTH = 1024;
 export const LISTING_HEIGHT = 1024;
+/** Richer art-first Main Cover, capped by the number of distinct actual assets. */
+export const DEFAULT_MAIN_COVER_CLIPART_COUNT = 12;
 
 export const LISTING_IMAGE_SPECS = [
   { number: 1, key: 'Main_Cover', title: 'Main Cover', headline: 'The Clipart Collection', purpose: 'Hero cover with standout original artwork', kind: 'gallery' },
@@ -129,7 +131,7 @@ export function planListingPlacements(number: number, source: ListingAsset[], op
       for (const group of distinct.slice(0, 6)) chosen.push(...group.slice(0, 3));
       selected = chosen;
     } else selected = available.slice(0, 18);
-  } else if (number === 1) selected = curatedListingHighlights(available, 7);
+  } else if (number === 1) selected = curatedListingHighlights(available, DEFAULT_MAIN_COVER_CLIPART_COUNT);
   else if (number === 4) selected = curatedListingHighlights(available, 8);
   else if (number === 6) selected = available.slice(0, 2);
   else if (number === 7) selected = available.slice(0, 3);
@@ -196,32 +198,39 @@ export function planListingPlacements(number: number, source: ListingAsset[], op
     return selected.map((a, i) => box(a, 5 + (i % cols) * cellW + 0.5, 24 + Math.floor(i / cols) * cellH + 0.3, cellW - 1, cellH - 0.7));
   }
   if (number === 1) {
-    // A cover is an expressive poster, not a ten-object pile. Give OpenAI
-    // lettering real visual breathing space while allowing intentional partial
-    // foreground overlap. Vision can adapt these starter placements to the
-    // generated lettering's ACTUAL position rather than a fixed title zone.
-    const coverSlots = [
-      [2, 17, 24, 27], [74, 14, 23, 28],
-      [3, 52, 25, 30], [73, 50, 25, 32],
-      [13, 78, 23, 21], [64, 77, 23, 21],
-      [41, 81, 19, 18]
+    // Art-first cover: 2 large heroes, 4 medium supporting illustrations,
+    // and up to 8 small accents. Avoid a uniform grid or repeated positions.
+    // The central lettering remains visually subordinate to the original art.
+    const coverSlots: Array<[number, number, number, number]> = [
+      [2, 24, 27, 31], [71, 24, 27, 31],  // hero
+      [4, 57, 20, 25], [76, 57, 20, 25],  // medium
+      [25, 78, 18, 20], [57, 78, 18, 20],
+      [8, 7, 12, 15], [30, 6, 12, 15],   // accents
+      [58, 6, 12, 15], [80, 8, 12, 15],
+      [38, 58, 12, 15], [51, 63, 12, 14],
+      [20, 45, 11, 13], [69, 45, 11, 13]
     ];
     if (selected.length <= coverSlots.length)
-      return selected.map((a, i) => box(a, ...coverSlots[i] as [number, number, number, number]));
-    // For a larger user-selected cover collage, distribute across the left,
-    // right and bottom perimeter instead of repeating seven overlapping slots.
+      return selected.map((asset, index) => box(asset, ...coverSlots[index]));
+    // For intentionally larger user-selected collages, continue varying
+    // scale around the perimeter without recycling identical seven slots.
     const sideCount = Math.ceil(selected.length * 0.36);
     const bottomCount = selected.length - sideCount * 2;
     return selected.map((asset, index) => {
       if (index < sideCount * 2) {
         const onLeft = index < sideCount;
         const i = onLeft ? index : index - sideCount;
-        const cell = 78 / sideCount;
-        return box(asset, onLeft ? 1 : 76, 9 + i * cell, 23, Math.max(5, cell + 1));
+        const cell = 77 / sideCount;
+        const scale = [1.15, 0.8, 1, 0.67][i % 4];
+        const width = Math.min(25, 19 * scale);
+        const height = Math.max(4, Math.min(cell * 0.94, cell * scale));
+        return box(asset, onLeft ? 1 : 99 - width, 7 + i * cell, width, height);
       }
       const j = index - sideCount * 2;
       const cell = 64 / Math.max(1, bottomCount);
-      return box(asset, 18 + j * cell, 79, Math.min(22, cell + 1), 19);
+      const scale = [1.1, 0.76, 0.95, 0.63][j % 4];
+      const width = Math.min(cell * 0.9, 21 * scale);
+      return box(asset, 18 + j * cell, 79, width, 18 * scale);
     });
   }
   if (number === 15) {
