@@ -225,8 +225,8 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
   };
   const renderAndSave = async (background: string, layout: ListingPlacement[], info: string,
     layoutReference: ListingReferenceLayout | undefined = referenceDesign,
-    heroReference = Boolean(config.referenceImage) || current?.compositionMode === 'hero-center') => {
-    const protectedZone = heroReference && (step === 1 || step === 15)
+    heroReference = Boolean(config.referenceImage) || current?.compositionMode === 'reference-guided' || current?.compositionMode === 'hero-center') => {
+    const protectedZone = heroReference
       ? (layoutReference ? heroTextZone(layoutReference) : current?.protectedTextZone || heroTextZone())
       : undefined;
     setWorking('render'); setMessage('Compositing ' + layout.length + ' exact original clipart images at 1024 × 1024 px...');
@@ -238,7 +238,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
     const renderedImageUrl = await upload(projectId, step, file, (done, total) => setMessage('Uploading original-asset JPG: ' + done + '/' + total + ' parts...'));
     const image: ListingImageRecord = {
       number: step, status: 'draft', backgroundUrl: background, renderedImageUrl, placements: layout,
-      compositionMode: protectedZone ? 'hero-center' : 'top-gallery',
+      compositionMode: protectedZone ? 'reference-guided' : 'top-gallery',
       protectedTextZone: protectedZone,
       notes: info, updatedAt: Date.now()
     };
@@ -311,7 +311,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
           const vision = await send({ action: 'layout', projectId, number: step, backgroundUrl: response.backgroundUrl, placements: effectivePositions,
             referenceDesign: styleTokens, settings: config ? { ...config, referenceImage: undefined, hasReference: Boolean(config.referenceImage) } : undefined });
           if (vision.placements?.length === effectivePositions.length) {
-            suggested = fitListingPlacementsToReference(step,vision.placements,Boolean(config.referenceImage),styleTokens);
+            suggested = fitListingPlacementsToReference(step,vision.placements,Boolean(config.referenceImage),styleTokens,true);
             if (!suggested.length) throw Error('Vision positions could not be kept outside the text zone.');
           }
           layoutWarning = vision.fallback || '';
@@ -322,7 +322,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
       await saveRecord({
         number: step, status: 'draft', backgroundUrl: response.backgroundUrl,
         renderedImageUrl: '', placements: suggested,
-        compositionMode: config.referenceImage ? 'hero-center' : 'top-gallery',
+        compositionMode: config.referenceImage ? 'reference-guided' : 'top-gallery',
       protectedTextZone: config.referenceImage ? heroTextZone(styleTokens) : undefined,
         notes: notes[step] || current?.notes || '', updatedAt: Date.now()
       });
