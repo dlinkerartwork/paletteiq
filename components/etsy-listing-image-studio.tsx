@@ -544,6 +544,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
    */
   const downloadAiFirstSourceZip = async () => {
     if(working||!positions.length)return;
+    if(!promptsReady) return setMessage('Prepare and review the OpenAI creative prompt before exporting the ZIP so the package contains the exact edited instructions.');
     setWorking('source-zip');
     setMessage('Packaging selected original clipart PNGs/JPGs and the current creative prompt into a source ZIP...');
     try{
@@ -552,7 +553,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
         body:JSON.stringify({action:'source-zip',projectId,number:step,
           selectedAssetIds:[...new Set(positions.map(p=>p.assetId))],
           title:currentLettering.title,subtitle:currentLettering.subtitle,badge:currentLettering.badge,
-          backgroundPrompt:promptsReady?promptDraft!.backgroundPrompt:''
+          backgroundPrompt:promptDraft!.backgroundPrompt
         })
       });
       if(!response.ok){
