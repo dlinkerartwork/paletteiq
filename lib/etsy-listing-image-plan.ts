@@ -229,7 +229,7 @@ export function planListingPlacements(number: number, source: ListingAsset[], op
       const j = index - sideCount * 2;
       const cell = 64 / Math.max(1, bottomCount);
       const scale = [1.1, 0.76, 0.95, 0.63][j % 4];
-      const width = Math.min(cell * 0.9, 21 * scale);
+      const width = Math.max(2, Math.min(cell * 0.9, 21 * scale));
       return box(asset, 18 + j * cell, 79, width, 18 * scale);
     });
   }
