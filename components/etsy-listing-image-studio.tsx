@@ -812,13 +812,13 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   };
   const autoArrangeArtwork = async () => {
     if (working) return;
+    if (compositionMode === 'ai-first' && current?.backgroundUrl && !current.renderedImageUrl)
+      return setMessage('AI-First art direction is ready. Use Build final JPG with original PNGs to apply OpenAI placement to its selected source artwork.');
     if (current?.backgroundUrl && !promptsReady)
       return setMessage('Prepare or refresh the OpenAI Vision prompt above before paid Auto Arrange. You can edit the composition instructions first.');
     if (current?.status === 'approved' && !window.confirm('Rearrange this approved image? Save the updated JPG to reset approval.')) return;
     const localPlan = planListingPlacements(step, categorizedAssets, { assetIds: selectedAssetIds });
     if (!current?.backgroundUrl) {
-      if (compositionMode === 'ai-first' && current?.conceptUrl)
-        return setMessage('Build the clean-plate final JPG from this AI-first concept before requesting a placement revision.');
       setChanges(old => ({ ...old, [step]: localPlan }));
       setMessage('Starter layout arranged locally. Generate background to let AI Vision independently plan a Free Composition, or adjust it manually.');
       return;
@@ -1039,7 +1039,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
                 }
               }}>
               <option value="free">Free Composition — OpenAI chooses sizes and positions (Main Cover default)</option>
-              {!(step >= 8 && step <= 12) && <option value="ai-first">AI-First Composition — generate a full concept from original collection references</option>}
+              {!(step >= 8 && step <= 12) && <option value="ai-first">AI-First Composition — Vision selects original PNGs; AI designs typography and background</option>}
               <option value="structured">Structured — preserve my white-canvas arrangement</option>
             </select>
             <small>{compositionMode === 'ai-first'
@@ -1173,7 +1173,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
               value={promptsReady ? promptDraft!.backgroundPrompt : ''}
               onChange={e => setPromptDrafts(old => ({...old,[step]:{...old[step]!,backgroundPrompt:e.target.value}}))}
               disabled={!!working || !promptsReady}
-              placeholder="Click Prepare OpenAI prompts to see the exact text that will be sent to the image-generation API."
+              placeholder="Click Prepare OpenAI prompts to review the art direction sent to OpenAI."
               style={{ width:'100%', boxSizing:'border-box', resize:'vertical', fontFamily:'inherit', fontSize:12, lineHeight:1.55 }}/>
             <small style={{ color:'#75695e' }}>This text is sent unchanged to {compositionMode === 'ai-first' ? 'OpenAI Vision with authentic clipart reference boards (not to the image generator)' : 'the image-generation model'}. Your creative preferences are respected; technical instructions still forbid generated clipart in the final image.</small>
             <label className="input-label" htmlFor="listing-vision-prompt">OPENAI VISION — ORIGINAL CLIPART COMPOSITION PROMPT</label>
