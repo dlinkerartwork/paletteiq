@@ -575,6 +575,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
     setPackStatus('Analyzing the selected graphic reference and preserving manual artwork placement...');
     try {
       let referenceDesign = source.referenceDesign;
+      let referenceWarning = '';
       let referenceSlots: Array<{x:number;y:number;width:number;height:number;rotation?:number}> = [];
       if (reference) {
         try {
@@ -582,7 +583,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               projectId, imageUrl: reference, provider, model,
-              referenceStyle, count: Math.min(imageLayers.length, 24)
+              referenceStyle, count: Math.min(imageLayers.length, 12)
             })
           });
           const result = await readApiJson<{ layout?: ThumbnailDesign['referenceDesign'] & {slots?: typeof referenceSlots; texts?: Array<{x:number;y:number;width:number;height:number}>}; error?: string }>(
@@ -607,9 +608,19 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
               compositionGuide: result.layout.compositionGuide };
           }
         } catch (error) {
-          if (layoutMode === 'ai') throw Error('Reference analysis failed; no paid background generated: ' +
-            (error instanceof Error ? error.message.slice(0, 150) : String(error)));
-          setPackStatus('Reference analysis unavailable; keeping manual layout.');
+          const reason = error instanceof Error ? error.message : String(error);
+          referenceWarning = 'Reference analysis unavailable (' + reason.slice(0, 95) +
+            '). Using a safe layout fallback; visual fidelity to the reference may be reduced.';
+          // Do not prevent the user-approved image request when optional visual analysis times out.
+          // Vision will still inspect the actual generated background before composing exact PNGs.
+          referenceSlots = imageLayers.map(e => ({
+            x:e.x, y:e.y, width:e.width, height:e.height, rotation:e.rotation
+          }));
+          referenceDesign ||= {
+            graphicMotif: 'soft-wash', letteringStyle: 'script-serif', paletteMood: 'forest-cream',
+            compositionGuide: 'Light premium nonfigurative graphic design with a readable title and quiet artwork perimeter.'
+          };
+          setPackStatus(referenceWarning + ' Continuing with background generation.');
         }
       }
       setPackStatus('Creating AI ' + (hasLettering ? 'background and artistic lettering' : 'background with no typography') + '. Original collection PNGs stay in place...');
@@ -698,9 +709,11 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
       latestDesignsRef.current = next;
       onChange(next);
       if (!result.qcRejected) setShowTypographyGuide(false);
-      setMessage(result.qcRejected
+      setMessage((result.qcRejected
         ? 'New AI background was flagged for review. Inspect it and explicitly approve it before composition; original clipart positions are preserved.'
-        : (hasLettering ? 'Background, exact badge text and typography applied.' : 'Text-free background applied.') + (layoutMode === 'ai' ? ' Original PNGs were fitted to reference and background.' : ' Manual PNG positions preserved.') + ' Save the design to persist.');
+        : (hasLettering ? 'Background, exact badge text and typography applied.' : 'Text-free background applied.') +
+          (layoutMode === 'ai' ? ' Original PNGs were fitted around the generated background.' : ' Manual PNG positions preserved.') +
+          ' Save the design to persist.') + (referenceWarning ? ' ' + referenceWarning : ''));
       setPackStatus('');
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
