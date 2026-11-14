@@ -582,7 +582,7 @@ export async function POST(request: Request) {
     const existing = Array.isArray(input.existingPlacements) ? input.existingPlacements : [];
     if (existing.some(p => !p || !valid.has(p.assetId) || !validListingPlacement(p,input.number!) ||
         fallback.some(current => current.assetId === p.assetId)) ||
-        new Set(existing.map(p => p.assetId)).size !== existing.length)
+        (mode !== 'ai-first' && new Set(existing.map(p => p.assetId)).size !== existing.length))
       return bad('Invalid previously arranged original artwork');
     const totalSelected = Number.isInteger(input.totalSelected) && (input.totalSelected || 0) >= fallback.length + existing.length
       ? input.totalSelected! : fallback.length + existing.length;
