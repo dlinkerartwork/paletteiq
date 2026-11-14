@@ -32,7 +32,8 @@ test('custom canvas generates graphics only, then Vision fits exact original PNG
     editor.indexOf('  // Create the background and artistic lettering FIRST'));
   assert.match(method, /const originalLayers = source\.elements\.filter/);
   assert.match(method, /filterThemeCharacters\(title,characters\)/);
-  assert.match(method, /slice\(0,9\)\.map\(\(c,i\)=>newImage\(c,i,'original'\)\)/);
+  assert.match(method, /const imageLayers = originalLayers/);
+  assert.doesNotMatch(method, /filterThemeCharacters\(title,characters\).*slice\(0,9\)/);
   assert.match(method, /assetMap\.get\(e\.characterId\)\?\.imageUrl/);
   assert.match(method, /layout: imageLayers\.map\(e => \(\{ type: 'image' as const/);
   assert.match(method, /mode: needsAiLettering \? 'background-with-typography'/);
@@ -80,9 +81,21 @@ test('AI image backend accepts optional badge and honors absence of badges', () 
   assert.doesNotMatch(api, /mode !== 'full-thumbnail' && input\.provider !== 'openai'/);
 });
 
-test('empty canvas can generate an exact-asset reference-based composition', () => {
-  assert.match(editor, /layoutMode === 'ai' && characters\.some\(c => c\.imageUrl\)/);
-  assert.match(editor, /currentDesign\.elements\.some\(e => e\.type === 'image'\)/);
-  assert.match(editor, /: imageLayers\)/);
+test('user must select exact collection clipart before generating; no automatic extras', () => {
+  const method = editor.slice(editor.indexOf('const generateCanvasArtwork ='),editor.indexOf('// Create the background and artistic lettering FIRST'));
+  assert.match(method, /const imageLayers = originalLayers/);
+  assert.match(method, /if \(!imageLayers\.length\)/);
+  assert.match(method, /imageLayers\.length > 36/);
+  assert.doesNotMatch(method, /slice\(0,9\)\.map\(\(c,i\)=>newImage/);
+  assert.match(editor, /disabled=\{aiBusy \|\| Boolean\(backgroundRetryId\) \|\| !design\.elements\.some/);
   assert.match(editor, /const badgeTextLayers = hasLettering \? badgeOverlay\(zone,badge\) : \[\]/);
+});
+
+test('final Vision layout preserves every selected original and follows both reference and background', () => {
+  assert.match(editor, /referenceImageUrl,/);
+  assert.match(editor, /referenceDesign\?\.compositionGuide \|\| '', reference/);
+  assert.match(editor, /if \(selected\.length !== imageElements\.length\)/);
+  assert.match(editor, /if \(fitted\.length < imageElements\.length\)/);
+  assert.match(editor, /const scale = Math\.min\(slot\.width/);
+  assert.match(editor, /selected clipart could not fit safely/);
 });
