@@ -497,6 +497,14 @@ export async function POST(request: Request) {
   if (input.action === 'save') {
     if (!input.image || input.image.number !== input.number) return bad('Invalid image record');
     try {
+      // Persist the generating mode so AI-generated covers don't silently
+      // reappear in the Free / exact-PNG editor after a browser refresh.
+      if (input.image.aiGeneratedFullCover === true) {
+        project.listingCompositionModes={
+          ...(project.listingCompositionModes||{}),
+          [String(input.number)]:'ai-first'
+        };
+      }
       const images = await updateImage(project, input.number, input.image, user.userId);
       return Response.json({ images });
     } catch (error) { return bad(error instanceof Error ? error.message : 'Could not save listing image'); }
