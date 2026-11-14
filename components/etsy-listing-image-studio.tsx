@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Check, Download, Image as ImageIcon, LoaderCircle, RotateCcw, Sparkles } from 'lucide-react';
 import { readApiJson, uploadListingJpg } from '@/lib/listing-image-upload';
+import type { ListingStyleSample, ListingVisualStyleProfile } from '@/lib/etsy-listing-visual-style';
 import type { ImageGenerationCostEstimate } from '@/lib/etsy-listing-image-cost';
 import { listingCreativeDirection, listingMockupScene } from '@/lib/etsy-listing-creative-direction';
 import {
@@ -25,6 +26,11 @@ type Props = {
 };
 type ListResponse = { images?: ListingImageRecord[]; backgroundUrl?: string; placements?: ListingPlacement[]; fallback?: string; reviewWarning?: string; costEstimate?: ImageGenerationCostEstimate | null; warning?: string; deleted?: boolean; error?: string };
 const apiUrl = '/api/listing-image-studio';
+const styleApiUrl = '/api/listing-style-analysis';
+type StyleResponse = { profile?: ListingVisualStyleProfile | null; cached?: boolean; error?: string };
+async function styleRequest(url: string, options?: RequestInit): Promise<StyleResponse> {
+  return readApiJson<StyleResponse>(await fetch(url, options), 'Collection style analysis');
+}
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Number.isFinite(n) ? n : lo));
 const fileName = (number: number) => listingFilename(number);
 const smoothName = (name: string) => name.replace(/\s+/g, ' ').trim().slice(0, 75);
@@ -69,6 +75,39 @@ async function inspectOriginalCollectionSample(assets: ListingAsset[]): Promise<
     transparent: succeeded.filter(x => x.hasAlpha).length,
     dimensionSummary: sizes.slice(0, 4).join(', ') + (sizes.length > 4 ? ', …' : ''),
     failed: sample.length - succeeded.length };
+}
+
+/**
+ * Make a compact contact sample from REAL collection PNG pixels. Only these
+ * thumbnails are sent to Vision for art STYLE observation; the image model that
+ * creates the listing background receives text direction, never original art.
+ */
+async function createCollectionStyleSamples(assets: ListingAsset[]): Promise<ListingStyleSample[]> {
+  const count = Math.min(6, assets.length);
+  const choices = Array.from({ length: count }, (_, i) =>
+    assets[Math.min(assets.length - 1, Math.floor((i + 0.5) * assets.length / count))]);
+  const samples = await Promise.all(choices.map(async asset => {
+    try {
+      const image = await imageFromUrl(asset.imageUrl!);
+      const bounds = imageBounds(image);
+      const canvas = document.createElement('canvas');
+      canvas.width = 320; canvas.height = 320;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+      // Solid neutral backing prevents alpha transparency from becoming black
+      // in JPEG and allows Vision to judge the true edges of painted assets.
+      ctx.fillStyle = '#fffefd';
+      ctx.fillRect(0, 0, 320, 320);
+      const ratio = Math.min(292 / bounds.sw, 292 / bounds.sh);
+      const width = bounds.sw * ratio, height = bounds.sh * ratio;
+      ctx.drawImage(image, bounds.sx, bounds.sy, bounds.sw, bounds.sh,
+        (320 - width) / 2, (320 - height) / 2, width, height);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.78);
+      return dataUrl.length < 230_000
+        ? { assetId: asset.id, dataUrl } satisfies ListingStyleSample : null;
+    } catch { return null; }
+  }));
+  return samples.filter((s): s is ListingStyleSample => Boolean(s));
 }
 
 function imageBounds(image: HTMLImageElement): { sx: number; sy: number; sw: number; sh: number } {
@@ -152,6 +191,9 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [categories, setCategories] = useState<Record<string,string>>({});
   const [inspection, setInspection] = useState<CollectionInspection | null>(null);
+  const [styleProfile, setStyleProfile] = useState<ListingVisualStyleProfile | null>(null);
+  const [styleWarning, setStyleWarning] = useState('');
+  const [costNotice, setCostNotice] = useState<{ step: number; model: string; quality: string; estimate: ImageGenerationCostEstimate | null } | null>(null);
 
   const categorizedAssets = useMemo(() => assets.map(a => ({ ...a, category: categories[a.id] || a.category })), [assets, categories]);
   const current = records.find(item => item.number === step);
@@ -198,6 +240,16 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   }, [projectId, assets]);
   useEffect(() => {
     let live = true;
+    setStyleProfile(null);
+    setStyleWarning('');
+    setCostNotice(null);
+    void styleRequest(styleApiUrl + '?projectId=' + encodeURIComponent(projectId))
+      .then(response => { if (live && response.profile) setStyleProfile(response.profile); })
+      .catch(() => { /* The initial read is optional; generate will retry. */ });
+    return () => { live = false; };
+  }, [projectId]);
+  useEffect(() => {
+    let live = true;
     void request('/api/settings?models=openai').then(data => {
       const models = data as ListResponse & { models?: Array<{id:string;name:string}> };
       if (live) setAvailableModels((models.models || []).filter(m => /^gpt-image-/.test(m.id)));
@@ -208,6 +260,28 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     setRecords(images);
     onSaved?.(images);
   }, [onSaved]);
+
+  const ensureSourceStyle = async (): Promise<string> => {
+    // The server owns the durable cache and checks the current collection
+    // fingerprint. A reload or switching tabs must not incur repeat Vision fees.
+    const existing = await styleRequest(styleApiUrl + '?projectId=' + encodeURIComponent(projectId));
+    if (existing.profile) {
+      setStyleProfile(existing.profile);
+      setStyleWarning('');
+      return '';
+    }
+    setMessage('Inspecting representative ORIGINAL clipart pixels to match the collection visual style...');
+    const samples = await createCollectionStyleSamples(assets);
+    if (!samples.length) throw Error('Could not decode original clipart previews for Vision analysis');
+    const analyzed = await styleRequest(styleApiUrl, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId, samples })
+    });
+    if (!analyzed.profile) throw Error('Style analysis returned no visual profile');
+    setStyleProfile(analyzed.profile);
+    setStyleWarning('');
+    return '';
+  };
 
   const categorize = async () => {
     setWorking('categories'); setMessage('Analyzing collection categories from saved artwork names...');
