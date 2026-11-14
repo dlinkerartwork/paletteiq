@@ -647,7 +647,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         projectId, provider: imageProvider, model: imageModelChoice, quality: packQuality,
         mode: needsAiLettering ? 'background-with-typography' as const : 'background-only' as const,
         width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE,
-        headline: hasLettering ? heading : '', subtitle: hasLettering ? subtitle : '', badge: '',
+        headline: hasLettering ? heading : '', subtitle: hasLettering ? subtitle : '', badge: hasLettering ? badge : '',
         letteringStyle: 'auto' as const,
         slideName: 'Custom Canvas Artwork',
         backgroundStyle, backgroundIntensity: 'soft' as const, designBoldness: 'balanced' as const,
@@ -662,7 +662,7 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           ...currentBriefSettings(), scope: 'single' as const, slide: 'Custom Canvas Artwork',
           boldness: 'balanced', coverStyle: 'editorial', intensity: 'soft',
           headline: hasLettering ? heading : '', subtitle: hasLettering ? subtitle : '',
-          badge: '',
+          badge: hasLettering ? badge : '',
           typography: needsAiLettering ? 'ai-artwork' as const : 'editable' as const,
           textDisabled: !hasLettering,
           imageModel: imageModelChoice
@@ -1568,6 +1568,65 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
         </button>
         <small>AI image generation uses the selected reference and background quality. AI Vision then resizes and arranges only selected original PNGs. API charges apply.</small>
         </div>}
+      <div className="thumbnail-left-settings" style={{ display: 'grid', gap: 12, minWidth: 0 }}>
+      <div className="panel" style={{ padding: 14, display: 'grid', gap: 9 }}>
+        <h3>Design properties</h3>
+        <label className="input-label">DESIGN NAME</label>
+        <input value={design.name} onChange={e => mutate({ name: e.target.value })}/>
+        <label className="input-label">THUMBNAIL SIZE</label>
+        <input readOnly aria-label="Thumbnail size" value="1024 × 1024 px" />
+        <small>Fixed thumbnail creation and standard JPG/PNG export: 1024 × 1024 pixels. Remote upscale is a separate optional action.</small>
+        <label className="input-label">BACKGROUND COLOR</label>
+        <input type="color" value={design.background} onChange={e => mutate({ background: e.target.value, renderedImageUrl: undefined, upscaledImageUrl: undefined })}/>
+        <label className="input-label" htmlFor="thumbnail-background-opacity">BACKGROUND OPACITY — {Math.round(backgroundAlpha(design) * 100)}%</label>
+        <input id="thumbnail-background-opacity" aria-label="Background opacity" type="range" min="0" max="100" step="1"
+          value={Math.round(backgroundAlpha(design) * 100)}
+          onChange={e => mutate({ backgroundOpacity: Number(e.target.value) / 100, renderedImageUrl: undefined, upscaledImageUrl: undefined })}/>
+        <small>0% = latar memudar putih, 100% = desain asli. PNG clipart dan teks editable tidak memudar. AI lettering yang menyatu dengan background ikut memudar karena masih satu gambar. Save, PNG, dan JPG memakai opacity yang sama.</small>
+        <label className="input-label">AI DECORATIVE BACKGROUND (OPENAI)</label>
+        <button className="outline-btn" type="button" disabled={backgroundGenerating || aiBusy} onClick={() => void generateReferenceBackground()}><WandSparkles size={15}/> {backgroundGenerating ? 'Generating background...' : 'Generate background (no clipart or text)'}</button>
+        <small>Generate visible decorative textures and color variations. Original clipart and typography stay on top as independent layers. Generating again may incur API charges.</small>
+        <label className="input-label">BACKGROUND IMAGE (LOCAL PNG/JPG)</label>
+        <input type="file" accept="image/png,image/jpeg" disabled={backgroundUploading} onChange={e => void uploadBackground(e.target.files?.[0])}/>
+        {backgroundUploading && <small>Uploading background…</small>}
+        {backgroundLoadError && <small role="alert" style={{ color: '#b91c1c' }}>{backgroundLoadError}</small>}
+        {design.backgroundImageUrl && <a href={design.backgroundImageUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>View current background image</a>}
+        {design.backgroundImageUrl && <button className="outline-btn" type="button" onClick={() => { setBackgroundLoadError(''); mutate({ backgroundImageUrl: undefined }); }}>Remove background image</button>}
+        <h3>Layers</h3>
+        <div style={{ display: 'grid', gap: 5, maxHeight: 190, overflowY: 'auto' }}>
+          {[...design.elements].reverse().map(e => <div key={e.id} style={{ display: 'flex', gap: 5, minWidth: 0 }}>
+            <button type="button" className="outline-btn" style={{ flex: 1, justifyContent: 'flex-start', minWidth: 0, background: e.id === selectedId ? '#fff0df' : undefined, overflow: 'hidden', textOverflow: 'ellipsis' }} onClick={() => setSelectedId(e.id)}>{e.type === 'text' ? 'T' : '◫'} {e.type === 'text' ? e.text?.slice(0,24) : assetMap.get(e.characterId || '')?.name || 'Image'}</button>
+            <button type="button" className="outline-btn" disabled={e.locked} aria-label={`Delete ${e.type === 'text' ? 'text' : 'character'} from layers`} title="Delete layer" onClick={() => { commit({ ...design, elements: design.elements.filter(item => item.id !== e.id) }); if (selectedId === e.id) setSelectedId(''); }}><Trash2 size={14}/></button>
+          </div>)}
+        </div>
+      </div>
+      <div className="panel" style={{ padding: 14, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', alignItems: 'start', gap: 8 }}>
+        <h3 style={{ gridColumn: '1 / -1' }}>Selected element</h3>
+        {selection ? <>
+          {selection.type === 'text' ? <>
+            <label className="input-label">TEXT</label><textarea value={selection.text || ''} rows={3} onChange={e => updateElement({ text: e.target.value })}/>
+            <label className="input-label">FONT</label><select value={selection.fontFamily || 'Arial'} onChange={e => updateElement({ fontFamily: e.target.value })}>{["Arial","Georgia","Dancing Script","Sacramento","Tangerine","Kaushan Script","Courgette","Playball","Petit Formal Script","Indie Flower","Gloria Hallelujah","Architects Daughter","Chewy","Bangers","Yeseva One","Josefin Sans","Caveat","Amatic SC","Kalam","Patrick Hand","Permanent Marker","Pacifico","Satisfy","Lobster Two","Bebas Neue","Oswald","Abril Fatface","Fredericka the Great","Rye","Special Elite","Playfair Display","Cormorant Garamond","Cinzel","Bodoni Moda","DM Serif Display","Libre Baskerville","EB Garamond","Lora","Prata","Marcellus","Great Vibes","Allura","Poppins","Montserrat","Raleway","Times New Roman","Verdana"].map(f => <option key={f}>{f}</option>)}</select>
+            <label className="input-label">FONT SIZE</label><input type="number" min={8} max={500} value={selection.fontSize || 80} onChange={e => updateElement({ fontSize: clamp(Number(e.target.value),8,500) })}/>
+            <label className="input-label">TEXT CURVE ({selection.curve || 0}%)</label>
+            <input aria-label="Curve text" type="range" min={-100} max={100} step={1} value={selection.curve || 0} onChange={e => updateElement({ curve: Number(e.target.value) })}/>
+            <button type="button" className="outline-btn" onClick={() => updateElement({ curve: 0 })}>Straight text</button>
+            <label className="input-label">TEXT COLOR</label><div style={{ display: 'flex', gap: 8 }}><input aria-label="Choose text color" type="color" value={selection.color || '#333333'} onChange={e => updateElement({ color: e.target.value })}/><input aria-label="Text color hex" value={selection.color || '#333333'} onChange={e => { if (/^#[0-9a-f]{6}$/i.test(e.target.value)) updateElement({ color: e.target.value }); }}/></div>
+            <label className="input-label">WEIGHT</label><select value={selection.fontWeight || 'bold'} onChange={e => updateElement({ fontWeight: e.target.value })}><option value="normal">Normal</option><option value="bold">Bold</option></select>
+          </> : <>
+            <label className="input-label">ASSET SOURCE</label><select disabled={Boolean(design.originalAssetsOnly)} value={design.originalAssetsOnly ? 'original' : selection.source || 'original'} onChange={e => updateElement({ source: e.target.value as 'original' | 'upscaled' })}><option value="original">Original</option><option value="upscaled" disabled={Boolean(design.originalAssetsOnly) || !assetMap.get(selection.characterId || '')?.upscaledImageUrl}>Upscaled</option></select>
+          </>}
+          {(['x','y','width','height','rotation','opacity'] as const).map(key => <label key={key} style={{ display: 'grid', gap: 4 }}><span className="input-label">{key.toUpperCase()}{key === 'opacity' ? ' (0–1)' : key === 'rotation' ? ' (DEG)' : ' (%)'}</span><input type="number" step={key === 'opacity' ? .1 : 1} value={selection[key] ?? (key === 'opacity' ? 1 : 0)} onChange={e => updateElement({ [key]: Number(e.target.value) })}/></label>)}
+          <label><input type="checkbox" checked={Boolean(selection.locked)} onChange={e => updateElement({ locked: e.target.checked })}/> Lock element</label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            <button className="outline-btn" onClick={() => { const index = design.elements.findIndex(e => e.id === selectedId); if (index < design.elements.length-1) { const all = [...design.elements]; [all[index],all[index+1]]=[all[index+1],all[index]]; mutate({elements:all}); } }}>Bring forward</button>
+            <button className="outline-btn" onClick={() => { const index = design.elements.findIndex(e => e.id === selectedId); if (index > 0) { const all = [...design.elements]; [all[index],all[index-1]]=[all[index-1],all[index]]; mutate({elements:all}); } }}>Send backward</button>
+            <button className="outline-btn" onClick={() => add({ ...selection, id: id(), x: selection.x+3, y: selection.y+3 })}>Duplicate</button>
+            <button className="outline-btn" onClick={remove}><Trash2 size={15}/> Remove</button>
+          </div>
+        </> : <p className="sub">Click an element to edit its position, size, rotation, style or layer.</p>}
+
+      </div>
+      </div>
       </div>
       <div style={{ minWidth: 0, position: 'sticky', top: 12, alignSelf: 'start' }}>
       <div className="panel" style={{ padding: 12, minWidth: 0 }}>
@@ -1634,65 +1693,6 @@ export default function ThumbnailDesigner({ onStartListingStudio, registerSaveCo
           <button className="primary-btn" disabled={busy} onClick={() => void exportPng('png')}><Download size={15}/> Export PNG</button>
           <button className="outline-btn" disabled={busy} onClick={() => void exportPng('jpeg')}><Download size={15}/> Export JPG</button>
         </div>
-      </div>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 'min(82vh, 950px)', minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain' }}>
-      <div className="panel" style={{ padding: 14, display: 'grid', gap: 9 }}>
-        <h3>Design properties</h3>
-        <label className="input-label">DESIGN NAME</label>
-        <input value={design.name} onChange={e => mutate({ name: e.target.value })}/>
-        <label className="input-label">THUMBNAIL SIZE</label>
-        <input readOnly aria-label="Thumbnail size" value="1024 × 1024 px" />
-        <small>Fixed thumbnail creation and standard JPG/PNG export: 1024 × 1024 pixels. Remote upscale is a separate optional action.</small>
-        <label className="input-label">BACKGROUND COLOR</label>
-        <input type="color" value={design.background} onChange={e => mutate({ background: e.target.value, renderedImageUrl: undefined, upscaledImageUrl: undefined })}/>
-        <label className="input-label" htmlFor="thumbnail-background-opacity">BACKGROUND OPACITY — {Math.round(backgroundAlpha(design) * 100)}%</label>
-        <input id="thumbnail-background-opacity" aria-label="Background opacity" type="range" min="0" max="100" step="1"
-          value={Math.round(backgroundAlpha(design) * 100)}
-          onChange={e => mutate({ backgroundOpacity: Number(e.target.value) / 100, renderedImageUrl: undefined, upscaledImageUrl: undefined })}/>
-        <small>0% = latar memudar putih, 100% = desain asli. PNG clipart dan teks editable tidak memudar. AI lettering yang menyatu dengan background ikut memudar karena masih satu gambar. Save, PNG, dan JPG memakai opacity yang sama.</small>
-        <label className="input-label">AI DECORATIVE BACKGROUND (OPENAI)</label>
-        <button className="outline-btn" type="button" disabled={backgroundGenerating || aiBusy} onClick={() => void generateReferenceBackground()}><WandSparkles size={15}/> {backgroundGenerating ? 'Generating background...' : 'Generate background (no clipart or text)'}</button>
-        <small>Generate visible decorative textures and color variations. Original clipart and typography stay on top as independent layers. Generating again may incur API charges.</small>
-        <label className="input-label">BACKGROUND IMAGE (LOCAL PNG/JPG)</label>
-        <input type="file" accept="image/png,image/jpeg" disabled={backgroundUploading} onChange={e => void uploadBackground(e.target.files?.[0])}/>
-        {backgroundUploading && <small>Uploading background…</small>}
-        {backgroundLoadError && <small role="alert" style={{ color: '#b91c1c' }}>{backgroundLoadError}</small>}
-        {design.backgroundImageUrl && <a href={design.backgroundImageUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>View current background image</a>}
-        {design.backgroundImageUrl && <button className="outline-btn" type="button" onClick={() => { setBackgroundLoadError(''); mutate({ backgroundImageUrl: undefined }); }}>Remove background image</button>}
-        <h3>Layers</h3>
-        <div style={{ display: 'grid', gap: 5, maxHeight: 190, overflowY: 'auto' }}>
-          {[...design.elements].reverse().map(e => <div key={e.id} style={{ display: 'flex', gap: 5, minWidth: 0 }}>
-            <button type="button" className="outline-btn" style={{ flex: 1, justifyContent: 'flex-start', minWidth: 0, background: e.id === selectedId ? '#fff0df' : undefined, overflow: 'hidden', textOverflow: 'ellipsis' }} onClick={() => setSelectedId(e.id)}>{e.type === 'text' ? 'T' : '◫'} {e.type === 'text' ? e.text?.slice(0,24) : assetMap.get(e.characterId || '')?.name || 'Image'}</button>
-            <button type="button" className="outline-btn" disabled={e.locked} aria-label={`Delete ${e.type === 'text' ? 'text' : 'character'} from layers`} title="Delete layer" onClick={() => { commit({ ...design, elements: design.elements.filter(item => item.id !== e.id) }); if (selectedId === e.id) setSelectedId(''); }}><Trash2 size={14}/></button>
-          </div>)}
-        </div>
-      </div>
-      <div className="panel" style={{ padding: 14, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', alignItems: 'start', gap: 8 }}>
-        <h3 style={{ gridColumn: '1 / -1' }}>Selected element</h3>
-        {selection ? <>
-          {selection.type === 'text' ? <>
-            <label className="input-label">TEXT</label><textarea value={selection.text || ''} rows={3} onChange={e => updateElement({ text: e.target.value })}/>
-            <label className="input-label">FONT</label><select value={selection.fontFamily || 'Arial'} onChange={e => updateElement({ fontFamily: e.target.value })}>{["Arial","Georgia","Dancing Script","Sacramento","Tangerine","Kaushan Script","Courgette","Playball","Petit Formal Script","Indie Flower","Gloria Hallelujah","Architects Daughter","Chewy","Bangers","Yeseva One","Josefin Sans","Caveat","Amatic SC","Kalam","Patrick Hand","Permanent Marker","Pacifico","Satisfy","Lobster Two","Bebas Neue","Oswald","Abril Fatface","Fredericka the Great","Rye","Special Elite","Playfair Display","Cormorant Garamond","Cinzel","Bodoni Moda","DM Serif Display","Libre Baskerville","EB Garamond","Lora","Prata","Marcellus","Great Vibes","Allura","Poppins","Montserrat","Raleway","Times New Roman","Verdana"].map(f => <option key={f}>{f}</option>)}</select>
-            <label className="input-label">FONT SIZE</label><input type="number" min={8} max={500} value={selection.fontSize || 80} onChange={e => updateElement({ fontSize: clamp(Number(e.target.value),8,500) })}/>
-            <label className="input-label">TEXT CURVE ({selection.curve || 0}%)</label>
-            <input aria-label="Curve text" type="range" min={-100} max={100} step={1} value={selection.curve || 0} onChange={e => updateElement({ curve: Number(e.target.value) })}/>
-            <button type="button" className="outline-btn" onClick={() => updateElement({ curve: 0 })}>Straight text</button>
-            <label className="input-label">TEXT COLOR</label><div style={{ display: 'flex', gap: 8 }}><input aria-label="Choose text color" type="color" value={selection.color || '#333333'} onChange={e => updateElement({ color: e.target.value })}/><input aria-label="Text color hex" value={selection.color || '#333333'} onChange={e => { if (/^#[0-9a-f]{6}$/i.test(e.target.value)) updateElement({ color: e.target.value }); }}/></div>
-            <label className="input-label">WEIGHT</label><select value={selection.fontWeight || 'bold'} onChange={e => updateElement({ fontWeight: e.target.value })}><option value="normal">Normal</option><option value="bold">Bold</option></select>
-          </> : <>
-            <label className="input-label">ASSET SOURCE</label><select disabled={Boolean(design.originalAssetsOnly)} value={design.originalAssetsOnly ? 'original' : selection.source || 'original'} onChange={e => updateElement({ source: e.target.value as 'original' | 'upscaled' })}><option value="original">Original</option><option value="upscaled" disabled={Boolean(design.originalAssetsOnly) || !assetMap.get(selection.characterId || '')?.upscaledImageUrl}>Upscaled</option></select>
-          </>}
-          {(['x','y','width','height','rotation','opacity'] as const).map(key => <label key={key} style={{ display: 'grid', gap: 4 }}><span className="input-label">{key.toUpperCase()}{key === 'opacity' ? ' (0–1)' : key === 'rotation' ? ' (DEG)' : ' (%)'}</span><input type="number" step={key === 'opacity' ? .1 : 1} value={selection[key] ?? (key === 'opacity' ? 1 : 0)} onChange={e => updateElement({ [key]: Number(e.target.value) })}/></label>)}
-          <label><input type="checkbox" checked={Boolean(selection.locked)} onChange={e => updateElement({ locked: e.target.checked })}/> Lock element</label>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            <button className="outline-btn" onClick={() => { const index = design.elements.findIndex(e => e.id === selectedId); if (index < design.elements.length-1) { const all = [...design.elements]; [all[index],all[index+1]]=[all[index+1],all[index]]; mutate({elements:all}); } }}>Bring forward</button>
-            <button className="outline-btn" onClick={() => { const index = design.elements.findIndex(e => e.id === selectedId); if (index > 0) { const all = [...design.elements]; [all[index],all[index-1]]=[all[index-1],all[index]]; mutate({elements:all}); } }}>Send backward</button>
-            <button className="outline-btn" onClick={() => add({ ...selection, id: id(), x: selection.x+3, y: selection.y+3 })}>Duplicate</button>
-            <button className="outline-btn" onClick={remove}><Trash2 size={15}/> Remove</button>
-          </div>
-        </> : <p className="sub">Click an element to edit its position, size, rotation, style or layer.</p>}
-
       </div>
       </div>
     </div>}

@@ -69,8 +69,10 @@ test('QC review still adjusts exact originals and restores badge text after appr
 test('Badge text is overlaid exactly, never guessed by an image model', () => {
   assert.match(editor, /const badgeOverlay = \(zone: ThumbnailBox, copy: string\)/);
   assert.match(editor, /\.\.\.newText\(copy\.trim\(\)\)/);
-  assert.match(editor, /badge: '',/);
-  assert.match(api, /NO BADGE TEXT:/);
+  assert.match(editor, /badge: hasLettering \? badge : ''/);
+  assert.match(api, /EXACT BADGE CONTENT PROVIDED BY USER/);
+  assert.match(api, /DO NOT render badge letters in the background image/);
+  assert.match(api, /PaletteIQ overlays them exactly as a separate editable text layer/);
 });
 
 test('AI image backend accepts optional badge and honors absence of badges', () => {
