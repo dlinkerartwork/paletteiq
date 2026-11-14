@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Check, Download, Image as ImageIcon, LoaderCircle, RotateCcw, Sparkles } from 'lucide-react';
 import { readApiJson, uploadListingJpg } from '@/lib/listing-image-upload';
+import AutoDismissNotice from '@/components/auto-dismiss-notice';
 import { DEFAULT_LISTING_STUDIO_CONFIG, type ListingStudioConfig } from '@/lib/listing-studio-config';
 import {
   LISTING_IMAGE_SPECS, LISTING_WIDTH, LISTING_HEIGHT, originalAssets,
@@ -505,7 +506,7 @@ export default function EtsyListingImageStudio({ config: initialConfig, referenc
           </div>
         </div>
       </div>
-      {!!message && <p role="status" className="notice" style={{ marginTop: 12 }}>{working ? <LoaderCircle className="spin" size={16}/> : null}{message}</p>}
+      <AutoDismissNotice message={message} onClose={() => setMessage('')} />
     </div>
   </div>;
 }
