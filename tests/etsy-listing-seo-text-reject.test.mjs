@@ -80,6 +80,6 @@ test('rejection does not discard batch integrity: independent approvals, 1024 fo
   assert.match(backend,/const existing = normalizedImages\(project\)/);
   assert.match(backend,/project\.listingImages = existing\.filter/);
   assert.match(client,/const approved = LISTING_IMAGE_SPECS\.filter/);
-  assert.match(backend,/Approve all 15 square 1024 × 1024 JPG listing images before exporting/);
+  assert.match(backend,/Approve all 15 square JPGs\. Complete Collection \(03\) must show every CURRENT original clipart/);
   assert.match(client,/width: LISTING_WIDTH, height: LISTING_HEIGHT/);
 });
