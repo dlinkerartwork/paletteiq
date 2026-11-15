@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { originalImagePrompt } from '../lib/originality.ts';
+import { productionPromptInstruction } from '../lib/creative-research-prompts.ts';
 
 const source = readFileSync(new URL('../lib/originality.ts', import.meta.url), 'utf8');
 const single = readFileSync(new URL('../app/api/studio/route.ts', import.meta.url), 'utf8');
@@ -26,7 +27,12 @@ test('regeneration retains originality guard and varies art direction', () => {
   assert.notEqual(first, next);
 });
 
-test('AI prompt creation directs original redesigns of subjects extracted from listing images', () => {
-  assert.match(single, /For EVERY subject deliberately invent a NEW pose/);
-  assert.match(single, /transform them into distinct, original alternatives/);
+test('AI prompt creation directs original redesigns while preserving niche and identity', () => {
+  assert.match(single, /productionPromptInstruction\(/);
+  const prompt = productionPromptInstruction({ title: 'Strawberry Farm', analysis: {
+    theme: 'Farm Animals', subtheme: 'Baby Animals', microtheme: 'Strawberry Birthday',
+  }, characters: [{ id: 'one', name: 'Duckling', family: 'duck' }] });
+  assert.match(prompt, /vary pose, silhouette, point of view/);
+  assert.match(prompt, /NEVER reproduce|Do NOT reproduce/);
+  assert.match(prompt, /The subject must fit the source listing TITLE/);
 });
