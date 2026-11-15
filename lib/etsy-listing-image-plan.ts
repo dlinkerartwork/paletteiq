@@ -7,8 +7,8 @@ export const DEFAULT_MAIN_COVER_CLIPART_COUNT = 12;
 
 export const LISTING_IMAGE_SPECS = [
   { number: 1, key: 'Main_Cover', title: 'Main Cover', headline: 'The Clipart Collection', purpose: 'Hero cover with standout original artwork', kind: 'gallery' },
-  { number: 2, key: 'Bundle_Overview', title: 'Bundle Overview', headline: 'Explore the Bundle', purpose: 'See every available illustration', kind: 'all' },
-  { number: 3, key: 'Complete_Collection', title: 'Complete Collection', headline: 'The Complete Collection', purpose: 'See the full variety, grouped by theme when available', kind: 'all-grouped' },
+  { number: 2, key: 'Bundle_Overview', title: 'Bundle Overview', headline: 'Explore the Bundle', purpose: 'Show the collection at a glance without implying every asset is visible', kind: 'all' },
+  { number: 3, key: 'Complete_Collection', title: 'Complete Collection', headline: 'The Complete Collection', purpose: 'Show genuine variety and breadth; indicate samples honestly when not every file appears', kind: 'all-grouped' },
   { number: 4, key: 'Best_Elements', title: 'Best Elements', headline: 'Our Favorite Details', purpose: 'Larger illustrations showcasing the highlights', kind: 'gallery' },
   { number: 5, key: 'Collection_Categories', title: 'Collection Categories', headline: 'Meet the Collection', purpose: 'Browse distinct, verified artwork groups', kind: 'categories' },
   { number: 6, key: 'File_Features', title: 'File Features', headline: 'Made for Your Projects', purpose: 'Show only verified digital-product facts', kind: 'detail' },
@@ -75,6 +75,22 @@ export function listingImageTextDefaults(
     subtitle: (listing?.primaryKeyword || '').trim(),
     badge: ''
   };
+}
+
+/**
+ * Project Instructions v1.1: the MAIN COVER sells the product; supporting
+ * pages should not repeat a long SEO title or primary keyword on every image.
+ * The user can override Title, Subtitle and Badge independently for each page.
+ */
+export function listingImageTextDefaultsForStep(
+  number: number,
+  listing: {title?:string;primaryKeyword?:string}|undefined,
+  fallback: string
+): ListingImageText {
+  if (number === 1) return listingImageTextDefaults(listing,fallback);
+  const spec=LISTING_IMAGE_SPECS[number-1];
+  if (!spec) throw Error('Invalid listing image number');
+  return {title:spec.headline,subtitle:'',badge:''};
 }
 
 /** Old 4:3 approved JPGs remain stored but cannot count toward square exports. */
