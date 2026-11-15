@@ -88,7 +88,7 @@ test('03 source picker is locked and user sees 120/120 completion status without
   assert.match(ui,/Complete Catalog — every original exactly once/);
   assert.match(ui,/disabled=\{!!working \|\| step===3\}/);
   assert.match(ui,/ALL ORIGINAL COLLECTION CLIPARTS — LOCKED/);
-  assert.match(ui,/step===3 \? 'Generate Complete Collection — '/);
+  assert.match(ui,/step===3\s*\? 'Generate Complete Collection — '/);
   assert.match(ui,/no AI cost/);
   assert.match(ui,/data-complete-collection-required="true"/);
   assert.match(ui,/completeCatalogMatchesInventory\(current,assets\)/);
