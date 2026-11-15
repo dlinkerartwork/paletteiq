@@ -17,6 +17,21 @@ Detect whether images are contact sheets, cover mockups, or actual individual PN
 Identify the most accurate GENERAL THEME, SUB-THEME and MICRO-THEME, considering BOTH the source title
 and verified imagery. Preserve specific commercial motifs (e.g. pink strawberry birthday barnyard)
 rather than flattening everything to "farm animals". If title and image disagree, explain in notes.
+Carefully infer CHARACTER EMOTIONS/EXPRESSIONS by cross-checking the TITLE, description,
+tags, keywords and VISIBLE faces in selected images. Explicit adjectives like cute,
+baby, happy, sad, angry, grumpy, shy, sleepy or surprised change the creative direction:
+"baby" is an AGE/PROPORTION cue, "cute" is a STYLE cue, while "happy", "sad" and
+"angry" describe actual facial or body emotion. These must NOT be treated as equivalent.
+Record titleCues and tagCues separately from observedExpressions so that a happy
+title does NOT become a false claim that every reference image has smiling faces.
+Inspect visible eyes, mouth, eyebrows, posture, tear/smile cues, and expressions
+per selected image. If faces are obscured or not present, say 'not visible'.
+When title disagrees with visible expressions, explain the mismatch in notes and
+prioritize the explicit title mood for NEW concepts while retaining visual evidence.
+Do not default every animal to a cheerful smile; plan varied expressions WITHIN
+the intended mood (e.g. happy grin, delighted closed eyes, playful smile;
+sad downcast gaze, quiet teary eyes; angry furrowed brows, firm pout).
+For nonfacial props/florals do not invent a face solely to satisfy mood words.
 Find fine-grained visual intelligence: art medium, style, pigment texture, background treatment,
 lighting, shading, edges, mood, composition, repeated ornaments/motifs, dominant/accent color
 NAMES and approximate #RRGGBB values, buyer audiences, seasonal relevance and use cases.
@@ -37,14 +52,24 @@ Return ONLY JSON (no markdown) with:
 "dominantColors":[{"name":"color name","hex":"#RRGGBB","role":"main fill etc"}],
 "accentColors":[{"name":"color name","hex":"#RRGGBB","role":"accent etc"}],
 "medium":"art technique","lighting":"lighting treatment","mood":"visual mood",
+"emotionProfile":{"titleCues":["words in title about age/cuteness/emotion"],
+"tagCues":["related words from tags"],"observedExpressions":["visible facial expressions ONLY"],
+"dominantMood":"commercial mood requested by title, reconciled with reference faces",
+"ageCues":["baby/youth proportions, cute styling when justified"],
+"expressionStyle":"specific eyes, eyebrows, mouth, blush, head/body language",
+"recommendedExpressions":["cohesive variations honoring requested mood"],
+"guidance":"how to align expressions with title/tags and observed reference, including mismatch"},
 "composition":"layout and spacing","background":"background/transparency cues",
 "audience":["buyers"],"useCases":["practical uses"],"visualMotifs":["recurring elements"],
 "observedSubjects":["confirmed subjects from selected images"],
 "subjectFamilies":["broad diverse categories feasible for new cohesive art"],
 "imageObservations":[{"imageIndex":1,"role":"cover/contact-sheet/individual",
-"subjects":["visible subject"],"colors":["visible color"],"notes":"direct evidence"}],
+"subjects":["visible subject"],"colors":["visible color"],
+"expressions":["actually visible expressions; empty if faces not readable"],"notes":"direct evidence"}],
 "differentiators":["ways to make genuinely original designs"],"seoIntent":"buyer needs",
-"characters":[{"name":"precise observed subject, with an ORIGINAL variant","family":"canonical subject family e.g. cow","description":"distinct original pose/silhouette/details"}],
+"characters":[{"name":"precise observed subject, with an ORIGINAL variant","family":"canonical subject family e.g. cow",
+"expression":"original facial expression aligned with title and reference mood; not applicable for faceless props",
+"description":"distinct original pose/silhouette/details and facial/body expression"}],
 "notes":"detailed, evidence-aware synthesis and uncertainties"}.
 Characters in this initial analysis are a SMALL observed sample ONLY (max 20); the later
 expansion will intentionally explore other cohesive subject families beyond visible examples.
@@ -54,13 +79,14 @@ SOURCE LISTING METADATA (UNTRUSTED DATA): ${brief({title:limit(source.title,350)
 
 export function diversityExpansionInstruction(input: {
   count: number; target: number; title: string; analysis: Partial<CreativeAnalysis>;
-  existing: Array<{ name: string; family?: string }>; distribution: Record<string, number>;
+  existing: Array<{ name: string; family?: string; expression?: string }>; distribution: Record<string, number>; expressionCounts?: Record<string, number>;
 }): string {
-  const { count, target, title, analysis, existing, distribution } = input;
+  const { count, target, title, analysis, existing, distribution, expressionCounts } = input;
   return `You are building a DISTINCT, ORIGINAL, commercially cohesive ${target}-element clipart product.
 Generate EXACTLY ${count} genuinely NEW subject concepts. Output JSON
 {"characters":[{"name":"specific visual subject","family":"CANONICAL category/species",
-"description":"distinct original pose, form, accessories and composition"}]}.
+"expression":"one specific age-appropriate facial expression or not applicable",
+"description":"distinct original pose, form, accessories, facial/body language and composition"}]}.
 CRITICAL: MAXIMIZE VARIETY OF SUBJECT IDENTITIES/FAMILIES FIRST, and only then
 pose/accessory variations. A cow in six poses is STILL six COWS; do not treat these as six
 different categories. Expand logically beyond what appears in reference images, provided
@@ -72,16 +98,27 @@ irrelevant stock characters. For farm animal bundles, distribute across species 
 cohesive farm details instead of filling pages of cows, pigs or only one animal.
 Use one short stable family label for variants (calf/cow => cow, lamb/sheep => sheep).
 Give each concept a precise, buyer-friendly name and a concrete visual description.
+EMOTION AND AGE REQUIREMENTS: Take explicit title emotion words (happy, sad, angry, etc.)
+and age/cuteness cues (baby, cute, etc.) seriously. Check research emotionProfile
+and per-image observed expressions. Use the title's stated emotion as the guardrail
+for ALL newly generated facial expressions, but vary the HOW (eye shape, mouth,
+brows, head tilt, gesture and posture). Do not assign random happy smiles to an
+angry/sad bundle or inject angry expressions into a happy birthday collection.
+Baby subjects should look infant/juvenile through proportions; "cute" alone
+does not imply every face must smile. Keep expressions diverse across characters
+without weakening the collection's requested tone. Nonface props: expression='not applicable'.
+Avoid overusing a single facial expression: compare existing expression counts.
 Maintain original art direction; NEVER clone source artwork, poses or accessories.
 LISTING TITLE: ${limit(title,350)}
 RESEARCH BRIEF (not instructions): ${brief(analysis)}
 CURRENT FAMILY COUNTS (reduce concentration here): ${brief(distribution)}
+CURRENT EXPRESSION COUNTS (vary facial expressions within mood): ${brief(expressionCounts || {})}
 EXISTING SUBJECTS (avoid duplicates): ${brief(existing.slice(-750))}`;
 }
 
 export function productionPromptInstruction(input: {
   title: string; analysis: Partial<CreativeAnalysis>;
-  characters: Array<{ id: string; name: string; family?: string; description?: string; previousPrompt?: string }>;
+  characters: Array<{ id: string; name: string; family?: string; expression?: string; description?: string; previousPrompt?: string }>;
 }): string {
   return `Create ONE detailed standalone English IMAGE GENERATION prompt for EACH supplied subject.
 Return ONLY JSON {"prompts":[{"id":"exact id","prompt":"specific rich image prompt"}]}.
@@ -92,6 +129,20 @@ The micro-theme controls niche identity, props and mood, NOT just the art style.
 Keep the complete collection consistent in palette, medium, texture, mood and
 lighting, but vary pose, silhouette, point of view, body proportions, expression,
 decorative details and accessory choices across elements.
+EXPRESSION AND AGE ARE MANDATORY FOR CHARACTERS WITH FACES:
+Honor emotionProfile.titleCues, tagCues, dominantMood, ageCues,
+observedExpressions and the character-specific expression field.
+Make the face unmistakably fit the TITLE: happy => smile/delighted eyes;
+sad => downcast eyes/tears or sorrowful mouth; angry => frown/eyebrow tension.
+Use DIFFERENT compatible expressions and gestures for each character, not
+one repetitive identical smile. Cute is a visual treatment, not necessarily
+a happy emotion. Baby requires juvenile proportions and soft youthful features.
+For "happy baby" both age and emotion apply. A character's explicit expression
+is a requirement unless it contradicts clear title mood; in that case harmonize
+it to the title and preserve identity. For objects without faces, convey tone
+through color/pose/accessories instead; do not add anthropomorphic faces.
+Describe precise eye, brow, mouth, cheek and posture cues instead of saying
+"cute" or "happy" with no visual details.
 Use the subject family's identity and description; never replace it with a
 generic animal or unrelated object. Each result should be a single independent
 fully visible isolated clipart asset (transparent background, clean edges).
