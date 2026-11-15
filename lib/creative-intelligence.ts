@@ -3,7 +3,12 @@
  * suggested subjects are new ideas, never claims about the source listing.
  */
 export type ColorSignal = { name: string; hex?: string; role?: string };
-export type ImageObservation = { imageIndex: number; role: string; subjects: string[]; colors: string[]; notes: string };
+export type ImageObservation = { imageIndex: number; role: string; subjects: string[]; colors: string[]; expressions: string[]; notes: string };
+export type EmotionProfile = {
+  titleCues: string[]; tagCues: string[]; observedExpressions: string[];
+  dominantMood: string; ageCues: string[]; expressionStyle: string;
+  recommendedExpressions: string[]; guidance: string;
+};
 export type CreativeAnalysis = {
   theme: string; subtheme: string; microtheme: string; style: string; palette: string; texture: string;
   primaryKeyword: string; keywords: string[]; longTailKeywords: string[];
@@ -11,9 +16,9 @@ export type CreativeAnalysis = {
   mood: string; medium: string; lighting: string; composition: string; background: string;
   audience: string[]; useCases: string[]; visualMotifs: string[];
   observedSubjects: string[]; subjectFamilies: string[]; imageObservations: ImageObservation[];
-  differentiators: string[]; seoIntent: string; notes: string;
+  differentiators: string[]; seoIntent: string; notes: string; emotionProfile: EmotionProfile;
 };
-export type DiverseConcept = { name: string; description?: string; family?: string };
+export type DiverseConcept = { name: string; description?: string; family?: string; expression?: string };
 
 const clean = (value: unknown, max = 500): string => typeof value === 'string' ? value.trim().slice(0, max) : '';
 const strings = (value: unknown, max = 60) => Array.isArray(value)
@@ -35,7 +40,7 @@ export function normalizeCreativeAnalysis(input: unknown): CreativeAnalysis {
     const row = item as Record<string, unknown>;
     const imageIndex = Number(row.imageIndex);
     if (!Number.isInteger(imageIndex) || imageIndex < 1) return [];
-    return [{ imageIndex, role: clean(row.role, 100), subjects: strings(row.subjects, 30), colors: strings(row.colors, 12), notes: clean(row.notes, 500) }];
+    return [{ imageIndex, role: clean(row.role, 100), subjects: strings(row.subjects, 30), colors: strings(row.colors, 12), expressions: strings(row.expressions, 15), notes: clean(row.notes, 500) }];
   }) : [];
   return {
     theme: clean(raw.theme, 200), subtheme: clean(raw.subtheme, 200), microtheme: clean(raw.microtheme, 200),
@@ -49,7 +54,55 @@ export function normalizeCreativeAnalysis(input: unknown): CreativeAnalysis {
     subjectFamilies: strings(raw.subjectFamilies, 60), imageObservations: observations,
     differentiators: strings(raw.differentiators, 30), seoIntent: clean(raw.seoIntent),
     notes: clean(raw.notes, 2400),
+    emotionProfile: normalizeEmotionProfile(raw.emotionProfile),
   };
+}
+
+
+const emotionCues: Array<[RegExp, string]> = [
+  [/\b(cute|adorable|kawaii|sweet)\b/i, 'cute'],
+  [/\b(baby|babies|newborn|infant|toddler|little)\b/i, 'baby'],
+  [/\b(happy|joyful|cheerful|smiling|smile)\b/i, 'happy'],
+  [/\b(sad|unhappy|tearful|crying)\b/i, 'sad'],
+  [/\b(angry|mad|furious|grumpy)\b/i, 'angry'],
+  [/\b(sleepy|sleeping|dreamy|tired)\b/i, 'sleepy'],
+  [/\b(surprised|shocked|astonished)\b/i, 'surprised'],
+  [/\b(shy|bashful|timid)\b/i, 'shy'],
+  [/\b(playful|silly|mischievous)\b/i, 'playful'],
+  [/\b(calm|peaceful|serene)\b/i, 'calm'],
+  [/\b(scared|afraid|frightened)\b/i, 'scared'],
+];
+export function extractEmotionCues(text: string): string[] {
+  return emotionCues.filter(([pattern]) => pattern.test(text)).map(([, cue]) => cue);
+}
+const moodCues = new Set(['happy', 'sad', 'angry', 'sleepy', 'surprised', 'shy', 'playful', 'calm', 'scared']);
+function normalizeEmotionProfile(value: unknown): EmotionProfile {
+  const raw: Record<string, unknown> = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  return { titleCues: strings(raw.titleCues, 30), tagCues: strings(raw.tagCues, 30),
+    observedExpressions: strings(raw.observedExpressions, 50),
+    dominantMood: clean(raw.dominantMood, 200), ageCues: strings(raw.ageCues, 30),
+    expressionStyle: clean(raw.expressionStyle, 350),
+    recommendedExpressions: strings(raw.recommendedExpressions, 30), guidance: clean(raw.guidance, 1200) };
+}
+/** Title intent has precedence for the requested mood; image evidence stays separate. */
+export function mergeSourceEmotionProfile(analysis: CreativeAnalysis, title: string, tags: string[]): CreativeAnalysis {
+  const titleCues = extractEmotionCues(title);
+  const tagCues = extractEmotionCues(tags.join(' '));
+  const explicitMood = titleCues.filter(x => moodCues.has(x));
+  const tagMood = tagCues.filter(x => moodCues.has(x));
+  const dominantMood = explicitMood.length ? explicitMood.join(' / ') :
+    analysis.emotionProfile.dominantMood || (tagMood.length ? tagMood.join(' / ') : analysis.mood);
+  const ageCues = [...new Set([...titleCues, ...tagCues, ...analysis.emotionProfile.ageCues].filter(x => x === 'cute' || x === 'baby' || !moodCues.has(x)))];
+  return { ...analysis, emotionProfile: { ...analysis.emotionProfile, titleCues, tagCues,
+    dominantMood, ageCues } };
+}
+export function expressionDistribution(items: Array<{ expression?: string }>): Record<string, number> {
+  const result: Record<string, number> = {};
+  for (const item of items) {
+    const key = clean(item.expression, 120).toLowerCase() || 'unspecified';
+    result[key] = (result[key] || 0) + 1;
+  }
+  return result;
 }
 
 // Normalize livestock synonyms and plurals so "calf", "cow" and "cattle" share a quota.
@@ -85,15 +138,19 @@ export function familyDistribution(items: Array<{ name: string; family?: string 
   return result;
 }
 export function selectDiverseConcepts<T extends DiverseConcept>(
-  proposals: T[], existing: Array<{ name: string; family?: string }>, target: number, limit: number,
+  proposals: T[], existing: Array<{ name: string; family?: string; expression?: string }>, target: number, limit: number,
 ): T[] {
   const current = familyDistribution(existing);
   const seen = new Set(existing.map(c => conceptSignature(c.name)));
+  const emotions = expressionDistribution(existing);
   // A broad catalog should cover at least eight different subject families.
   // This caps repetition of the SAME species/category, not the number of poses.
   const perFamilyCap = Math.max(3, Math.ceil(Math.max(1, target) / 8));
-  const ordered = [...proposals].sort((a, b) =>
-    (current[conceptFamily(a.family, a.name)] || 0) - (current[conceptFamily(b.family, b.name)] || 0));
+  const ordered = [...proposals].sort((a, b) => {
+    const familyGap = (current[conceptFamily(a.family, a.name)] || 0) - (current[conceptFamily(b.family, b.name)] || 0);
+    return familyGap || (emotions[(a.expression || '').trim().toLowerCase() || 'unspecified'] || 0) -
+      (emotions[(b.expression || '').trim().toLowerCase() || 'unspecified'] || 0);
+  });
   const accepted: T[] = [];
   for (const candidate of ordered) {
     const name = clean(candidate.name, 160), signature = conceptSignature(name);
@@ -101,6 +158,8 @@ export function selectDiverseConcepts<T extends DiverseConcept>(
     const family = conceptFamily(candidate.family, name);
     if ((current[family] || 0) >= perFamilyCap) continue;
     accepted.push(candidate); seen.add(signature); current[family] = (current[family] || 0) + 1;
+    const expression = clean(candidate.expression, 120).toLowerCase() || 'unspecified';
+    emotions[expression] = (emotions[expression] || 0) + 1;
     if (accepted.length >= limit) break;
   }
   return accepted;
