@@ -221,7 +221,7 @@ export async function POST(req: Request) {
     const input = [{ role: 'user', content: [{ type: 'input_text', text: instruction }, ...images.map(image_url => ({ type: 'input_image', image_url }))] }];
     const ai = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'gpt-4.1-mini', input, text: { format: { type: 'json_object' } } }) });
     if (!ai.ok) return fail(`AI expansion returned ${ai.status}`, 502);
-    try { const result = JSON.parse(extractText(await ai.json())) as { characters?: Array<{ name: string; description?: string }> }; const characters = Array.isArray(result.characters) ? result.characters.filter(c => c && typeof c.name === 'string' && c.name.trim()).slice(0, count).map(c => ({ name: c.name.trim().slice(0,160), family: String(c.family || '').slice(0,120), description: String(c.description || '').slice(0,500) })) : []; return Response.json({ characters }); } catch { return fail('Invalid AI response', 502); }
+    try { const result = JSON.parse(extractText(await ai.json())) as { characters?: Array<{ name: string; family?: string; description?: string }> }; const characters = Array.isArray(result.characters) ? result.characters.filter(c => c && typeof c.name === 'string' && c.name.trim()).slice(0, count).map(c => ({ name: c.name.trim().slice(0,160), family: String(c.family || '').slice(0,120), description: String(c.description || '').slice(0,500) })) : []; return Response.json({ characters }); } catch { return fail('Invalid AI response', 502); }
   }
   if (body.action === 'generate-prompts') {
     const provider = body.promptProvider ?? 'openai';
