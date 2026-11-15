@@ -17,7 +17,8 @@ test('title length advisory warns, but never silently rewrites the full Etsy SEO
   assert.match(ui,/evaluateListingCoverTitle\(currentLettering\.title\)/);
   assert.match(ui,/evaluation\.status === 'too-long' && !window\.confirm/);
   assert.match(ui,/titleAdvice\.message/);
-  assert.match(ui,/Default Title = SEO Title, Subtitle = Primary Keyword from Etsy Listing Draft/);
+  assert.match(ui,/Main Cover defaults to the SEO title and primary keyword/);
+  assert.match(ui,/Supporting image defaults to a concise/);
 });
 
 test('cost-free suggestions reflect the actual collection SEO, keyword, theme and supported item count', () => {
