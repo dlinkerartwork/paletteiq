@@ -17,6 +17,7 @@ type CreativeInput = {
   theme: string; title: string; subtitle: string; badge: string;
   selectedCount: number; revisionNotes?: string;
   style?: string; palette?: string; texture?: string;
+  observedSourceStyle?: string; approvedCoverStyle?: string;
   sourceAssets?: Array<{ name: string; category?: string }>;
 };
 
@@ -34,7 +35,7 @@ export function aiFirstConceptPrompt(input: CreativeInput): string {
     '',
     '**ARTWORK & COMPOSITION**',
     'Create a rich, abundant collage featuring original illustrations from the supplied '+JSON.stringify(input.theme)+' collection.',
-    'Approximately 18–25 illustrations can work well when the selection supports it, but use more or fewer whenever the composition benefits. There is no fixed number of objects.',
+    'For the main hero, begin with approximately 6–12 standout source illustrations with clear recognizable details. If a more abundant collage genuinely looks better, add smaller sourced supporting motifs as needed; this is guidance, not a hard object limit.',
     'Use a variety of ACTUAL supplied original assets. Source artwork is represented visually by numbered reference images; they are equivalent to the contents of a collection ZIP, not pre-arranged canvas objects.',
     examples.length ? 'Examples of the actual available illustrations (not mandatory to include all): '+examples.join('; ') : '',
     '- Arrange illustrations organically around and between the typography, creating a rich but harmonious composition.',
@@ -43,6 +44,7 @@ export function aiFirstConceptPrompt(input: CreativeInput): string {
     '- Create visual depth and rhythm through intentional variation.',
     '- Avoid uniform grids, repetitive spacing, awkward overlaps, overcrowding, obscured characters and excessive empty space.',
     '- Make the composition feel like an expertly art-directed commercial illustration collage.',
+    '- Verify that the product is immediately recognizable and dominant at mobile thumbnail size. Do not let titles, tiny artwork, extra badges or unnecessary decoration overpower the real clipart.',
     '',
     '**TYPOGRAPHY**',
     'Include the following exact text:',
@@ -62,6 +64,8 @@ export function aiFirstConceptPrompt(input: CreativeInput): string {
     input.palette?.trim() ? 'Collection palette guidance: '+input.palette.trim() : '',
     input.texture?.trim() ? 'Collection texture: '+input.texture.trim() : '',
     'Make the result cohesive, charming, premium and highly appealing to Etsy shoppers. Preserve each original illustration’s distinctive rendering, color, expressions and details.',
+    input.observedSourceStyle?.trim() ? 'Actual source artwork style observed from collection imagery: '+input.observedSourceStyle.trim() : '',
+    'DEFAULT DESIGN SYSTEM: Clean Commercial, 1:1 square, light theme-adapted backdrop, bold readable friendly artistic lettering and modern balanced layout. Adapt naturally to watercolor flowers, cute characters, seasonal holidays, vintage pictures and minimalist line art; do not impose one style on unrelated collections.',
     '',
     '**CREATIVE FREEDOM**',
     'Act as an experienced Etsy creative director and commercial thumbnail designer.',
@@ -70,12 +74,14 @@ export function aiFirstConceptPrompt(input: CreativeInput): string {
     'Make the result professionally designed, not mechanically assembled.',
     '',
     '**FINAL QUALITY**',
-    'A polished premium Etsy listing cover with abundant original clipart, beautifully varied illustration sizes, balanced artistic typography, a harmonious background, and strong visual impact at 128px thumbnail size.',
+    'A polished premium Etsy listing cover with visually prominent original clipart, beautifully varied illustration sizes, balanced artistic typography, a harmonious background, and strong visual impact at 128px thumbnail size.',
+    'Final cover quality checklist: Is the product recognizable instantly? Is the title readable when reduced? Can you clearly see the most appealing illustrations? Does the design stand out without clutter? Does it accurately represent the supplied references? Improve any weakness BEFORE returning the image.',
     '',
     '**SOURCE CLIPART REQUIREMENTS**',
     'Use the supplied clipart collection as the EXCLUSIVE source for all illustrated characters and objects.',
     'Preserve original characters, artistic styles, colors, expressions, clothing, accessories and recognizable details.',
     'Do not invent unrelated clipart or replace supplied characters with newly imagined variations.',
+    'Never invent or imply unverified asset counts, formats, dimensions, resolution, DPI, transparency, licensing rights or bonus items. Only the user-supplied exact lettering may carry its own claims; do not add new ones.',
     'You may select any number of actual source assets, resize, rotate, position and repeat EXISTING source PNGs where artistically appropriate. No fixed grid or mandatory size uniformity.',
     'Treat originals as flexible independent illustrations, not an existing design to preserve.',
     'The selected clipart are VISUAL REFERENCES for the image model to integrate creatively into ONE finished thumbnail. Stay as faithful as possible to the original artwork, recognizable subjects, colors, expressions and details. A generative image model may reinterpret or redraw them; pixel-identical copying is not guaranteed.',
@@ -86,6 +92,7 @@ export function aiFirstConceptPrompt(input: CreativeInput): string {
     'Generate the complete finished 1024 × 1024 Etsy cover directly as ONE cohesive image: illustrated collage, artistic typography, background and badge together. This is NOT a layout JSON request, an empty typography plate or a contact sheet.',
     'The attached visual reference boards are an unordered collection of artwork; numbers and cell boundaries are for identification only. Ignore the source board geometry. Select and arrange elements freely, with dramatically varied scale and attractive spacing.',
     'Use only objects depicted in the reference boards as the visual subject vocabulary; do not add unrelated characters or falsely claim more available items than the collection contains.',
+    'Generate ONE image. The rest of the 15-image sequence should reuse the same visual family but show DIFFERENT layouts appropriate to each listing step.',
     'Maintain exact wording for title, subtitle and badge. Make all lettering readable at Etsy search thumbnail size.',
   ].filter(Boolean).join('\n');
 }
@@ -157,21 +164,21 @@ export const AI_FIRST_LISTING_IMAGE_BRIEFS: Readonly<Record<number, {
     ]},
   10: {title:'Accessories Mockup',objective:'Illustrate a tasteful potential accessory customization.',
     directions:[
-      'Choose a believable tote bag, mug or stationery accessory that fits the supplied artwork and create a realistic premium lifestyle product mockup.',
+      'Choose a believable tote bag, ceramic mug or tumbler that fits the supplied artwork and create a realistic premium lifestyle product mockup.',
       'Apply a selected source motif naturally to the product surface; preserve convincing material curvature, light and shadows.',
       'Clearly treat the object as an example of POSSIBLE USE, not an included physical product or a promise of print compatibility.',
       'Make the clipart application visually prominent without overwhelming the scene.'
     ]},
   11: {title:'Packaging & Labels Mockup',objective:'Show how the artwork could embellish gift packaging and labels.',
     directions:[
-      'Create a warm, professional product-packaging or gift-label mockup featuring selected source artwork on a tag, card or paper wrap.',
+      'Create a warm, professional product-packaging or gift-label mockup featuring selected source artwork on a product label, packaging tag, box or paper wrap.',
       'Make printed artwork appropriately scaled and integrated with real paper, shadows and perspective.',
       'This is a CREATIVE APPLICATION EXAMPLE only. Do not imply boxes, labels, cards, or printed merchandise are shipped with the digital bundle.',
       'Use simple credible print finishing and restrained text.'
     ]},
   12: {title:'Creative Projects Mockup',objective:'Inspire creative uses with an achievable example project.',
     directions:[
-      'Show an appealing scrapbook, planner spread, invitation or DIY paper project using recognizable motifs from the actual source art.',
+      'Show an appealing scrapbook, planner spread or practical DIY craft project using recognizable motifs from the actual source art. Avoid greeting/invitation/wedding stationery.',
       'Build a believable overhead workspace/editorial scene and let the applied artwork communicate a practical creative idea.',
       'Do not present physical supplies or finished print products as items included in the digital download.',
       'Balance aesthetic impact with clarity of how the motifs may be used.'
@@ -219,9 +226,20 @@ export function aiFirstListingPrompt(number: number, input: CreativeInput & {
     input.texture?.trim() ? 'Saved texture guidance: '+input.texture.trim() : '',
     'Number of unique ORIGINAL clipart images currently saved in the collection (verified app inventory): '+String(input.collectionCount ?? input.selectedCount)+'.',
     'Number of selected source images supplied as candidate visual references: '+String(input.selectedCount)+'.',
+    input.observedSourceStyle?.trim() ? 'OBSERVED real clipart visual characteristics: '+input.observedSourceStyle.trim() : '',
+    input.approvedCoverStyle?.trim() ? 'VISUAL CONTINUITY: Main Cover was approved. Maintain its verified collection identity, palette, typography character and overall finish while using a DIFFERENT composition. '+input.approvedCoverStyle.trim() : '',
     examples.length ? 'Examples of genuinely selected source clipart: '+examples.join('; ') : '',
     '**VISUAL DIRECTION FOR '+spec.title.toUpperCase()+'**',
     ...spec.directions.map(s=>'- '+s),
+    number>=8 && number<=12
+      ? 'GENERAL-PURPOSE MOCKUP POLICY: Prioritize sticker sheets, die-cut stickers, T-shirts, sweatshirts, kidswear, mugs, tumblers, tote bags, product packaging, labels, scrapbooks, planners and DIY craft applications. Adapt automatically to the real collection. DO NOT use greeting cards, invitation cards, wedding stationery, or other card-based mockups by default; only do so if the user explicitly requests them. A physical mockup product is NOT included in the digital bundle.'
+      : '',
+    number>=2 && number<=5
+      ? 'COLLECTION PRESENTATION POLICY: Demonstrate genuine variety and recognizable original subjects, with clean editorial organization and minimal duplicates. Never suggest a reference selection is literally the entire archive unless it is.'
+      : '',
+    number===6 || number===7 || number===13
+      ? 'VERIFIED PRODUCT DATA: Use ONLY collection facts actually validated by the saved PaletteIQ inventory or user-provided authoritative listing information. Never invent asset counts, formats, DPI, dimensions, transparency, commercial licenses or bonuses. If a claim is uncertain, OMIT it.'
+      : '',
     '**TYPOGRAPHY**',
     'Use these exact user-editable words (empty fields mean omit them):',
     'Main title: '+JSON.stringify(input.title),
@@ -229,8 +247,10 @@ export function aiFirstListingPrompt(number: number, input: CreativeInput & {
     'Badge: '+JSON.stringify(input.badge),
     'Design typography, font styles, text positions and relative sizes with freedom appropriate to this SPECIFIC image purpose.',
     'The typography must remain subordinate to content where this is an informational or mockup image. Never invent additional text, discounts, features or quantities.',
+    'Design with short, readable, high-contrast wording; do not fill supporting images with the long SEO title or repeat the Main Cover layout.',
     '**ARTISTIC FREEDOM**',
     'Maintain an original, cohesive visual language derived from the supplied artwork, but adapt the layout, visual hierarchy, density and presentation to THIS image type—not to the Main Cover.',
+    'QUALITY GATE: Confirm a professional balanced layout, recognizable real source subjects, theme-relevant mockups, readable exact typography, no invented file/license claims, no awkward cropping and coherent finish with previously approved listing images. Fix design problems before finishing.',
     'The attached numbered contact sheets are unordered visual references, not grids, canvas positions or pixel-exact assets.',
     'Use depicted reference subjects only; do not invent unrelated characters or misrepresent what is included in the sold digital collection.',
     'OpenAI will generate the complete image in one creative pass. Exact pixel-matching with original clipart cannot be guaranteed.',
