@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { listingImageTextDefaults } from '../lib/etsy-listing-image-plan.ts';
+import { listingImageTextDefaults, listingImageTextDefaultsForStep } from '../lib/etsy-listing-image-plan.ts';
 
 const page=readFileSync(new URL('../app/page.tsx',import.meta.url),'utf8');
 const client=readFileSync(new URL('../components/etsy-listing-image-studio.tsx',import.meta.url),'utf8');
 const backend=readFileSync(new URL('../app/api/listing-image-studio/route.ts',import.meta.url),'utf8');
 const plan=readFileSync(new URL('../lib/etsy-listing-image-plan.ts',import.meta.url),'utf8');
 
-test('new per-image inputs default exactly to saved Etsy SEO title and primary keyword',()=>{
+test('Main Cover SEO defaults and purpose-led text for the other 14 images',()=>{
   const defaults=listingImageTextDefaults({ title:'Winter Woodland Clipart Digital Download | 80 Animals', primaryKeyword:'winter woodland watercolor animals' },'Collection Name');
   assert.deepEqual(defaults,{
     title:'Winter Woodland Clipart Digital Download | 80 Animals',
@@ -25,7 +25,10 @@ test('new per-image inputs default exactly to saved Etsy SEO title and primary k
     assert.match(client,new RegExp('value=\\{currentLettering\\.'+field+'\\}'));
     assert.match(client,new RegExp("editLettering\\('"+field+"', e\\.target\\.value\\)"));
   }
-  assert.match(client,/Reset text to Etsy SEO defaults/);
+  assert.match(client,/Reset to \{step === 1 \? 'Etsy SEO' : 'image type'\} text defaults/);
+  assert.equal(listingImageTextDefaultsForStep(1,{title:'My SEO Title',primaryKeyword:'my keyword'},'Collection').title,'My SEO Title');
+  assert.equal(listingImageTextDefaultsForStep(2,{title:'My SEO Title',primaryKeyword:'my keyword'},'Collection').title,'Explore the Bundle');
+  assert.equal(listingImageTextDefaultsForStep(2,{title:'My SEO Title',primaryKeyword:'my keyword'},'Collection').subtitle,'');
 });
 
 test('every generate sends editable exact wording to the server and persists it per step',()=>{
