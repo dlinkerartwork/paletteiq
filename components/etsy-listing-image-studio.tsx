@@ -398,8 +398,11 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
   const visibleAssetChoices = useMemo(() => categorizedAssets.filter(asset =>
     !assetSearch.trim() || (asset.name + ' ' + (asset.category || '')).toLowerCase().includes(assetSearch.trim().toLowerCase())),
     [categorizedAssets, assetSearch]);
-  const approved = LISTING_IMAGE_SPECS.filter(s => records.some(r => r.number === s.number && isSquareListingApproved(r))).length;
-  const precedingApproved = LISTING_IMAGE_SPECS.slice(0, step - 1).every(s => records.some(r => r.number === s.number && isSquareListingApproved(r)));
+  const approved = LISTING_IMAGE_SPECS.filter(s => records.some(r => r.number === s.number &&
+    isSquareListingApproved(r) && (s.number!==3 || completeCatalogMatchesInventory(r,assets)))).length;
+  const precedingApproved = LISTING_IMAGE_SPECS.slice(0, step - 1).every(s =>
+    records.some(r => r.number === s.number && isSquareListingApproved(r) &&
+      (s.number!==3 || completeCatalogMatchesInventory(r,assets))));
 
   useEffect(() => {
     let live = true;
@@ -1080,7 +1083,16 @@ function catalogGridLabel(count:number):string{
               <img key={current.renderedImageUrl} src={current.renderedImageUrl} alt={'Saved listing image '+step} style={{ width: '100%', height: '100%', objectFit: 'contain' }}/>
             </div>
           </div>}
-          {compositionMode === 'ai-first' && <div data-ai-first-full-cover-notice="true"
+          {step===3 && <div data-complete-collection-required="true"
+            style={{marginTop:10,padding:12,border:'1px solid #9abd9b',borderRadius:10,fontSize:13}}>
+            <strong>Complete Collection — ALL {assets.length} original cliparts</strong>
+            <p style={{margin:'7px 0 0'}}>Purpose: a complete visual catalog, not an AI-generated selection. PaletteIQ uses every actual PNG/JPG exactly once, organized into {planCompleteCollectionCatalog(assets).columns} columns × {planCompleteCollectionCatalog(assets).rows} rows.</p>
+            <p style={{margin:'6px 0 0'}}>Required: {assets.length} · {completeCatalogMatchesInventory(current,assets)
+              ? 'Saved: '+current!.catalogAssetIds!.length+' of '+assets.length+' originals ✓'
+              : 'Incomplete / not yet generated — regenerate all '+assets.length+' originals'}.</p>
+            <small>No OpenAI image request and no extra image generation cost. If the collection changes, regenerate this image before approval or export.</small>
+          </div>}
+          {compositionMode === 'ai-first' && step!==3 && <div data-ai-first-full-cover-notice="true"
             style={{marginTop:10,padding:12,border:'1px solid #e5dacb',borderRadius:10,fontSize:12}}>
             <strong>One-step OpenAI {spec.title} artwork</strong>
             {step>1 && AI_FIRST_LAYOUT_ARCHETYPES[step] && <div data-listing-layout-archetype={AI_FIRST_LAYOUT_ARCHETYPES[step].name}
@@ -1092,7 +1104,7 @@ function catalogGridLabel(count:number):string{
             <p style={{margin:'6px 0 0'}}>Generate a COMPLETE image with clipart collage, artistic typography, badge and background together. No PNG positioning, mapping or second generation step.</p>
             <p style={{margin:'6px 0 0'}}>OpenAI receives source-art contact sheets plus a few larger original PNG/JPG references when available. The Main Cover image is NOT supplied for supporting tiles, to prevent cloning its layout; only its documented color/style direction is reused. AI may still reinterpret artwork, so inspect characters, words and claims before approval.</p>
           </div>}
-          {compositionMode !== 'ai-first' && <section style={{ marginTop: current?.renderedImageUrl ? 16 : 0, display: 'grid', gap: 8 }}>
+          {compositionMode !== 'ai-first' && step!==3 && <section style={{ marginTop: current?.renderedImageUrl ? 16 : 0, display: 'grid', gap: 8 }}>
             <strong>{current?.backgroundUrl ? 'Editable Original Clipart Layers (post-generate)' : 'White Canvas Pre-Layout — arrange before AI generation'}</strong>
             <EtsyListingLayoutCanvas
               assets={assets} placements={positions} selectedIndex={selectedIndex}
@@ -1117,7 +1129,9 @@ function catalogGridLabel(count:number):string{
           </section>}
           {current?.renderedImageUrl && <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
             <a className="outline-btn" href={current.renderedImageUrl} download={fileName(step)}><Download size={15}/> Download JPG</a>
-            <span className="sub">{current.width || 'Legacy'} × {current.height || '4:3'} • {isSquareListingApproved(current) ? 'Approved square JPG' : 'Awaiting square approval'}</span>
+            <span className="sub">{current.width || 'Legacy'} × {current.height || '4:3'} • {isSquareListingApproved(current) &&
+              (step!==3 || completeCatalogMatchesInventory(current,assets))
+                ? 'Approved square JPG' : 'Awaiting square approval'}</span>
           </div>}
           {current?.renderedImageUrl && (current.width !== LISTING_WIDTH || current.height !== LISTING_HEIGHT) && <p role="alert" className="notice">This saved image was produced by the previous 4:3 workflow. It is preserved for reference; regenerate the AI background, or re-render its background as 1024 × 1024 before approving the square edition.</p>}
           {current?.reviewWarning && <p role="alert" style={{ border: '1px solid #d48c48', borderRadius: 8, padding: 10, color: '#7b431b', background: '#fff6e9' }}>Manual quality review required: {current.reviewWarning}. Approval requires your explicit confirmation.</p>}
@@ -1152,7 +1166,7 @@ function catalogGridLabel(count:number):string{
           {(spec.kind === 'mockup') && <p className="sub">Application example: {listingMockupScene(step, artDirection.family)?.name}. Mockup is a demonstration, not included in the sold collection. Inspect printable placement: the photograph is AI-generated, while the featured clipart is composited from its original file.</p>}
         </div>
         <div style={{ display: 'grid', alignContent: 'start', gap: 10 }}>
-          <section data-listing-advanced-settings="always-visible" aria-label="Advanced AI settings (optional)"
+          {step!==3 && <section data-listing-advanced-settings="always-visible" aria-label="Advanced AI settings (optional)"
             style={{ border: '1px solid #e5d9cb', borderRadius: 9, padding: '9px 12px' }}>
             <strong style={{ fontSize: 13 }}>Advanced AI settings (optional)</strong>
             <div style={{ display: 'grid', gap: 9, marginTop: 12 }}>
@@ -1167,7 +1181,7 @@ function catalogGridLabel(count:number):string{
               </select>
               <small style={{color:'#75695e'}}>OpenAI chooses the lettering style, font, relative scale, placement and background treatment using your editable prompt. No fixed typography or background presets.</small>
             </div>
-          </section>
+          </section>}
           <div style={{ border: '1px solid #eadfce', borderRadius: 10, padding: 12, display: 'grid', gap: 9 }}>
             <strong>Title, Subtitle &amp; Badge for Image {String(step).padStart(2,'0')}</strong>
             <small style={{ color: '#75695e' }}>{step === 1
@@ -1213,7 +1227,9 @@ function catalogGridLabel(count:number):string{
               onClick={() => setLetteringChanges(prev => ({ ...prev, [step]: { ...imageTextDefaults } }))}>
               Reset to {step === 1 ? 'Etsy SEO' : 'image type'} text defaults
             </button>
-            {letteringDirty && <small role="alert" style={{ color: '#a04c22' }}>Title, Subtitle or Badge has changed since this background was generated. Click Regenerate AI background + lettering to apply the new text. A layout-only re-render cannot change AI lettering.</small>}
+            {letteringDirty && <small role="alert" style={{ color: '#a04c22' }}>{step===3
+              ? 'Title, Subtitle or Badge changed. Regenerate the full original-asset catalog (no AI cost) before approving.'
+              : 'Title, Subtitle or Badge changed. Regenerate the AI artwork before approving.'}</small>}
           </div>
           <div style={{ border: '1px solid #eadfce', padding: 12, borderRadius: 10, display: 'grid', gap: 9 }}>
             <strong>Original clipart selection — Image {String(step).padStart(2,'0')}</strong>
