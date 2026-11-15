@@ -91,7 +91,7 @@ export function aiFirstConceptPrompt(input: CreativeInput): string {
     '**FINAL IMAGE GENERATION**',
     'Generate the complete finished 1024 × 1024 Etsy cover directly as ONE cohesive image: illustrated collage, artistic typography, background and badge together. This is NOT a layout JSON request, an empty typography plate or a contact sheet.',
     'The attached visual reference boards are an unordered collection of artwork; numbers and cell boundaries are for identification only. Ignore the source board geometry. Select and arrange elements freely, with dramatically varied scale and attractive spacing.',
-    'Use only objects depicted in the reference boards as the visual subject vocabulary; do not add unrelated characters or falsely claim more available items than the collection contains.',
+    'Use only objects depicted in the reference boards as the visual subject vocabulary; do not invent, blend, reinterpret or substitute unrelated characters, clothing, accessories or vehicles. Preserve recognizable face, structure, silhouette, pose, color and detailed identity; exact original pixels are not guaranteed in a generative result.',
     'Generate ONE image. The rest of the 15-image sequence should reuse the same visual family but show DIFFERENT layouts appropriate to each listing step.',
     'Maintain exact wording for title, subtitle and badge. Make all lettering readable at Etsy search thumbnail size.',
   ].filter(Boolean).join('\n');
@@ -229,6 +229,7 @@ export function aiFirstListingPrompt(number: number, input: CreativeInput & {
     input.observedSourceStyle?.trim() ? 'OBSERVED real clipart visual characteristics: '+input.observedSourceStyle.trim() : '',
     input.approvedCoverStyle?.trim() ? 'VISUAL CONTINUITY: Main Cover was approved. Maintain its verified collection identity, palette, typography character and overall finish while using a DIFFERENT composition. '+input.approvedCoverStyle.trim() : '',
     examples.length ? 'Examples of genuinely selected source clipart: '+examples.join('; ') : '',
+    aiFirstLayoutArchetype(number),
     '**VISUAL DIRECTION FOR '+spec.title.toUpperCase()+'**',
     ...spec.directions.map(s=>'- '+s),
     number>=8 && number<=12
@@ -251,10 +252,83 @@ export function aiFirstListingPrompt(number: number, input: CreativeInput & {
     '**ARTISTIC FREEDOM**',
     'Maintain an original, cohesive visual language derived from the supplied artwork, but adapt the layout, visual hierarchy, density and presentation to THIS image type—not to the Main Cover.',
     'QUALITY GATE: Confirm a professional balanced layout, recognizable real source subjects, theme-relevant mockups, readable exact typography, no invented file/license claims, no awkward cropping and coherent finish with previously approved listing images. Fix design problems before finishing.',
-    'The attached numbered contact sheets are unordered visual references, not grids, canvas positions or pixel-exact assets.',
+    'The attached numbered contact sheets are unordered visual references, not grids, canvas positions or pixel-exact assets. Prefer the separate full-resolution original image references for distinctive details when supplied.',
     'Use depicted reference subjects only; do not invent unrelated characters or misrepresent what is included in the sold digital collection.',
     'OpenAI will generate the complete image in one creative pass. Exact pixel-matching with original clipart cannot be guaranteed.',
     input.revisionNotes?.trim() ? 'User revision direction: '+input.revisionNotes.trim().slice(0,800) : '',
-    '**FINAL OUTPUT**: Generate the entire finished 1024 × 1024 Etsy '+spec.title+' image directly, not a contact sheet, mockup template, JSON plan, typography-only plate or Main Cover.'
+    aiFirstLayoutArchetype(number),
+    '**FIDELITY TO THE REAL COLLECTION**: Use the attached actual clipart illustrations as the ONLY figurative subject vocabulary. Preserve each reference image character silhouette, expression, color, accessories, pose, texture and distinctive identity as faithfully as possible. Do not invent characters, blend parts from two references, repaint one asset as a different subject, add random text inside illustrations or substitute made-up variations. Different source originals should remain recognizable and distinct. This is generative image editing, so pixel-exact copying is not guaranteed.',
+    '**FINAL OUTPUT**: Generate one finished 1024 × 1024 Etsy '+spec.title+' image following the UNIQUE structural archetype above, not a generic Main Cover variant, raw reference contact sheet, blank template or JSON layout.'
   ].filter(Boolean).join('\n');
+}
+
+/**
+ * Deliberately DISTINCT visual construction rules per Etsy Clipart Listing
+ * Studio tile. Layout is decisive; brand/cover STYLE does not imply
+ * repeating the same title frame, image arrangement or border.
+ */
+export const AI_FIRST_LAYOUT_ARCHETYPES: Readonly<Record<number,{
+  name: string; layout: string; forbidden: string; detailedReferences: number;
+}>>={
+  2:{name:'HERO STRIP + MINI COLLECTION CATALOG',
+    layout:'BUILT LIKE A TWO-TIER MERCHANDISING PAGE, not a hero poster. TOP: a slim heading (no more than 10–12% height), then a showcase strip of FOUR to SIX prominently sized, different source illustrations taking approximately 30–35% of canvas height. LOWER: a tidy miniature gallery of MANY other DISTINCT reference illustrations arranged in 5–8 narrow columns and several rows over roughly the bottom 45–50% of the canvas. The gallery should communicate range at a glance; enlarge the leading objects and keep the smaller catalog orderly, with restrained dividers and a small final caption only if supplied. Preserve generous breathing room between the upper showcases and lower catalog. This is the large-featured-top + small-catalog-bottom pattern.',
+    forbidden:'DO NOT make a single generic hero collage, 12 equally sized stickers, or a uniformly tiny full-page inventory. DO NOT copy Main Cover header bands, badge placement or ornamental border geometry.',detailedReferences:5},
+  3:{name:'MAXIMUM-COVERAGE FULL CATALOG GRID',
+    layout:'A TRUE COMPLETE-COLLECTION INVENTORY BOARD. Use a SMALL compact title occupying no more than 8–12% of the height. Devote at least 75–85% of the 1024 square to a dense, tidy, regularly spaced catalog of many DIFFERENT original-reference motifs. When the selected collection is large, visually target approximately TEN TO TWELVE COLUMNS by EIGHT TO TEN ROWS of small independent items, each sitting neatly within a consistent light cell or separated by equal narrow spacing. Favor maximum recognizable variety and even thumbnail sizes over large feature illustrations. The provided reference boards are INPUT only; create a deliberately designed catalog page instead of copying their pixels or numbering. If only fewer assets are available, show fewer without inventing entries.',
+    forbidden:'NO 4–6 giant featured images. NO dominant headline, hero collage, poster layout, upper showcase zone or large logo banner. DO NOT invent duplicates to reach a visual count or assert ALL items are shown if not.',detailedReferences:2},
+  4:{name:'LARGE EDITORIAL BEST-ELEMENTS SHOWCASE',
+    layout:'Create a spacious art-gallery showcase with TWO very large, detailed hero illustrations side by side across approximately the upper HALF of the image, and approximately FOUR TO EIGHT secondary standout illustrations at varied medium sizes across the lower portion. White space and subject clarity are the priority. Use a small elegant header, with little or no footer or sales badge. Each subject should be individually appreciable without a cramped cell, with lively natural scale differences.',
+    forbidden:'NO dense small catalog grid, NO many equally sized cells, NO giant dark title panel, NO clone of the Main Cover collage. Do not reduce the hero assets to thumbnail-sized icons.',detailedReferences:5},
+  5:{name:'LABELED CATEGORY SECTIONS',
+    layout:'A clearly divided educational category board with TWO TO FIVE separate titled compartments/columns, each containing a small relevant group of illustrations whose actual source category exists. Use distinct whitespace or gentle dividers between compartments. Categories—not one general collage—are the visual hierarchy. Header small; all category labels concise and accurate.',
+    forbidden:'NO generic hero strip plus grid, NO dense uniform master inventory, NO fictitious category names or repeated full Main Cover.',detailedReferences:3},
+  6:{name:'MINIMAL FACT-LED FEATURE INFOGRAPHIC',
+    layout:'Use a split editorial infographic: about HALF the page is a beautiful small original-art sample, the other half is a clean typographic information column with ONLY validated digital product facts. Use large readable factual labels and spacious alignment. If there are no verified details, omit feature chips and show only a restrained art preview.',
+    forbidden:'NO hero collage, NO invented DPI, transparency, print size or licensing, NO dense inventory, NO fake feature icons or decorative badges.',detailedReferences:2},
+  7:{name:'MAGNIFIED ARTWORK DETAIL STUDY',
+    layout:'Create a detail-led close-up image. ONE large illustration/region dominates roughly TWO THIRDS of the square with realistic brushwork texture as seen in its reference; add ONE or TWO smaller intact source objects for context or compare fine details. The typography is a quiet small label only. Leave quiet light negative space.',
+    forbidden:'NO dense grids, NO five-object hero strip, NO large display headline, NO artwork or strokes that do not exist in the source references.',detailedReferences:3},
+  8:{name:'REALISTIC STICKER SHEET MOCKUP',
+    layout:'Realistic photographed mockup of ONE sheet of paper with several distinct die-cut sticker applications and realistic matte paper, edge shadows and occasional visible craft-table tools. The whole design is about the sheet itself; keep the page header off the mockup or extremely small.',
+    forbidden:'NO digital clipart inventory grid masquerading as stickers, NO main-cover typography banner, NO physical-sticker-included claim.',detailedReferences:4},
+  9:{name:'APPAREL PRODUCT PHOTOGRAPH',
+    layout:'A premium realistic lifestyle photo or flat-lay of ONE T-shirt or sweatshirt occupying approximately TWO THIRDS of the square, with one compact original-reference motif printed naturally on its front. Use real garment folds and plausible print perspective. A small corner explanatory label may fit.',
+    forbidden:'NO collage of vehicles/animals floating around a garment, NO multiple unrelated apparel panels, NO thick Main Cover header or repeated inventory grid.',detailedReferences:2},
+  10:{name:'SINGLE ACCESSORY LIFESTYLE MOCKUP',
+    layout:'ONE believable accessory product, such as a tote bag, mug or tumbler, centered in an editorial lifestyle scene. Apply a real source-reference artwork motif onto its printable surface with accurate curvature and material lighting. Use a quiet background and a small text label.',
+    forbidden:'NO collage of multiple unrelated accessories, NO poster grid, NO giant header and no false claim that a physical accessory is sold.',detailedReferences:2},
+  11:{name:'PAPER PACKAGING FLAT-LAY',
+    layout:'An elegant overhead or three-quarter photographic flat-lay of a few product labels, parcel packaging or paper tags, each naturally featuring one source-reference motif. Materials, print registration, perspective and shadows must look plausible. Light small explanatory lettering.',
+    forbidden:'NO greeting/invitation/wedding cards by default, NO generic artwork grid, NO Main Cover copy, NO claim packaging is included.',detailedReferences:2},
+  12:{name:'ONE FINISHED DIY CREATIVE SCENE',
+    layout:'A realistic overhead craft desk or scrapbook/planner project showing source artwork actually used within ONE coherent creative project. Build foreground-background depth with restrained stationery props but keep the applied motifs recognizable. Use only a tiny instructional heading.',
+    forbidden:'NO separate subject catalog, NO invitation-card or greeting-card mockup by default, NO oversized cover title and no claim physical tools are included.',detailedReferences:3},
+  13:{name:'INVENTORY SUMMARY FACT PANEL',
+    layout:'A clearly structured informational page: one compact actual-artwork preview on one side, a readable list of strictly VERIFIED bundle contents on the other, with generous typography and clean dividers. The legitimate count (when known) may be larger than the graphic. Show several visual examples without suggesting the graphic itself contains all assets.',
+    forbidden:'NO invented item counts, file formats, rights, extras, resolutions or service guarantees; NO cover-style decorative giant title or tiny catalog grid.',detailedReferences:3},
+  14:{name:'LARGE NUMBERED HOW-TO STEPS',
+    layout:'A simple visual instructional infographic with THREE or FOUR numbered steps laid out top-to-bottom or left-to-right, each with concise wording, clean nonfigurative diagram accents and a very small original reference art flourish. Readability of the steps is the whole purpose.',
+    forbidden:'NO dense illustration collage, NO creative product mockup grid, NO fabricated Etsy-interface screenshots or account-specific digital delivery claims.',detailedReferences:1},
+  15:{name:'OPEN SPACIOUS FINAL GALLERY',
+    layout:'A calm premium finale with a fresh asymmetrical cluster of about SIX TO TEN memorable original source reference motifs, styled like a final magazine spread or designer lookbook with generous negative space. One concise closing phrase, with slightly quieter type than Main Cover. Cohesive palette but new framing and object distribution.',
+    forbidden:'NO recycled Main Cover, NO giant repeated title plaque, NO dense Complete Collection grid, NO fake discount/urgency text.',detailedReferences:4}
+};
+
+export function aiFirstLayoutArchetype(number:number){
+  const info=AI_FIRST_LAYOUT_ARCHETYPES[number];
+  if(!info)throw Error('No separate supporting-image layout for this listing type');
+  return [
+    '**NON-NEGOTIABLE VISUAL STRUCTURE — '+info.name+'**',
+    info.layout,
+    '**FORBIDDEN LAYOUTS:** '+info.forbidden,
+    'This specific visual construction is MORE IMPORTANT than repeating any previous listing image layout. Preserve ONLY the collection art style, palette and professional finish from Main Cover; never use its composition, title panel, border, layout grid or large lettering as a template.'
+  ].join('\n');
+}
+
+/** A few actual high-resolution source image files can supplement small JPEG
+ * contact sheets and improve detail recognition, not guarantee pixel identity.
+ */
+export function aiFirstDetailedReferenceCount(number:number){
+  if(number===1)return 5;
+  return AI_FIRST_LAYOUT_ARCHETYPES[number]?.detailedReferences ?? 0;
 }
