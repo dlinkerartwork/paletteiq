@@ -97,7 +97,8 @@ test('generate/revise/approve/next persists each independent step and resumes at
   assert.match(studio,/revisionNotes: \(notes\[step\] \?\? current\?\.notes \?\? ''\)\.trim\(\)/);
   assert.match(route,/CURRENT IMAGE REVISION REQUEST from the user/);
   assert.match(route,/typeof input\.revisionNotes === 'string'/);
-  assert.match(studio,/setStep\(LISTING_IMAGE_SPECS\.find\(s => !images\.some\(r => r\.number === s\.number && isSquareListingApproved\(r\)\)\)\?\.number \|\| 15\)/);
+  assert.match(studio,/setStep\(LISTING_IMAGE_SPECS\.find\(s => !images\.some\(r =>/);
+  assert.match(studio,/s\.number!==3 \|\| completeCatalogMatchesInventory\(r,assets\)/);
   assert.match(studio,/if \(!precedingApproved\)/);
   assert.match(studio,/if \(status === 'approved' && step < 15\)/);
   assert.match(studio,/Review spelling, crop, verified facts and mockup realism before approving/);
