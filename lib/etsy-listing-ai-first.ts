@@ -90,3 +90,151 @@ export function aiFirstConceptPrompt(input: CreativeInput): string {
   ].filter(Boolean).join('\n');
 }
 
+
+
+/**
+ * Creative briefs for Etsy CLIPART LISTING STUDIO's fifteen image tiles.
+ * Main Cover intentionally retains the user's proven full artistic prompt.
+ * The other images are distinct merchandising tasks, not fourteen more covers.
+ * This helper is NOT used by Thumbnail Designer.
+ */
+export const AI_FIRST_LISTING_IMAGE_BRIEFS: Readonly<Record<number, {
+  title: string; objective: string; directions: readonly string[];
+}>> = {
+  2: {title:'Bundle Overview',objective:'Give buyers a quick, attractive overview of the collection.',
+    directions:[
+      'Present a broad, representative assortment of the selected source clipart, not another hero title cover.',
+      'Organize organically into a few clearly distinguishable visual groupings to communicate the range and theme.',
+      'Use varied object sizes, balanced whitespace and modest typography. The clipart—not marketing copy—should dominate.',
+      'Avoid depicting dozens of indistinguishable tiny items or implying that every item is visible when it is not.'
+    ]},
+  3: {title:'Complete Collection',objective:'Show the breadth of the digital bundle in a useful visual inventory.',
+    directions:[
+      'Present as many DIFFERENT selected source motifs as can remain recognizable at thumbnail size; favor comprehensive visual coverage over dramatic hero typography.',
+      'Use a beautifully ordered dense mosaic, multi-row salon-style gallery or editorial semi-grid. Keep individual illustrations distinguishable.',
+      'Small, consistent margins and a compact title are appropriate. Do not add objects that are not represented in the source references.',
+      'This is a visual SAMPLE when the reference set does not include the entire bundle; do not falsely imply pixel-exact coverage.'
+    ]},
+  4: {title:'Best Elements',objective:'Spotlight the collection\'s most appealing individual illustrations.',
+    directions:[
+      'Choose a small set of the most visually expressive selected source subjects and show them substantially larger than on overview pages.',
+      'Let fine brushwork, faces, silhouette and special details remain visible; make the presentation an editorial close-up showcase, not a crowded cover.',
+      'Use restrained complimentary lettering and careful spacing. Keep subject shapes unobstructed.'
+    ]},
+  5: {title:'Collection Categories',objective:'Help the buyer understand which kinds of clipart are in the collection.',
+    directions:[
+      'Create an elegant categorized gallery with recognizable small groups of relevant source clipart and clear section hierarchy.',
+      'Use only category names supported by the supplied source names or their known category metadata. Do not invent new product groups.',
+      'Separate categories using tasteful spacing or subtle nonfigurative dividers, not a giant decorative title collage.',
+      'If category metadata is missing, group by genuinely visible subject types without making unsupported claims.'
+    ]},
+  6: {title:'File Features',objective:'Communicate real digital file benefits with a refined product-feature graphic.',
+    directions:[
+      'Design a clean, readable feature-led editorial graphic with a handful of selected clipart samples supporting the text.',
+      'Only assert features that are confirmed by user-supplied wording or verifiable collection metadata: do not invent dimensions, resolution, DPI, transparency, license rights, file types or delivery guarantees.',
+      'Prefer precise small labels, discreet dividers and premium hierarchy. Never claim formats or entitlements just because they are common for Etsy.',
+      'If no verified feature data is supplied, focus on the digital artwork preview rather than generating unverified feature badges.'
+    ]},
+  7: {title:'Artwork Close-Up',objective:'Show the visual craft and texture of the illustrations.',
+    directions:[
+      'Create a refined macro-detail study with one to three prominent source motifs, cropped artistically but with enough intact subject context.',
+      'Emphasize the actually visible brushwork, color transitions and edge quality from the references. Do not invent quality claims about source resolution.',
+      'Use tiny supporting typography and a calm background, prioritizing close-up artwork texture.'
+    ]},
+  8: {title:'Sticker Sheet Mockup',objective:'Demonstrate how the selected clipart might look as a crafted sticker sheet.',
+    directions:[
+      'Create a believable sticker-sheet APPLICATION MOCKUP with several selected source illustrations arranged as individual sticker motifs.',
+      'Use crisp white die-cut borders, light paper texture and realistic but tasteful tabletop lighting, without claiming that physical stickers are included.',
+      'The digital clipart bundle is the product; the sticker sheet is only an inspirational usage example.',
+      'Keep any main title secondary to the applied sample designs. Avoid crowded overlaps.'
+    ]},
+  9: {title:'Apparel Mockup',objective:'Show one credible apparel-use example of the digital artwork.',
+    directions:[
+      'Create a commercially polished, realistic blank T-shirt or sweatshirt mockup, choosing a simple garment well suited to this actual collection.',
+      'Apply a small, attractive arrangement of reference motifs to a plausible printable garment area with proper fold and fabric perspective.',
+      'Show it as an APPLICATION IDEA ONLY: the physical garment is not included in the digital download.',
+      'Avoid brand names, fake endorsements, unexpected text on the garment and unrelated generated clipart.'
+    ]},
+  10: {title:'Accessories Mockup',objective:'Illustrate a tasteful potential accessory customization.',
+    directions:[
+      'Choose a believable tote bag, mug or stationery accessory that fits the supplied artwork and create a realistic premium lifestyle product mockup.',
+      'Apply a selected source motif naturally to the product surface; preserve convincing material curvature, light and shadows.',
+      'Clearly treat the object as an example of POSSIBLE USE, not an included physical product or a promise of print compatibility.',
+      'Make the clipart application visually prominent without overwhelming the scene.'
+    ]},
+  11: {title:'Packaging & Labels Mockup',objective:'Show how the artwork could embellish gift packaging and labels.',
+    directions:[
+      'Create a warm, professional product-packaging or gift-label mockup featuring selected source artwork on a tag, card or paper wrap.',
+      'Make printed artwork appropriately scaled and integrated with real paper, shadows and perspective.',
+      'This is a CREATIVE APPLICATION EXAMPLE only. Do not imply boxes, labels, cards, or printed merchandise are shipped with the digital bundle.',
+      'Use simple credible print finishing and restrained text.'
+    ]},
+  12: {title:'Creative Projects Mockup',objective:'Inspire creative uses with an achievable example project.',
+    directions:[
+      'Show an appealing scrapbook, planner spread, invitation or DIY paper project using recognizable motifs from the actual source art.',
+      'Build a believable overhead workspace/editorial scene and let the applied artwork communicate a practical creative idea.',
+      'Do not present physical supplies or finished print products as items included in the digital download.',
+      'Balance aesthetic impact with clarity of how the motifs may be used.'
+    ]},
+  13: {title:"What's Included",objective:'Summarize exactly what the customer will receive.',
+    directions:[
+      'Design a polished, highly legible informational product-summary slide with a restrained representative sample of the artwork.',
+      'Only list factual contents validated by the selected collection and user-provided text. A source reference count is not automatically a verified full-bundle quantity.',
+      'Do not invent ZIP contents, bonus packs, number of unique files, license terms, software compatibility, DPI, dimensions, or file formats.',
+      'Use a premium feature hierarchy rather than a dense artistic cover collage.'
+    ]},
+  14: {title:'How to Download & Use',objective:'Explain the digital delivery and usage journey simply.',
+    directions:[
+      'Create a clean numbered educational infographic with concise, easy-to-follow steps and modest selected clipart accents.',
+      'Communicate the general digital-download workflow without pretending to show exact storefront UI or unverified personal account settings.',
+      'Avoid invented file formats, technical requirements, licensing claims and fixed platform-specific instructions that may be inaccurate.',
+      'Make steps legible at Etsy thumbnail size; keep the background spare and instructional.'
+    ]},
+  15: {title:'Final Bundle Showcase',objective:'Close the listing sequence with a memorable, cohesive summary of the collection.',
+    directions:[
+      'Create an emotionally appealing final showcase, reusing the actual theme and visual language of the selected artwork.',
+      'Combine several recognizable collection motifs in a fresh balanced editorial arrangement, distinct from the Main Cover.',
+      'Use elegant finishing typography and a tasteful closing impression without invented urgency, discounts or guarantees.',
+      'Conclude with a visually compelling reminder of the bundle’s character rather than repeating the main cover composition.'
+    ]}
+};
+
+/** Return the user-approved Main Cover prompt ONLY for tile 01. */
+export function aiFirstListingPrompt(number: number, input: CreativeInput & {
+  collectionCount?: number;
+}): string {
+  if (number === 1) return aiFirstConceptPrompt(input);
+  const spec=AI_FIRST_LISTING_IMAGE_BRIEFS[number];
+  if (!spec) throw Error('Invalid Etsy Clipart Listing Studio image type');
+  const examples=(input.sourceAssets||[]).slice(0,32)
+    .map(a=>[a.name,a.category].filter(Boolean).join(' — '));
+  return [
+    'Design ONE stunning, commercially professional Etsy digital clipart listing image specifically for '+spec.title+'.',
+    'This is image '+number+' of 15 in Etsy Clipart Listing Studio. It is NOT Main Cover. Do NOT reuse the Main Cover 18–25-clipart hero collage formula or oversized headline treatment.',
+    '**PURPOSE**: '+spec.objective,
+    '**CANVAS**: Square 1024 × 1024 pixels, premium and clearly readable even at Etsy thumbnail size.',
+    '**ACTUAL COLLECTION**: '+JSON.stringify(input.theme),
+    input.style?.trim() ? 'Saved artistic style: '+input.style.trim() : '',
+    input.palette?.trim() ? 'Saved palette guidance: '+input.palette.trim() : '',
+    input.texture?.trim() ? 'Saved texture guidance: '+input.texture.trim() : '',
+    'Number of unique ORIGINAL clipart images currently saved in the collection (verified app inventory): '+String(input.collectionCount ?? input.selectedCount)+'.',
+    'Number of selected source images supplied as candidate visual references: '+String(input.selectedCount)+'.',
+    examples.length ? 'Examples of genuinely selected source clipart: '+examples.join('; ') : '',
+    '**VISUAL DIRECTION FOR '+spec.title.toUpperCase()+'**',
+    ...spec.directions.map(s=>'- '+s),
+    '**TYPOGRAPHY**',
+    'Use these exact user-editable words (empty fields mean omit them):',
+    'Main title: '+JSON.stringify(input.title),
+    'Subtitle: '+JSON.stringify(input.subtitle),
+    'Badge: '+JSON.stringify(input.badge),
+    'Design typography, font styles, text positions and relative sizes with freedom appropriate to this SPECIFIC image purpose.',
+    'The typography must remain subordinate to content where this is an informational or mockup image. Never invent additional text, discounts, features or quantities.',
+    '**ARTISTIC FREEDOM**',
+    'Maintain an original, cohesive visual language derived from the supplied artwork, but adapt the layout, visual hierarchy, density and presentation to THIS image type—not to the Main Cover.',
+    'The attached numbered contact sheets are unordered visual references, not grids, canvas positions or pixel-exact assets.',
+    'Use depicted reference subjects only; do not invent unrelated characters or misrepresent what is included in the sold digital collection.',
+    'OpenAI will generate the complete image in one creative pass. Exact pixel-matching with original clipart cannot be guaranteed.',
+    input.revisionNotes?.trim() ? 'User revision direction: '+input.revisionNotes.trim().slice(0,800) : '',
+    '**FINAL OUTPUT**: Generate the entire finished 1024 × 1024 Etsy '+spec.title+' image directly, not a contact sheet, mockup template, JSON plan, typography-only plate or Main Cover.'
+  ].filter(Boolean).join('\n');
+}
