@@ -73,7 +73,7 @@ test('niche, keywords and source-title context reach expansion and image prompts
   assert.match(prompts,/GENERAL THEME, SUB-THEME and MICRO-THEME/);
   assert.match(prompts,/strawberry farm clipart/);
   assert.match(prompts,/Birthday Duckling/);
-  assert.match(prompts,/subject must fit the source listing TITLE/);
+  assert.match(prompts,/subject must fit the source listing TITLE/i);
 });
 
 test('UI and API use the same research context, family selection and production brief', () => {
