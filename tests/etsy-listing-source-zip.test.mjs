@@ -96,7 +96,7 @@ test('selected source ZIP button is visible in every mode and works before prepa
   assert.match(button,/onClick=\{\(\) => void downloadAiFirstSourceZip\(\)\}/);
   assert.doesNotMatch(button,/compositionMode === 'ai-first' &&/);
   assert.doesNotMatch(button,/disabled=\{!!working \|\| !positions\.length \|\| !promptsReady\}/);
-  assert.match(backend,/const creativePrompt=input\.backgroundPrompt\?\.trim\(\) \|\| aiFirstConceptPrompt\(/);
+  assert.match(backend,/const creativePrompt=input\.backgroundPrompt\?\.trim\(\) \|\| aiFirstListingPrompt\(input\.number,/);
   assert.match(backend,/sourceAssets:refs\.map/);
   assert.match(backend,/prompt:creativePrompt/);
 });
