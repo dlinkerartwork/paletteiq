@@ -32,6 +32,27 @@ const sanitizedText = (s: string, limit: number) => s.replace(/[<>\r\n]/g, ' ').
 const normalizedImages = (project: StoredProject) => Array.isArray(project.listingImages)
   ? project.listingImages.filter(item => validNumber(item.number)) : [];
 
+/** Project Instructions v1.1: maintain the visual family of the approved
+ * cover and infer source style only from actual saved Vision observations.
+ */
+function studioV11Context(project: StoredProject, number: number) {
+  const observed=currentListingVisualStyle(project.listingVisualStyle,project.characters||[]);
+  const cover=normalizedImages(project).find(item=>item.number===1 && isSquareListingApproved(item));
+  return {
+    observedSourceStyle:observed
+      ? [observed.summary,'Palette: '+observed.palette,'Texture: '+observed.texture].join('; ').slice(0,900)
+      : undefined,
+    approvedCoverStyle:number>1 && cover
+      ? 'Approved Main Cover: '+JSON.stringify({
+        heading:cover.title||'',subtitle:cover.subtitle||'',
+        theme:project.subtheme||project.theme||project.name,
+        sourceStyle:observed?.summary||project.style||'',
+        palette:observed?.palette||project.palette||''
+      })
+      : undefined
+  };
+}
+
 async function findProject(projectId: string, owner: string) {
   const rows = await getDb().select().from(projects).where(and(eq(projects.id, projectId), eq(projects.owner, owner))).limit(1);
   return rows[0] || null;
@@ -457,6 +478,7 @@ export async function POST(request: Request) {
       theme:project.subtheme||project.theme||project.name,
       title,subtitle,badge,
       style:project.style,palette:project.palette,texture:project.texture,
+      ...studioV11Context(project,input.number),
       sourceAssets:refs.map(({asset})=>({name:asset.name,category:asset.category})),
       selectedCount:refs.length,collectionCount:collection.length
     });
@@ -510,6 +532,9 @@ export async function POST(request: Request) {
     } catch (error) { return bad(error instanceof Error ? error.message : 'Could not save listing image'); }
   }
   if (input.action === 'generate-concept') {
+    if (input.number>1 && !LISTING_IMAGE_SPECS.slice(0,input.number-1).every(spec=>
+      normalizedImages(project).some(item=>item.number===spec.number && isSquareListingApproved(item))))
+      return bad('Approve every preceding square listing image before generating this one.');
     // AI-First is intentionally a SINGLE image model call, NOT a two-stage
     // Vision JSON plan followed by background/PNG compositing.
     // The numbered contact boards are visual references from the same genuine
@@ -565,6 +590,8 @@ export async function POST(request: Request) {
       'SUBTITLE: '+JSON.stringify(subtitle),
       'BADGE: '+JSON.stringify(badge)+' (omit when empty).',
       'Keep complete lettering readable at small Etsy thumbnail size; do not produce a contact sheet or JSON.',
+      'PROJECT INSTRUCTIONS V1.1: This is ONE of fifteen sequential Etsy listing images. Prioritize high click-through readability for 01, organized genuine source variety for 02–05, verified facts for 06/07/13, realistic general-purpose product-use mockups for 08–12, concise buyer guidance for 14 and a visually cohesive finale for 15. No greeting cards, invitation cards, wedding stationery or other card-based mockups unless explicitly requested.',
+      'If prior Main Cover is included as the FINAL reference image, use it for shared palette, typography character, atmosphere and professional polish ONLY. Never copy its layout or duplicate unrelated characters, lettering, badges or product claims; use actual collection reference boards for the subject vocabulary.',
       'IMPORTANT: This is a GENERATIVE image. It can reinterpret source clipart; pixel-identical preservation is not guaranteed. Do not claim that artwork pixels are exact.'
     ].join('\n');
     try {
@@ -581,6 +608,28 @@ export async function POST(request: Request) {
           return bad('Invalid reference board '+(i+1),413);
         form.append('image[]',new Blob([new Uint8Array(bytes)],{type:'image/jpeg'}),
           'selected-clipart-reference-'+String(i+1)+'.jpg');
+      }
+      // Image Edit supports up to 16 reference images. Source boards (up to 8)
+      // take priority; the approved Main Cover is added only as a STYLE
+      // reference for tiles 02–15. Original subject identity still comes
+      // exclusively from the selected collection clipart boards.
+      let approvedCoverReferenceIncluded=false;
+      if(input.number>1 && sheets.length<16){
+        const cover=normalizedImages(project).find(item=>item.number===1 && isSquareListingApproved(item));
+        const key=cover?.renderedImageUrl
+          ? savedAssetKey(cover.renderedImageUrl,input.projectId,user.userId) : null;
+        if(key?.endsWith('.jpg')){
+          const coverObject=await bucket()?.get(key);
+          if(coverObject){
+            const coverBytes=new Uint8Array(await coverObject.arrayBuffer());
+            if(coverBytes.length>100 && coverBytes.length<=12_000_000 &&
+              coverBytes[0]===255 && coverBytes[1]===216){
+              form.append('image[]',new Blob([new Uint8Array(coverBytes)],{type:'image/jpeg'}),
+                'approved-main-cover-style-reference-ONLY.jpg');
+              approvedCoverReferenceIncluded=true;
+            }
+          }
+        }
       }
       const response=await fetch('https://api.openai.com/v1/images/edits',{
         method:'POST',headers:{Authorization:'Bearer '+apiKey},
@@ -601,6 +650,7 @@ export async function POST(request: Request) {
         backgroundUrl,
         sampledSourceCount:sampled.length,
         selectedSourceCount:ids.length,
+        approvedCoverReferenceIncluded,
         reviewWarning:'AI-generated listing image: subjects and details can differ from original clipart. Check visual accuracy, text, product claims and whether mockups are clearly illustrative before approval.',
         costEstimate:estimateListingImageGenerationCost(model,quality as 'low'|'medium'|'high',result.usage)
       });
@@ -780,6 +830,7 @@ export async function POST(request: Request) {
   const prompt = mode === 'ai-first'
     ? aiFirstListingPrompt(input.number,{ theme: project.subtheme || project.theme || project.name, ...text,
       style:project.style,palette:project.palette,texture:project.texture,
+      ...studioV11Context(project,input.number),
       sourceAssets:selectedSources.map(a=>({name:a.name,category:a.category})),
       selectedCount:selectedSources.length || input.featuredCount || count,
       collectionCount:count,
