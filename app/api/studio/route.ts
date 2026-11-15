@@ -12,26 +12,27 @@ import { hasTargetSeoAltLength, normalizeSeoAlt } from '@/lib/seo-alt-text';
 import { reviewImageSimilarity, type SimilarityReview } from '@/lib/similarity-review';
 import { nativeAssetBucket } from '@/lib/native-bridge';
 import { acquireProductionLocks } from '@/lib/production-locks';
-import { familyDistribution, normalizeCreativeAnalysis } from '@/lib/creative-intelligence';
+import { expressionDistribution, familyDistribution, mergeSourceEmotionProfile, normalizeCreativeAnalysis } from '@/lib/creative-intelligence';
 import { diversityExpansionInstruction, productionPromptInstruction, researchAnalysisInstruction } from '@/lib/creative-research-prompts';
 
 const fail = (error: string, status = 400) => Response.json({ error }, { status });
 const secret = (key: string) => (env as unknown as Record<string, string | undefined>)[key];
-type SubjectInput = { id: string; name: string; family?: string; description?: string; prompt?: string; status?: string; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: { id: string }; error?: string; similarityReview?: SimilarityReview };
+type SubjectInput = { id: string; name: string; family?: string; expression?: string; description?: string; prompt?: string; status?: string; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: { id: string }; error?: string; similarityReview?: SimilarityReview };
 type ProjectInput = { id: string; name: string; characters: SubjectInput[]; [key: string]: unknown };
 type StudioRequest = { action: string; id: string; name: string; data: ProjectInput; url: string; project: ProjectInput; draft?: unknown; projectId: string; characterId: string; model: string; quality: string; selectedImages?: unknown[]; characters?: SubjectInput[]; [key: string]: unknown };
 type AiTextResult = { output?: Array<{ content?: Array<{ text?: string }> }> };
 const extractText = (result: AiTextResult) => result.output?.flatMap(o => o.content ?? []).map(c => c.text ?? '').join('') ?? '{}';
-const normalizeResearchPayload = (value: unknown) => {
+const normalizeResearchPayload = (value: unknown, source: { title: string; tags: string[] }) => {
   const raw = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
-  const analysis = normalizeCreativeAnalysis(raw);
+  const analysis = mergeSourceEmotionProfile(normalizeCreativeAnalysis(raw), source.title, source.tags);
   const characters = Array.isArray(raw.characters) ? raw.characters.slice(0, 20).flatMap(item => {
-    if (typeof item === 'string') return [{ name: item.slice(0, 160), family: '', description: '' }];
+    if (typeof item === 'string') return [{ name: item.slice(0, 160), family: '', expression: '', description: '' }];
     if (!item || typeof item !== 'object') return [];
     const c = item as Record<string, unknown>;
     if (typeof c.name !== 'string' || !c.name.trim()) return [];
     return [{ name: c.name.trim().slice(0, 160),
       family: typeof c.family === 'string' ? c.family.trim().slice(0, 120) : '',
+      expression: typeof c.expression === 'string' ? c.expression.trim().slice(0, 160) : '',
       description: typeof c.description === 'string' ? c.description.trim().slice(0, 500) : '' }];
   }) : [];
   return { ...analysis, characters };
@@ -161,7 +162,7 @@ export async function POST(req: Request) {
     if (provider === 'openai') {
       const ai = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model, input, text: { format: { type: 'json_object' } } }) });
       if (!ai.ok) return fail(`OpenAI visual analysis failed (${ai.status}): ${(await ai.text()).slice(0,200)}`, 502);
-      try { return Response.json({ source, selectedImages, analysis: normalizeResearchPayload(JSON.parse(extractText(await ai.json()))) }); } catch { return fail('Could not parse OpenAI visual analysis', 502); }
+      try { return Response.json({ source, selectedImages, analysis: normalizeResearchPayload(JSON.parse(extractText(await ai.json())), source) }); } catch { return fail('Could not parse OpenAI visual analysis', 502); }
     }
     // Gemini inline inputs are fetched only from the Etsy-owned image CDN.
     // Limit image count and payload size to avoid oversized requests and SSRF.
@@ -196,7 +197,7 @@ export async function POST(req: Request) {
       try {
         const result = await ai.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
         const raw = result.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('') || '';
-        return Response.json({ source, selectedImages, analysis: normalizeResearchPayload(JSON.parse(raw)) });
+        return Response.json({ source, selectedImages, analysis: normalizeResearchPayload(JSON.parse(raw), source) });
       } catch { return fail('Could not parse Gemini visual analysis', 502); }
     }
     return fail(lastError, 502);
@@ -206,22 +207,22 @@ export async function POST(req: Request) {
     if (!aiKey) return fail('OpenAI API not connected.', 503);
     const count = Math.max(1, Math.min(20, Number(body.count) || 1));
     const images = Array.isArray(body.images) ? body.images.filter((url: unknown) => { try { const parsed = new URL(String(url)); return parsed.protocol === 'https:' && (parsed.hostname === 'etsystatic.com' || parsed.hostname.endsWith('.etsystatic.com')); } catch { return false; } }).slice(0, 3) as string[] : [];
-    const existing = Array.isArray(body.existing) ? body.existing.slice(-750).flatMap((value): Array<{ name: string; family?: string }> => {
+    const existing = Array.isArray(body.existing) ? body.existing.slice(-750).flatMap((value): Array<{ name: string; family?: string; expression?: string }> => {
       if (typeof value === 'string') return [{ name: value.slice(0, 160) }];
       if (!value || typeof value !== 'object') return [];
       const record = value as Record<string, unknown>;
-      return typeof record.name === 'string' ? [{ name: record.name.slice(0, 160), family: typeof record.family === 'string' ? record.family.slice(0, 120) : '' }] : [];
+      return typeof record.name === 'string' ? [{ name: record.name.slice(0, 160), family: typeof record.family === 'string' ? record.family.slice(0, 120) : '', expression: typeof record.expression === 'string' ? record.expression.slice(0, 160) : '' }] : [];
     }) : [];
     const analysis = normalizeCreativeAnalysis(body.analysis ?? body);
     const instruction = diversityExpansionInstruction({
       count, target: Math.max(count, Math.min(1000, Number(body.target) || 120)),
       title: String(body.title ?? '').slice(0, 350), analysis, existing,
-      distribution: familyDistribution(existing),
+      distribution: familyDistribution(existing), expressionCounts: expressionDistribution(existing),
     });
     const input = [{ role: 'user', content: [{ type: 'input_text', text: instruction }, ...images.map(image_url => ({ type: 'input_image', image_url }))] }];
     const ai = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'gpt-4.1-mini', input, text: { format: { type: 'json_object' } } }) });
     if (!ai.ok) return fail(`AI expansion returned ${ai.status}`, 502);
-    try { const result = JSON.parse(extractText(await ai.json())) as { characters?: Array<{ name: string; family?: string; description?: string }> }; const characters = Array.isArray(result.characters) ? result.characters.filter(c => c && typeof c.name === 'string' && c.name.trim()).slice(0, count).map(c => ({ name: c.name.trim().slice(0,160), family: String(c.family || '').slice(0,120), description: String(c.description || '').slice(0,500) })) : []; return Response.json({ characters }); } catch { return fail('Invalid AI response', 502); }
+    try { const result = JSON.parse(extractText(await ai.json())) as { characters?: Array<{ name: string; family?: string; expression?: string; description?: string }> }; const characters = Array.isArray(result.characters) ? result.characters.filter(c => c && typeof c.name === 'string' && c.name.trim()).slice(0, count).map(c => ({ name: c.name.trim().slice(0,160), family: String(c.family || '').slice(0,120), expression: String(c.expression || '').slice(0,160), description: String(c.description || '').slice(0,500) })) : []; return Response.json({ characters }); } catch { return fail('Invalid AI response', 502); }
   }
   if (body.action === 'generate-prompts') {
     const provider = body.promptProvider ?? 'openai';
@@ -232,7 +233,7 @@ export async function POST(req: Request) {
     const context = normalizeCreativeAnalysis(body.analysis ?? body);
     const characters = incoming.map(c => ({ id: String(c.id).slice(0, 80),
       name: String(c.name).slice(0, 200), family: String(c.family ?? '').slice(0, 120),
-      description: String(c.description ?? '').slice(0, 500),
+      expression: String(c.expression ?? '').slice(0, 160), description: String(c.description ?? '').slice(0, 500),
       previousPrompt: String(c.prompt ?? '').slice(0, 1200) }));
     const requestText = productionPromptInstruction({
       title: String(body.title ?? '').slice(0, 350), analysis: context, characters,
