@@ -679,6 +679,57 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     }finally{setWorking('');}
   };
 
+function catalogGridLabel(count:number):string{
+  return count+'-artwork complete catalog';
+}
+
+  /** Tile 03 always renders 100% of current collection sources, not a sample. */
+  const generateCompleteCollection = async () => {
+    if(working||!assets.length)return;
+    const copy={...currentLettering};
+    setCostNotice(null);
+    setWorking('complete-catalog');
+    setMessage('Rendering Complete Collection from ALL '+assets.length+' original clipart files; no AI request or sampling...');
+    try{
+      const catalog=await composeCompleteCollectionCatalog(assets,copy.title,copy.subtitle,copy.badge,
+        (drawn,total)=>{
+          if(drawn===total||drawn%10===0)
+            setMessage('Compositing exact original artwork '+drawn+'/'+total+' in '+catalogGridLabel(total)+'...');
+        });
+      if(catalog.placements.length!==assets.length ||
+        new Set(catalog.assetIds).size!==assets.length)
+        throw Error('Complete Collection is incomplete. No JPG will be saved.');
+      setMessage('All '+assets.length+'/'+assets.length+' originals rendered. Uploading 1024 × 1024 JPG...');
+      const renderedImageUrl=await upload(projectId,3,catalog.file,
+        (done,total)=>setMessage('Uploading complete catalog '+done+'/'+total+' chunks...'));
+      const record:ListingImageRecord={
+        number:3,status:'draft',backgroundUrl:'',renderedImageUrl,
+        placements:catalog.placements,catalogAssetIds:catalog.assetIds,
+        catalogExpectedCount:assets.length,selectedSourceIds:catalog.assetIds,
+        aiGeneratedFullCover:false,
+        title:copy.title,subtitle:copy.subtitle,badge:copy.badge,
+        width:LISTING_WIDTH,height:LISTING_HEIGHT,updatedAt:Date.now(),
+        notes:notes[3]??current?.notes??'',reviewWarning:''
+      };
+      await saveRecord(record);
+      setChanges(old=>{const next={...old};delete next[3];return next;});
+      let reviewText='';
+      if(autoFinalCritique){
+        setWorking('critique');
+        try{
+          const critique=await send({action:'critique',projectId,number:3});
+          if(critique.images)receive(critique.images);
+          if(critique.finalReview)reviewText=' Visual quality '+critique.finalReview.score.toFixed(1)+'/10.';
+        }catch(error){reviewText=' Optional visual critique failed: '+String(error);}
+      }
+      setMessage('Complete Collection JPG saved: '+catalog.assetIds.length+'/'+assets.length+
+        ' ORIGINAL cliparts in '+catalog.columns+' columns × '+catalog.rows+
+        ' rows. Every source is present exactly once.'+reviewText);
+    }catch(error){
+      setMessage('Complete Collection not saved: '+(error instanceof Error?error.message:String(error)));
+    }finally{setWorking('');}
+  };
+
   /** One paid image edit: selected clipart references + prompt -> entire full cover. */
   const generateAiFirstConcept = async () => {
     if(!promptsReady||working)return;
@@ -744,14 +795,15 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
 
   const generate = async () => {
     if (working) return;
-    if (!promptsReady) return setMessage('Prepare and review both OpenAI prompts before paid generation. Refresh prompts after changing settings or selected originals.');
+    if(step!==3 && !promptsReady) return setMessage('Prepare and review both OpenAI prompts before paid generation. Refresh prompts after changing settings or selected originals.');
     if (!assets.length) return setMessage('Generate collection clipart in Image Production first.');
     if (!precedingApproved) return setMessage('Approve all preceding listing images before generating this one.');
     if (current?.status === 'approved' && !window.confirm('Regenerate an approved image? Its approval will be reset to Draft.')) return;
     const evaluation = evaluateListingCoverTitle(currentLettering.title);
-    if (evaluation.status === 'too-long' && !window.confirm(
+    if (evaluation.status === 'too-long' && step!==3 && !window.confirm(
       'Your cover title has ' + evaluation.words + ' words (' + evaluation.characters +
       ' characters). It may be difficult to read at Etsy thumbnail size. Generate anyway?')) return;
+    if (step===3) return generateCompleteCollection();
     if (compositionMode === 'ai-first') return generateAiFirstConcept();
     const lettering = { ...currentLettering };
     setCostNotice(null);
@@ -856,6 +908,10 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     if (status === 'approved' && current.finalReview && current.finalReview.score < 8.5 &&
       !window.confirm('Final design critique scored this JPG ' + current.finalReview.score + '/10. Suggested improvement: ' +
         (current.finalReview.improvements[0] || 'Check text and visual balance') + '\nApprove anyway?')) return;
+    if (status === 'approved' && step===3 &&
+        !completeCatalogMatchesInventory(current,assets))
+      return setMessage('Complete Collection approval blocked: all '+assets.length+
+        ' CURRENT originals must appear exactly once. Generate Complete Collection again.');
     if (status === 'approved' && current.reviewWarning &&
         !window.confirm('Automatic review flagged a possible issue:\n' + current.reviewWarning + '\n\nHave you carefully checked the artwork, mockup, text and verified facts and want to approve this JPG anyway?')) return;
     if (letteringDirty) return setMessage('Title, Subtitle, or Badge changed. Regenerate the AI artwork before approving the new text.');
