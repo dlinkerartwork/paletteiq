@@ -10,7 +10,7 @@ import EtsyListingLayoutCanvas from '@/components/etsy-listing-layout-canvas';
 import { evaluateListingCoverTitle, suggestListingCoverCopy } from '@/lib/etsy-listing-cover-copy';
 import { aiFirstSampleIndices, AI_FIRST_LAYOUT_ARCHETYPES } from '@/lib/etsy-listing-ai-first';
 import {
-  LISTING_IMAGE_SPECS, LISTING_WIDTH, LISTING_HEIGHT, originalAssets,
+  LISTING_IMAGE_SPECS, LISTING_WIDTH, LISTING_HEIGHT, originalAssets, planCompleteCollectionCatalog, completeCatalogMatchesInventory,
   planListingPlacements, curatedListingHighlights, DEFAULT_MAIN_COVER_CLIPART_COUNT, defaultListingCompositionMode, listingAllowsBleed, listingFilename, listingImageTextDefaults, listingImageTextDefaultsForStep, isSquareListingApproved, type ListingCompositionMode, type ListingImageText, type ListingFinalReview, type ListingAsset, type ListingImageRecord, type ListingPlacement
 } from '@/lib/etsy-listing-image-plan';
 
@@ -219,6 +219,91 @@ async function compose(backgroundUrl: string, placements: ListingPlacement[], as
   return await new Promise<Blob>((resolve, reject) =>
     canvas.toBlob(blob => blob ? resolve(blob) : reject(Error('Could not render JPG image.')), 'image/jpeg', 0.92));
 }
+
+/**
+ * Tile 03 is intentionally NEVER generative. It must draw every actual
+ * collection asset exactly once, with no sampling or imagined illustrations.
+ * Fail the whole render if even one original image is unavailable.
+ */
+async function composeCompleteCollectionCatalog(
+  originals: ListingAsset[], title: string, subtitle: string, badge: string,
+  progress?: (drawn:number,total:number)=>void
+): Promise<{file:Blob;placements:ListingPlacement[];assetIds:string[];columns:number;rows:number}> {
+  const {placements,columns,rows}=planCompleteCollectionCatalog(originals);
+  if(!placements.length || placements.length!==originals.length)
+    throw Error('Complete Collection needs all saved original clipart images');
+  const sourceById=new Map(originals.map(asset=>[asset.id,asset]));
+  const used=new Set(placements.map(p=>p.assetId));
+  if(used.size!==originals.length || originals.some(a=>!used.has(a.id)))
+    throw Error('Complete Collection planner did not include every original');
+  const canvas=document.createElement('canvas');
+  canvas.width=LISTING_WIDTH;canvas.height=LISTING_HEIGHT;
+  const ctx=canvas.getContext('2d',{alpha:false});
+  if(!ctx)throw Error('Browser canvas cannot render the complete catalog');
+  ctx.fillStyle='#fdfbf6';ctx.fillRect(0,0,LISTING_WIDTH,LISTING_HEIGHT);
+  // Compact, carefully fitted title: never obscure real catalog illustrations.
+  ctx.fillStyle='#2e493a';ctx.textAlign='center';ctx.textBaseline='middle';
+  const heading=(title||'The Complete Collection').trim();
+  let headingSize=38;
+  do{
+    ctx.font='700 '+headingSize+'px Georgia, serif';
+    if(ctx.measureText(heading).width<=LISTING_WIDTH-75)break;
+    headingSize-=1;
+  }while(headingSize>=16);
+  if(ctx.measureText(heading).width>LISTING_WIDTH-75)
+    throw Error('Complete Collection title is too long. Shorten the title before generating.');
+  ctx.fillText(heading,LISTING_WIDTH/2,40);
+  if(subtitle.trim()){
+    let subtitleSize=19;
+    do{
+      ctx.font='500 '+subtitleSize+'px Arial, sans-serif';
+      if(ctx.measureText(subtitle.trim()).width<=LISTING_WIDTH-90)break;
+      subtitleSize-=1;
+    }while(subtitleSize>=12);
+    if(ctx.measureText(subtitle.trim()).width>LISTING_WIDTH-90)
+      throw Error('Complete Collection subtitle is too long. Shorten it before generating.');
+    ctx.fillStyle='#716455';ctx.fillText(subtitle.trim(),LISTING_WIDTH/2,83);
+  }
+  // One slot per ORIGINAL. Bounding-box fit preserves aspect ratio and source
+  // artwork; white margin between slots keeps all 120 items recognizable.
+  ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+  for(let i=0;i<placements.length;i++){
+    const placement=placements[i];
+    const source=sourceById.get(placement.assetId);
+    if(!source?.imageUrl)throw Error('Missing original artwork ID '+placement.assetId);
+    let image:HTMLImageElement;
+    try{image=await imageFromUrl(source.imageUrl);}
+    catch{throw Error('Could not load original clipart '+(i+1)+'/'+placements.length+': '+source.name);}
+    const bounds=imageBounds(image);
+    if(bounds.sw<=0||bounds.sh<=0)throw Error('Original artwork has empty dimensions: '+source.name);
+    const x=placement.x*LISTING_WIDTH/100,y=placement.y*LISTING_HEIGHT/100;
+    const w=placement.width*LISTING_WIDTH/100,h=placement.height*LISTING_HEIGHT/100;
+    const scale=Math.min(w/bounds.sw,h/bounds.sh);
+    const dw=bounds.sw*scale,dh=bounds.sh*scale;
+    ctx.drawImage(image,bounds.sx,bounds.sy,bounds.sw,bounds.sh,
+      x+(w-dw)/2,y+(h-dh)/2,dw,dh);
+    progress?.(i+1,placements.length);
+  }
+  // Verified inventory count, not a marketing estimate or a sampled count.
+  ctx.fillStyle='#365343';ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.font='700 18px Arial, sans-serif';
+  ctx.fillText(placements.length+' ORIGINAL CLIPART ILLUSTRATIONS',LISTING_WIDTH/2,979);
+  if(badge.trim()){
+    let size=15;ctx.fillStyle='#7a6757';
+    do{
+      ctx.font='600 '+size+'px Arial, sans-serif';
+      if(ctx.measureText(badge.trim()).width<LISTING_WIDTH-80)break;
+      size--;
+    }while(size>=10);
+    if(ctx.measureText(badge.trim()).width>LISTING_WIDTH-80)
+      throw Error('Complete Collection badge is too long.');
+    ctx.fillText(badge.trim(),LISTING_WIDTH/2,1004);
+  }
+  const file=await new Promise<Blob>((resolve,reject)=>canvas.toBlob(
+    b=>b?resolve(b):reject(Error('Could not export complete collection JPG')),'image/jpeg',0.94));
+  return {file,placements,assetIds:placements.map(p=>p.assetId),columns,rows};
+}
+
 /** Save an AI-generated full cover as JPG WITHOUT overlaying any collection PNGs. */
 async function flattenAiFullCover(fullCoverUrl: string): Promise<Blob> {
   const canvas=document.createElement('canvas');
@@ -285,7 +370,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
     currentLettering.badge !== (current.badge ?? imageTextDefaults.badge)
   ));
   const compositionMode: ListingCompositionMode = compositionModes[String(step)] ?? defaultListingCompositionMode(step);
-  const positions = changes[step] ||
+  const positions = step===3 ? planCompleteCollectionCatalog(assets).placements : changes[step] ||
     (compositionMode === 'ai-first'
       ? current?.selectedSourceIds?.length
         ? planListingPlacements(step,categorizedAssets,{assetIds:current.selectedSourceIds})
