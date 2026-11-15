@@ -66,7 +66,7 @@ test('one-step JPG export uses AI full-cover pixels; no coordinate map or origin
   assert.doesNotMatch(action,/arrangeWithAI\(|renderAndSave\(|compose\(|finalizeAiFirstConcept/);
   assert.match(ui,/data-ai-first-full-cover-notice="true"/);
   assert.doesNotMatch(ui,/Build final JPG with original PNGs|data-ai-first-background-preview/);
-  assert.match(ui,/compositionMode !== 'ai-first' && <section/);
+  assert.match(ui,/compositionMode !== 'ai-first' && step!==3 && <section/);
   assert.match(plan,/aiGeneratedFullCover\?: boolean/);
   assert.match(api,/!value\.aiGeneratedFullCover/);
   assert.match(api,/record\.aiGeneratedFullCover/);
