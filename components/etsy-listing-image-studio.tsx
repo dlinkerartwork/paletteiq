@@ -8,7 +8,7 @@ import type { ImageGenerationCostEstimate } from '@/lib/etsy-listing-image-cost'
 import { listingCreativeDirection, listingMockupScene } from '@/lib/etsy-listing-creative-direction';
 import EtsyListingLayoutCanvas from '@/components/etsy-listing-layout-canvas';
 import { evaluateListingCoverTitle, suggestListingCoverCopy } from '@/lib/etsy-listing-cover-copy';
-import { aiFirstSampleIndices } from '@/lib/etsy-listing-ai-first';
+import { aiFirstSampleIndices, AI_FIRST_LAYOUT_ARCHETYPES } from '@/lib/etsy-listing-ai-first';
 import {
   LISTING_IMAGE_SPECS, LISTING_WIDTH, LISTING_HEIGHT, originalAssets,
   planListingPlacements, curatedListingHighlights, DEFAULT_MAIN_COVER_CLIPART_COUNT, defaultListingCompositionMode, listingAllowsBleed, listingFilename, listingImageTextDefaults, listingImageTextDefaultsForStep, isSquareListingApproved, type ListingCompositionMode, type ListingImageText, type ListingFinalReview, type ListingAsset, type ListingImageRecord, type ListingPlacement
@@ -29,7 +29,7 @@ type Props = {
   characters: ListingAsset[];
   onSaved?: (images: ListingImageRecord[]) => void;
 };
-type ListResponse = { conceptUrl?: string; creativeBrief?: string; selectedSourceIds?: string[]; sampledSourceCount?: number; selectedSourceCount?: number; backgroundPrompt?: string; layoutPrompt?: string; images?: ListingImageRecord[]; preLayouts?: Record<string, ListingPlacement[]>; compositionModes?: Record<string, ListingCompositionMode>; saved?: boolean; backgroundUrl?: string; placements?: ListingPlacement[]; finalReview?: ListingFinalReview | null; fallback?: string; reviewWarning?: string; costEstimate?: ImageGenerationCostEstimate | null; warning?: string; deleted?: boolean; error?: string };
+type ListResponse = { conceptUrl?: string; creativeBrief?: string; selectedSourceIds?: string[]; sampledSourceCount?: number; selectedSourceCount?: number; detailedOriginalReferencesIncluded?: number; backgroundPrompt?: string; layoutPrompt?: string; images?: ListingImageRecord[]; preLayouts?: Record<string, ListingPlacement[]>; compositionModes?: Record<string, ListingCompositionMode>; saved?: boolean; backgroundUrl?: string; placements?: ListingPlacement[]; finalReview?: ListingFinalReview | null; fallback?: string; reviewWarning?: string; costEstimate?: ImageGenerationCostEstimate | null; warning?: string; deleted?: boolean; error?: string };
 const apiUrl = '/api/listing-image-studio';
 const styleApiUrl = '/api/listing-style-analysis';
 type StyleResponse = { profile?: ListingVisualStyleProfile | null; cached?: boolean; error?: string };
@@ -644,7 +644,10 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           }
         }catch(error){qualityMessage=' Optional final review unavailable: '+String(error);}
       }
-      setMessage('AI-First '+spec.title+' saved as JPG. No PNG positioning, mapping or post-compositing was performed.'+
+      setMessage('AI-First '+spec.title+' saved as JPG. Its unique layout follows the '+(AI_FIRST_LAYOUT_ARCHETYPES[step]?.name||'Main Cover hero')+' design.'+
+        (response.detailedOriginalReferencesIncluded
+          ? ' Included '+response.detailedOriginalReferencesIncluded+' full-detail original PNG/JPG files alongside contact sheets to help reference fidelity (not a guarantee of identical pixels).' : '')+
+        ' No PNG positioning, mapping or post-compositing was performed.'+
         (response.sampledSourceCount && response.selectedSourceCount &&
         response.sampledSourceCount<response.selectedSourceCount
           ? ' Reference boards sampled '+response.sampledSourceCount+' of '+response.selectedSourceCount+' selected assets.' : '')+
@@ -938,9 +941,15 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           </div>}
           {compositionMode === 'ai-first' && <div data-ai-first-full-cover-notice="true"
             style={{marginTop:10,padding:12,border:'1px solid #e5dacb',borderRadius:10,fontSize:12}}>
-            <strong>One-step OpenAI '+spec.title+' artwork</strong>
+            <strong>One-step OpenAI {spec.title} artwork</strong>
+            {step>1 && AI_FIRST_LAYOUT_ARCHETYPES[step] && <div data-listing-layout-archetype={AI_FIRST_LAYOUT_ARCHETYPES[step].name}
+              style={{marginTop:8,padding:9,borderRadius:7,background:'#f8f2ea'}}>
+              <strong>Distinct layout: {AI_FIRST_LAYOUT_ARCHETYPES[step].name}</strong>
+              <p style={{margin:'5px 0 0',lineHeight:1.45}}>{AI_FIRST_LAYOUT_ARCHETYPES[step].layout}</p>
+              <p style={{margin:'5px 0 0'}}><strong>Do not use:</strong> {AI_FIRST_LAYOUT_ARCHETYPES[step].forbidden}</p>
+            </div>}
             <p style={{margin:'6px 0 0'}}>Generate a COMPLETE image with clipart collage, artistic typography, badge and background together. No PNG positioning, mapping or second generation step.</p>
-            <p style={{margin:'6px 0 0'}}>This mode uses source art as visual references. Generated subjects can differ from the original PNGs; inspect every character, word and bundle claim before approval.</p>
+            <p style={{margin:'6px 0 0'}}>OpenAI receives source-art contact sheets plus a few larger original PNG/JPG references when available. The Main Cover image is NOT supplied for supporting tiles, to prevent cloning its layout; only its documented color/style direction is reused. AI may still reinterpret artwork, so inspect characters, words and claims before approval.</p>
           </div>}
           {compositionMode !== 'ai-first' && <section style={{ marginTop: current?.renderedImageUrl ? 16 : 0, display: 'grid', gap: 8 }}>
             <strong>{current?.backgroundUrl ? 'Editable Original Clipart Layers (post-generate)' : 'White Canvas Pre-Layout — arrange before AI generation'}</strong>
