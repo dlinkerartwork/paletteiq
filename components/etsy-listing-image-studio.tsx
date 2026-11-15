@@ -11,7 +11,7 @@ import { evaluateListingCoverTitle, suggestListingCoverCopy } from '@/lib/etsy-l
 import { aiFirstSampleIndices } from '@/lib/etsy-listing-ai-first';
 import {
   LISTING_IMAGE_SPECS, LISTING_WIDTH, LISTING_HEIGHT, originalAssets,
-  planListingPlacements, curatedListingHighlights, DEFAULT_MAIN_COVER_CLIPART_COUNT, defaultListingCompositionMode, listingAllowsBleed, listingFilename, listingImageTextDefaults, isSquareListingApproved, type ListingCompositionMode, type ListingImageText, type ListingFinalReview, type ListingAsset, type ListingImageRecord, type ListingPlacement
+  planListingPlacements, curatedListingHighlights, DEFAULT_MAIN_COVER_CLIPART_COUNT, defaultListingCompositionMode, listingAllowsBleed, listingFilename, listingImageTextDefaults, listingImageTextDefaultsForStep, isSquareListingApproved, type ListingCompositionMode, type ListingImageText, type ListingFinalReview, type ListingAsset, type ListingImageRecord, type ListingPlacement
 } from '@/lib/etsy-listing-image-plan';
 
 type Props = {
@@ -272,15 +272,17 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
 
   const categorizedAssets = useMemo(() => assets.map(a => ({ ...a, category: categories[a.id] || a.category })), [assets, categories]);
   const current = records.find(item => item.number === step);
+  const imageTextDefaults=listingImageTextDefaultsForStep(step,
+    {title:seoTitle,primaryKeyword},artDirection.title);
   const currentLettering: ListingImageText = letteringChanges[step] ?? {
-    title: current?.title ?? seoText.title,
-    subtitle: current?.subtitle ?? seoText.subtitle,
-    badge: current?.badge ?? seoText.badge
+    title: current?.title ?? imageTextDefaults.title,
+    subtitle: current?.subtitle ?? imageTextDefaults.subtitle,
+    badge: current?.badge ?? imageTextDefaults.badge
   };
   const letteringDirty = Boolean(current?.backgroundUrl && (
-    currentLettering.title !== (current.title ?? seoText.title) ||
-    currentLettering.subtitle !== (current.subtitle ?? seoText.subtitle) ||
-    currentLettering.badge !== (current.badge ?? seoText.badge)
+    currentLettering.title !== (current.title ?? imageTextDefaults.title) ||
+    currentLettering.subtitle !== (current.subtitle ?? imageTextDefaults.subtitle) ||
+    currentLettering.badge !== (current.badge ?? imageTextDefaults.badge)
   ));
   const compositionMode: ListingCompositionMode = compositionModes[String(step)] ?? defaultListingCompositionMode(step);
   const positions = changes[step] ||
@@ -1018,8 +1020,10 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           </section>
           <div style={{ border: '1px solid #eadfce', borderRadius: 10, padding: 12, display: 'grid', gap: 9 }}>
             <strong>Title, Subtitle &amp; Badge for Image {String(step).padStart(2,'0')}</strong>
-            <small style={{ color: '#75695e' }}>Default Title = SEO Title, Subtitle = Primary Keyword from Etsy Listing Draft. Both can be edited. Badge is optional and empty by default.</small>
-            <label className="input-label" htmlFor="listing-image-title">TITLE (SEO TITLE DEFAULT)</label>
+            <small style={{ color: '#75695e' }}>{step === 1
+              ? 'Main Cover defaults to the SEO title and primary keyword. Keep the heading short and readable. All fields are editable.'
+              : 'Supporting image defaults to a concise '+spec.title+' heading, with no automatic subtitle or badge. Edit only if the design benefits from additional words.'}</small>
+            <label className="input-label" htmlFor="listing-image-title">TITLE ({step === 1 ? 'SEO TITLE DEFAULT' : 'IMAGE TYPE DEFAULT'})</label>
             <input id="listing-image-title" aria-label="Listing image title" type="text" maxLength={140}
               value={currentLettering.title} disabled={!!working}
               onChange={e => editLettering('title', e.target.value)}
@@ -1031,12 +1035,12 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
               <strong>{titleAdvice.status === 'good' ? 'Good cover title length' : titleAdvice.status === 'too-long' ? 'Title is too long for a thumbnail' : 'Title readability warning'}</strong>
               <div>{titleAdvice.words} words · {titleAdvice.characters} characters. {titleAdvice.message}</div>
             </div>
-            <label className="input-label" htmlFor="listing-image-subtitle">SUBTITLE (PRIMARY KEYWORD DEFAULT)</label>
+            <label className="input-label" htmlFor="listing-image-subtitle">SUBTITLE ({step === 1 ? 'PRIMARY KEYWORD DEFAULT' : 'OPTIONAL'})</label>
             <input id="listing-image-subtitle" aria-label="Listing image subtitle" type="text" maxLength={140}
               value={currentLettering.subtitle} disabled={!!working}
               onChange={e => editLettering('subtitle', e.target.value)}
               placeholder="Primary keyword"/>
-            <div style={{ border:'1px solid #e6e0d6',borderRadius:8,padding:10,display:'grid',gap:9 }}>
+            {step === 1 && <div style={{ border:'1px solid #e6e0d6',borderRadius:8,padding:10,display:'grid',gap:9 }}>
               <strong style={{ fontSize:12 }}>Suggested Cover Copy — based on this collection</strong>
               <small>Quick, cost-free suggestions based on your SEO Title, Primary Keyword, theme, style and verified collection size. These change only the words on this image, not your Etsy SEO listing.</small>
               <span className="input-label">SUGGESTED TITLES</span>
@@ -1049,15 +1053,15 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
                 {coverCopy.subtitles.map(option => <button key={option} type="button" className="outline-btn" disabled={!!working}
                   style={{ padding:'6px 9px',fontSize:12 }} onClick={() => editLettering('subtitle', option)}>{option}</button>)}
               </div>
-            </div>
+            </div>}
             <label className="input-label" htmlFor="listing-image-badge">BADGE (OPTIONAL)</label>
             <input id="listing-image-badge" aria-label="Listing image badge" type="text" maxLength={60}
               value={currentLettering.badge} disabled={!!working}
               onChange={e => editLettering('badge', e.target.value)}
               placeholder="e.g. 80 CLIPART • Leave blank for no badge"/>
             <button type="button" className="outline-btn" disabled={!!working}
-              onClick={() => setLetteringChanges(prev => ({ ...prev, [step]: { ...seoText } }))}>
-              Reset text to Etsy SEO defaults
+              onClick={() => setLetteringChanges(prev => ({ ...prev, [step]: { ...imageTextDefaults } }))}>
+              Reset to {step === 1 ? 'Etsy SEO' : 'image type'} text defaults
             </button>
             {letteringDirty && <small role="alert" style={{ color: '#a04c22' }}>Title, Subtitle or Badge has changed since this background was generated. Click Regenerate AI background + lettering to apply the new text. A layout-only re-render cannot change AI lettering.</small>}
           </div>
