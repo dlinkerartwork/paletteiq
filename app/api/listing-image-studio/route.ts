@@ -13,7 +13,7 @@ import { aiFirstListingPrompt, AI_FIRST_MAX_REFERENCE_SHEETS, AI_FIRST_MAX_REFER
 import { originalAssetStorageKey, sourceZipFilename, selectedSourceManifest } from '@/lib/etsy-listing-source-zip';
 import {
   LISTING_IMAGE_SPECS, LISTING_HEIGHT, LISTING_WIDTH, listingFilename, listingTitle,
-  originalAssets, isSquareListingApproved, validListingPlacement, defaultListingCompositionMode, listingImageTextDefaults, DEFAULT_MAIN_COVER_CLIPART_COUNT, type ListingCompositionMode, type ListingFinalReview, type ListingImageText, type ListingImageRecord, type ListingPlacement, type ListingAsset, type ListingImageStatus
+  originalAssets, isSquareListingApproved, validListingPlacement, defaultListingCompositionMode, listingImageTextDefaults, listingImageTextDefaultsForStep, DEFAULT_MAIN_COVER_CLIPART_COUNT, type ListingCompositionMode, type ListingFinalReview, type ListingImageText, type ListingImageRecord, type ListingPlacement, type ListingAsset, type ListingImageStatus
 } from '@/lib/etsy-listing-image-plan';
 
 const bad = (message: string, status = 400) => Response.json({ error: message }, { status });
@@ -748,7 +748,8 @@ export async function POST(request: Request) {
     if (raw !== undefined && (typeof raw !== 'string' || raw.length > limit))
       return bad('Invalid ' + key + ': expected text of at most ' + limit + ' characters.');
   }
-  const defaults = listingImageTextDefaults(project.listing, listingCreativeDirection(project).title);
+  const defaults = listingImageTextDefaultsForStep(input.number,
+    project.listing, listingCreativeDirection(project).title);
   const text: ListingImageText = {
     title: typeof input.title === 'string' ? sanitizedText(input.title, 140) : defaults.title.slice(0, 140),
     subtitle: typeof input.subtitle === 'string' ? sanitizedText(input.subtitle, 140) : defaults.subtitle.slice(0, 140),
