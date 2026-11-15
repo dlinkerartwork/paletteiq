@@ -642,7 +642,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           }
         }catch(error){qualityMessage=' Optional final review unavailable: '+String(error);}
       }
-      setMessage('AI-First full thumbnail saved as JPG. No PNG positioning, mapping or post-compositing was performed.'+
+      setMessage('AI-First '+spec.title+' saved as JPG. No PNG positioning, mapping or post-compositing was performed.'+
         (response.sampledSourceCount && response.selectedSourceCount &&
         response.sampledSourceCount<response.selectedSourceCount
           ? ' Reference boards sampled '+response.sampledSourceCount+' of '+response.selectedSourceCount+' selected assets.' : '')+
@@ -936,7 +936,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           </div>}
           {compositionMode === 'ai-first' && <div data-ai-first-full-cover-notice="true"
             style={{marginTop:10,padding:12,border:'1px solid #e5dacb',borderRadius:10,fontSize:12}}>
-            <strong>One-step OpenAI full thumbnail</strong>
+            <strong>One-step OpenAI '+spec.title+' artwork</strong>
             <p style={{margin:'6px 0 0'}}>Generate a COMPLETE image with clipart collage, artistic typography, badge and background together. No PNG positioning, mapping or second generation step.</p>
             <p style={{margin:'6px 0 0'}}>This mode uses source art as visual references. Generated subjects can differ from the original PNGs; inspect every character, word and bundle claim before approval.</p>
           </div>}
@@ -1086,7 +1086,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
                 }
               }}>
               <option value="free">Free Composition — OpenAI chooses sizes and positions (Main Cover default)</option>
-              {!(step >= 8 && step <= 12) && <option value="ai-first">AI-First Composition — OpenAI generates complete creative thumbnail</option>}
+              <option value="ai-first">AI-First Composition — OpenAI generates complete listing image</option>
               <option value="structured">Structured — preserve my white-canvas arrangement</option>
             </select>
             <small>{compositionMode === 'ai-first'
@@ -1212,7 +1212,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
             borderRadius:10, padding:12, display:'grid', gap:9 }}>
             <strong>OpenAI prompt editor — review before sending</strong>
             <small style={{ color:'#75695e' }}>{compositionMode === 'ai-first'
-              ? 'OpenAI receives the selected reference images and your creative prompt, then produces the ENTIRE thumbnail directly. No coordinate mapping, original PNG overlay or second stage.'
+              ? 'A dedicated creative prompt for '+spec.title+' is prepared automatically. Main Cover retains the premium artistic collage template, while other listing images use their own overview, category, close-up, feature, mockup or information design direction. OpenAI creates the entire image directly.'
               : 'Edit the background and optional Vision art direction. PaletteIQ then composes original PNGs.'}</small>
             <button type="button" className="outline-btn" disabled={!!working || !positions.length}
               onClick={() => {
@@ -1225,7 +1225,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
             </button>
             {!promptsReady && <small role="status" style={{ color:'#96501f' }}>Prompts have not been prepared for the current collection selection and settings. Refresh them before generating; any previous draft for this image remains saved in this session.</small>}
             <label className="input-label" htmlFor="listing-background-prompt">{compositionMode === 'ai-first'
-              ? 'OPENAI IMAGE EDIT — COMPLETE THUMBNAIL PROMPT'
+              ? 'OPENAI IMAGE EDIT — '+spec.title.toUpperCase()+' CREATIVE PROMPT'
               : 'OPENAI IMAGE GENERATION — BACKGROUND & TYPOGRAPHY PROMPT'}</label>
             <textarea id="listing-background-prompt" aria-label="Editable OpenAI background and typography prompt"
               rows={10} maxLength={24000} spellCheck={false}
@@ -1252,7 +1252,7 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
           <button type="button" className="primary-btn" onClick={() => void generate()} disabled={!loaded || !assets.length || !!working || !precedingApproved || !promptsReady}>
             {working === 'generate' ? <LoaderCircle className="spin" size={16}/> : <Sparkles size={16}/>}
             {compositionMode === 'ai-first'
-              ? 'Generate Full Creative Thumbnail (OpenAI paid)'
+              ? 'Generate '+spec.title+' (OpenAI paid)'
               : current?.backgroundUrl ? 'Revise Image ' + String(step).padStart(2,'0') + ' (AI background)' : step === 1 ? 'Start /new-listing — Generate Main Cover' : 'Generate Image ' + String(step).padStart(2,'0')}
           </button>
           {!precedingApproved && <small style={{ color: '#94502e' }}>Approve the earlier images in order before generating this image.</small>}
