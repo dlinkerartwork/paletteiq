@@ -101,7 +101,7 @@ test('generate/revise/approve/next persists each independent step and resumes at
   assert.match(studio,/if \(!precedingApproved\)/);
   assert.match(studio,/if \(status === 'approved' && step < 15\)/);
   assert.match(studio,/Review spelling, crop, verified facts and mockup realism before approving/);
-  assert.match(route,/Approve all 15 square 1024 × 1024 JPG listing images before exporting/);
+  assert.match(route,/Approve all 15 square JPGs\. Complete Collection \(03\) must show every CURRENT original clipart/);
 });
 
 test('QC warnings save paid backgrounds for manual review rather than silently rejecting them', () => {
