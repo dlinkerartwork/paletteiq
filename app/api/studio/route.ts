@@ -12,14 +12,30 @@ import { hasTargetSeoAltLength, normalizeSeoAlt } from '@/lib/seo-alt-text';
 import { reviewImageSimilarity, type SimilarityReview } from '@/lib/similarity-review';
 import { nativeAssetBucket } from '@/lib/native-bridge';
 import { acquireProductionLocks } from '@/lib/production-locks';
+import { familyDistribution, normalizeCreativeAnalysis } from '@/lib/creative-intelligence';
+import { diversityExpansionInstruction, productionPromptInstruction, researchAnalysisInstruction } from '@/lib/creative-research-prompts';
 
 const fail = (error: string, status = 400) => Response.json({ error }, { status });
 const secret = (key: string) => (env as unknown as Record<string, string | undefined>)[key];
-type SubjectInput = { id: string; name: string; description?: string; prompt?: string; status?: string; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: { id: string }; error?: string; similarityReview?: SimilarityReview };
+type SubjectInput = { id: string; name: string; family?: string; description?: string; prompt?: string; status?: string; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: { id: string }; error?: string; similarityReview?: SimilarityReview };
 type ProjectInput = { id: string; name: string; characters: SubjectInput[]; [key: string]: unknown };
 type StudioRequest = { action: string; id: string; name: string; data: ProjectInput; url: string; project: ProjectInput; draft?: unknown; projectId: string; characterId: string; model: string; quality: string; selectedImages?: unknown[]; characters?: SubjectInput[]; [key: string]: unknown };
 type AiTextResult = { output?: Array<{ content?: Array<{ text?: string }> }> };
 const extractText = (result: AiTextResult) => result.output?.flatMap(o => o.content ?? []).map(c => c.text ?? '').join('') ?? '{}';
+const normalizeResearchPayload = (value: unknown) => {
+  const raw = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const analysis = normalizeCreativeAnalysis(raw);
+  const characters = Array.isArray(raw.characters) ? raw.characters.slice(0, 20).flatMap(item => {
+    if (typeof item === 'string') return [{ name: item.slice(0, 160), family: '', description: '' }];
+    if (!item || typeof item !== 'object') return [];
+    const c = item as Record<string, unknown>;
+    if (typeof c.name !== 'string' || !c.name.trim()) return [];
+    return [{ name: c.name.trim().slice(0, 160),
+      family: typeof c.family === 'string' ? c.family.trim().slice(0, 120) : '',
+      description: typeof c.description === 'string' ? c.description.trim().slice(0, 500) : '' }];
+  }) : [];
+  return { ...analysis, characters };
+};
 
 export async function GET(req: Request) {
   const user = await getChatGPTUser();
@@ -140,11 +156,12 @@ export async function POST(req: Request) {
     const geminiKeys = provider === 'gemini' ? await userGeminiKeys(user.userId) : [];
     if (provider === 'openai' && !aiKey) return fail('OpenAI API not connected. Configure it in Settings to analyze images.', 503);
     if (provider === 'gemini' && !geminiKeys.length) return fail('Gemini API key not connected. Configure it in Settings to analyze images.', 503);
-    const input = [{ role: 'user', content: [{ type: 'input_text', text: `Analyze this Etsy CLIPART listing ONLY from the SELECTED reference images attached. Determine actual subject matter, theme, subtheme, style, palette, texture and SEO keywords. Identify recognizable subject CATEGORIES supported by SELECTED images, then design ORIGINAL variations of each, not replicas. For every character provide a new pose, different silhouette, altered composition and distinctive details that were NOT copied from the visible reference. Do not reproduce exact petal arrangements, distinctive accessories, facial expressions, or layouts. Do not use generic default subjects (women, teddy bears, cats, etc.) unless selected images contain them. Distinguish collage/mockup from actual clipart. Return JSON {"theme":"...","subtheme":"...","style":"...","palette":"...","texture":"...","keywords":["..."],"characters":[{"name":"specific subject category with an original twist","description":"new creative design direction and intentional differences from source"}],"notes":"observed subject evidence and suggested original deviations"}. Never copy visual designs. Listing text is secondary evidence; ignore subjects not present in selected images: ${JSON.stringify({ ...source, images: undefined }).slice(0,14000)}` }, ...selectedImages.map((image_url: string) => ({ type: 'input_image', image_url }))] }];
+    const analysisText = researchAnalysisInstruction(source, selectedImages.length);
+    const input = [{ role: 'user', content: [{ type: 'input_text', text: analysisText }, ...selectedImages.map((image_url: string) => ({ type: 'input_image', image_url }))] }];
     if (provider === 'openai') {
       const ai = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model, input, text: { format: { type: 'json_object' } } }) });
       if (!ai.ok) return fail(`OpenAI visual analysis failed (${ai.status}): ${(await ai.text()).slice(0,200)}`, 502);
-      try { return Response.json({ source, selectedImages, analysis: JSON.parse(extractText(await ai.json())) }); } catch { return fail('Could not parse OpenAI visual analysis', 502); }
+      try { return Response.json({ source, selectedImages, analysis: normalizeResearchPayload(JSON.parse(extractText(await ai.json()))) }); } catch { return fail('Could not parse OpenAI visual analysis', 502); }
     }
     // Gemini inline inputs are fetched only from the Etsy-owned image CDN.
     // Limit image count and payload size to avoid oversized requests and SSRF.
@@ -179,7 +196,7 @@ export async function POST(req: Request) {
       try {
         const result = await ai.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
         const raw = result.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('') || '';
-        return Response.json({ source, selectedImages, analysis: JSON.parse(raw) });
+        return Response.json({ source, selectedImages, analysis: normalizeResearchPayload(JSON.parse(raw)) });
       } catch { return fail('Could not parse Gemini visual analysis', 502); }
     }
     return fail(lastError, 502);
@@ -189,12 +206,22 @@ export async function POST(req: Request) {
     if (!aiKey) return fail('OpenAI API not connected.', 503);
     const count = Math.max(1, Math.min(20, Number(body.count) || 1));
     const images = Array.isArray(body.images) ? body.images.filter((url: unknown) => { try { const parsed = new URL(String(url)); return parsed.protocol === 'https:' && (parsed.hostname === 'etsystatic.com' || parsed.hostname.endsWith('.etsystatic.com')); } catch { return false; } }).slice(0, 3) as string[] : [];
-    const existing = Array.isArray(body.existing) ? body.existing.map((s: unknown) => String(s).slice(0,120)).slice(-600) : [];
-    const instruction = `Create EXACTLY ${count} NEW, visually distinct, original, specific clipart subjects compatible with the reference product IMAGES. The images and the detailed art direction are the main source of truth; do not suggest unrelated default characters like people, bears, or cats unless consistent with these references. Use fresh poses, compositions, variants, botanical or object subtypes as appropriate to the actual theme. Distinguish each character by descriptive name and 1-sentence visual details. They are NEW AI proposals, never claim they appeared in the listing. Respect the theme and visual language but never imitate reference artwork exactly. Avoid names or close semantic duplicates of the existing subjects. Return JSON {"characters":[{"name":"distinct subject name","description":"original specific visual traits"}]}. Theme: ${String(body.theme ?? '').slice(0,200)}; subtheme: ${String(body.subtheme ?? '').slice(0,200)}; style: ${String(body.style ?? '').slice(0,400)}; palette: ${String(body.palette ?? '').slice(0,300)}; texture: ${String(body.texture ?? '').slice(0,300)}; visual analysis notes: ${String(body.notes ?? '').slice(0,1800)}; existing subjects: ${JSON.stringify(existing).slice(0,22000)}`;
+    const existing = Array.isArray(body.existing) ? body.existing.slice(-750).flatMap((value): Array<{ name: string; family?: string }> => {
+      if (typeof value === 'string') return [{ name: value.slice(0, 160) }];
+      if (!value || typeof value !== 'object') return [];
+      const record = value as Record<string, unknown>;
+      return typeof record.name === 'string' ? [{ name: record.name.slice(0, 160), family: typeof record.family === 'string' ? record.family.slice(0, 120) : '' }] : [];
+    }) : [];
+    const analysis = normalizeCreativeAnalysis(body.analysis ?? body);
+    const instruction = diversityExpansionInstruction({
+      count, target: Math.max(count, Math.min(1000, Number(body.target) || 120)),
+      title: String(body.title ?? '').slice(0, 350), analysis, existing,
+      distribution: familyDistribution(existing),
+    });
     const input = [{ role: 'user', content: [{ type: 'input_text', text: instruction }, ...images.map(image_url => ({ type: 'input_image', image_url }))] }];
     const ai = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'gpt-4.1-mini', input, text: { format: { type: 'json_object' } } }) });
     if (!ai.ok) return fail(`AI expansion returned ${ai.status}`, 502);
-    try { const result = JSON.parse(extractText(await ai.json())) as { characters?: Array<{ name: string; description?: string }> }; const characters = Array.isArray(result.characters) ? result.characters.filter(c => c && typeof c.name === 'string' && c.name.trim()).slice(0, count).map(c => ({ name: c.name.trim().slice(0,160), description: String(c.description || '').slice(0,500) })) : []; return Response.json({ characters }); } catch { return fail('Invalid AI response', 502); }
+    try { const result = JSON.parse(extractText(await ai.json())) as { characters?: Array<{ name: string; description?: string }> }; const characters = Array.isArray(result.characters) ? result.characters.filter(c => c && typeof c.name === 'string' && c.name.trim()).slice(0, count).map(c => ({ name: c.name.trim().slice(0,160), family: String(c.family || '').slice(0,120), description: String(c.description || '').slice(0,500) })) : []; return Response.json({ characters }); } catch { return fail('Invalid AI response', 502); }
   }
   if (body.action === 'generate-prompts') {
     const provider = body.promptProvider ?? 'openai';
@@ -202,9 +229,14 @@ export async function POST(req: Request) {
     if (!['openai', 'gemini'].includes(String(provider)) || typeof model !== 'string' || !(provider === 'gemini' ? /^gemini-[a-z0-9.-]{1,80}$/ : /^gpt-[a-z0-9.-]{1,80}$/).test(model)) return fail('Invalid prompt AI provider or model');
     const incoming: SubjectInput[] = Array.isArray(body.characters) ? body.characters : [];
     if (!incoming.length || incoming.length > 10 || incoming.some(c => typeof c.id !== 'string' || typeof c.name !== 'string' || !c.name.trim())) return fail('Select 1–10 valid characters per AI request.');
-    const context = { theme: String(body.theme ?? '').slice(0, 200), subtheme: String(body.subtheme ?? '').slice(0, 200), style: String(body.style ?? '').slice(0, 500), palette: String(body.palette ?? '').slice(0, 300), texture: String(body.texture ?? '').slice(0, 300) };
-    const characters = incoming.map(c => ({ id: String(c.id).slice(0, 80), name: String(c.name).slice(0, 200), description: String(c.description ?? '').slice(0, 500), previousPrompt: String(c.prompt ?? '').slice(0, 1200) }));
-    const requestText = `Write ONE original, detailed, production-ready English image-generation prompt per character. Return JSON {"prompts":[{"id":"exact given id","prompt":"..."}]}. Preserve each id exactly. The source Etsy images establish the broad subject and art medium ONLY; NEVER reproduce their distinctive design. For EVERY subject deliberately invent a NEW pose, silhouette, arrangement, proportions, focal details and creative accessories. If character descriptions contain visible reference specifics, transform them into distinct, original alternatives. Make each prompt self-contained with concrete differences instead of vague words like 'unique'. Each prompt must be visually distinctive in pose/composition/character details while following the same art direction. Include hand-painted texture, palette, lighting, expressive details, isolated full subject centered on transparent background; no text, logo, watermark, sticker cutline, white border, exterior shadows, unrelated elements. The image must be a single clipart element ready for a coordinated bundle. Avoid copying any existing shop's character or proprietary artwork. If previousPrompt exists, regenerate with fresh unique subject-specific details. Never add unsupported trademarked characters. Style guide: ${JSON.stringify(context)}. Subjects: ${JSON.stringify(characters)}`;
+    const context = normalizeCreativeAnalysis(body.analysis ?? body);
+    const characters = incoming.map(c => ({ id: String(c.id).slice(0, 80),
+      name: String(c.name).slice(0, 200), family: String(c.family ?? '').slice(0, 120),
+      description: String(c.description ?? '').slice(0, 500),
+      previousPrompt: String(c.prompt ?? '').slice(0, 1200) }));
+    const requestText = productionPromptInstruction({
+      title: String(body.title ?? '').slice(0, 350), analysis: context, characters,
+    });
     try {
       const result = await generateSeoJson(user.userId, requestText, provider as 'openai' | 'gemini', model) as { prompts?: Array<{ id: string; prompt: string }> };
       const allowed = new Set(characters.map((c: { id: string }) => c.id));
