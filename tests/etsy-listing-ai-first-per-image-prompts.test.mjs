@@ -82,7 +82,7 @@ test('Etsy Clipart Listing Studio routes each tile to matching prompt without ch
   assert.match(api,/const creativePrompt=input\.backgroundPrompt\?\.trim\(\) \|\| aiFirstListingPrompt\(input\.number,/);
   assert.match(api,/LISTING_IMAGE_SPECS\[input\.number-1\]\.title/);
   assert.match(studio,/action:'preview-prompt', projectId, number:step/);
-  assert.match(studio,/value=\{compositionMode\}/);
+  assert.match(studio,/value=\{step===3\?'complete-catalog':compositionMode\}/);
   assert.match(studio,/<option value="ai-first">AI-First Composition/);
   assert.doesNotMatch(studio,/\!\(step >= 8 && step <= 12\) && <option value="ai-first"/);
   assert.match(studio,/spec\.title\.toUpperCase\(\)\+' CREATIVE PROMPT'/);
