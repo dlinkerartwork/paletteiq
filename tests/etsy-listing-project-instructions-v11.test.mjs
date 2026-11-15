@@ -97,8 +97,10 @@ test('supporting prompts continue approved Main Cover style, keep distinct compo
   assert.match(prompt,/cream storybook lettering and green\/red palette/);
   assert.match(prompt,/DIFFERENT composition/);
   assert.match(route,/function studioV11Context\(project: StoredProject, number: number\)/);
-  assert.match(route,/approved-main-cover-style-reference-ONLY\.jpg/);
-  assert.match(route,/approvedCoverReferenceIncluded/);
+  assert.doesNotMatch(route,/approved-main-cover-style-reference-ONLY\.jpg/);
+  assert.match(route,/NEVER pass approved Main Cover pixels as an input image/);
+  assert.match(route,/aiFirstLayoutArchetype\(input\.number\)/);
+  assert.match(route,/detailedOriginalReferencesIncluded/);
   assert.match(route,/LISTING_IMAGE_SPECS\.slice\(0,input\.number-1\)/);
 });
 
