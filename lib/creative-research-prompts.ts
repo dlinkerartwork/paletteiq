@@ -55,7 +55,8 @@ Return ONLY JSON (no markdown) with:
 "emotionProfile":{"titleCues":["words in title about age/cuteness/emotion"],
 "tagCues":["related words from tags"],"observedExpressions":["visible facial expressions ONLY"],
 "dominantMood":"commercial mood requested by title, reconciled with reference faces",
-"ageCues":["baby/youth proportions, cute styling when justified"],
+"ageCues":["baby/youth proportions when evidenced or requested"],
+"styleCues":["cute/kawaii/sweet visual treatment when evidenced or requested"],
 "expressionStyle":"specific eyes, eyebrows, mouth, blush, head/body language",
 "recommendedExpressions":["cohesive variations honoring requested mood"],
 "guidance":"how to align expressions with title/tags and observed reference, including mismatch"},
@@ -130,7 +131,7 @@ Keep the complete collection consistent in palette, medium, texture, mood and
 lighting, but vary pose, silhouette, point of view, body proportions, expression,
 decorative details and accessory choices across elements.
 EXPRESSION AND AGE ARE MANDATORY FOR CHARACTERS WITH FACES:
-Honor emotionProfile.titleCues, tagCues, dominantMood, ageCues,
+Honor emotionProfile.titleCues, tagCues, dominantMood, ageCues, styleCues,
 observedExpressions and the character-specific expression field.
 Make the face unmistakably fit the TITLE: happy => smile/delighted eyes;
 sad => downcast eyes/tears or sorrowful mouth; angry => frown/eyebrow tension.
