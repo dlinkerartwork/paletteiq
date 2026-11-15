@@ -718,18 +718,12 @@ function catalogGridLabel(count:number):string{
       };
       await saveRecord(record);
       setChanges(old=>{const next={...old};delete next[3];return next;});
-      let reviewText='';
-      if(autoFinalCritique){
-        setWorking('critique');
-        try{
-          const critique=await send({action:'critique',projectId,number:3});
-          if(critique.images)receive(critique.images);
-          if(critique.finalReview)reviewText=' Visual quality '+critique.finalReview.score.toFixed(1)+'/10.';
-        }catch(error){reviewText=' Optional visual critique failed: '+String(error);}
-      }
+      // No automatic paid Vision request for tile03: exact count/inventory
+      // validation is deterministic. The user may manually choose a paid
+      // "Analyze final JPG quality" action after rendering.
       setMessage('Complete Collection JPG saved: '+catalog.assetIds.length+'/'+assets.length+
         ' ORIGINAL cliparts in '+catalog.columns+' columns × '+catalog.rows+
-        ' rows. Every source is present exactly once.'+reviewText);
+        ' rows. Every source is present exactly once. No OpenAI charge.');
     }catch(error){
       setMessage('Complete Collection not saved: '+(error instanceof Error?error.message:String(error)));
     }finally{setWorking('');}
