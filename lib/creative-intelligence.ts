@@ -6,7 +6,7 @@ export type ColorSignal = { name: string; hex?: string; role?: string };
 export type ImageObservation = { imageIndex: number; role: string; subjects: string[]; colors: string[]; expressions: string[]; notes: string };
 export type EmotionProfile = {
   titleCues: string[]; tagCues: string[]; observedExpressions: string[];
-  dominantMood: string; ageCues: string[]; expressionStyle: string;
+  dominantMood: string; ageCues: string[]; styleCues: string[]; expressionStyle: string;
   recommendedExpressions: string[]; guidance: string;
 };
 export type CreativeAnalysis = {
@@ -80,7 +80,7 @@ function normalizeEmotionProfile(value: unknown): EmotionProfile {
   const raw: Record<string, unknown> = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
   return { titleCues: strings(raw.titleCues, 30), tagCues: strings(raw.tagCues, 30),
     observedExpressions: strings(raw.observedExpressions, 50),
-    dominantMood: clean(raw.dominantMood, 200), ageCues: strings(raw.ageCues, 30),
+    dominantMood: clean(raw.dominantMood, 200), ageCues: strings(raw.ageCues, 30), styleCues: strings(raw.styleCues, 30),
     expressionStyle: clean(raw.expressionStyle, 350),
     recommendedExpressions: strings(raw.recommendedExpressions, 30), guidance: clean(raw.guidance, 1200) };
 }
@@ -92,9 +92,10 @@ export function mergeSourceEmotionProfile(analysis: CreativeAnalysis, title: str
   const tagMood = tagCues.filter(x => moodCues.has(x));
   const dominantMood = explicitMood.length ? explicitMood.join(' / ') :
     analysis.emotionProfile.dominantMood || (tagMood.length ? tagMood.join(' / ') : analysis.mood);
-  const ageCues = [...new Set([...titleCues, ...tagCues, ...analysis.emotionProfile.ageCues].filter(x => x === 'cute' || x === 'baby' || !moodCues.has(x)))];
+  const ageCues = [...new Set([...titleCues, ...tagCues].filter(x => x === 'baby').concat(analysis.emotionProfile.ageCues))];
+  const styleCues = [...new Set([...titleCues, ...tagCues].filter(x => x === 'cute').concat(analysis.emotionProfile.styleCues))];
   return { ...analysis, emotionProfile: { ...analysis.emotionProfile, titleCues, tagCues,
-    dominantMood, ageCues } };
+    dominantMood, ageCues, styleCues } };
 }
 export function expressionDistribution(items: Array<{ expression?: string }>): Record<string, number> {
   const result: Record<string, number> = {};
