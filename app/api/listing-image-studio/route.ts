@@ -13,7 +13,7 @@ import { aiFirstListingPrompt, aiFirstLayoutArchetype, aiFirstDetailedReferenceC
 import { originalAssetStorageKey, sourceZipFilename, selectedSourceManifest } from '@/lib/etsy-listing-source-zip';
 import {
   LISTING_IMAGE_SPECS, LISTING_HEIGHT, LISTING_WIDTH, listingFilename, listingTitle,
-  originalAssets, isSquareListingApproved, validListingPlacement, defaultListingCompositionMode, listingImageTextDefaults, listingImageTextDefaultsForStep, DEFAULT_MAIN_COVER_CLIPART_COUNT, type ListingCompositionMode, type ListingFinalReview, type ListingImageText, type ListingImageRecord, type ListingPlacement, type ListingAsset, type ListingImageStatus
+  originalAssets, isSquareListingApproved, completeCatalogMatchesInventory, validListingPlacement, defaultListingCompositionMode, listingImageTextDefaults, listingImageTextDefaultsForStep, DEFAULT_MAIN_COVER_CLIPART_COUNT, type ListingCompositionMode, type ListingFinalReview, type ListingImageText, type ListingImageRecord, type ListingPlacement, type ListingAsset, type ListingImageStatus
 } from '@/lib/etsy-listing-image-plan';
 
 const bad = (message: string, status = 400) => Response.json({ error: message }, { status });
@@ -85,6 +85,19 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
   const height = value.height ?? previous?.height;
   if (status === 'approved' && (!renderedImageUrl || (!placements.length && !value.aiGeneratedFullCover) || width !== LISTING_WIDTH || height !== LISTING_HEIGHT))
     throw Error('Save a 1024 × 1024 JPG using original collection artwork before approval. Legacy 4:3 renders must be remade.');
+  const catalogAssetIds=Array.isArray(value.catalogAssetIds)
+    ? value.catalogAssetIds.filter(id=>typeof id==='string'&&allowed.has(id))
+    : value.renderedImageUrl !== undefined && value.renderedImageUrl !== previous?.renderedImageUrl
+      ? undefined : previous?.catalogAssetIds;
+  const catalogExpectedCount=value.catalogExpectedCount !== undefined
+    ? value.catalogExpectedCount
+    : value.renderedImageUrl !== undefined && value.renderedImageUrl !== previous?.renderedImageUrl
+      ? undefined : previous?.catalogExpectedCount;
+  if(value.number===3 && status==='approved' && !completeCatalogMatchesInventory({
+    ...value, renderedImageUrl,placements, width,height,
+    catalogAssetIds,catalogExpectedCount
+  },project.characters||[]))
+    throw Error('Complete Collection approval requires every current original clipart exactly once. Regenerate the full catalog.');
   const selectedSourceIds = Array.isArray(value.selectedSourceIds)
     ? [...new Set(value.selectedSourceIds.filter(id => allowed.has(id)))].slice(0,allowed.size)
     : previous?.selectedSourceIds;
@@ -96,7 +109,7 @@ function preparedRecord(value: ListingImageRecord, project: StoredProject, previ
   // Client-provided ratings are never trusted. A score is server-owned and
   // remains valid only while the EXACT reviewed JPG URL is unchanged.
   const finalReview = previous?.renderedImageUrl === renderedImageUrl ? previous?.finalReview : undefined;
-  return { number: value.number, status, backgroundUrl, conceptUrl, renderedImageUrl, placements, aiGeneratedFullCover: value.aiGeneratedFullCover === true, selectedSourceIds, creativeBrief, width, height, title, subtitle, badge, finalReview, notes: sanitizedText(value.notes || '', 800),
+  return { number: value.number, status, backgroundUrl, conceptUrl, renderedImageUrl, placements, aiGeneratedFullCover: value.aiGeneratedFullCover === true, selectedSourceIds, catalogAssetIds, catalogExpectedCount, creativeBrief, width, height, title, subtitle, badge, finalReview, notes: sanitizedText(value.notes || '', 800),
     reviewWarning: typeof value.reviewWarning === 'string' ? sanitizedText(value.reviewWarning, 280) : '',
     updatedAt: Date.now() };
 }
@@ -253,8 +266,9 @@ export async function GET(request: Request) {
   const images = normalizedImages(project);
   if (url.searchParams.get('export') !== '1') return Response.json({ images, preLayouts: project.listingPreLayouts || {}, compositionModes: project.listingCompositionModes || {} });
   const selected = LISTING_IMAGE_SPECS.map(spec => images.find(item => item.number === spec.number));
-  if (selected.some(item => !isSquareListingApproved(item)))
-    return bad('Approve all 15 square 1024 × 1024 JPG listing images before exporting. Legacy 4:3 images are not eligible.', 409);
+  if (selected.some(item => !isSquareListingApproved(item)) ||
+      !completeCatalogMatchesInventory(selected[2],project.characters||[]))
+    return bad('Approve all 15 square JPGs. Complete Collection (03) must show every CURRENT original clipart exactly once; regenerate it if any are missing or the collection changed.',409);
   const storage = bucket();
   if (!storage) return bad('Image storage is unavailable', 503);
   const entries: ZipEntry[] = [];
@@ -541,9 +555,13 @@ export async function POST(request: Request) {
     } catch (error) { return bad(error instanceof Error ? error.message : 'Could not save listing image'); }
   }
   if (input.action === 'generate-concept') {
+    if (input.number===3)
+      return bad('Complete Collection is generated directly from ALL original collection PNGs in the local exact-catalog renderer; the AI image endpoint cannot guarantee full inclusion.',409);
     if (input.number>1 && !LISTING_IMAGE_SPECS.slice(0,input.number-1).every(spec=>
-      normalizedImages(project).some(item=>item.number===spec.number && isSquareListingApproved(item))))
-      return bad('Approve every preceding square listing image before generating this one.');
+      normalizedImages(project).some(item=>item.number===spec.number &&
+        isSquareListingApproved(item) && (spec.number!==3 ||
+        completeCatalogMatchesInventory(item,project.characters||[])))))
+      return bad('Approve every preceding valid square listing image before generating this one.');
     // AI-First is intentionally a SINGLE image model call, NOT a two-stage
     // Vision JSON plan followed by background/PNG compositing.
     // The numbered contact boards are visual references from the same genuine
