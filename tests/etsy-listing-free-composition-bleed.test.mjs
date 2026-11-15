@@ -140,8 +140,8 @@ test('users can review and edit both OpenAI prompts before any paid generation o
   assert.match(ui,/setPromptDrafts\(prev =>/);
   assert.match(ui,/backgroundPrompt:promptDraft!\.backgroundPrompt/);
   assert.match(ui,/layoutPrompt:visionArtPrompt/);
-  assert.match(ui,/if \(!promptsReady\) return setMessage/);
-  assert.match(ui,/disabled=\{!loaded \|\| !assets\.length \|\| !!working \|\| !precedingApproved \|\| !promptsReady\}/);
+  assert.match(ui,/if \(step!==3 && !promptsReady\) return setMessage/);
+  assert.match(ui,/disabled=\{!loaded \|\| !assets\.length \|\| !!working \|\| !precedingApproved \|\| \(step!==3 && !promptsReady\)\}/);
   assert.match(ui,/promptDraft\.context === promptContext/);
   assert.match(ui,/Replace your edited OpenAI prompt drafts with fresh defaults/);
   assert.doesNotMatch(ui.slice(ui.indexOf('const prepareOpenAiPrompts ='),ui.indexOf('const generate = async')),/await ensureSourceStyle\(/,
