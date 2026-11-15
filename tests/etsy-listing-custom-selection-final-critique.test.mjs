@@ -14,12 +14,14 @@ const images=Array.from({length:120},(_,index)=>({
   category:['Flowers','Leaves','Bouquets','Decor'][index%4]
 }));
 
-test('every listing stage permits a user-chosen count of original assets, not a fixed 7-item cap',()=>{
+test('non-catalog stages support user-selected count; Complete Collection always includes all 120',()=>{
   assert.equal(LISTING_IMAGE_SPECS.length,15);
   for(const spec of LISTING_IMAGE_SPECS){
-    assert.equal(planListingPlacements(spec.number,images,{count:3}).length,3,'image '+spec.number);
-    assert.equal(planListingPlacements(spec.number,images,{count:17}).length,17,'image '+spec.number);
-    assert.equal(new Set(planListingPlacements(spec.number,images,{count:17}).map(p=>p.assetId)).size,17);
+    const expected3=spec.number===3?120:3;
+    const expected17=spec.number===3?120:17;
+    assert.equal(planListingPlacements(spec.number,images,{count:3}).length,expected3,'image '+spec.number);
+    assert.equal(planListingPlacements(spec.number,images,{count:17}).length,expected17,'image '+spec.number);
+    assert.equal(new Set(planListingPlacements(spec.number,images,{count:17}).map(p=>p.assetId)).size,expected17);
     assert.equal(planListingPlacements(spec.number,images,{count:120}).length,120);
   }
   assert.equal(planListingPlacements(1,images).length,12,'new art-first cover defaults to 12; saved individual pre-layouts remain untouched');
