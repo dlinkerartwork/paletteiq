@@ -9,7 +9,7 @@ import { zipStream, type ZipEntry } from '@/lib/zip-stream';
 import { listingCreativeDirection, listingCreativeSummary, listingMockupScene } from '@/lib/etsy-listing-creative-direction';
 import { currentListingVisualStyle, listingStyleDirection, type ListingVisualStyleProfile } from '@/lib/etsy-listing-visual-style';
 import { estimateListingImageGenerationCost, type GeneratedImageUsage } from '@/lib/etsy-listing-image-cost';
-import { aiFirstConceptPrompt, AI_FIRST_MAX_REFERENCE_SHEETS, AI_FIRST_MAX_REFERENCE_ASSETS } from '@/lib/etsy-listing-ai-first';
+import { aiFirstListingPrompt, AI_FIRST_MAX_REFERENCE_SHEETS, AI_FIRST_MAX_REFERENCE_ASSETS } from '@/lib/etsy-listing-ai-first';
 import { originalAssetStorageKey, sourceZipFilename, selectedSourceManifest } from '@/lib/etsy-listing-source-zip';
 import {
   LISTING_IMAGE_SPECS, LISTING_HEIGHT, LISTING_WIDTH, listingFilename, listingTitle,
@@ -453,12 +453,12 @@ export async function POST(request: Request) {
     const title=typeof input.title==='string'?sanitizedText(input.title,140):'';
     const subtitle=typeof input.subtitle==='string'?sanitizedText(input.subtitle,140):'';
     const badge=typeof input.badge==='string'?sanitizedText(input.badge,60):'';
-    const creativePrompt=input.backgroundPrompt?.trim() || aiFirstConceptPrompt({
+    const creativePrompt=input.backgroundPrompt?.trim() || aiFirstListingPrompt(input.number,{
       theme:project.subtheme||project.theme||project.name,
       title,subtitle,badge,
       style:project.style,palette:project.palette,texture:project.texture,
       sourceAssets:refs.map(({asset})=>({name:asset.name,category:asset.category})),
-      selectedCount:refs.length
+      selectedCount:refs.length,collectionCount:collection.length
     });
     const manifest=selectedSourceManifest({
       theme:project.subtheme||project.theme||project.name,title,subtitle,badge,
@@ -515,8 +515,6 @@ export async function POST(request: Request) {
     // The numbered contact boards are visual references from the same genuine
     // collection files users can export as a ZIP. The ZIP itself is NOT an
     // accepted image input. OpenAI generates the entire artwork and lettering.
-    if (input.number >= 8 && input.number <= 12)
-      return bad('AI-first full images are supported for listing artwork, not product mockups.');
     const model = input.model || 'gpt-image-1-mini';
     const quality = input.quality || 'medium';
     if (!/^gpt-image-[a-z0-9.-]{1,80}$/.test(model) ||
@@ -559,7 +557,7 @@ export async function POST(request: Request) {
     const fullPrompt = [
       input.backgroundPrompt,
       '',
-      'Generate ONE complete finished square Etsy listing thumbnail. All illustration, typography, badge and background must appear in the SAME final 1024×1024 image.',
+      'Generate ONE complete finished square Etsy listing image '+input.number+' of 15: '+LISTING_IMAGE_SPECS[input.number-1].title+'. Follow the image-type-specific creative brief above, NOT the Main Cover composition unless this is tile 01. Artwork, typography, badge and background must form ONE finished 1024×1024 image.',
       'The supplied source-image boards are unordered visual references, NOT fixed layouts. Use them to inspire the actual illustrated objects. You may choose, scale, rotate, repeat and arrange subjects freely; do not preserve board grids or source ordering.',
       'Use only subject types seen in the selected collection references; do not add unrelated characters or product claims. Preserve recognizable visual traits as closely as the image model can.',
       'FINAL TEXT (these exact strings override any conflicting prompt wording):',
@@ -603,7 +601,7 @@ export async function POST(request: Request) {
         backgroundUrl,
         sampledSourceCount:sampled.length,
         selectedSourceCount:ids.length,
-        reviewWarning:'AI-generated full cover: subjects and details can differ from original collection clipart. Check visual accuracy, exact text and the claimed asset count before approval.',
+        reviewWarning:'AI-generated listing image: subjects and details can differ from original clipart. Check visual accuracy, text, product claims and whether mockups are clearly illustrative before approval.',
         costEstimate:estimateListingImageGenerationCost(model,quality as 'low'|'medium'|'high',result.usage)
       });
     }catch(error){
@@ -779,10 +777,11 @@ export async function POST(request: Request) {
     ? [...new Set(input.placements.map(p=>p.assetId))].map(id=>sourceById.get(id)).filter((a):a is ListingAsset=>Boolean(a))
     : originalAssets(project.characters || []);
   const prompt = mode === 'ai-first'
-    ? aiFirstConceptPrompt({ theme: project.subtheme || project.theme || project.name, ...text,
+    ? aiFirstListingPrompt(input.number,{ theme: project.subtheme || project.theme || project.name, ...text,
       style:project.style,palette:project.palette,texture:project.texture,
       sourceAssets:selectedSources.map(a=>({name:a.name,category:a.category})),
       selectedCount:selectedSources.length || input.featuredCount || count,
+      collectionCount:count,
       revisionNotes: typeof input.revisionNotes === 'string' ? input.revisionNotes : '' })
     : artPrompt(input.number,
       { ...project, selectedArtworkCount: input.featuredCount },
