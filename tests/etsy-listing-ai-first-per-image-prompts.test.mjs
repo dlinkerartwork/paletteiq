@@ -58,9 +58,9 @@ test('mockup types 08–12 are explicitly examples, not included physical produc
   }
   assert.match(aiFirstListingPrompt(8,sample),/sticker-sheet APPLICATION MOCKUP/);
   assert.match(aiFirstListingPrompt(9,sample),/T-shirt or sweatshirt/);
-  assert.match(aiFirstListingPrompt(10,sample),/tote bag, mug or stationery/);
+  assert.match(aiFirstListingPrompt(10,sample),/tote bag, ceramic mug or tumbler/);
   assert.match(aiFirstListingPrompt(11,sample),/packaging or gift-label/);
-  assert.match(aiFirstListingPrompt(12,sample),/scrapbook, planner spread, invitation or DIY/);
+  assert.match(aiFirstListingPrompt(12,sample),/scrapbook, planner spread or practical DIY craft/);
 });
 
 test('prompt depends on real collection, selected source descriptions and exact text',()=>{
