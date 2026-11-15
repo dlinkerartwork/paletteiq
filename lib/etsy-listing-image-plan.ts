@@ -8,7 +8,7 @@ export const DEFAULT_MAIN_COVER_CLIPART_COUNT = 12;
 export const LISTING_IMAGE_SPECS = [
   { number: 1, key: 'Main_Cover', title: 'Main Cover', headline: 'The Clipart Collection', purpose: 'Hero cover with standout original artwork', kind: 'gallery' },
   { number: 2, key: 'Bundle_Overview', title: 'Bundle Overview', headline: 'Explore the Bundle', purpose: 'Show the collection at a glance without implying every asset is visible', kind: 'all' },
-  { number: 3, key: 'Complete_Collection', title: 'Complete Collection', headline: 'The Complete Collection', purpose: 'Show genuine variety and breadth; indicate samples honestly when not every file appears', kind: 'all-grouped' },
+  { number: 3, key: 'Complete_Collection', title: 'Complete Collection', headline: 'The Complete Collection', purpose: 'Show every original collection clipart exactly once as a complete visual catalog', kind: 'all-grouped' },
   { number: 4, key: 'Best_Elements', title: 'Best Elements', headline: 'Our Favorite Details', purpose: 'Larger illustrations showcasing the highlights', kind: 'gallery' },
   { number: 5, key: 'Collection_Categories', title: 'Collection Categories', headline: 'Meet the Collection', purpose: 'Browse distinct, verified artwork groups', kind: 'categories' },
   { number: 6, key: 'File_Features', title: 'File Features', headline: 'Made for Your Projects', purpose: 'Show only verified digital-product facts', kind: 'detail' },
@@ -58,7 +58,7 @@ export type ListingFinalReview = {
 };
 export type ListingImageRecord = {
   number: number; status: ListingImageStatus; backgroundUrl?: string; conceptUrl?: string; renderedImageUrl?: string;
-  placements?: ListingPlacement[]; aiGeneratedFullCover?: boolean; selectedSourceIds?: string[]; creativeBrief?: string; notes?: string; reviewWarning?: string;
+  placements?: ListingPlacement[]; aiGeneratedFullCover?: boolean; selectedSourceIds?: string[]; catalogAssetIds?: string[]; catalogExpectedCount?: number; creativeBrief?: string; notes?: string; reviewWarning?: string;
   title?: string; subtitle?: string; badge?: string; // Exact user-approved AI lettering per image.
   finalReview?: ListingFinalReview; // Vision critique of FINAL composited JPG, not background alone.
   width?: number; height?: number; // Missing size = legacy 4:3, pending square re-render.
@@ -93,10 +93,68 @@ export function listingImageTextDefaultsForStep(
   return {title:spec.headline,subtitle:'',badge:''};
 }
 
+
+/**
+ * 03 Complete Collection MUST NOT use an AI-generated partial sample.
+ * The catalog is built exclusively from the full current original inventory.
+ * Geometry uses % units to stay compatible with existing canvas helpers.
+ */
+export function planCompleteCollectionCatalog(source: ListingAsset[]): {
+  placements: ListingPlacement[]; columns: number; rows: number;
+} {
+  const assets = [...originalAssets(source)].sort((a,b)=>
+    listingCategory(a).localeCompare(listingCategory(b)) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+  if (!assets.length) return {placements:[],columns:0,rows:0};
+  const count=assets.length;
+  // 120 originals => 12 columns × 10 rows. Aim for proportional square
+  // cells in the content area. Every original gets its own cell and ID.
+  const columns=Math.max(1,Math.min(count,Math.round(Math.sqrt(count * 92 / 81))));
+  const rows=Math.ceil(count/columns);
+  const x0=3.5, y0=12.5, contentW=93, contentH=81;
+  const cellW=contentW/columns, cellH=contentH/rows;
+  const inset=Math.min(0.35,cellW*0.07,cellH*0.07);
+  const placements=assets.map((asset,i)=>({
+    assetId:asset.id,
+    x:x0+(i%columns)*cellW+inset,
+    y:y0+Math.floor(i/columns)*cellH+inset,
+    width:cellW-2*inset,
+    height:cellH-2*inset,
+    rotation:0
+  }));
+  return {placements,columns,rows};
+}
+
+/** Trusted server check: 03 is approved only if every CURRENT source ID is
+ * represented in the saved ORIGINAL-PNG catalog and not AI-generated.
+ */
+export function completeCatalogMatchesInventory(
+  record: ListingImageRecord | undefined,
+  source: ListingAsset[]
+): boolean {
+  const inventory=originalAssets(source);
+  if(!record || record.number!==3 || record.aiGeneratedFullCover ||
+     !record.renderedImageUrl || record.width!==LISTING_WIDTH ||
+     record.height!==LISTING_HEIGHT || !Array.isArray(record.catalogAssetIds) ||
+     !Array.isArray(record.placements) || !inventory.length ||
+     record.catalogExpectedCount!==inventory.length ||
+     record.catalogAssetIds.length!==inventory.length ||
+     record.placements.length!==inventory.length) return false;
+  const required=new Set(inventory.map(a=>a.id));
+  const catalog=new Set(record.catalogAssetIds);
+  const placed=new Set(record.placements.map(p=>p.assetId));
+  if(catalog.size!==required.size || placed.size!==required.size) return false;
+  return [...required].every(id=>catalog.has(id) && placed.has(id)) &&
+    record.placements.every(p=>validListingPlacement(p,3));
+}
+
 /** Old 4:3 approved JPGs remain stored but cannot count toward square exports. */
 export function isSquareListingApproved(record?: ListingImageRecord): boolean {
   return Boolean(record && record.status === 'approved' && record.renderedImageUrl &&
-    record.width === LISTING_WIDTH && record.height === LISTING_HEIGHT);
+    record.width === LISTING_WIDTH && record.height === LISTING_HEIGHT &&
+    (record.number !== 3 || (!record.aiGeneratedFullCover &&
+      Array.isArray(record.catalogAssetIds) && record.catalogAssetIds.length > 0 &&
+      record.catalogExpectedCount === record.catalogAssetIds.length &&
+      record.placements?.length === record.catalogExpectedCount)));
 }
 
 
@@ -211,6 +269,9 @@ export function planListingPlacements(number: number, source: ListingAsset[], op
     const width = number === 8 ? 9 : 10;
     const height = number === 8 ? 12 : 19;
     return selected.map((a, i) => box(a, originX + (i % cols) * (width + 1.5), originY + Math.floor(i / cols) * (height + 1.5), width, height));
+  }
+  if (number === 3) {
+    return planCompleteCollectionCatalog(available).placements;
   }
   if (spec.kind === 'all-grouped') {
     // Visually separate the complete collection into four curated groups,
