@@ -123,9 +123,11 @@ test('explicit happy baby words take priority, while cute alone does not force a
   const happy = mergeSourceEmotionProfile(parsed, 'Happy Baby Farm Animals', ['sad watercolor png']);
   assert.equal(happy.emotionProfile.dominantMood, 'happy');
   assert.deepEqual(happy.emotionProfile.ageCues, ['baby']);
+  assert.deepEqual(happy.emotionProfile.styleCues, []);
   const cute = mergeSourceEmotionProfile(parsed, 'Cute Farm Animal Clipart', []);
   assert.equal(cute.emotionProfile.dominantMood, 'gentle');
-  assert.deepEqual(cute.emotionProfile.ageCues, ['cute']);
+  assert.deepEqual(cute.emotionProfile.ageCues, []);
+  assert.deepEqual(cute.emotionProfile.styleCues, ['cute']);
 });
 
 test('concept selection favors expression variation within eligible subject-family quotas', () => {
@@ -152,6 +154,7 @@ test('research, expansion and image prompts retain observed expressions, title m
   assert.match(research,/titleCues/);
   assert.match(research,/observedExpressions/);
   assert.match(research,/ageCues/);
+  assert.match(research,/styleCues/);
   assert.match(research,/eyes, mouth, eyebrows/);
   const analysis = mergeSourceEmotionProfile(normalizeCreativeAnalysis({
     emotionProfile: { observedExpressions: ['sad downcast eyes'], recommendedExpressions: ['teary gaze'] },
@@ -179,6 +182,7 @@ test('UI/API forward editable per-character expression and source mood throughou
   const api = readFileSync(new URL('../app/api/studio/route.ts', import.meta.url), 'utf8');
   assert.match(page,/EXPRESSION \/ FACE/);
   assert.match(page,/Collection mood and expression direction/);
+  assert.match(page,/Cute styling direction/);
   assert.match(page,/Character expression distribution/);
   assert.match(page,/emotionDirection: research\.emotionProfile\.dominantMood/);
   assert.match(page,/existing: working\.characters\.map\(c => \(\{ name: c\.name, family: c\.family, expression: c\.expression \}\)\)/);
