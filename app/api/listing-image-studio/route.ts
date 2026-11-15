@@ -9,7 +9,7 @@ import { zipStream, type ZipEntry } from '@/lib/zip-stream';
 import { listingCreativeDirection, listingCreativeSummary, listingMockupScene } from '@/lib/etsy-listing-creative-direction';
 import { currentListingVisualStyle, listingStyleDirection, type ListingVisualStyleProfile } from '@/lib/etsy-listing-visual-style';
 import { estimateListingImageGenerationCost, type GeneratedImageUsage } from '@/lib/etsy-listing-image-cost';
-import { aiFirstListingPrompt, AI_FIRST_MAX_REFERENCE_SHEETS, AI_FIRST_MAX_REFERENCE_ASSETS } from '@/lib/etsy-listing-ai-first';
+import { aiFirstListingPrompt, aiFirstLayoutArchetype, aiFirstDetailedReferenceCount, aiFirstSampleIndices, AI_FIRST_MAX_REFERENCE_SHEETS, AI_FIRST_MAX_REFERENCE_ASSETS } from '@/lib/etsy-listing-ai-first';
 import { originalAssetStorageKey, sourceZipFilename, selectedSourceManifest } from '@/lib/etsy-listing-source-zip';
 import {
   LISTING_IMAGE_SPECS, LISTING_HEIGHT, LISTING_WIDTH, listingFilename, listingTitle,
@@ -44,10 +44,10 @@ function studioV11Context(project: StoredProject, number: number) {
       : undefined,
     approvedCoverStyle:number>1 && cover
       ? 'Approved Main Cover: '+JSON.stringify({
-        heading:cover.title||'',subtitle:cover.subtitle||'',
         theme:project.subtheme||project.theme||project.name,
         sourceStyle:observed?.summary||project.style||'',
-        palette:observed?.palette||project.palette||''
+        palette:observed?.palette||project.palette||'',
+        texture:observed?.texture||project.texture||''
       })
       : undefined
   };
@@ -592,15 +592,16 @@ export async function POST(request: Request) {
       input.backgroundPrompt,
       '',
       'Generate ONE complete finished square Etsy listing image '+input.number+' of 15: '+LISTING_IMAGE_SPECS[input.number-1].title+'. Follow the image-type-specific creative brief above, NOT the Main Cover composition unless this is tile 01. Artwork, typography, badge and background must form ONE finished 1024×1024 image.',
-      'The supplied source-image boards are unordered visual references, NOT fixed layouts. Use them to inspire the actual illustrated objects. You may choose, scale, rotate, repeat and arrange subjects freely; do not preserve board grids or source ordering.',
-      'Use only subject types seen in the selected collection references; do not add unrelated characters or product claims. Preserve recognizable visual traits as closely as the image model can.',
+      'The supplied source-image boards are unordered visual references, NOT fixed layouts. Use the separate high-resolution ORIGINAL clipart files when supplied to preserve distinctive details. You may choose, scale, rotate, repeat and arrange subjects freely; do not preserve board grids or source ordering.',
+      'Use ONLY the actual specific illustrations shown in the selected clipart references. Do not generate new characters or objects, merge two originals, swap accessories or turn a referenced vehicle/animal into a different design. Favor faithful rendition of identifiable source illustrations and avoid inventing their tiny details. Image generation may still reinterpret source pixels.',
       'FINAL TEXT (these exact strings override any conflicting prompt wording):',
       'MAIN TITLE: '+JSON.stringify(title),
       'SUBTITLE: '+JSON.stringify(subtitle),
       'BADGE: '+JSON.stringify(badge)+' (omit when empty).',
       'Keep complete lettering readable at small Etsy thumbnail size; do not produce a contact sheet or JSON.',
       'PROJECT INSTRUCTIONS V1.1: This is ONE of fifteen sequential Etsy listing images. Prioritize high click-through readability for 01, organized genuine source variety for 02–05, verified facts for 06/07/13, realistic general-purpose product-use mockups for 08–12, concise buyer guidance for 14 and a visually cohesive finale for 15. No greeting cards, invitation cards, wedding stationery or other card-based mockups unless explicitly requested.',
-      'If prior Main Cover is included as the FINAL reference image, use it for shared palette, typography character, atmosphere and professional polish ONLY. Never copy its layout or duplicate unrelated characters, lettering, badges or product claims; use actual collection reference boards for the subject vocabulary.',
+      input.number>1 ? 'STYLE ONLY FROM PRIOR APPROVED COVER: We intentionally DO NOT pass Main Cover as an input image. Follow its approved visual-family description (palette/medium/typography character) where supplied, while constructing a NEW image layout from the mandatory image-type archetype. Do not draw the Main Cover header, plaque, large top title band, borders, footer badge, hero collage or positioning again.' : '',
+      input.number>1 ? aiFirstLayoutArchetype(input.number) : '',
       'IMPORTANT: This is a GENERATIVE image. It can reinterpret source clipart; pixel-identical preservation is not guaranteed. Do not claim that artwork pixels are exact.'
     ].join('\n');
     try {
@@ -618,27 +619,35 @@ export async function POST(request: Request) {
         form.append('image[]',new Blob([new Uint8Array(bytes)],{type:'image/jpeg'}),
           'selected-clipart-reference-'+String(i+1)+'.jpg');
       }
-      // Image Edit supports up to 16 reference images. Source boards (up to 8)
-      // take priority; the approved Main Cover is added only as a STYLE
-      // reference for tiles 02–15. Original subject identity still comes
-      // exclusively from the selected collection clipart boards.
-      let approvedCoverReferenceIncluded=false;
-      if(input.number>1 && sheets.length<16){
-        const cover=normalizedImages(project).find(item=>item.number===1 && isSquareListingApproved(item));
-        const key=cover?.renderedImageUrl
-          ? savedAssetKey(cover.renderedImageUrl,input.projectId,user.userId) : null;
-        if(key?.endsWith('.jpg')){
-          const coverObject=await bucket()?.get(key);
-          if(coverObject){
-            const coverBytes=new Uint8Array(await coverObject.arrayBuffer());
-            if(coverBytes.length>100 && coverBytes.length<=12_000_000 &&
-              coverBytes[0]===255 && coverBytes[1]===216){
-              form.append('image[]',new Blob([new Uint8Array(coverBytes)],{type:'image/jpeg'}),
-                'approved-main-cover-style-reference-ONLY.jpg');
-              approvedCoverReferenceIncluded=true;
-            }
-          }
-        }
+      // NEVER pass approved Main Cover pixels as an input image for tiles 02–15:
+      // the image model previously copied its large header and collage geometry.
+      // The persisted observed-style summary is sufficient for palette/medium
+      // continuity, while the per-tile archetype owns the layout.
+      //
+      // The reference boards display 24 tiny motifs each, which can obscure
+      // their real details. Add a small, distributed set of ORIGINAL PNG/JPG
+      // source FILES in higher resolution (when safely stored and available).
+      // The image model still renders a new image; pixel-exact fidelity is not
+      // guaranteed, but it receives much better individual visual references.
+      const originalById=new Map(originals.map(asset=>[asset.id,asset]));
+      const detailCandidates=aiFirstSampleIndices(sampled.length,
+        Math.min(aiFirstDetailedReferenceCount(input.number),16-sheets.length))
+        .map(index=>originalById.get(sampled[index]))
+        .filter((asset):asset is ListingAsset=>Boolean(asset));
+      let detailedOriginalReferencesIncluded=0;
+      for(const asset of detailCandidates){
+        const source=originalAssetStorageKey(asset,user.userId);
+        if(!source)continue;
+        const storedOriginal=await bucket()?.get(source.key);
+        if(!storedOriginal)continue;
+        const bytes=new Uint8Array(await storedOriginal.arrayBuffer());
+        const png=source.extension==='png' && bytes[0]===137 && bytes[1]===80 &&
+          bytes[2]===78 && bytes[3]===71;
+        const jpg=source.extension==='jpg' && bytes[0]===255 && bytes[1]===216;
+        if(bytes.length<100 || bytes.length>8_000_000 || (!png&&!jpg))continue;
+        const mime=png?'image/png':'image/jpeg';
+        form.append('image[]',new Blob([new Uint8Array(bytes)],{type:mime}),
+          'HIGH-DETAIL-ORIGINAL-'+String(++detailedOriginalReferencesIncluded)+'.'+source.extension);
       }
       const response=await fetch('https://api.openai.com/v1/images/edits',{
         method:'POST',headers:{Authorization:'Bearer '+apiKey},
@@ -659,7 +668,9 @@ export async function POST(request: Request) {
         backgroundUrl,
         sampledSourceCount:sampled.length,
         selectedSourceCount:ids.length,
-        approvedCoverReferenceIncluded,
+        approvedCoverReferenceIncluded:false,
+        detailedOriginalReferencesIncluded,
+        layoutArchetype:input.number>1?aiFirstLayoutArchetype(input.number).split('\n')[0]:'MAIN COVER HERO',
         reviewWarning:'AI-generated listing image: subjects and details can differ from original clipart. Check visual accuracy, text, product claims and whether mockups are clearly illustrative before approval.',
         costEstimate:estimateListingImageGenerationCost(model,quality as 'low'|'medium'|'high',result.usage)
       });
