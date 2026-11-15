@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { conceptFamily, familyDistribution, normalizeCreativeAnalysis, selectDiverseConcepts } from '../lib/creative-intelligence.ts';
+import { conceptFamily, expressionDistribution, extractEmotionCues, familyDistribution, mergeSourceEmotionProfile, normalizeCreativeAnalysis, selectDiverseConcepts } from '../lib/creative-intelligence.ts';
 import { diversityExpansionInstruction, productionPromptInstruction, researchAnalysisInstruction } from '../lib/creative-research-prompts.ts';
 
 test('deep source research separates observed pixels from suggested compatible categories', () => {
@@ -87,4 +87,102 @@ test('UI and API use the same research context, family selection and production 
   assert.match(api,/researchAnalysisInstruction\(source/);
   assert.match(api,/diversityExpansionInstruction\(/);
   assert.match(api,/productionPromptInstruction\(/);
+});
+
+test('cute and baby are style and age signals, whereas happy/sad/angry are moods', () => {
+  assert.deepEqual(extractEmotionCues('Cute Baby Happy Barnyard Animals'), ['cute', 'baby', 'happy']);
+  assert.deepEqual(extractEmotionCues('Sad crying puppy and angry cat'), ['sad', 'angry']);
+  assert.deepEqual(extractEmotionCues('Pastel Flower Clipart'), []);
+  assert.deepEqual(extractEmotionCues('grumpy baby ducklings'), ['baby', 'angry']);
+});
+
+test('visual facial-expression evidence remains distinct from title and tags', () => {
+  const parsed = normalizeCreativeAnalysis({
+    theme: 'Farm Animals',
+    emotionProfile: {
+      dominantMood: 'cheerful', observedExpressions: ['smiling cow', 'happy pig'],
+      expressionStyle: 'rounded joyful eyes', recommendedExpressions: ['soft smile', 'closed-eye grin'],
+    },
+    imageObservations: [
+      { imageIndex: 1, role: 'contact sheet', subjects: ['cow'], colors: ['pink'], expressions: ['smiling with eyes closed'], notes: 'Cow visible' },
+      { imageIndex: 2, role: 'product mockup', subjects: ['barn'], colors: ['green'], notes: 'no visible face' },
+    ],
+  });
+  const merged = mergeSourceEmotionProfile(parsed, 'Angry Baby Farm Animals', ['happy farm png']);
+  assert.deepEqual(merged.emotionProfile.titleCues, ['baby', 'angry']);
+  assert.deepEqual(merged.emotionProfile.tagCues, ['happy']);
+  assert.equal(merged.emotionProfile.dominantMood, 'angry');
+  assert.ok(merged.emotionProfile.ageCues.includes('baby'));
+  assert.deepEqual(merged.emotionProfile.observedExpressions, ['smiling cow', 'happy pig']);
+  assert.deepEqual(merged.imageObservations[0].expressions, ['smiling with eyes closed']);
+  assert.deepEqual(merged.imageObservations[1].expressions, []);
+});
+
+test('explicit happy baby words take priority, while cute alone does not force a smiling face', () => {
+  const parsed = normalizeCreativeAnalysis({ mood: 'soft watercolor', emotionProfile: { dominantMood: 'gentle' } });
+  const happy = mergeSourceEmotionProfile(parsed, 'Happy Baby Farm Animals', ['sad watercolor png']);
+  assert.equal(happy.emotionProfile.dominantMood, 'happy');
+  assert.deepEqual(happy.emotionProfile.ageCues, ['baby']);
+  const cute = mergeSourceEmotionProfile(parsed, 'Cute Farm Animal Clipart', []);
+  assert.equal(cute.emotionProfile.dominantMood, 'gentle');
+  assert.deepEqual(cute.emotionProfile.ageCues, ['cute']);
+});
+
+test('concept selection favors expression variation within eligible subject-family quotas', () => {
+  const existing = [{ name: 'Baby cow', family: 'cow', expression: 'gentle smile' }];
+  const choices = [
+    { name: 'Happy pig with a smile', family: 'pig', expression: 'gentle smile' },
+    { name: 'Delighted duck', family: 'duck', expression: 'closed-eye grin' },
+    { name: 'Shy lamb', family: 'sheep', expression: 'subtle bashful smile' },
+  ];
+  const selected = selectDiverseConcepts(choices, existing, 120, 3);
+  assert.equal(selected[0].family, 'duck');
+  assert.equal(selected[1].family, 'sheep');
+  assert.equal(selected[2].family, 'pig');
+  assert.deepEqual(expressionDistribution([...existing, ...selected]), {
+    'gentle smile': 2, 'closed-eye grin': 1, 'subtle bashful smile': 1,
+  });
+});
+
+test('research, expansion and image prompts retain observed expressions, title mood and age', () => {
+  const research = researchAnalysisInstruction({
+    title: 'Sad Baby Watercolor Farm Animals', description: 'Sad little animals',
+    tags: ['sad animal png', 'cute baby clipart'],
+  }, 4);
+  assert.match(research,/titleCues/);
+  assert.match(research,/observedExpressions/);
+  assert.match(research,/ageCues/);
+  assert.match(research,/eyes, mouth, eyebrows/);
+  const analysis = mergeSourceEmotionProfile(normalizeCreativeAnalysis({
+    emotionProfile: { observedExpressions: ['sad downcast eyes'], recommendedExpressions: ['teary gaze'] },
+  }), 'Sad Baby Farm Animals', ['baby animals']);
+  const expand = diversityExpansionInstruction({
+    count: 20, target: 120, title: 'Sad Baby Farm Animals', analysis,
+    existing: [{ name: 'Baby pig', family: 'pig', expression: 'teary gaze' }],
+    distribution: { pig: 1 }, expressionCounts: { 'teary gaze': 1 },
+  });
+  assert.match(expand,/CURRENT EXPRESSION COUNTS/);
+  assert.match(expand,/Do not assign random happy smiles/);
+  assert.match(expand,/sad/);
+  const production = productionPromptInstruction({
+    title: 'Sad Baby Farm Animals', analysis,
+    characters: [{ id:'pig1', name:'Baby Piglet', family:'pig', expression:'downcast eyes',
+      description:'small pink snout' }],
+  });
+  assert.match(production,/EXPRESSION AND AGE ARE MANDATORY/);
+  assert.match(production,/downcast eyes/);
+  assert.match(production,/Baby requires juvenile proportions/);
+});
+
+test('UI/API forward editable per-character expression and source mood throughout production', () => {
+  const page = readFileSync(new URL('../app/page.tsx', import.meta.url), 'utf8');
+  const api = readFileSync(new URL('../app/api/studio/route.ts', import.meta.url), 'utf8');
+  assert.match(page,/EXPRESSION \/ FACE/);
+  assert.match(page,/Collection mood and expression direction/);
+  assert.match(page,/Character expression distribution/);
+  assert.match(page,/emotionDirection: research\.emotionProfile\.dominantMood/);
+  assert.match(page,/existing: working\.characters\.map\(c => \(\{ name: c\.name, family: c\.family, expression: c\.expression \}\)\)/);
+  assert.match(api,/mergeSourceEmotionProfile\(normalizeCreativeAnalysis\(raw\), source\.title, source\.tags\)/);
+  assert.match(api,/expressionCounts: expressionDistribution\(existing\)/);
+  assert.match(api,/expression: String\(c\.expression \?\? ''\)/);
 });
