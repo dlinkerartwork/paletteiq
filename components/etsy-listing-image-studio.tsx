@@ -416,13 +416,15 @@ export default function EtsyListingImageStudio({ projectId, name, theme, subthem
         setSavedCompositionModes(response.compositionModes || {});
         // Resume the first unapproved image on return/reload, instead of always
         // restarting visually at step 01 (approved JPGs are never regenerated).
-        setStep(LISTING_IMAGE_SPECS.find(s => !images.some(r => r.number === s.number && isSquareListingApproved(r)))?.number || 15);
+        setStep(LISTING_IMAGE_SPECS.find(s => !images.some(r =>
+          r.number === s.number && isSquareListingApproved(r) &&
+          (s.number!==3 || completeCatalogMatchesInventory(r,assets))))?.number || 15);
         setSelectedIndex(0);
         setLoaded(true);
       }
     }).catch(error => { if (live) { setLoaded(true); setMessage('Could not load saved listing images: ' + String(error)); } });
     return () => { live = false; };
-  }, [projectId]);
+  }, [projectId, assets]);
   useEffect(() => {
     let live = true;
     setInspection(null);
@@ -1067,7 +1069,7 @@ function catalogGridLabel(count:number):string{
         }}>
           <strong>{String(s.number).padStart(2, '0')} · {s.title}</strong>
           <small style={{ display: 'block', marginTop: 6, color: item?.status === 'approved' ? '#247046' : '#786a5b' }}>
-            {isSquareListingApproved(item) ? '✓ Approved (square)' : item?.renderedImageUrl && (item.width !== LISTING_WIDTH || item.height !== LISTING_HEIGHT) ? 'Legacy 4:3 • remake as square' : item?.status === 'needs_revision' ? 'Needs revision' : item?.renderedImageUrl ? 'Draft • Review' : 'Not generated'}
+            {isSquareListingApproved(item) && (s.number!==3 || completeCatalogMatchesInventory(item,assets)) ? '✓ Approved (square)' : item?.renderedImageUrl && (item.width !== LISTING_WIDTH || item.height !== LISTING_HEIGHT) ? 'Legacy 4:3 • remake as square' : item?.status === 'needs_revision' ? 'Needs revision' : item?.renderedImageUrl ? 'Draft • Review' : 'Not generated'}
           </small>
         </button>;
       })}
