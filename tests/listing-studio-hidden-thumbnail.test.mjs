@@ -39,7 +39,7 @@ test('original sequence requires review/approval per image and retains 15-image 
   assert.match(studio, /Export 15 approved JPGs as ZIP/);
   assert.match(studio, /aspectRatio: '1 \/ 1'/);
   assert.match(studio, /const file = await compose\(background, layout, assets\)/);
-  assert.match(route, /Approve all 15 square 1024 × 1024 JPG listing images before exporting/);
+  assert.match(route, /Approve all 15 square JPGs\. Complete Collection \(03\) must show every CURRENT original clipart/);
 });
 
 test('revert keeps safe upload and paid background retry fixes, including original project data', () => {
