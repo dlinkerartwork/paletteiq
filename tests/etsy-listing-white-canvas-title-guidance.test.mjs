@@ -15,7 +15,7 @@ test('title length advisory warns, but never silently rewrites the full Etsy SEO
   assert.equal(evaluateListingCoverTitle('').status,'warning');
   assert.match(ui,/data-listing-title-length=\{titleAdvice\.status\}/);
   assert.match(ui,/evaluateListingCoverTitle\(currentLettering\.title\)/);
-  assert.match(ui,/evaluation\.status === 'too-long' && !window\.confirm/);
+  assert.match(ui,/evaluation\.status === 'too-long' && step!==3 && !window\.confirm/);
   assert.match(ui,/titleAdvice\.message/);
   assert.match(ui,/Main Cover defaults to the SEO title and primary keyword/);
   assert.match(ui,/Supporting image defaults to a concise/);
@@ -67,7 +67,7 @@ test('save white canvas snapshots per step, prevent stale full-collection saves 
   assert.match(api,/eq\(projects\.owner,user\.userId\)/);
   assert.match(ui,/await savePreLayout\(effectivePositions\)/);
   assert.match(ui,/setPreLayouts\(response\.preLayouts \|\| \{\}\)/);
-  assert.match(ui,/const positions = changes\[step\] \|\|/);
+  assert.match(ui,/const positions = step===3 \? planCompleteCollectionCatalog\(assets\)\.placements : changes\[step\] \|\|/);
   assert.match(ui,/current\?\.placements \|\| preLayouts\[String\(step\)\]/);
   assert.match(ui,/Save White Canvas Pre-Layout \(no AI cost\)/);
   assert.match(studio,/const savedLayouts = \(old as \{ listingPreLayouts\?: Record<string, unknown> \}\)\.listingPreLayouts/);
