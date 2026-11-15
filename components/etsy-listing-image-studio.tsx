@@ -1243,9 +1243,9 @@ function catalogGridLabel(count:number):string{
               </button>
               <small>Available in every composition mode. Packages your selected original images, Title, Subtitle, Badge and a theme-adapted premium Etsy prompt. No OpenAI payment or prompt preparation needed. In AI-First, a prepared edited prompt is included instead.</small>
             </div>
-            <label className="input-label" htmlFor="listing-composition-mode">COMPOSITION MODE</label>
-            <select id="listing-composition-mode" aria-label="Listing composition mode" value={compositionMode}
-              disabled={!!working}
+            <label className="input-label" htmlFor="listing-composition-mode">{step===3 ? 'COMPOSITION MODE — COMPLETE CATALOG REQUIRED' : 'COMPOSITION MODE'}</label>
+            <select id="listing-composition-mode" aria-label="Listing composition mode" value={step===3?'complete-catalog':compositionMode}
+              disabled={!!working || step===3}
               onChange={e => {
                 const mode=e.target.value as ListingCompositionMode;
                 setCompositionModes(old => ({...old,[String(step)]:mode}));
@@ -1255,27 +1255,33 @@ function catalogGridLabel(count:number):string{
                   setMessage('AI-First now offers the entire original collection to OpenAI as candidate artwork. OpenAI chooses the final selection and composition. You may narrow the source pool before preparing prompts.');
                 }
               }}>
+              {step===3 && <option value="complete-catalog">Complete Catalog — every original exactly once (automatic)</option>}
               <option value="free">Free Composition — OpenAI chooses sizes and positions (Main Cover default)</option>
               <option value="ai-first">AI-First Composition — OpenAI generates complete listing image</option>
               <option value="structured">Structured — preserve my white-canvas arrangement</option>
             </select>
-            <small>{compositionMode === 'ai-first'
+            <small>{step===3
+              ? '03 Complete Collection always displays 100% of your current collection: '+assets.length+'/'+assets.length+' original cliparts. This image cannot use AI-First generation, samples, or a smaller selected subset.'
+              : compositionMode === 'ai-first'
               ? 'AI-First: Pick clipart references, title, subtitle, badge and creative prompt. OpenAI directly generates ONE finished artistic thumbnail from numbered visual reference sheets. No geometry extraction, original PNG paste or second generation step. AI illustration details may differ from the source files.'
               : compositionMode === 'free'
                 ? 'AI Vision acts as the art director after the background is generated: it can resize, move, rotate, overlap or partially crop any selected ORIGINAL clipart. White-canvas positions are inspiration only, NOT a constraint. Clipart selection and identity remain unchanged.'
                 : 'PaletteIQ preserves the composition you created on the white canvas. You can still choose optional AI Vision refinement or Auto Arrange.'}</small>
-            <small>{compositionMode === 'ai-first'
+            <small>{step===3
+              ? 'PaletteIQ creates the dense catalog itself from your source files. No OpenAI reinterpretation, no 80-of-120 sampling, no invented or duplicated artworks.'
+              : compositionMode === 'ai-first'
               ? 'These images are visual REFERENCES, not fixed canvas positions. OpenAI freely determines which subjects to depict and how they appear. A generative result is not a pixel-identical copy of the original clipart.'
               : 'Choose how many ORIGINAL collection assets appear in this listing image. Main Cover defaults to '+DEFAULT_MAIN_COVER_CLIPART_COUNT+' but you can choose any count up to your collection size.'}</small>
-            <label className="input-label" htmlFor="listing-clipart-count">{compositionMode === 'ai-first'
-              ? 'ELIGIBLE ORIGINAL CLIPART SOURCES'
-              : 'NUMBER OF CLIPARTS'} (1–{assets.length})</label>
+            <label className="input-label" htmlFor="listing-clipart-count">{step===3
+              ? 'ALL ORIGINAL COLLECTION CLIPARTS — LOCKED'
+              : compositionMode === 'ai-first' ? 'ELIGIBLE ORIGINAL CLIPART SOURCES' : 'NUMBER OF CLIPARTS'}
+              {step===3 ? ' ('+assets.length+' required)' : ' (1–'+assets.length+')'}</label>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <input id="listing-clipart-count" aria-label="Number of listing cliparts" type="number" min={1} max={assets.length} step={1} value={positions.length}
-                disabled={!assets.length || !!working} onChange={e => changeArtworkCount(Number(e.target.value))}
+                disabled={!assets.length || !!working || step===3} onChange={e => changeArtworkCount(Number(e.target.value))}
                 style={{ width: 105, flexShrink: 0 }}/>
-              <button type="button" className="outline-btn" disabled={!!working || !assets.length} onClick={autoSelectArtwork}>Auto Select ({positions.length})</button>
-              {compositionMode === 'ai-first' && <button type="button" className="outline-btn"
+              {step!==3 && <button type="button" className="outline-btn" disabled={!!working || !assets.length} onClick={autoSelectArtwork}>Auto Select ({positions.length})</button>}
+              {step!==3 && compositionMode === 'ai-first' && <button type="button" className="outline-btn"
                 disabled={!!working || !assets.length}
                 onClick={() => {
                   setChanges(old => ({...old,[step]:planListingPlacements(step,categorizedAssets,{count:assets.length})}));
@@ -1309,21 +1315,23 @@ function catalogGridLabel(count:number):string{
               <div style={{ maxHeight: 300, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 7, border: '1px solid #eee7dc', padding: 8, borderRadius: 8 }}>
                 {visibleAssetChoices.map(asset => <label key={asset.id} style={{ display: 'flex', alignItems: 'center', gap: 8, border: '1px solid #eee4d8', borderRadius: 6, padding: 6, minWidth: 0, cursor: 'pointer' }}>
                   <input type="checkbox" aria-label={'Include ' + asset.name} checked={selectedAssetIds.includes(asset.id)}
-                    disabled={!!working || (selectedAssetIds.length === 1 && selectedAssetIds.includes(asset.id))}
+                    disabled={!!working || step===3 || (selectedAssetIds.length === 1 && selectedAssetIds.includes(asset.id))}
                     onChange={e => toggleArtwork(asset.id, e.target.checked)}/>
                   <img src={asset.imageUrl} alt="" loading="lazy" style={{ width: 36, height: 36, objectFit: 'contain', flexShrink: 0 }}/>
                   <span style={{ fontSize: 11, overflowWrap: 'anywhere' }}>{asset.name}</span>
                 </label>)}
                 {!visibleAssetChoices.length && <small>No matching original clipart.</small>}
               </div>
-              <small>{compositionMode === 'ai-first'
+              <small>{step===3
+                ? 'Complete Collection: all '+assets.length+' originals are required and checked. Selection cannot be reduced for this listing image.'
+                : compositionMode === 'ai-first'
                 ? 'Source references: '+new Set(positions.map(p=>p.assetId)).size+' of '+assets.length+' original images. OpenAI directly designs the whole thumbnail and may reinterpret illustrations.'
                 : 'Checked: '+positions.length+' / '+assets.length+'. Each selected original appears once.'}</small>
             </div>}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {compositionMode !== 'ai-first' && <button type="button" className="outline-btn" disabled={!!working || !positions.length}
+              {step!==3 && compositionMode !== 'ai-first' && <button type="button" className="outline-btn" disabled={!!working || !positions.length}
                 onClick={() => void autoArrangeArtwork()}>Auto Arrange ({positions.length})</button>}
-              <button type="button" className="outline-btn" disabled={!!working || !selected || positions.length <= 1}
+              <button type="button" className="outline-btn" disabled={!!working || step===3 || !selected || positions.length <= 1}
                 onClick={() => {
                   if(!selected)return;
                   if(compositionMode === 'ai-first' && current?.renderedImageUrl){
