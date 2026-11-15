@@ -190,3 +190,12 @@ test('UI/API forward editable per-character expression and source mood throughou
   assert.match(api,/expressionCounts: expressionDistribution\(existing\)/);
   assert.match(api,/expression: String\(c\.expression \?\? ''\)/);
 });
+
+test('AI-enhanced Etsy SEO considers title, microtheme and confirmed artwork expression', () => {
+  const api = readFileSync(new URL('../app/api/studio/route.ts', import.meta.url), 'utf8');
+  assert.match(api,/actualArtworkExpressions:/);
+  assert.match(api,/longTailKeywords: Array\.isArray\(project\.longTailKeywords\)/);
+  assert.match(api,/For AI-ENHANCED drafts ONLY/);
+  assert.match(api,/Never describe a sad, angry/);
+  assert.match(api,/In faithful TRANSLATION mode/);
+});
