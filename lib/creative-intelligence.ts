@@ -92,8 +92,8 @@ export function mergeSourceEmotionProfile(analysis: CreativeAnalysis, title: str
   const tagMood = tagCues.filter(x => moodCues.has(x));
   const dominantMood = explicitMood.length ? explicitMood.join(' / ') :
     analysis.emotionProfile.dominantMood || (tagMood.length ? tagMood.join(' / ') : analysis.mood);
-  const ageCues = [...new Set([...titleCues, ...tagCues].filter(x => x === 'baby').concat(analysis.emotionProfile.ageCues))];
-  const styleCues = [...new Set([...titleCues, ...tagCues].filter(x => x === 'cute').concat(analysis.emotionProfile.styleCues))];
+  const ageCues = [...new Set<string>([...titleCues.filter(x => x === 'baby'), ...tagCues.filter(x => x === 'baby'), ...analysis.emotionProfile.ageCues])];
+  const styleCues = [...new Set<string>([...titleCues.filter(x => x === 'cute'), ...tagCues.filter(x => x === 'cute'), ...analysis.emotionProfile.styleCues])];
   return { ...analysis, emotionProfile: { ...analysis.emotionProfile, titleCues, tagCues,
     dominantMood, ageCues, styleCues } };
 }
