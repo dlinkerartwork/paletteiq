@@ -1232,7 +1232,7 @@ function catalogGridLabel(count:number):string{
               : 'Title, Subtitle or Badge changed. Regenerate the AI artwork before approving.'}</small>}
           </div>
           <div style={{ border: '1px solid #eadfce', padding: 12, borderRadius: 10, display: 'grid', gap: 9 }}>
-            <strong>Original clipart selection — Image {String(step).padStart(2,'0')}</strong>
+            <strong>{step===3 ? 'Complete Collection — ALL Original Cliparts' : 'Original clipart selection — Image '+String(step).padStart(2,'0')}</strong>
             <div data-listing-source-zip-download="always-visible" style={{display:'grid',gap:5}}>
               <button type="button" className="outline-btn"
                 style={{display:'flex',gap:8,alignItems:'center',justifyContent:'center',minHeight:40}}
@@ -1386,7 +1386,7 @@ function catalogGridLabel(count:number):string{
               ? 'Optionally critique the finished AI-generated JPG (additional paid Vision API request)'
               : 'Automatically critique the FINAL composited JPG (recommended, additional paid Vision API request)'}
           </label>
-          <section data-listing-openai-prompt-editor="true" style={{ border:'1px solid #e5d9cb',
+          {step!==3 && <section data-listing-openai-prompt-editor="true" style={{ border:'1px solid #e5d9cb',
             borderRadius:10, padding:12, display:'grid', gap:9 }}>
             <strong>OpenAI prompt editor — review before sending</strong>
             <small style={{ color:'#75695e' }}>{compositionMode === 'ai-first'
@@ -1426,22 +1426,28 @@ function catalogGridLabel(count:number):string{
               style={{ width:'100%', boxSizing:'border-box', resize:'vertical', fontFamily:'inherit', fontSize:12, lineHeight:1.55 }}/>
             <small style={{ color:'#75695e' }}>Vision chooses geometry for original PNG layers in Free and Structured modes.</small>
             </>}
-          </section>
-          <button type="button" className="primary-btn" onClick={() => void generate()} disabled={!loaded || !assets.length || !!working || !precedingApproved || !promptsReady}>
+          </section>}
+          <button type="button" className="primary-btn" onClick={() => void generate()} disabled={!loaded || !assets.length || !!working || !precedingApproved || (step!==3 && !promptsReady)}>
             {working === 'generate' ? <LoaderCircle className="spin" size={16}/> : <Sparkles size={16}/>}
-            {compositionMode === 'ai-first'
-              ? 'Generate '+spec.title+' (OpenAI paid)'
-              : current?.backgroundUrl ? 'Revise Image ' + String(step).padStart(2,'0') + ' (AI background)' : step === 1 ? 'Start /new-listing — Generate Main Cover' : 'Generate Image ' + String(step).padStart(2,'0')}
+            {step===3
+              ? 'Generate Complete Collection — '+assets.length+'/'+assets.length+' Original Cliparts (no AI cost)'
+              : compositionMode === 'ai-first'
+                ? 'Generate '+spec.title+' (OpenAI paid)'
+                : current?.backgroundUrl ? 'Revise Image ' + String(step).padStart(2,'0') + ' (AI background)' : step === 1 ? 'Start /new-listing — Generate Main Cover' : 'Generate Image ' + String(step).padStart(2,'0')}
           </button>
           {!precedingApproved && <small style={{ color: '#94502e' }}>Approve the earlier images in order before generating this image.</small>}
-          {(step === 3 || step === 5) && <button className="outline-btn" type="button" onClick={() => void categorize()} disabled={!!working}>Analyze collection categories (optional)</button>}
-          <small style={{ color: '#74695e' }}>{compositionMode === 'ai-first'
+          {step === 5 && <button className="outline-btn" type="button" onClick={() => void categorize()} disabled={!!working}>Analyze collection categories (optional)</button>}
+          <small style={{ color: '#74695e' }}>{step===3
+            ? 'Complete Collection is rendered locally from every actual collection image, no sampling or AI redraw. If even one source cannot load, saving fails rather than silently leaving it out.'
+            : compositionMode === 'ai-first'
             ? 'The OpenAI image is the complete SINGLE-LAYER cover. No mapping, image replacement or PNG compositing. Some depicted details may differ from the original references.'
             : 'Free Composition ignores starter canvas coordinates in the AI background prompt. OpenAI Vision chooses original asset positions, and PaletteIQ composites the source PNGs.'}</small>
           <hr style={{ width: '100%', border: 0, borderTop: '1px solid #eee4d9' }}/>
           <label className="input-label">REVISION NOTES</label>
           <textarea rows={3} maxLength={800} value={notes[step] ?? current?.notes ?? ''} onChange={e => setNotes(old => ({ ...old, [step]: e.target.value }))} placeholder="Specify desired revision to the current image, if any."/>
-          <small style={{ color: '#74695e' }}>{compositionMode === 'ai-first'
+          <small style={{ color: '#74695e' }}>{step===3
+            ? 'Complete Collection revisions: edit the Title, Subtitle or Badge, then regenerate the exact full catalog at no OpenAI cost. All '+assets.length+' source illustrations remain included.'
+            : compositionMode === 'ai-first'
             ? 'Revision notes apply on the NEXT paid full-cover generation. This artwork has no separately editable source layers. Review all source subjects, spelling and claims.'
             : 'Revision notes are included in the next paid AI background regeneration. Original clipart positions can be adjusted with a free JPG re-render. Review spelling, crop, verified facts and mockup realism before approving.'}</small>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -1449,7 +1455,9 @@ function catalogGridLabel(count:number):string{
             <button type="button" className="outline-btn" disabled={!loaded || !!working || (!current?.backgroundUrl && !current?.renderedImageUrl)}
               style={{ color: '#a8342b', borderColor: '#d7a19c' }}
               onClick={() => void rejectAndDelete()}>Reject &amp; Delete</button>
-            <button type="button" className="primary-btn" disabled={!current?.renderedImageUrl || !!working || letteringDirty || current.width !== LISTING_WIDTH || current.height !== LISTING_HEIGHT} onClick={() => void review('approved')}><Check size={16}/> Approve & Next (/next) <ArrowRight size={15}/></button>
+            <button type="button" className="primary-btn" disabled={!current?.renderedImageUrl || !!working || letteringDirty ||
+              current.width !== LISTING_WIDTH || current.height !== LISTING_HEIGHT ||
+              (step===3 && !completeCatalogMatchesInventory(current,assets))} onClick={() => void review('approved')}><Check size={16}/> Approve & Next (/next) <ArrowRight size={15}/></button>
           </div>
         </div>
       </div>
