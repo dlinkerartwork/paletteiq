@@ -202,7 +202,7 @@ export const AI_FIRST_LISTING_IMAGE_BRIEFS: Readonly<Record<number, {
       'Create an emotionally appealing final showcase, reusing the actual theme and visual language of the selected artwork.',
       'Combine several recognizable collection motifs in a fresh balanced editorial arrangement, distinct from the Main Cover.',
       'Use elegant finishing typography and a tasteful closing impression without invented urgency, discounts or guarantees.',
-      'Conclude with a visually compelling reminder of the bundle’s character rather than repeating the main cover composition.'
+      'Conclude with a visually cohesive reminder of the bundle’s character, consistent with the approved Main Cover, rather than repeating its composition.'
     ]}
 };
 
