@@ -126,8 +126,16 @@ async function finish(owner: string, projectId: string, job: ResearchJob, respon
     keywords: research.keywords.length ? research.keywords : source.tags,
     notes: research.notes, research, characters,
   };
-  await getDb().update(projects).set({ name: updated.name.slice(0, 160), data: JSON.stringify(updated), updatedAt: Date.now() })
-    .where(and(eq(projects.id, projectId), eq(projects.owner, owner)));
+  const applied = await getDb().update(projects)
+    .set({ name: updated.name.slice(0, 160), data: JSON.stringify(updated),
+      updatedAt: Math.max(Date.now(), saved.row.updatedAt + 1) })
+    .where(and(eq(projects.id, projectId), eq(projects.owner, owner), eq(projects.updatedAt, saved.row.updatedAt)))
+    .returning({ id: projects.id });
+  if (!applied.length) {
+    // Another tab saved the collection while we parsed this response. The next
+    // poll can retry import from the SAME remote response at no new AI charge.
+    return Response.json({ job: safeJob(job), retryImport: true });
+  }
   return Response.json({ job: safeJob(updatedJob), project: updated });
 }
 
