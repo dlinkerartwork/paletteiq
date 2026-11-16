@@ -114,6 +114,27 @@ export async function POST(req: Request) {
           incoming.characters = [...persisted as SubjectInput[], ...incoming.characters.filter(c => !persistedIds.has(c.id))];
         }
       }
+      // Remote OpenAI prompt batches are authoritative. Keep their job ID and
+      // recovered paid prompts when an older browser tab saves its snapshot.
+      const serverPromptJob = (old as { promptJob?: {
+        id: string; status: string; items?: Array<{ id: string; status: string }> } }).promptJob;
+      const browserPromptJob = incoming.promptJob as { id?: string; status?: string } | undefined;
+      if (serverPromptJob) {
+        incoming.promptJob = serverPromptJob;
+        const browserSawCompletion = browserPromptJob?.id === serverPromptJob.id &&
+          browserPromptJob.status === serverPromptJob.status;
+        if (!browserSawCompletion && ['completed','completed_with_errors','failed','cancelled','expired'].includes(serverPromptJob.status)) {
+          const completedIds = new Set((serverPromptJob.items || []).filter(item => item.status === 'done').map(item => item.id));
+          const storedPrompts = new Map((old.characters || []).filter(c => completedIds.has(c.id)).map(c => [c.id, c]));
+          incoming.characters = incoming.characters.map(c => {
+            const saved = storedPrompts.get(c.id);
+            return saved && typeof (saved as SubjectInput).prompt === 'string'
+              ? { ...c, prompt: (saved as SubjectInput).prompt,
+                  status: c.status === 'done' ? 'done' : (saved as SubjectInput).status || c.status }
+              : c;
+          });
+        }
+      }
       // Style analysis is server-owned and derived from original collection pixels.
       // A stale browser snapshot must never erase its cached (paid) Vision result.
       const storedStyle = (old as { listingVisualStyle?: unknown }).listingVisualStyle;
