@@ -3,7 +3,43 @@
  * suggested subjects are new ideas, never claims about the source listing.
  */
 export type ColorSignal = { name: string; hex?: string; role?: string };
-export type ImageObservation = { imageIndex: number; role: string; subjects: string[]; colors: string[]; expressions: string[]; notes: string };
+export type ImageObservation = { imageIndex: number; role: string; subjects: string[]; colors: string[]; expressions: string[]; shapes: string[]; materials: string[]; effects: string[]; notes: string };
+/** The twelve visual reverse-engineering dimensions must remain reference-specific. */
+export type VisualReverseEngineering = {
+  characterShape: string; facialExpression: string; colorPalette: string;
+  materialTexture: string; specialEffects: string; lightingRendering: string;
+  characterCategories: string; accessories: string; composition: string;
+  illustrationQuality: string; clipartProduction: string; commercialAssets: string;
+};
+export type StyleDNA = {
+  visualLanguage: string; shapeLanguage: string; paletteRules: string; materialRules: string;
+  effectRules: string; lightingRules: string; outlineRules: string; renderingRules: string;
+  compositionRules: string; backgroundRules: string;
+};
+export type CharacterDNA = {
+  categoryDiversity: string; silhouetteDiversity: string; facialDiversity: string;
+  expressionDiversity: string; accessoryDiversity: string; colorDiversity: string;
+  duplicationAvoidance: string;
+};
+export type CreativeControls = {
+  styleConsistency: number; characterVariation: number; textureControl: number;
+  detailQuality: number; promptQuantity: number;
+};
+export const defaultCreativeControls: CreativeControls = {
+  styleConsistency: 4, characterVariation: 4, textureControl: 4, detailQuality: 4,
+  promptQuantity: 0, // 0 = all selected/unfilled; avoids silently limiting existing workflows
+};
+export function normalizeCreativeControls(input: unknown): CreativeControls {
+  const raw = input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : {};
+  const scale = (value: unknown, fallback: number) => typeof value === 'number' && Number.isFinite(value)
+    ? Math.max(1, Math.min(5, Math.round(value))) : fallback;
+  return {
+    styleConsistency: scale(raw.styleConsistency, 4), characterVariation: scale(raw.characterVariation, 4),
+    textureControl: scale(raw.textureControl, 4), detailQuality: scale(raw.detailQuality, 4),
+    promptQuantity: typeof raw.promptQuantity === 'number' && Number.isFinite(raw.promptQuantity)
+      ? Math.max(0, Math.min(1000, Math.floor(raw.promptQuantity))) : 0,
+  };
+}
 export type EmotionProfile = {
   titleCues: string[]; tagCues: string[]; observedExpressions: string[];
   dominantMood: string; ageCues: string[]; styleCues: string[]; expressionStyle: string;
@@ -17,13 +53,35 @@ export type CreativeAnalysis = {
   audience: string[]; useCases: string[]; visualMotifs: string[];
   observedSubjects: string[]; subjectFamilies: string[]; imageObservations: ImageObservation[];
   differentiators: string[]; seoIntent: string; notes: string; emotionProfile: EmotionProfile;
+  visualReverseEngineering: VisualReverseEngineering; styleDNA: StyleDNA;
+  characterDNA: CharacterDNA; creativeControls: CreativeControls;
 };
-export type DiverseConcept = { name: string; description?: string; family?: string; expression?: string };
+export type DiverseConcept = {
+  name: string; description?: string; family?: string; expression?: string;
+  shape?: string; silhouette?: string; accessories?: string; colorPlan?: string;
+};
 
 const clean = (value: unknown, max = 500): string => typeof value === 'string' ? value.trim().slice(0, max) : '';
 const strings = (value: unknown, max = 60) => Array.isArray(value)
   ? [...new Set(value.filter((x): x is string => typeof x === 'string').map(x => x.trim().slice(0, 150)).filter(Boolean))].slice(0, max)
   : [];
+const normalizeFields = <T extends string>(input: unknown, keys: readonly T[], max = 420): Record<T, string> => {
+  const raw = input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : {};
+  return Object.fromEntries(keys.map(key => [key, clean(raw[key], max)])) as Record<T, string>;
+};
+export const reverseEngineeringKeys = [
+  'characterShape','facialExpression','colorPalette','materialTexture','specialEffects',
+  'lightingRendering','characterCategories','accessories','composition','illustrationQuality',
+  'clipartProduction','commercialAssets',
+] as const;
+export const styleDNAKeys = [
+  'visualLanguage','shapeLanguage','paletteRules','materialRules','effectRules','lightingRules',
+  'outlineRules','renderingRules','compositionRules','backgroundRules',
+] as const;
+export const characterDNAKeys = [
+  'categoryDiversity','silhouetteDiversity','facialDiversity','expressionDiversity',
+  'accessoryDiversity','colorDiversity','duplicationAvoidance',
+] as const;
 const colors = (value: unknown): ColorSignal[] => Array.isArray(value) ? value.slice(0, 14).flatMap((item): ColorSignal[] => {
   if (typeof item === 'string') return [{ name: clean(item, 80) }];
   if (!item || typeof item !== 'object') return [];
@@ -40,7 +98,7 @@ export function normalizeCreativeAnalysis(input: unknown): CreativeAnalysis {
     const row = item as Record<string, unknown>;
     const imageIndex = Number(row.imageIndex);
     if (!Number.isInteger(imageIndex) || imageIndex < 1) return [];
-    return [{ imageIndex, role: clean(row.role, 100), subjects: strings(row.subjects, 30), colors: strings(row.colors, 12), expressions: strings(row.expressions, 15), notes: clean(row.notes, 500) }];
+    return [{ imageIndex, role: clean(row.role, 100), subjects: strings(row.subjects, 30), colors: strings(row.colors, 12), expressions: strings(row.expressions, 15), shapes: strings(row.shapes, 15), materials: strings(row.materials, 15), effects: strings(row.effects, 15), notes: clean(row.notes, 500) }];
   }) : [];
   return {
     theme: clean(raw.theme, 200), subtheme: clean(raw.subtheme, 200), microtheme: clean(raw.microtheme, 200),
@@ -55,6 +113,10 @@ export function normalizeCreativeAnalysis(input: unknown): CreativeAnalysis {
     differentiators: strings(raw.differentiators, 30), seoIntent: clean(raw.seoIntent),
     notes: clean(raw.notes, 2400),
     emotionProfile: normalizeEmotionProfile(raw.emotionProfile),
+    visualReverseEngineering: normalizeFields(raw.visualReverseEngineering, reverseEngineeringKeys, 750),
+    styleDNA: normalizeFields(raw.styleDNA, styleDNAKeys, 750),
+    characterDNA: normalizeFields(raw.characterDNA, characterDNAKeys, 750),
+    creativeControls: normalizeCreativeControls(raw.creativeControls),
   };
 }
 
