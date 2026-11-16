@@ -294,14 +294,14 @@ export default function Home() {
     setBusy('analyze'); setMessage(''); setAnalysisProgress({ done: 0, total: target });
     let working = project;
     try {
-      const data = await api({ action: 'analyze', url: sourceUrl.trim(), selectedImages: chosenImages, analysisProvider, analysisModel: visualModel });
+      const data = await api({ action: 'analyze', url: sourceUrl.trim(), selectedImages: chosenImages, analysisProvider, analysisModel: visualModel, creativeControls: normalizeCreativeControls(project.creativeControls) });
       const a = data.analysis;
       if (!a || !Array.isArray(a.characters)) throw new Error('OpenAI did not return visual character analysis.');
       const observed = a.characters.map((x: string | Concept) => typeof x === 'string'
         ? makeChar(x, 'listing') : makeChar(String(x.name || ''), 'listing', String(x.description || ''), String(x.family || ''), String(x.expression || ''), x)).filter((c: Character) => c.name.trim());
       const previous = working.url === sourceUrl ? working.characters : [];
       const preserved = [...new Map(previous.filter(c => c.name.trim()).map(c => [c.name.trim().toLowerCase(), c])).values()].slice(0, target);
-      const verified = [...preserved, ...selectDiverseConcepts(observed, preserved, target, target - preserved.length)];
+      const verified = [...preserved, ...selectDiverseConcepts(observed, preserved, target, target - preserved.length, normalizeCreativeControls(working.creativeControls).characterVariation)];
       const research = normalizeCreativeAnalysis(a);
       working = { ...working, url: sourceUrl.trim(), name: data.source.title || working.name,
         title: data.source.title || '', sourceDescription: data.source.description || '',
@@ -322,7 +322,7 @@ export default function Home() {
         const needed = Math.min(20, target - working.characters.length);
         const result = await api({ action: 'expand', count: needed, target, title: working.title || working.name, analysis: creativeContext(working), images: working.selectedImageUrls ?? working.images, existing: working.characters.map(c => ({ name: c.name, family: c.family, expression: c.expression })) });
         const proposals: Character[] = (result.characters ?? []).map((x: Concept) => makeChar(String(x.name || ''), 'ai', String(x.description || ''), String(x.family || ''), String(x.expression || ''), x));
-        const added = selectDiverseConcepts(proposals, working.characters, target, target - working.characters.length);
+        const added = selectDiverseConcepts(proposals, working.characters, target, target - working.characters.length, normalizeCreativeControls(working.creativeControls).characterVariation);
         if (!added.length && ++emptyRounds >= 2) break;
         if (added.length) emptyRounds = 0;
         if (added.length) { working = { ...working, characters: [...working.characters, ...added] }; setProject(working); setAnalysisProgress({ done: working.characters.length, total: target }); }
@@ -416,7 +416,7 @@ export default function Home() {
           existing: current.characters.map(c => ({ name: c.name, family: c.family, expression: c.expression })) });
         const proposals = (res.characters ?? []).map((v: Concept) =>
           makeChar(String(v.name || ''), 'ai', String(v.description || ''), String(v.family || ''), String(v.expression || ''), v));
-        const batch = selectDiverseConcepts(proposals, current.characters, target, target - current.characters.length);
+        const batch = selectDiverseConcepts(proposals, current.characters, target, target - current.characters.length, normalizeCreativeControls(current.creativeControls).characterVariation);
         if (!batch.length && ++emptyRounds >= 2) break;
         if (batch.length) emptyRounds = 0;
         current = { ...current, characters: [...current.characters, ...batch] };
