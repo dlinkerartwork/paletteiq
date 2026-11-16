@@ -56,6 +56,7 @@ test('research GET restores completed catalog without resubmitting paid work', (
   assert.match(api, /selectDiverseConcepts\(candidates, uniquePrevious/);
   assert.match(api, /const updated: Collection = \{/);
   assert.match(api, /\.\.\.saved\.data, researchJob: updatedJob/);
+  assert.match(api, /eq\(projects\.updatedAt, saved\.row\.updatedAt\)/);
   assert.doesNotMatch(get, /method: 'POST'/);
 });
 
@@ -82,5 +83,6 @@ test('remote GPU progress changes only in state; no full-page refresh remains', 
   assert.match(production, /setRemoteProgress\(old =>/);
   assert.match(production, /latestUpscaleChange\.current\(c\.id/);
   assert.match(production, /\[project\.id, pendingUpscaleKey\]/);
-  assert.match(ui, /onUpscaleChange=\{\(id,fields\) => updateChar\(id,fields\)\}/);
+  assert.match(ui, /onUpscaleChange=\{updateUpscaleChar\}/);
+  assert.match(ui, /setProjects\(prev => prev\.map\(p => p\.id !== project\.id/);
 });
