@@ -12,7 +12,8 @@ import { isOpenAICreditError, primeProductionAudio, useProductionSounds } from '
 type Character = { id: string; name: string; prompt: string; status: string; imageUrl?: string; upscaledImageUrl?: string; upscaleJob?: { id: string; submittedAt?: number; factor?: number }; error?: string; similarityReview?: SimilarityReview };
 type Project = { id: string; name: string; characters: Character[]; listing?: { title?: string } };
 type Job = { id: string; status: string; model: string; total: number; completed: number; failed: number; imported: number; createdAt: number; characterIds: string[]; assets: Array<{ id: string; status: string; imageUrl?: string; error?: string }>; warning?: string };
-type Props = { project: Project; model: string; quality: string; onModel: (value: string) => void; onQuality: (value: string) => void; onDownloaded: (receipt: { lastDownloadedAt: number; downloadCount: number; lastDownloadImageCount: number; downloadedImageIds: string[] }) => void; onAsset: (id: string, data: { imageUrl?: string; status: 'done' | 'error'; error?: string; similarityReview?: SimilarityReview }) => void };
+type UpscaleUpdate = { upscaleJob?: Character['upscaleJob']; upscaledImageUrl?: string; upscaledAt?: number };
+type Props = { project: Project; model: string; quality: string; onModel: (value: string) => void; onQuality: (value: string) => void; onDownloaded: (receipt: { lastDownloadedAt: number; downloadCount: number; lastDownloadImageCount: number; downloadedImageIds: string[] }) => void; onAsset: (id: string, data: { imageUrl?: string; status: 'done' | 'error'; error?: string; similarityReview?: SimilarityReview }) => void; onUpscaleChange: (id: string, data: UpscaleUpdate) => void };
 
 async function request<T = unknown>(url: string, options?: RequestInit): Promise<T> {
   const r = await fetch(url, options);
@@ -24,7 +25,7 @@ async function request<T = unknown>(url: string, options?: RequestInit): Promise
 // Keep the last known job progress visible immediately when switching tabs.
 const batchJobSnapshot = new Map<string, Job[]>();
 
-export default function ImageProduction({ project, model, quality, onModel, onQuality, onDownloaded, onAsset }: Props) {
+export default function ImageProduction({ project, model, quality, onModel, onQuality, onDownloaded, onAsset, onUpscaleChange }: Props) {
   const [mode, setMode] = useState<'single' | 'batch'>('batch');
   const [batchModel, setBatchModel] = useState('gpt-image-2.5-flare');
   const [imageModels, setImageModels] = useState<Array<{ id: string; name: string; batchSupported: boolean }>>([]);
@@ -51,6 +52,10 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
   const [upscaling, setUpscaling] = useState(false);
   const [upscalePreview, setUpscalePreview] = useState<{ name: string; originalUrl: string; upscaledUrl: string } | null>(null);
   const [remoteProgress, setRemoteProgress] = useState<Record<string, { status: string; elapsed: number; remaining?: number | null }>>({});
+  const latestUpscaleChange = useRef(onUpscaleChange);
+  useEffect(() => { latestUpscaleChange.current = onUpscaleChange; }, [onUpscaleChange]);
+  // The polling effect re-subscribes ONLY when the saved job IDs change, not on each tick.
+  const pendingUpscaleKey = project.characters.filter(c => c.upscaleJob).map(c => c.id + ':' + c.upscaleJob!.id).join('|');
   useEffect(() => {
     let live = true;
     void fetch('/api/settings').then(async r => await r.json() as { preferences?: { upscaleFactor?: number } }).then(data => {
@@ -84,13 +89,24 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
             }
             continue;
           }
-          const result = await response.json() as { status: string; error?: string; elapsedSeconds?: number; estimatedRemainingSeconds?: number | null };
+          const result = await response.json() as { status: string; error?: string; url?: string; elapsedSeconds?: number; estimatedRemainingSeconds?: number | null };
           if (stopped) return;
-          if (result.status === 'succeeded') { window.location.reload(); return; }
-          if (result.status === 'cancelled') { window.location.reload(); return; }
-          setRemoteProgress(old => ({ ...old, [characterId]: { status: result.status, elapsed: result.elapsedSeconds || 0, remaining: result.estimatedRemainingSeconds } }));
+          if (result.status === 'succeeded' || result.status === 'cancelled') {
+            // The API has already saved the result/cancellation in the collection.
+            // Update ONLY this character; do not reload the page or reset selection/scroll.
+            latestUpscaleChange.current(characterId, result.status === 'succeeded'
+              ? { upscaleJob: undefined, upscaledImageUrl: result.url, upscaledAt: Date.now() }
+              : { upscaleJob: undefined });
+            setRemoteProgress(old => ({ ...old, [characterId]: { status: result.status, elapsed: result.elapsedSeconds || 0 } }));
+            continue;
+          }
+          setRemoteProgress(old => {
+            const previous = old[characterId];
+            const next = { status: result.status, elapsed: result.elapsedSeconds || 0, remaining: result.estimatedRemainingSeconds };
+            return previous?.status === next.status && previous.elapsed === next.elapsed && previous.remaining === next.remaining
+              ? old : { ...old, [characterId]: next };
+          });
           if (result.status === 'failed') setMessage(`Remote upscale failed: ${result.error || 'Unknown error'}`);
-          else setMessage(`Remote GPU upscale: ${result.status} · ${Math.floor((result.elapsedSeconds || 0) / 60)}m ${Math.floor((result.elapsedSeconds || 0) % 60)}s. This job continues on the GPU server.`);
         }
       } catch (error) {
         if (!stopped) setMessage(`Upscale status check failed: ${error instanceof Error ? error.message : String(error)}. The GPU job remains on the server; do not resubmit it.`);
@@ -99,7 +115,7 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
     void poll();
     const interval = setInterval(() => void poll(), 5000);
     return () => { stopped = true; clearInterval(interval); };
-  }, [project.id]);
+  }, [project.id, pendingUpscaleKey]);
   const [creditAlert, setCreditAlert] = useState('');
   const { enabled: soundEnabled, toggle: toggleSound, play: playSound } = useProductionSounds();
   const soundRef = useRef(playSound);
@@ -231,12 +247,15 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
       for (const c of targets) {
         setMessage(`Uploading ${accepted + errors.length + 1}/${targets.length}: ${c.name}. Keep this client running until all jobs are accepted.`);
         try {
-          await request<{ id: string }>('/api/upscale', {
+          const submitted = await request<{ id: string }>('/api/upscale', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ projectId: project.id, characterId: c.id, factor: upscaleFactor }),
           });
           accepted++;
+          latestUpscaleChange.current(c.id, { upscaleJob: {
+            id: submitted.id, submittedAt: Date.now(), factor: upscaleFactor,
+          } });
           setRemoteProgress(old => ({ ...old, [c.id]: { status: 'queued', elapsed: 0 } }));
         } catch (error) {
           errors.push(`${c.name}: ${error instanceof Error ? error.message : String(error)}`);
@@ -244,11 +263,8 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
       }
       const notice = `GPU server accepted ${accepted}/${targets.length} upscale jobs. ${errors.length ? `${errors.length} failed to submit:\n${errors.slice(0, 5).join('\n')}${errors.length > 5 ? `\n…and ${errors.length - 5} more failures.` : ''} Retry only failed images after fixing the errors.` : 'You may turn off the client PC now; processing continues on the GPU server.'} ${accepted ? 'Reopen PaletteIQ to import results.' : ''}`;
       setMessage(notice);
-      // Rehydrate persisted references and start normal background polling.
-      if (accepted) {
-        try { sessionStorage.setItem('paletteiq-upscale-submission-notice', notice); } catch { /* Optional notice. */ }
-        window.location.reload();
-      }
+      // Saved job IDs are now reflected in parent state, which starts status-only polling.
+      // No reload: keep image selection, compare viewer and scroll position intact.
     } finally { setUpscaling(false); }
   };
   const cancelRemoteUpscale = async (character: Character) => {
@@ -256,7 +272,11 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
     try {
       const result = await request<{ status: string; cleared?: boolean }>('/api/upscale', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'cancel', projectId: project.id, characterId: character.id }) });
       setRemoteProgress(old => ({ ...old, [character.id]: { status: result.status, elapsed: old[character.id]?.elapsed || 0 } }));
-      if (result.cleared) { window.location.reload(); return; }
+      if (result.cleared) {
+        latestUpscaleChange.current(character.id, { upscaleJob: undefined });
+        setMessage(`Remote upscale cancelled for ${character.name}.`);
+        return;
+      }
       setMessage(result.status === 'completed'
         ? `GPU job for ${character.name} is already completed and cannot be cancelled. The result is still on the server; PaletteIQ will retry importing it. Do not submit another upscale job.`
         : `Remote upscale for ${character.name}: ${result.status}. Waiting for server confirmation.`);
