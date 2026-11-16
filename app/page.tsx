@@ -16,32 +16,32 @@ import TablePagination from '@/components/table-pagination';
 import EtsyListingDraft, { type SavedSeoReview } from '@/components/etsy-listing-draft';
 import type { EtsyListingDraft as ListingData } from '@/lib/etsy-listing';
 import type { SimilarityReview } from '@/lib/similarity-review';
-import { expressionDistribution, familyDistribution, normalizeCreativeAnalysis, selectDiverseConcepts, type CreativeAnalysis } from '@/lib/creative-intelligence';
+import { expressionDistribution, familyDistribution, normalizeCreativeAnalysis, normalizeCreativeControls, reverseEngineeringKeys, styleDNAKeys, characterDNAKeys, selectDiverseConcepts, type CreativeAnalysis, type CreativeControls } from '@/lib/creative-intelligence';
 
-type Character = { id: string; name: string; family?: string; expression?: string; description: string; prompt: string; status: 'draft' | 'ready' | 'done' | 'error'; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: { id: string; submittedAt?: number; factor?: number }; error?: string; similarityReview?: SimilarityReview; origin: 'listing' | 'ai' | 'manual' };
+type Character = { id: string; name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description: string; prompt: string; status: 'draft' | 'ready' | 'done' | 'error'; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: { id: string; submittedAt?: number; factor?: number }; error?: string; similarityReview?: SimilarityReview; origin: 'listing' | 'ai' | 'manual' };
 type ResearchJobPreview = { id: string; status: 'submitting' | 'queued' | 'in_progress' | 'completed' | 'failed'; target: number; requested: number; completedCount: number; model: string; createdAt: number; updatedAt: number; error?: string };
 const hasActiveResearch = (job?: ResearchJobPreview) => !!job && ['submitting','queued','in_progress'].includes(job.status);
 type PromptJobPreview = { id: string; status: string; total: number; imported: number; failed: number; processedGroups: number; totalGroups: number; model: string; createdAt: number; updatedAt: number; error?: string };
 const hasActivePromptJob = (job?: PromptJobPreview) => !!job && !['completed','completed_with_errors','failed','cancelled','expired'].includes(job.status);
-type Project = { id: string; name: string; url: string; researchJob?: ResearchJobPreview; promptJob?: PromptJobPreview; theme: string; subtheme: string; microtheme?: string; primaryKeyword?: string; longTailKeywords?: string[]; research?: CreativeAnalysis; sourceDescription?: string; sourceTags?: string[]; emotionDirection?: string; ageDirection?: string; cutenessDirection?: string; style: string; palette: string; texture: string; keywords: string[]; characters: Character[]; title: string; images: string[]; selectedImageUrls?: string[]; notes: string; listing?: ListingData; seoReview?: SavedSeoReview; thumbnails?: ThumbnailDesign[]; listingImages?: ListingImageRecord[]; listingStudioSettings?: ListingStudioConfig; lastDownloadedAt?: number; downloadCount?: number; lastDownloadImageCount?: number; downloadedImageIds?: string[] };
+type Project = { id: string; name: string; url: string; researchJob?: ResearchJobPreview; promptJob?: PromptJobPreview; theme: string; subtheme: string; microtheme?: string; primaryKeyword?: string; longTailKeywords?: string[]; research?: CreativeAnalysis; creativeControls?: CreativeControls; sourceDescription?: string; sourceTags?: string[]; emotionDirection?: string; ageDirection?: string; cutenessDirection?: string; style: string; palette: string; texture: string; keywords: string[]; characters: Character[]; title: string; images: string[]; selectedImageUrls?: string[]; notes: string; listing?: ListingData; seoReview?: SavedSeoReview; thumbnails?: ThumbnailDesign[]; listingImages?: ListingImageRecord[]; listingStudioSettings?: ListingStudioConfig; lastDownloadedAt?: number; downloadCount?: number; lastDownloadImageCount?: number; downloadedImageIds?: string[] };
 const etsyListingId = (value: string) => { try { const url = new URL(value.trim()); return ['etsy.com', 'www.etsy.com'].includes(url.hostname) ? url.pathname.match(/^\/listing\/(\d+)/)?.[1] || null : null; } catch { return null; } };
 const uid = () => crypto.randomUUID();
 const blank = (): Project => ({ id: uid(), name: 'Untitled collection', url: '', theme: '', subtheme: '', microtheme: '', primaryKeyword: '', longTailKeywords: [], style: 'Soft hand-painted watercolor illustration', palette: 'Earthy muted colors', texture: 'Natural watercolor pigment granulation', keywords: [], characters: [], title: '', images: [], notes: '' });
-const makeChar = (name: string, origin: Character['origin'], description = '', family = '', expression = ''): Character => ({ id: uid(), name, family, expression, description, prompt: '', status: 'draft', origin });
+const makeChar = (name: string, origin: Character['origin'], description = '', family = '', expression = '', dna: Partial<Character> = {}): Character => ({ id: uid(), name, family, expression, description, prompt: '', status: 'draft', origin, shape: dna.shape, silhouette: dna.silhouette, accessories: dna.accessories, colorPlan: dna.colorPlan });
 const creativeContext = (p: Project): CreativeAnalysis => {
   const research = normalizeCreativeAnalysis(p.research);
   return { ...research, theme: p.theme, subtheme: p.subtheme,
     microtheme: p.microtheme || '', primaryKeyword: p.primaryKeyword || '',
     style: p.style, palette: p.palette, texture: p.texture,
     keywords: p.keywords, longTailKeywords: p.longTailKeywords || [],
-    notes: p.notes,
+    notes: p.notes, creativeControls: normalizeCreativeControls(p.creativeControls ?? research.creativeControls),
     emotionProfile: { ...research.emotionProfile,
       dominantMood: p.emotionDirection === undefined ? research.emotionProfile.dominantMood : p.emotionDirection,
       ageCues: p.ageDirection === undefined ? research.emotionProfile.ageCues : [p.ageDirection].filter(Boolean),
       styleCues: p.cutenessDirection === undefined ? research.emotionProfile.styleCues : [p.cutenessDirection].filter(Boolean) },
   };
 };
-type Concept = { name: string; description?: string; family?: string; expression?: string };
+type Concept = { name: string; description?: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string };
 type StudioApiResponse = { error?: string; source: { title: string; description?: string; images: string[]; tags: string[] }; analysis: Partial<CreativeAnalysis> & { characters: Array<string | Concept> }; selectedImages: string[]; characters: Concept[]; prompts: Array<{ id: string; prompt: string }> };
 const api = async (body: object): Promise<StudioApiResponse> => {
   const payload = JSON.stringify(body);
@@ -298,7 +298,7 @@ export default function Home() {
       const a = data.analysis;
       if (!a || !Array.isArray(a.characters)) throw new Error('OpenAI did not return visual character analysis.');
       const observed = a.characters.map((x: string | Concept) => typeof x === 'string'
-        ? makeChar(x, 'listing') : makeChar(String(x.name || ''), 'listing', String(x.description || ''), String(x.family || ''), String(x.expression || ''))).filter((c: Character) => c.name.trim());
+        ? makeChar(x, 'listing') : makeChar(String(x.name || ''), 'listing', String(x.description || ''), String(x.family || ''), String(x.expression || ''), x)).filter((c: Character) => c.name.trim());
       const previous = working.url === sourceUrl ? working.characters : [];
       const preserved = [...new Map(previous.filter(c => c.name.trim()).map(c => [c.name.trim().toLowerCase(), c])).values()].slice(0, target);
       const verified = [...preserved, ...selectDiverseConcepts(observed, preserved, target, target - preserved.length)];
@@ -321,7 +321,7 @@ export default function Home() {
         attempts++;
         const needed = Math.min(20, target - working.characters.length);
         const result = await api({ action: 'expand', count: needed, target, title: working.title || working.name, analysis: creativeContext(working), images: working.selectedImageUrls ?? working.images, existing: working.characters.map(c => ({ name: c.name, family: c.family, expression: c.expression })) });
-        const proposals: Character[] = (result.characters ?? []).map((x: Concept) => makeChar(String(x.name || ''), 'ai', String(x.description || ''), String(x.family || ''), String(x.expression || '')));
+        const proposals: Character[] = (result.characters ?? []).map((x: Concept) => makeChar(String(x.name || ''), 'ai', String(x.description || ''), String(x.family || ''), String(x.expression || ''), x));
         const added = selectDiverseConcepts(proposals, working.characters, target, target - working.characters.length);
         if (!added.length && ++emptyRounds >= 2) break;
         if (added.length) emptyRounds = 0;
@@ -415,7 +415,7 @@ export default function Home() {
           images: current.selectedImageUrls ?? current.images,
           existing: current.characters.map(c => ({ name: c.name, family: c.family, expression: c.expression })) });
         const proposals = (res.characters ?? []).map((v: Concept) =>
-          makeChar(String(v.name || ''), 'ai', String(v.description || ''), String(v.family || ''), String(v.expression || '')));
+          makeChar(String(v.name || ''), 'ai', String(v.description || ''), String(v.family || ''), String(v.expression || ''), v));
         const batch = selectDiverseConcepts(proposals, current.characters, target, target - current.characters.length);
         if (!batch.length && ++emptyRounds >= 2) break;
         if (batch.length) emptyRounds = 0;
