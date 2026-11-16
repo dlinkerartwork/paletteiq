@@ -201,7 +201,7 @@ export function familyDistribution(items: Array<{ name: string; family?: string 
   return result;
 }
 export function selectDiverseConcepts<T extends DiverseConcept>(
-  proposals: T[], existing: Array<{ name: string; family?: string; expression?: string }>, target: number, limit: number,
+  proposals: T[], existing: Array<{ name: string; family?: string; expression?: string; silhouette?: string }>, target: number, limit: number, characterVariation = 4,
 ): T[] {
   if (limit <= 0) return [];
   const current = familyDistribution(existing);
@@ -209,7 +209,18 @@ export function selectDiverseConcepts<T extends DiverseConcept>(
   const emotions = expressionDistribution(existing);
   // A broad catalog should cover at least eight different subject families.
   // This caps repetition of the SAME species/category, not the number of poses.
-  const perFamilyCap = Math.max(3, Math.ceil(Math.max(1, target) / 8));
+  const variation = Math.max(1, Math.min(5, Math.round(characterVariation)));
+  const desiredFamilies = Math.max(4, 8 + (variation - 4) * 2);
+  const perFamilyCap = Math.max(3, Math.ceil(Math.max(1, target) / desiredFamilies));
+  // Silhouette repeats within the same subject family are not meaningfully
+  // different assets simply because their colors or accessories change.
+  const silhouetteSignature = (item: { name: string; family?: string; silhouette?: string }) => {
+    const silhouette = clean(item.silhouette, 180).toLowerCase()
+      .replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+    return silhouette.length >= 14 && silhouette.split(' ').length >= 3
+      ? conceptFamily(item.family, item.name) + ':' + silhouette : '';
+  };
+  const seenSilhouettes = new Set(existing.map(silhouetteSignature).filter(Boolean));
   const ordered = [...proposals].sort((a, b) => {
     const familyGap = (current[conceptFamily(a.family, a.name)] || 0) - (current[conceptFamily(b.family, b.name)] || 0);
     return familyGap || (emotions[(a.expression || '').trim().toLowerCase() || 'unspecified'] || 0) -
@@ -220,8 +231,10 @@ export function selectDiverseConcepts<T extends DiverseConcept>(
     const name = clean(candidate.name, 160), signature = conceptSignature(name);
     if (!signature || seen.has(signature)) continue;
     const family = conceptFamily(candidate.family, name);
-    if ((current[family] || 0) >= perFamilyCap) continue;
-    accepted.push(candidate); seen.add(signature); current[family] = (current[family] || 0) + 1;
+    const silhouette = silhouetteSignature(candidate);
+    if ((current[family] || 0) >= perFamilyCap || (silhouette && seenSilhouettes.has(silhouette))) continue;
+    accepted.push(candidate); seen.add(signature); if (silhouette) seenSilhouettes.add(silhouette);
+    current[family] = (current[family] || 0) + 1;
     const expression = clean(candidate.expression, 120).toLowerCase() || 'unspecified';
     emotions[expression] = (emotions[expression] || 0) + 1;
     if (accepted.length >= limit) break;
