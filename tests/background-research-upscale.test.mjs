@@ -44,7 +44,7 @@ test('research POST stores job before paid request, remote response survives dis
   assert.match(api, /eq\(projects\.updatedAt, saved\.row\.updatedAt\)/);
   assert.match(api, /if \(active\(saved\.data\.researchJob\)\)/);
   assert.match(api, /requested = Math\.min\(target, 160\)/);
-  assert.match(api, /researchAnalysisInstruction\(source, selectedImages\.length, requested\)/);
+  assert.match(api, /researchAnalysisInstruction\(source, selectedImages\.length, requested,/);
   assert.match(api, /return Response\.json\(\{ job: safeJob\(savedJob/);
 });
 
