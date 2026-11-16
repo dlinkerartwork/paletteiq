@@ -155,7 +155,7 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
     const refresh = async (manual = false, sync = true) => {
       if (syncBusy.current) { if (manual) setMessage('A refresh is already in progress.'); return; }
       syncBusy.current = true;
-      setRefreshing(true);
+      if (manual) setRefreshing(true);
       try {
         const data = await request<{ jobs: Job[] }>(`/api/image-batches?projectId=${encodeURIComponent(project.id)}&sync=${sync ? '1' : '0'}`);
         if (closed) return;
@@ -167,7 +167,7 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
         previousBatchStates.current = new Map(freshJobs.map(job => [job.id, job.status]));
         const warning = freshJobs.find(job => isOpenAICreditError(job.warning))?.warning;
         if (warning) reportCredit(warning);
-        setJobs(freshJobs);
+        setJobs(previous => JSON.stringify(previous) === JSON.stringify(freshJobs) ? previous : freshJobs);
         setJobsLoaded(true);
         // The stored collection is authoritative; historical completed jobs must not
         // overwrite a newer single or batch regeneration on the client.
@@ -179,7 +179,7 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
         }
         if (manual && !closed) setMessage('Image and Batch job statuses refreshed.');
       } catch (e) { if (!closed) { setMessage(e instanceof Error ? e.message : String(e)); reportCredit(e); } }
-      finally { syncBusy.current = false; if (!closed) setRefreshing(false); }
+      finally { syncBusy.current = false; if (!closed && manual) setRefreshing(false); }
     };
     refreshNow.current = () => refresh(true, true);
     // Read locally persisted batch status first. OpenAI polling/import must not
