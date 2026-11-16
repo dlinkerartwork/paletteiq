@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import {
   normalizeCreativeAnalysis, normalizeCreativeControls, defaultCreativeControls,
-  reverseEngineeringKeys, styleDNAKeys, characterDNAKeys, selectDiverseConcepts,
+  reverseEngineeringKeys, styleDNAKeys, characterDNAKeys, selectDiverseConcepts, auditCreativeConcepts,
 } from '../lib/creative-intelligence.ts';
 import { researchAnalysisInstruction, diversityExpansionInstruction, productionPromptInstruction } from '../lib/creative-research-prompts.ts';
 import { buildPromptBatchInput, projectPromptContext } from '../lib/prompt-batch-jobs.ts';
@@ -162,4 +162,27 @@ test('all UI and API paths propagate research DNA and five settings', () => {
   assert.match(direct,/colorPlan: String\(c.colorPlan/);
   assert.match(remote,/normalizeCreativeControls\(saved.data.creativeControls\)/);
   assert.match(remote,/silhouette: c.silhouette/);
+});
+
+test('concept QA detects duplicate silhouettes, tracks variation, and does not assert visual pixel quality', () => {
+  const audit = auditCreativeConcepts([
+    { name:'Pink Dumpling',family:'dessert',shape:'chubby oval',silhouette:'rounded oval with folded corners',expression:'happy',accessories:'bow',colorPlan:'mint' },
+    { name:'Lavender Dumpling',family:'dessert',shape:'chubby oval',silhouette:'rounded oval with folded corners',expression:'wink',accessories:'sprinkles',colorPlan:'lavender' },
+    { name:'Mint Bunny',family:'rabbit',shape:'long oval',silhouette:'long bunny ears and short feet',expression:'happy',accessories:'bow',colorPlan:'mint' },
+  ], completeAnalysis.styleDNA);
+  assert.equal(audit.duplicateNames,0);
+  assert.equal(audit.duplicateSilhouettes,1);
+  assert.equal(audit.distinctFamilies,2);
+  assert.equal(audit.distinctExpressions,2);
+  assert.equal(audit.distinctColorPlans,2);
+  assert.equal(audit.distinctAccessories,2);
+  assert.equal(audit.missingShape,0);
+  assert.equal(audit.hasStyleDNA,true);
+  assert.equal(audit.hasRenderingRules,true);
+  const blank = auditCreativeConcepts([{ name:'Flower' }], {});
+  assert.equal(blank.hasStyleDNA,false);
+  assert.equal(blank.hasRenderingRules,false);
+  const ui=readFileSync(new URL('../app/page.tsx',import.meta.url),'utf8');
+  assert.match(ui,/Concept Diversity QA \(before image generation\)/);
+  assert.match(ui,/not an assessment of final image pixels/);
 });
