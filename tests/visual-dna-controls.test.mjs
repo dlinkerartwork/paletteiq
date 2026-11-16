@@ -132,7 +132,7 @@ test('nine-component image prompt formula applies reference style, not preset gl
   assert.match(text,/CHARACTER DNA/);
   assert.match(text,/transparent-background PNG/);
   assert.match(text,/shy wink/);
-  assert.match(text,/glossy 3D or glitter/);
+  assert.match(text,/do not force 3D or glitter/);
 });
 
 test('batch prompts preserve all character DNA and creative controls', () => {
