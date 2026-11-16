@@ -4,7 +4,7 @@ import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { getDb } from '@/db';
 import { projects } from '@/db/schema';
 import { userCredential } from '@/lib/credentials';
-import { mergeSourceEmotionProfile, normalizeCreativeAnalysis, selectDiverseConcepts } from '@/lib/creative-intelligence';
+import { mergeSourceEmotionProfile, normalizeCreativeAnalysis, normalizeCreativeControls, selectDiverseConcepts } from '@/lib/creative-intelligence';
 import { researchAnalysisInstruction } from '@/lib/creative-research-prompts';
 
 type Concept = { name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description?: string };
@@ -105,7 +105,8 @@ async function finish(owner: string, projectId: string, job: ResearchJob, respon
   const previous = saved.data.characters || [];
   const uniquePrevious = [...new Map(previous.filter(c => c.name).map(c => [c.name.trim().toLowerCase(), c])).values()];
   const needed = Math.max(0, job.target - uniquePrevious.length);
-  const selected = selectDiverseConcepts(candidates, uniquePrevious, job.target, needed);
+  const selected = selectDiverseConcepts(candidates, uniquePrevious, job.target, needed,
+    normalizeCreativeControls(saved.data.creativeControls).characterVariation);
   const characters: StoredCharacter[] = [
     ...uniquePrevious,
     ...selected.map(c => ({ id: crypto.randomUUID(), name: c.name, family: c.family,
@@ -189,7 +190,8 @@ export async function POST(req: Request) {
     .returning({ id: projects.id });
   if (!claim.length) return bad('Collection changed in another tab. Refresh and retry before paying for analysis.', 409);
   try {
-    const instruction = researchAnalysisInstruction(source, selectedImages.length, requested);
+    const instruction = researchAnalysisInstruction(source, selectedImages.length, requested,
+      normalizeCreativeControls(saved.data.creativeControls));
     const input = [{ role: 'user', content: [
       { type: 'input_text', text: instruction },
       ...selectedImages.map(image_url => ({ type: 'input_image', image_url })),
