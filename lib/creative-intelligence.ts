@@ -141,6 +141,7 @@ export function familyDistribution(items: Array<{ name: string; family?: string 
 export function selectDiverseConcepts<T extends DiverseConcept>(
   proposals: T[], existing: Array<{ name: string; family?: string; expression?: string }>, target: number, limit: number,
 ): T[] {
+  if (limit <= 0) return [];
   const current = familyDistribution(existing);
   const seen = new Set(existing.map(c => conceptSignature(c.name)));
   const emotions = expressionDistribution(existing);
