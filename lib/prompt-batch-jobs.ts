@@ -1,5 +1,5 @@
-import { normalizeCreativeAnalysis, type CreativeAnalysis } from './creative-intelligence';
-import { productionPromptInstruction } from './creative-research-prompts';
+import { normalizeCreativeAnalysis, type CreativeAnalysis } from './creative-intelligence.ts';
+import { productionPromptInstruction } from './creative-research-prompts.ts';
 
 export type PromptTarget = {
   id: string; name: string; family?: string; expression?: string;
