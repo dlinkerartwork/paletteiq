@@ -12,7 +12,7 @@ import { hasTargetSeoAltLength, normalizeSeoAlt } from '@/lib/seo-alt-text';
 import { reviewImageSimilarity, type SimilarityReview } from '@/lib/similarity-review';
 import { nativeAssetBucket } from '@/lib/native-bridge';
 import { acquireProductionLocks } from '@/lib/production-locks';
-import { expressionDistribution, familyDistribution, mergeSourceEmotionProfile, normalizeCreativeAnalysis } from '@/lib/creative-intelligence';
+import { expressionDistribution, familyDistribution, mergeSourceEmotionProfile, normalizeCreativeAnalysis, normalizeCreativeControls } from '@/lib/creative-intelligence';
 import { diversityExpansionInstruction, productionPromptInstruction, researchAnalysisInstruction } from '@/lib/creative-research-prompts';
 
 const fail = (error: string, status = 400) => Response.json({ error }, { status });
@@ -202,7 +202,7 @@ export async function POST(req: Request) {
     const geminiKeys = provider === 'gemini' ? await userGeminiKeys(user.userId) : [];
     if (provider === 'openai' && !aiKey) return fail('OpenAI API not connected. Configure it in Settings to analyze images.', 503);
     if (provider === 'gemini' && !geminiKeys.length) return fail('Gemini API key not connected. Configure it in Settings to analyze images.', 503);
-    const analysisText = researchAnalysisInstruction(source, selectedImages.length);
+    const analysisText = researchAnalysisInstruction(source, selectedImages.length, 20, normalizeCreativeControls(body.creativeControls));
     const input = [{ role: 'user', content: [{ type: 'input_text', text: analysisText }, ...selectedImages.map((image_url: string) => ({ type: 'input_image', image_url }))] }];
     if (provider === 'openai') {
       const ai = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model, input, text: { format: { type: 'json_object' } } }) });
