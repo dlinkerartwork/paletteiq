@@ -94,6 +94,26 @@ export async function POST(req: Request) {
     if (current.length) {
       // An older browser snapshot must not erase assets already persisted by the image worker.
       const old = JSON.parse(current[0].data) as { thumbnails?: Array<{ id: string; upscaledImageUrl?: string; upscaleJob?: { id: string } }>; characters?: Array<{ id: string; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: { id: string }; status?: string; similarityReview?: SimilarityReview }>; lastDownloadedAt?: number; downloadCount?: number; lastDownloadImageCount?: number; downloadedImageIds?: string[] };
+      // A background research run is server-owned. A stale page or a Save from
+      // another tab must never erase its tracking ID or imported concepts.
+      const serverResearch = (old as { researchJob?: { id: string; status: string } }).researchJob;
+      const browserResearch = incoming.researchJob as { id?: string; status?: string } | undefined;
+      if (serverResearch) {
+        incoming.researchJob = serverResearch;
+        if (serverResearch.status === 'completed' && (browserResearch?.id !== serverResearch.id || browserResearch.status !== 'completed')) {
+          // The background response was imported while this browser held an old
+          // snapshot. Preserve the new analysis, context and subject library.
+          for (const field of ['title','theme','subtheme','microtheme','style','palette','texture','primaryKeyword',
+            'longTailKeywords','keywords','notes','research','emotionDirection','ageDirection',
+            'cutenessDirection','sourceDescription','sourceTags','images','selectedImageUrls'] as const) {
+            if ((old as Record<string, unknown>)[field] !== undefined)
+              incoming[field] = (old as Record<string, unknown>)[field];
+          }
+          const persisted = old.characters || [];
+          const persistedIds = new Set(persisted.map(c => c.id));
+          incoming.characters = [...persisted as SubjectInput[], ...incoming.characters.filter(c => !persistedIds.has(c.id))];
+        }
+      }
       // Style analysis is server-owned and derived from original collection pixels.
       // A stale browser snapshot must never erase its cached (paid) Vision result.
       const storedStyle = (old as { listingVisualStyle?: unknown }).listingVisualStyle;
