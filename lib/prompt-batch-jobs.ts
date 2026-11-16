@@ -1,9 +1,9 @@
-import { normalizeCreativeAnalysis, type CreativeAnalysis } from './creative-intelligence.ts';
+import { normalizeCreativeAnalysis, normalizeCreativeControls, type CreativeAnalysis, type CreativeControls } from './creative-intelligence.ts';
 import { productionPromptInstruction } from './creative-research-prompts.ts';
 
 export type PromptTarget = {
   id: string; name: string; family?: string; expression?: string;
-  description?: string; prompt?: string; status?: string; imageUrl?: string;
+  description?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; prompt?: string; status?: string; imageUrl?: string;
 };
 export type PromptBatchItem = {
   id: string; originalFingerprint: string;
@@ -22,7 +22,7 @@ export type PromptProject = {
   microtheme?: string; style?: string; palette?: string; texture?: string;
   primaryKeyword?: string; keywords?: string[]; longTailKeywords?: string[];
   notes?: string; emotionDirection?: string; ageDirection?: string;
-  cutenessDirection?: string; research?: CreativeAnalysis;
+  cutenessDirection?: string; research?: CreativeAnalysis; creativeControls?: CreativeControls;
   characters: PromptTarget[]; promptJob?: PromptBatchJob;
   [key: string]: unknown;
 };
@@ -45,6 +45,7 @@ export function projectPromptContext(p: PromptProject): CreativeAnalysis {
     palette: p.palette || a.palette, texture: p.texture || a.texture,
     primaryKeyword: p.primaryKeyword || a.primaryKeyword, keywords: p.keywords || a.keywords,
     longTailKeywords: p.longTailKeywords || a.longTailKeywords, notes: p.notes || a.notes,
+    creativeControls: normalizeCreativeControls(p.creativeControls ?? a.creativeControls),
     emotionProfile: {
       ...a.emotionProfile,
       dominantMood: p.emotionDirection === undefined ? a.emotionProfile.dominantMood : p.emotionDirection,
@@ -65,7 +66,8 @@ export function buildPromptBatchInput(p: PromptProject, selected: PromptTarget[]
       title: p.title || p.name, analysis: context,
       characters: subset.map(c => ({
         id: c.id, name: c.name, family: c.family, expression: c.expression,
-        description: c.description, previousPrompt: c.prompt?.slice(0, 1200),
+        description: c.description, shape: c.shape, silhouette: c.silhouette,
+        accessories: c.accessories, colorPlan: c.colorPlan, previousPrompt: c.prompt?.slice(0, 1200),
       })),
     });
     lines.push(JSON.stringify({
@@ -108,7 +110,7 @@ export function parsePromptBatchOutput(jsonl: string, groups: PromptBatchGroup[]
     for (const item of Array.isArray(decoded?.prompts) ? decoded.prompts : []) {
       if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !expected.has(item.id) || found.has(item.id)) continue;
       found.add(item.id);
-      if (typeof item.prompt === 'string' && item.prompt.trim().length > 60) prompts.set(item.id, item.prompt.trim().slice(0, 2600));
+      if (typeof item.prompt === 'string' && item.prompt.trim().length > 60) prompts.set(item.id, item.prompt.trim().slice(0, 6000));
       else errors.set(item.id, 'OpenAI returned an empty or too-short image prompt.');
     }
     for (const id of group.ids) if (!prompts.has(id) && !errors.has(id)) {
