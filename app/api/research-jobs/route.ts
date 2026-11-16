@@ -7,8 +7,8 @@ import { userCredential } from '@/lib/credentials';
 import { mergeSourceEmotionProfile, normalizeCreativeAnalysis, selectDiverseConcepts } from '@/lib/creative-intelligence';
 import { researchAnalysisInstruction } from '@/lib/creative-research-prompts';
 
-type Concept = { name: string; family?: string; expression?: string; description?: string };
-type StoredCharacter = { id: string; name: string; family?: string; expression?: string; description?: string; status?: string; prompt?: string; origin?: string; imageUrl?: string };
+type Concept = { name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description?: string };
+type StoredCharacter = { id: string; name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description?: string; status?: string; prompt?: string; origin?: string; imageUrl?: string };
 type Source = { title: string; description: string; tags: string[]; images: string[] };
 type ResearchJob = {
   id: string; status: 'submitting' | 'queued' | 'in_progress' | 'completed' | 'failed';
@@ -77,6 +77,10 @@ function normalizedProposals(value: unknown): Concept[] {
       name: char.name.trim().slice(0, 160),
       family: typeof char.family === 'string' ? char.family.slice(0, 120) : '',
       expression: typeof char.expression === 'string' ? char.expression.slice(0, 160) : '',
+      shape: typeof char.shape === 'string' ? char.shape.slice(0, 180) : '',
+      silhouette: typeof char.silhouette === 'string' ? char.silhouette.slice(0, 180) : '',
+      accessories: typeof char.accessories === 'string' ? char.accessories.slice(0, 180) : '',
+      colorPlan: typeof char.colorPlan === 'string' ? char.colorPlan.slice(0, 180) : '',
       description: typeof char.description === 'string' ? char.description.slice(0, 500) : '',
     }];
   });
@@ -105,7 +109,7 @@ async function finish(owner: string, projectId: string, job: ResearchJob, respon
   const characters: StoredCharacter[] = [
     ...uniquePrevious,
     ...selected.map(c => ({ id: crypto.randomUUID(), name: c.name, family: c.family,
-      expression: c.expression, description: c.description || '', origin: 'ai',
+      expression: c.expression, shape: c.shape, silhouette: c.silhouette, accessories: c.accessories, colorPlan: c.colorPlan, description: c.description || '', origin: 'ai',
       prompt: '', status: 'draft' })),
   ];
   const updatedJob: ResearchJob = { ...job, status: 'completed', completedCount: characters.length, updatedAt: Date.now() };
