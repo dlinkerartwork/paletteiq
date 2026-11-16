@@ -17,7 +17,7 @@ import { diversityExpansionInstruction, productionPromptInstruction, researchAna
 
 const fail = (error: string, status = 400) => Response.json({ error }, { status });
 const secret = (key: string) => (env as unknown as Record<string, string | undefined>)[key];
-type SubjectInput = { id: string; name: string; family?: string; expression?: string; description?: string; prompt?: string; status?: string; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: { id: string }; error?: string; similarityReview?: SimilarityReview };
+type SubjectInput = { id: string; name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description?: string; prompt?: string; status?: string; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: { id: string }; error?: string; similarityReview?: SimilarityReview };
 type ProjectInput = { id: string; name: string; characters: SubjectInput[]; [key: string]: unknown };
 type StudioRequest = { action: string; id: string; name: string; data: ProjectInput; url: string; project: ProjectInput; draft?: unknown; projectId: string; characterId: string; model: string; quality: string; selectedImages?: unknown[]; characters?: SubjectInput[]; [key: string]: unknown };
 type AiTextResult = { output?: Array<{ content?: Array<{ text?: string }> }> };
@@ -26,13 +26,17 @@ const normalizeResearchPayload = (value: unknown, source: { title: string; tags:
   const raw = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
   const analysis = mergeSourceEmotionProfile(normalizeCreativeAnalysis(raw), source.title, source.tags);
   const characters = Array.isArray(raw.characters) ? raw.characters.slice(0, 20).flatMap(item => {
-    if (typeof item === 'string') return [{ name: item.slice(0, 160), family: '', expression: '', description: '' }];
+    if (typeof item === 'string') return [{ name: item.slice(0, 160), family: '', expression: '', shape: '', silhouette: '', accessories: '', colorPlan: '', description: '' }];
     if (!item || typeof item !== 'object') return [];
     const c = item as Record<string, unknown>;
     if (typeof c.name !== 'string' || !c.name.trim()) return [];
     return [{ name: c.name.trim().slice(0, 160),
       family: typeof c.family === 'string' ? c.family.trim().slice(0, 120) : '',
       expression: typeof c.expression === 'string' ? c.expression.trim().slice(0, 160) : '',
+      shape: typeof c.shape === 'string' ? c.shape.trim().slice(0, 180) : '',
+      silhouette: typeof c.silhouette === 'string' ? c.silhouette.trim().slice(0, 180) : '',
+      accessories: typeof c.accessories === 'string' ? c.accessories.trim().slice(0, 180) : '',
+      colorPlan: typeof c.colorPlan === 'string' ? c.colorPlan.trim().slice(0, 180) : '',
       description: typeof c.description === 'string' ? c.description.trim().slice(0, 500) : '' }];
   }) : [];
   return { ...analysis, characters };
@@ -263,7 +267,7 @@ export async function POST(req: Request) {
     const input = [{ role: 'user', content: [{ type: 'input_text', text: instruction }, ...images.map(image_url => ({ type: 'input_image', image_url }))] }];
     const ai = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'gpt-4.1-mini', input, text: { format: { type: 'json_object' } } }) });
     if (!ai.ok) return fail(`AI expansion returned ${ai.status}`, 502);
-    try { const result = JSON.parse(extractText(await ai.json())) as { characters?: Array<{ name: string; family?: string; expression?: string; description?: string }> }; const characters = Array.isArray(result.characters) ? result.characters.filter(c => c && typeof c.name === 'string' && c.name.trim()).slice(0, count).map(c => ({ name: c.name.trim().slice(0,160), family: String(c.family || '').slice(0,120), expression: String(c.expression || '').slice(0,160), description: String(c.description || '').slice(0,500) })) : []; return Response.json({ characters }); } catch { return fail('Invalid AI response', 502); }
+    try { const result = JSON.parse(extractText(await ai.json())) as { characters?: Array<{ name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description?: string }> }; const characters = Array.isArray(result.characters) ? result.characters.filter(c => c && typeof c.name === 'string' && c.name.trim()).slice(0, count).map(c => ({ name: c.name.trim().slice(0,160), family: String(c.family || '').slice(0,120), expression: String(c.expression || '').slice(0,160), shape: String(c.shape || '').slice(0,180), silhouette: String(c.silhouette || '').slice(0,180), accessories: String(c.accessories || '').slice(0,180), colorPlan: String(c.colorPlan || '').slice(0,180), description: String(c.description || '').slice(0,500) })) : []; return Response.json({ characters }); } catch { return fail('Invalid AI response', 502); }
   }
   if (body.action === 'generate-prompts') {
     const provider = body.promptProvider ?? 'openai';
@@ -274,7 +278,7 @@ export async function POST(req: Request) {
     const context = normalizeCreativeAnalysis(body.analysis ?? body);
     const characters = incoming.map(c => ({ id: String(c.id).slice(0, 80),
       name: String(c.name).slice(0, 200), family: String(c.family ?? '').slice(0, 120),
-      expression: String(c.expression ?? '').slice(0, 160), description: String(c.description ?? '').slice(0, 500),
+      expression: String(c.expression ?? '').slice(0, 160), shape: String(c.shape ?? '').slice(0, 180), silhouette: String(c.silhouette ?? '').slice(0, 180), accessories: String(c.accessories ?? '').slice(0, 180), colorPlan: String(c.colorPlan ?? '').slice(0, 180), description: String(c.description ?? '').slice(0, 500),
       previousPrompt: String(c.prompt ?? '').slice(0, 1200) }));
     const requestText = productionPromptInstruction({
       title: String(body.title ?? '').slice(0, 350), analysis: context, characters,
