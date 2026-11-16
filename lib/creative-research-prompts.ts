@@ -203,7 +203,7 @@ EXISTING SUBJECTS (avoid duplicates): ${brief(existing.slice(-750))}`;
 
 export function productionPromptInstruction(input: {
   title: string; analysis: Partial<CreativeAnalysis>;
-  characters: Array<{ id: string; name: string; family?: string; expression?: string; description?: string; previousPrompt?: string }>;
+  characters: Array<{ id: string; name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description?: string; previousPrompt?: string }>;
 }): string {
   return `Create ONE detailed standalone English IMAGE GENERATION prompt for EACH supplied subject.
 Return ONLY JSON {"prompts":[{"id":"exact id","prompt":"specific rich image prompt"}]}.
