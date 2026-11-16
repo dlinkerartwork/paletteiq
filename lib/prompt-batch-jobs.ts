@@ -105,8 +105,8 @@ export function parsePromptBatchOutput(jsonl: string, groups: PromptBatchGroup[]
     try { decoded = JSON.parse(text) as { prompts?: Array<{ id: string; prompt: string }> }; } catch { /* See errors below. */ }
     const expected = new Set(group.ids);
     const found = new Set<string>();
-    for (const item of decoded?.prompts || []) {
-      if (typeof item.id !== 'string' || !expected.has(item.id) || found.has(item.id)) continue;
+    for (const item of Array.isArray(decoded?.prompts) ? decoded.prompts : []) {
+      if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !expected.has(item.id) || found.has(item.id)) continue;
       found.add(item.id);
       if (typeof item.prompt === 'string' && item.prompt.trim().length > 60) prompts.set(item.id, item.prompt.trim().slice(0, 2600));
       else errors.set(item.id, 'OpenAI returned an empty or too-short image prompt.');
