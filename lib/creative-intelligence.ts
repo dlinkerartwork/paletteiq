@@ -200,6 +200,47 @@ export function familyDistribution(items: Array<{ name: string; family?: string 
   for (const c of items) { const key = conceptFamily(c.family, c.name); result[key] = (result[key] || 0) + 1; }
   return result;
 }
+export type ConceptAudit = {
+  total: number; duplicateNames: number; duplicateSilhouettes: number;
+  distinctFamilies: number; distinctExpressions: number; distinctColorPlans: number;
+  distinctAccessories: number; missingShape: number; missingSilhouette: number;
+  missingColorPlan: number; hasStyleDNA: boolean; hasRenderingRules: boolean;
+};
+/** Concept-level checks only. Pixel-level rendering quality needs image inspection. */
+export function auditCreativeConcepts(items: DiverseConcept[], style?: Partial<StyleDNA>): ConceptAudit {
+  const names = new Set<string>(), silhouettes = new Set<string>();
+  const colors = new Set<string>(), expressions = new Set<string>(), accessories = new Set<string>();
+  let duplicateNames = 0, duplicateSilhouettes = 0;
+  let missingShape = 0, missingSilhouette = 0, missingColorPlan = 0;
+  for (const item of items) {
+    const name = conceptSignature(item.name || '');
+    if (name && names.has(name)) duplicateNames++;
+    else if (name) names.add(name);
+    const silhouette = clean(item.silhouette, 180).toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!clean(item.shape, 180)) missingShape++;
+    if (!silhouette) missingSilhouette++;
+    if (silhouette.length >= 14 && silhouette.split(' ').length >= 3) {
+      const key = conceptFamily(item.family, item.name) + ':' + silhouette;
+      if (silhouettes.has(key)) duplicateSilhouettes++;
+      else silhouettes.add(key);
+    }
+    const color = clean(item.colorPlan, 180).toLowerCase();
+    if (!color) missingColorPlan++; else colors.add(color);
+    const exp = clean(item.expression, 160).toLowerCase();
+    if (exp && exp !== 'not applicable') expressions.add(exp);
+    const accessory = clean(item.accessories, 160).toLowerCase();
+    if (accessory && accessory !== 'none' && accessory !== 'not applicable') accessories.add(accessory);
+  }
+  return {
+    total: items.length, duplicateNames, duplicateSilhouettes,
+    distinctFamilies: Object.keys(familyDistribution(items)).length,
+    distinctExpressions: expressions.size, distinctColorPlans: colors.size,
+    distinctAccessories: accessories.size, missingShape, missingSilhouette,
+    missingColorPlan, hasStyleDNA: !!(style?.visualLanguage || style?.materialRules || style?.paletteRules),
+    hasRenderingRules: !!(style?.renderingRules || style?.lightingRules || style?.outlineRules),
+  };
+}
+
 export function selectDiverseConcepts<T extends DiverseConcept>(
   proposals: T[], existing: Array<{ name: string; family?: string; expression?: string; silhouette?: string }>, target: number, limit: number, characterVariation = 4,
 ): T[] {
