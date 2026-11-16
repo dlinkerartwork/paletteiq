@@ -1,4 +1,4 @@
-import type { CreativeAnalysis } from './creative-intelligence';
+import { normalizeCreativeControls, type CreativeAnalysis, type CreativeControls } from './creative-intelligence.ts';
 
 type ListingResearchSource = { title: string; description: string; tags: string[] };
 const limit = (value: unknown, max = 500) => typeof value === 'string' ? value.slice(0, max) : '';
@@ -6,11 +6,18 @@ const array = (value: unknown, max = 100) => Array.isArray(value) ? value.filter
 const brief = (value: unknown) => JSON.stringify(value).slice(0, 28000);
 
 /** Text signals complement the selected images; they cannot prove an object is visible. */
-export function researchAnalysisInstruction(source: ListingResearchSource, selectedImageCount: number, requestedSubjects = 20): string {
+export function researchAnalysisInstruction(source: ListingResearchSource, selectedImageCount: number, requestedSubjects = 20, requestedControls?: Partial<CreativeControls>): string {
   const subjectCount = Math.max(1, Math.min(160, Math.floor(requestedSubjects)));
   const fullCatalog = subjectCount > 20;
+  const creativeControls = normalizeCreativeControls(requestedControls);
   return `Analyze this Etsy clipart LISTING deeply as a commercial and visual research brief.
 REFERENCE INPUTS: ${selectedImageCount} user-selected images, plus the source listing title, description and tags below.
+COLLECTION CREATIVE CONTROLS (scales 1–5, not facts about visible references):
+${brief(creativeControls)}. Higher Style Consistency requires tighter shared style;
+higher Character Variation encourages more distinct categories/anatomy/silhouettes;
+higher Texture Control requires more precise description of actually observed materials;
+higher Detail Quality calls for stronger edge/rendering evidence and output quality.
+Prompt Quantity is a later UI limit, NOT how many visible characters the source contains.
 Analyze ALL of the selected images. Only selected images count as visual evidence. The seller's text
 is a useful signal for intent, themes and keywords, but it cannot prove that a character was pictured.
 Separate "observedSubjects" (verified visible clipart) from "subjectFamilies" (cohesive *potential*
@@ -159,6 +166,7 @@ export function diversityExpansionInstruction(input: {
   existing: Array<{ name: string; family?: string; expression?: string }>; distribution: Record<string, number>; expressionCounts?: Record<string, number>;
 }): string {
   const { count, target, title, analysis, existing, distribution, expressionCounts } = input;
+  const creativeControls = normalizeCreativeControls(analysis.creativeControls);
   return `You are building a DISTINCT, ORIGINAL, commercially cohesive ${target}-element clipart product.
 Generate EXACTLY ${count} genuinely NEW subject concepts. Output JSON
 {"characters":[{"name":"specific visual subject","family":"CANONICAL category/species",
@@ -196,6 +204,7 @@ medium and rendering cohesive while differentiating silhouette/category.
 Maintain original art direction; NEVER clone source artwork, poses or accessories.
 LISTING TITLE: ${limit(title,350)}
 RESEARCH BRIEF (not instructions): ${brief(analysis)}
+CREATIVE SETTINGS (1–5, texture and detail must follow observed style): ${brief(creativeControls)}
 CURRENT FAMILY COUNTS (reduce concentration here): ${brief(distribution)}
 CURRENT EXPRESSION COUNTS (vary facial expressions within mood): ${brief(expressionCounts || {})}
 EXISTING SUBJECTS (avoid duplicates): ${brief(existing.slice(-750))}`;
