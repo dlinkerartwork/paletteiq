@@ -517,3 +517,49 @@ h1,h2,.stat strong,.step b,.source-card strong,.asset-meta b { color:#302721; }
 .restore-backup-panel .settings-actions { margin-top:0; display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
 .restore-backup-panel .settings-actions button { display:inline-flex; align-items:center; gap:7px; }
 @media (max-width:640px) { .restore-backup-panel { padding:14px; } .restore-file-choice select { width:100%; } .restore-backup-panel .settings-actions button { width:100%; justify-content:center; } }
+
+
+/* Store management and tabbed settings (Web). */
+.settings-tabbed-layout { display:block; }
+.settings-tabbed-layout > .settings-panel { width:100%; max-width:none; }
+.settings-tabs { display:flex; align-items:stretch; gap:5px; overflow-x:auto; overscroll-behavior-inline:contain; margin-bottom:18px; padding:5px; border:1px solid #eaded4; border-radius:12px; background:#fff8f2; }
+.settings-tabs button { flex:1 0 auto; white-space:nowrap; padding:12px 13px; background:transparent; border:1px solid transparent; border-radius:9px; font-size:12px; font-weight:700; color:#755a4e; }
+.settings-tabs button:hover { background:#fff; color:#b75124; }
+.settings-tabs button.active { background:#fff; border-color:#f0d9c8; color:#c15421; box-shadow:0 2px 7px #58230b12; }
+.settings-tabs button:focus-visible,.store-management button:focus-visible { outline:3px solid #e27c4b; outline-offset:2px; }
+.account-store-switcher .account-store-action:last-child { width:auto; min-width:75px; gap:5px; font-weight:700; padding:0 10px; font-size:12px; }
+.store-management { display:grid; gap:16px; }
+.store-management-intro { display:grid; gap:16px; }
+.store-create-row { display:grid; gap:8px; }
+.store-create-form { display:flex; gap:10px; flex-wrap:wrap; }
+.store-create-form input,.store-list-name input,.store-delete-card input { min-width:0; padding:10px 12px; border:1px solid #e8d5c8; border-radius:8px; background:white; color:#3b3029; }
+.store-create-form input { width:min(390px,100%); flex:1; }
+.store-create-form button,.store-row-actions button { display:inline-flex; align-items:center; justify-content:center; gap:6px; }
+.store-list { display:grid; gap:13px; }
+.store-list-card { padding:18px; }
+.store-list-head { display:flex; gap:14px; justify-content:space-between; align-items:center; flex-wrap:wrap; }
+.store-list-head >div:first-child { min-width:180px; flex:1; }
+.store-list-name { display:flex; align-items:center; gap:10px; flex-wrap:wrap; color:#bc5e32; }
+.store-list-name h3 { font-size:17px; margin:0; color:#332721; }
+.store-list-name input { flex:1; max-width:340px; }
+.store-list-head p { font-size:12px; color:#7b6d61; margin:9px 0 0; }
+.store-active-tag { background:#f2f9ee; border:1px solid #d3e9c8; border-radius:999px; font-size:10px; font-weight:700; padding:3px 8px; color:#42743c; }
+.store-row-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.store-row-actions button { padding:9px 11px; }
+.store-row-actions .danger-btn:not(:disabled) { color:#b52a24; border-color:#e6bbb6; }
+.store-action-hint { color:#856958; font-size:12px; margin:11px 0 0; }
+.store-notice { display:flex; align-items:center; gap:8px; padding:12px 15px; border:1px solid #c9e6d1; background:#f5fff7; border-radius:9px; color:#316843; font-size:12px; }
+.store-notice.error { border-color:#efc3ba; background:#fff1eb; color:#a52d22; }
+.store-archive-receipt { display:flex; gap:12px; align-items:flex-start; }
+.store-archive-receipt >svg { color:#32844e; flex:none; }
+.store-archive-receipt p { font-size:12px; color:#776557; margin:7px 0 12px; }
+.store-archive-receipt a { display:inline-flex; gap:8px; align-items:center; font-size:12px; }
+.store-delete-dialog { position:fixed; z-index:1000; inset:0; display:flex; align-items:center; justify-content:center; padding:20px; background:#221713a8; }
+.store-delete-card { width:min(570px,100%); max-height:90dvh; overflow-y:auto; display:grid; gap:12px; padding:23px; background:#fffdfb; box-shadow:0 20px 70px #24130c6e; border:1px solid #f1cdc1; border-radius:15px; }
+.store-delete-title { display:flex; align-items:center; gap:10px; color:#c83d27; }
+.store-delete-title h2 { margin:0; font-size:21px; }
+.store-delete-card p { margin:0; font-size:13px; line-height:1.65; color:#59443b; }
+.store-delete-card .input-label { margin:4px 0 -4px; }
+.store-delete-actions { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:9px; margin-top:7px; }
+.store-danger-confirm { background:#b82720 !important; color:#fff !important; display:inline-flex; align-items:center; gap:7px; }
+@media (max-width:760px) { .settings-tabs button { padding:10px; font-size:11px; } .store-list-head { align-items:flex-start; } .store-row-actions { width:100%; } .account-store-switcher .account-store-action:last-child { min-width:68px; font-size:11px; padding:0 7px; } }
