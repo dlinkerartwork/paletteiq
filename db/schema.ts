@@ -46,6 +46,7 @@ export const paletteStores = sqliteTable('paletteiq_stores', {
   id: text('id').primaryKey(),
   accountId: text('account_id').notNull(),
   name: text('name').notNull(),
+  legacyAssetOwner: text('legacy_asset_owner'),
   createdAt: integer('created_at').notNull(),
 });
 export const paletteSessions = sqliteTable('paletteiq_sessions', {
