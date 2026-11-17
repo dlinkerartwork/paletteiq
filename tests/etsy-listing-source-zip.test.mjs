@@ -40,10 +40,10 @@ test('selected-source ZIP manifest keeps exact chosen files and editable prompt'
 test('ZIP action validates selected original IDs and streams immutable bytes, not regenerated art',()=>{
   assert.match(backend,/input\.action === 'source-zip'/);
   assert.match(backend,/originalAssetStorageKey\(asset,user\.userId\)/);
-  assert.match(backend,/await storage\.head\(ref\.key\)/);
+  assert.match(backend,/await headRecoverableAsset\(storage,ref\.key\)/);
   assert.match(backend,/selectedSourceManifest/);
   assert.match(backend,/new Response\(zipStream\(entries\)/);
-  assert.match(backend,/storage\.get\(key\)/);
+  assert.match(backend,/getRecoverableAsset\(storage,key\)/);
   assert.match(backend,/application\/zip/);
   assert.match(frontend,/downloadAiFirstSourceZip/);
   assert.match(frontend,/Download selected source ZIP/);
