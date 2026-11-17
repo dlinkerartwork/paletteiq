@@ -4,8 +4,9 @@ import { paletteStores } from '@/db/schema';
 import {
   assertSameOrigin, authenticateAccount, beginAccountSession, changeActiveStore,
   createAccount, createOwnedStore, endAccountSession, getAccountSession,
-  listOwnedStores, validStoreName,
+  listOwnedStores,
 } from '@/lib/palette-accounts';
+import { validStoreName } from '@/lib/store-identity';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 
 const error = (message: string, status = 400) => Response.json({ error: message }, { status });
