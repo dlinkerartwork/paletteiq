@@ -183,7 +183,7 @@ async function critiqueFinalImage(project: StoredProject, number: number, owner:
   let binary='';
   for (let i=0;i<bytes.length;i+=8192) binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
   const keyOpenAi = await userCredential(owner,'openai') ||
-    sharedProviderSecret(user.userId, 'OPENAI_API_KEY');
+    sharedProviderSecret(owner, 'OPENAI_API_KEY');
   if (!keyOpenAi) throw Error('Configure OpenAI API key for final composition review');
   const spec=LISTING_IMAGE_SPECS[number-1];
   const instruction = [
