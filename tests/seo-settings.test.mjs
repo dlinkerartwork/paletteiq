@@ -10,16 +10,17 @@ const draft = () => normalizeListing({
   imageAltTexts: Array.from({ length: 12 }, (_, i) => 'Alt ' + i + ': ' + 'a'.repeat(490)),
 });
 
-test('SEO title limit defaults can be applied to 120 characters', () => {
+test('SEO title output allows up to 140 characters regardless of legacy preferences', () => {
   const limited = applySeoLimits(draft(), 120, 10);
-  assert.ok(limited.title.length <= 120);
+  assert.ok(limited.title.length <= 140);
   assert.equal(limited.imageAltTexts.length, 10);
   assert.ok(limited.imageAltTexts.every(text => text.length <= 500));
 });
 
-test('custom smaller title and alt count are respected', () => {
+test('legacy smaller title preference no longer constrains 140-character title; alt count still works', () => {
   const limited = applySeoLimits(draft(), 60, 3);
-  assert.ok(limited.title.length <= 60);
+  assert.ok(limited.title.length <= 140);
+  assert.ok(limited.title.length > 60);
   assert.equal(limited.imageAltTexts.length, 3);
   assert.ok(limited.imageAltTexts.every(text => text.length <= 500));
 });
