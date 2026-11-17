@@ -180,6 +180,95 @@ export default function Home() {
     try { window.history.replaceState({ ...window.history.state, paletteiqWorkspace: { ...route, index: cursor, session } }, '', workspaceHash(route)); } catch { /* History API unavailable. */ }
     historyReady.current = true;
   }).catch(() => {}).finally(() => setLoadDone(true)); }, []);
+  // Browser history entries hold the active collection AND page. Browser toolbar,
+  // Alt+Left/Right and the new in-app arrows all use this one native stack.
+  useEffect(() => {
+    if (!loadDone || !historyReady.current) return;
+    projectSnapshots.current.set(project.id, project);
+  }, [loadDone, project]);
+  useEffect(() => {
+    if (!loadDone || !historyReady.current) return;
+    const route: WorkspaceRoute = { tab, projectId: project.id };
+    if (restoreFromHistory.current) {
+      restoreFromHistory.current = false;
+      lastRoute.current = route;
+      return;
+    }
+    if (lastRoute.current && routeEquals(lastRoute.current, route)) return;
+    const index = historyIndex.current + 1;
+    historyIndex.current = index; historyMax.current = index;
+    lastRoute.current = route;
+    try {
+      window.history.pushState({
+        ...window.history.state, paletteiqWorkspace: { ...route, index, session: historySession.current },
+      }, '', workspaceHash(route));
+      sessionStorage.setItem('paletteiq-history-max', String(index));
+    } catch { /* Browsers may restrict history changes in private mode. */ }
+    setHistoryPosition({ index, max: index });
+  }, [loadDone, tab, project.id]);
+  useEffect(() => {
+    if (!loadDone) return;
+    const onPop = (event: PopStateEvent) => {
+      const entry = readWorkspaceHistoryState(event.state, historySession.current);
+      if (!entry) return;
+      const current = latestWorkspace.current;
+      const next: WorkspaceRoute = { tab: entry.tab, projectId: entry.projectId };
+      const previous: WorkspaceRoute = { tab: current.tab, projectId: current.project.id };
+      if (!routeEquals(next, previous)) {
+        const thumbnailDirty = current.tab === 'thumbnails' && !!thumbnailSaveControlsRef.current?.hasUnsaved();
+        const collectionDirty = next.projectId !== current.project.id &&
+          savedProjectSnapshots.current.get(current.project.id) !== JSON.stringify(current.project);
+        if ((thumbnailDirty || collectionDirty) &&
+            !window.confirm('You have unsaved changes. Leave this page? Your draft stays available in the current session, but a page reload could discard it.')) {
+          window.history.go(historyIndex.current - entry.index);
+          return;
+        }
+      }
+      historyIndex.current = entry.index;
+      setHistoryPosition({ index: entry.index, max: historyMax.current });
+      if (routeEquals(next, previous)) return;
+      const destination = projectSnapshots.current.get(entry.projectId)
+        || current.projects.find(p => p.id === entry.projectId);
+      if (!destination) {
+        // A collection was deleted; don't invent an empty replacement in history.
+        window.history.go(historyIndex.current > entry.index ? 1 : -1);
+        return;
+      }
+      restoreFromHistory.current = true;
+      lastRoute.current = next;
+      setProject(destination);
+      setSourceUrl(destination.url);
+      setTab(next.tab);
+      setLibraryPage(1);
+      setSelected([]);
+      setMessage('');
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [loadDone]);
+  useEffect(() => {
+    const guard = (event: BeforeUnloadEvent) => {
+      if (allowExplicitReload.current) return;
+      const current = latestWorkspace.current;
+      if (savedProjectSnapshots.current.get(current.project.id) !== JSON.stringify(current.project) ||
+          (current.tab === 'thumbnails' && !!thumbnailSaveControlsRef.current?.hasUnsaved())) {
+        event.preventDefault();
+        event.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', guard);
+    return () => window.removeEventListener('beforeunload', guard);
+  }, []);
+  const historyBack = () => { if (historyIndex.current > 0) window.history.back(); };
+  const historyForward = () => { if (historyIndex.current < historyMax.current) window.history.forward(); };
+  const historyRefresh = () => {
+    const current = latestWorkspace.current;
+    const dirty = savedProjectSnapshots.current.get(current.project.id) !== JSON.stringify(current.project) ||
+      (current.tab === 'thumbnails' && !!thumbnailSaveControlsRef.current?.hasUnsaved());
+    if (dirty && !window.confirm('Refresh PaletteIQ? Unsaved changes in the current collection or designer will be lost.')) return;
+    allowExplicitReload.current = true;
+    window.location.reload();
+  };
   useEffect(() => { if (!loadDone) return; try { localStorage.setItem('paletteiq-last-workspace', JSON.stringify({ id: project.id, tab })); } catch { /* Storage is optional. */ } }, [loadDone, project.id, tab]);
   useEffect(() => {
     if (!loadDone || tab === 'production' || tab === 'multi-production') return;
