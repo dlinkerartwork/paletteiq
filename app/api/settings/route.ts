@@ -1,4 +1,5 @@
 import { validImageNaming } from '@/lib/image-file-naming';
+import { sharedProviderSecret } from '@/lib/store-secrets';
 import { eq } from 'drizzle-orm';
 import { getDb } from '@/db';
 import { studioSettings } from '@/db/schema';
@@ -18,7 +19,7 @@ async function getSettings(req: Request) {
   const user = await getChatGPTUser();
   if (!user) return bad('Sign in required', 401);
   if (new URL(req.url).searchParams.get('models') === 'openai' || new URL(req.url).searchParams.get('models') === 'openai-seo') {
-    const key = await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
+    const key = await userCredential(user.userId, 'openai') || sharedProviderSecret(user.userId, 'OPENAI_API_KEY');
     if (!key) return bad('Save an OpenAI API key first.', 400);
     const response = await fetch('https://api.openai.com/v1/models', {
       headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(15_000),
