@@ -62,19 +62,37 @@ export async function listOwnedStores(accountId: string): Promise<StoreSummary[]
   const rows = await getDb().select().from(paletteStores).where(eq(paletteStores.accountId, accountId));
   return rows.map(row => ({ id: row.id, name: row.name }));
 }
+/**
+ * Fail before inserting anything if a prior installation has not applied the
+ * account/store migration. An absent session cookie alone cannot test that.
+ */
+export async function verifyAccountsSchema() {
+  const db = getDb();
+  await db.select({ id: paletteAccounts.id }).from(paletteAccounts).limit(1);
+  await db.select({ id: paletteStores.id }).from(paletteStores).limit(1);
+  await db.select({ tokenHash: paletteSessions.tokenHash }).from(paletteSessions).limit(1);
+}
+
 export async function createAccount(emailInput: unknown, password: unknown) {
   const email = normalizeEmail(emailInput);
   if (!validAccountEmail(email) || !validPassword(password))
     throw Error('Enter a valid email and password of 12–128 characters.');
+  await verifyAccountsSchema();
   const db = getDb(), id = newId(), storeId = newId(), now = Date.now();
   const salt = asHex(crypto.getRandomValues(new Uint8Array(16)));
   const passwordHash = await derivePassword(password, salt);
+  // Preserve the underlying SQLite/D1 error so the route can distinguish a
+  // real unique-email violation from missing tables or storage failures.
+  await db.insert(paletteAccounts).values({ id, email, passwordSalt: salt, passwordHash, createdAt: now });
   try {
-    await db.insert(paletteAccounts).values({ id, email, passwordSalt: salt, passwordHash, createdAt: now });
-  } catch {
-    throw Error('Could not register this email address. It might already be in use.');
+    await db.insert(paletteStores).values({ id: storeId, accountId: id, name: 'My Etsy Store', createdAt: now });
+  } catch (cause) {
+    // Do not leave a login account with no store if the second insert fails.
+    // The UUID is server generated; deletion cannot affect another account.
+    try { await db.delete(paletteAccounts).where(eq(paletteAccounts.id, id)); }
+    catch { /* The initial database error is more helpful than rollback noise. */ }
+    throw cause;
   }
-  await db.insert(paletteStores).values({ id: storeId, accountId: id, name: 'My Etsy Store', createdAt: now });
   return { accountId: id, storeId };
 }
 export async function authenticateAccount(emailInput: unknown, password: unknown) {
