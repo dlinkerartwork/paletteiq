@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Download, LoaderCircle, Pencil, Plus, Store, Trash2, X } from 'lucide-react';
 
-type StoreSummary = { id: string; name: string; collections: number; batches: number; activeJobs: number };
+type StoreSummary = { id: string; name: string; collections: number; batches: number; activeJobs: number; legacyProtected: boolean };
 type Result = { deletedStore: string; deletedStoreId: string; snapshot: string; collections: number };
 type List = { activeStoreId: string; stores: StoreSummary[]; error?: string };
 const read = async (response: Response) => {
@@ -100,8 +100,8 @@ export default function StoreManagement() {
               onClick={()=>setEditing('')} disabled={!!busy}><X size={15}/> Cancel</button></>
               :<><button type="button" className="outline-btn" disabled={!!busy} onClick={()=>{setEditing(store.id);setRename(store.name);}}>
                 <Pencil size={15}/> Rename</button>
-                <button type="button" className="outline-btn danger-btn" disabled={!!busy||stores.length===1||store.id===activeStoreId||store.activeJobs>0}
-                  title={stores.length===1?'Create another store before deleting your last one':store.id===activeStoreId?'Switch to another store before deleting this one':store.activeJobs>0?'Finish active jobs before deleting':''}
+                <button type="button" className="outline-btn danger-btn" disabled={!!busy||stores.length===1||store.id===activeStoreId||store.activeJobs>0||store.legacyProtected}
+                  title={stores.length===1?'Create another store before deleting your last one':store.id===activeStoreId?'Switch to another store before deleting this one':store.activeJobs>0?'Finish active jobs before deleting':store.legacyProtected?'Recovered legacy R2 images must be migrated before deletion':''}
                   onClick={()=>{setDeleting(store);setTypedName('');setTypedPhrase('');setReceipt(null);}}>
                   <Trash2 size={15}/> Delete
                 </button></>}
@@ -110,6 +110,7 @@ export default function StoreManagement() {
         {store.id===activeStoreId&&<p className="store-action-hint">To delete this store, first switch to another store using the selector at the top.</p>}
         {stores.length===1&&<p className="store-action-hint">Your last remaining store cannot be deleted.</p>}
         {store.activeJobs>0&&<p className="store-action-hint">Finish or cancel active image batches before deleting this store.</p>}
+        {store.legacyProtected&&<p className="store-action-hint">Protected: this store has recovered legacy R2 images. Migrate those image files before deleting the store.</p>}
       </section>)}
     </div>
     {deleting&&<section className="store-delete-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-store-heading">
