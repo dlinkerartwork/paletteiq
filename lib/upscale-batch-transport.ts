@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { sharedProviderSecret } from '@/lib/store-secrets';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '@/db';
 import { projects, studioSettings } from '@/db/schema';
@@ -36,7 +37,7 @@ export async function gpuConfig(owner: string) {
   const address = custom || vars().PALETTEIQ_UPSCALE_SERVER_URL?.trim() || '';
   const key = rows[0]?.upscaleCredential
     ? await decryptCredential(rows[0].upscaleCredential, owner)
-    : vars().PALETTEIQ_UPSCALE_SERVER_KEY?.trim();
+    : sharedProviderSecret(owner, 'PALETTEIQ_UPSCALE_SERVER_KEY');
   if (!address || !key || key.length < 32) throw Error('Set Remote GPU URL and Key in this store Settings before submitting an upscale batch.');
   const url = new URL(address);
   if (custom && !normalizeUpscaleServerUrl(custom)) throw Error('Invalid Remote GPU URL');
