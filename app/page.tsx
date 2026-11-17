@@ -284,6 +284,27 @@ export default function Home() {
     allowExplicitReload.current = true;
     window.location.reload();
   };
+  useEffect(() => {
+    // Use standard desktop browser shortcuts, but handle them ourselves so
+    // guarded reloads and collection-aware history work in both web and Electron.
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.repeat) return;
+      const command = workspaceShortcut(event);
+      if (!command) return;
+      const node = event.target;
+      const typing = node instanceof HTMLElement &&
+        (node.isContentEditable || ['INPUT','TEXTAREA','SELECT'].includes(node.tagName));
+      // Option+Arrow on macOS moves the caret; never override it when editing.
+      if (typing && (command === 'back' || command === 'forward') &&
+          /Mac|iPhone|iPad/.test(navigator.platform)) return;
+      event.preventDefault();
+      if (command === 'back') historyBack();
+      else if (command === 'forward') historyForward();
+      else historyRefresh();
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, []);
   useEffect(() => { if (!loadDone) return; try { localStorage.setItem('paletteiq-last-workspace', JSON.stringify({ id: project.id, tab })); } catch { /* Storage is optional. */ } }, [loadDone, project.id, tab]);
   useEffect(() => {
     if (!loadDone || tab === 'production' || tab === 'multi-production') return;
@@ -718,9 +739,15 @@ export default function Home() {
     <aside className="sidebar"><button type="button" className="sidebar-toggle" onClick={toggleSidebar} aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}>{sidebarCollapsed ? <PanelLeftOpen size={18}/> : <PanelLeftClose size={18}/>}</button><div className="brand"><div className="brand-icon" style={{ background: "transparent", boxShadow: "none" }}><Image src="/paletteiq-icon.svg" width={39} height={39} alt="PaletteIQ icon" unoptimized/></div><div><strong>palette<span>IQ</span></strong><small>CLIPART INTELLIGENCE</small></div></div><div className="side-caption">WORKSPACE</div><nav>{nav.map(n => <button key={n.id} className={tab === n.id ? 'active' : ''} onClick={() => navigateTab(n.id)}><n.icon size={18}/><span className="sidebar-nav-label">{n.label}</span>{tab === n.id && <span className="nav-active-dot"/>}</button>)}</nav><div className="side-foot"><div className="account-avatar">D</div><div><b>My creative workspace</b><small>Private studio</small></div><Settings2 size={16}/></div></aside>
     <main className="main"><header className="topbar">
       <div className="workspace-history-controls" role="group" aria-label="Workspace navigation">
-        <button type="button" className="outline-btn" aria-label="Go back" title="Go back" disabled={historyPosition.index === 0} onClick={historyBack}><ArrowLeft size={16}/></button>
-        <button type="button" className="outline-btn" aria-label="Go forward" title="Go forward" disabled={historyPosition.index >= historyPosition.max} onClick={historyForward}><ArrowRight size={16}/></button>
-        <button type="button" className="outline-btn" aria-label="Refresh page" title="Refresh PaletteIQ" onClick={historyRefresh}><RefreshCw size={16}/></button>
+        <span className="workspace-history-tip" data-tooltip="Go Back · Alt + ←" title="Go Back (Alt + Left Arrow)">
+          <button type="button" className="outline-btn" aria-label="Go back" aria-keyshortcuts="Alt+ArrowLeft" disabled={historyPosition.index === 0} onClick={historyBack}><ArrowLeft size={16}/></button>
+        </span>
+        <span className="workspace-history-tip" data-tooltip="Go Forward · Alt + →" title="Go Forward (Alt + Right Arrow)">
+          <button type="button" className="outline-btn" aria-label="Go forward" aria-keyshortcuts="Alt+ArrowRight" disabled={historyPosition.index >= historyPosition.max} onClick={historyForward}><ArrowRight size={16}/></button>
+        </span>
+        <span className="workspace-history-tip" data-tooltip="Refresh · Ctrl/⌘ + R or F5" title="Refresh (Ctrl+R / Cmd+R / F5)">
+          <button type="button" className="outline-btn" aria-label="Refresh page" aria-keyshortcuts="Control+R Meta+R F5" onClick={historyRefresh}><RefreshCw size={16}/></button>
+        </span>
       </div><div className="crumb"><button className="breadcrumb-button" onClick={() => navigateTab('collections')}>Collections</button> <span>/</span> <b>{stepIndex >= 0 ? `${project.name} / ${title}` : title}</b></div><div className="top-actions"><span className="online"><span/> Personal workspace</span>{stepIndex >= 0 && <button className="save-btn" onClick={() => save()} disabled={!!busy}><Check size={16}/> {busy === 'save' ? 'Saving...' : 'Save collection'}</button>}</div></header>
       <div className="content"><div className="page-head"><div><div className="eyebrow"><Sparkles size={13}/> AI-POWERED CREATIVE PRODUCTION {stepIndex >= 0 && <span> / {title}</span>}</div><h1>{stepIndex >= 0 ? project.name : tab === 'overview' ? 'Your creative command center' : title}</h1><p>{tab === 'overview' ? 'From market insight to an original, production-ready clipart collection.' : tab === 'collections' ? 'Find a saved collection and resume its production pipeline.' : tab === 'analysis' ? 'Turn an Etsy listing into structured, actionable creative intelligence.' : tab === 'characters' ? 'Build, refine and organize 120+ subjects.' : tab === 'prompts' ? 'Generate unique prompts with OpenAI for each character.' : tab === 'thumbnails' ? 'Arrange original clipart freely (including beyond canvas edges), reuse Etsy SEO defaults, and optionally generate expressive AI lettering.' : tab === 'listing-images' ? 'Generate 15 Etsy listing images from original collection PNGs; review and approve each one.' : 'Continue preparing your clipart product.'}</p></div>{stepIndex >= 0 && <div className="head-buttons"><button className="outline-btn" onClick={() => { const blob = new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${project.name.replace(/[^\w-]/g,'_')}.json`; a.click(); URL.revokeObjectURL(a.href); }}><Download size={16}/> Export JSON</button></div>}</div>
       {duplicateListing && <div role="alertdialog" aria-label="Previously used Etsy reference" style={{ position: 'fixed', right: 24, top: 88, zIndex: 1000, width: 'min(420px, calc(100vw - 48px))', padding: 18, borderRadius: 14, border: '1px solid #ffc69e', background: '#fff9f3', color: '#53260e', boxShadow: '0 12px 40px #0002' }}><strong>Reference Etsy ini sudah pernah digunakan</strong><p style={{ marginTop: 8, marginBottom: 8 }}>Digunakan dalam collection: {duplicateListing.collections.join(', ')}. Anda tetap bisa memakai URL yang sama untuk collection baru.</p><div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}><button type="button" className="outline-btn" onClick={() => setDuplicateListing(null)}>Batal</button><button type="button" className="primary-btn" onClick={() => { setSourceUrl(duplicateListing.url); void loadListingImages(true); }}>Tetap gunakan</button></div></div>}
