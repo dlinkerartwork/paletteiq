@@ -113,7 +113,7 @@ export default function Home() {
   async function copyAllPrompts() {
     const prompts = project.characters.map(character => character.prompt.trim()).filter(Boolean);
     if (!prompts.length) { setMessage('There are no prompts to copy yet.'); return; }
-    const contents = prompts.join('\\n\\n');
+    const contents = prompts.join('\n\n');
     try {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(contents);
