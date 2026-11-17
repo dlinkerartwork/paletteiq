@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { sharedProviderSecret } from '@/lib/store-secrets';
 import { and, eq } from 'drizzle-orm';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { getDb } from '@/db';
@@ -24,7 +25,7 @@ type Collection = {
 };
 type ApiResponse = { id?: string; status?: string; output?: Array<{ content?: Array<{ text?: string }> }>; error?: { message?: string }; incomplete_details?: { reason?: string } };
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
-const getSecret = (name: string) => (env as unknown as Record<string, string | undefined>)[name];
+
 const safeJob = (job: ResearchJob) => ({
   id: job.id, status: job.status, target: job.target, requested: job.requested,
   completedCount: job.completedCount, model: job.model, createdAt: job.createdAt,
@@ -161,8 +162,8 @@ export async function POST(req: Request) {
   const target = Number(body.target);
   if (!Number.isInteger(target) || target < 1 || target > 1000) return bad('Target must be between 1 and 1000');
   const requested = Math.min(target, 160); // Above 160, finish the remaining subjects with AI Fill.
-  const etsyKey = await userCredential(user.userId, 'etsy') || getSecret('ETSY_API_KEY');
-  const aiKey = await userCredential(user.userId, 'openai') || getSecret('OPENAI_API_KEY');
+  const etsyKey = await userCredential(user.userId, 'etsy') || sharedProviderSecret(user.userId, 'ETSY_API_KEY');
+  const aiKey = await userCredential(user.userId, 'openai') || sharedProviderSecret(user.userId, 'OPENAI_API_KEY');
   if (!etsyKey || !aiKey) return bad('Connect Etsy API and OpenAI API in Settings before starting research.', 503);
   const listingRes = await fetch(`https://api.etsy.com/v3/application/listings/${id}?includes=Images`, { headers: { 'x-api-key': etsyKey } });
   if (!listingRes.ok) return bad(`Could not load Etsy listing (HTTP ${listingRes.status})`, 502);
@@ -238,7 +239,7 @@ export async function GET(req: Request) {
     }
     return Response.json({ job: safeJob(job) });
   }
-  const key = await userCredential(user.userId, 'openai') || getSecret('OPENAI_API_KEY');
+  const key = await userCredential(user.userId, 'openai') || sharedProviderSecret(user.userId, 'OPENAI_API_KEY');
   if (!key) return bad('OpenAI API key is needed to retrieve the saved background response.', 503);
   const ai = await openai(key, 'responses/' + encodeURIComponent(job.responseId));
   if (!ai.ok) return bad('Cannot check background research (HTTP ' + ai.status + '): ' + (await ai.text()).slice(0, 200), 502);
