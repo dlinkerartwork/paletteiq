@@ -25,6 +25,25 @@ node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1
 
 For a hosted D1 database, apply that migration to the **correct hosted binding** using the project's deployment migration procedure before enabling login. Back up first. Do not apply it twice to different production databases inadvertently.
 
+For an **existing native Windows Desktop** installation with former local-anonymous
+`local_seedy` collections, first register your account and create the intended
+empty store, then **exit PaletteIQ Desktop completely**. Back up
+`%APPDATA%\PaletteIQ Desktop\paletteiq-data` before running:
+
+```powershell
+node scripts/migrate-legacy-desktop-to-store.cjs --email "your@email.com" --list-stores
+node scripts/migrate-legacy-desktop-to-store.cjs --email "your@email.com" --store-name "My Etsy Store" --confirm
+```
+
+If the account has only one store, omit `--store-name`. The script makes a
+SQLite `VACUUM INTO` backup, transfers old project rows, OpenAI Batch history
+and image folder to the selected owner, and copies saved non-secret preferences
+if the target store has no settings yet. **Encrypted API keys are not copied**;
+re-enter them for the new store. The script aborts if the destination image
+folder already exists; use an empty store to prevent overwriting current art.
+The CLI applies only to the standard **native Desktop SQLite** workspace, not
+Cloudflare-hosted data or restored-workspace selectors.
+
 **Legacy collection safety:** existing rows and image files owned by the old anonymous `local_seedy` or ChatGPT-authenticated IDs are **not automatically reassigned** to the first account created, since that would let a different registrant claim somebody else's assets. They remain intact in storage. To bring them into an email/password store, use an explicit administrator-controlled migration of the project rows, related image folders and encrypted credentials, or perform a JSON backup/export in the old version and import it after sign-in. API credentials must be re-entered when moving between owner IDs because they are encrypted per owner. Back up the data folder before any conversion.
 
 ## Remote GPU selected-image Batches
