@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { getDb } from '@/db';
 import { studioSettings } from '@/db/schema';
 import { userCredential, userGeminiKeys } from '@/lib/credentials';
+import { ETSY_TITLE_MAX } from './seo-title-policy';
 import { isGeminiQuotaExhausted, isGeminiModelUnavailable } from '@/lib/gemini-keyring';
 
 export type SeoGenerationPreferences = {
@@ -15,7 +16,7 @@ export type SeoGenerationPreferences = {
 };
 
 const defaults: SeoGenerationPreferences = {
-  seoProvider: 'openai', seoGeminiModel: 'gemini-2.5-pro', seoOpenaiModel: 'gpt-6.1-terra', seoTitleMaxLength: 120,
+  seoProvider: 'openai', seoGeminiModel: 'gemini-2.5-pro', seoOpenaiModel: 'gpt-6.1-terra', seoTitleMaxLength: ETSY_TITLE_MAX,
   seoAltTextCount: 1, seoFileNaming: 'charactername_imagenumber',
 };
 const secret = (key: string) => (env as unknown as Record<string, string | undefined>)[key];
@@ -28,7 +29,7 @@ export async function seoPreferences(owner: string): Promise<SeoGenerationPrefer
     seoProvider: stored.seoProvider === 'gemini' ? 'gemini' : 'openai',
     seoOpenaiModel: typeof stored.seoOpenaiModel === 'string' && /^gpt-[a-z0-9.-]{1,80}$/.test(stored.seoOpenaiModel) ? stored.seoOpenaiModel : 'gpt-6.1-terra',
     seoGeminiModel: typeof stored.seoGeminiModel === 'string' && /^gemini-[a-z0-9.-]{1,80}$/.test(stored.seoGeminiModel) ? stored.seoGeminiModel : 'gemini-2.5-pro',
-    seoTitleMaxLength: typeof stored.seoTitleMaxLength === 'number' && Number.isInteger(stored.seoTitleMaxLength) && Number(stored.seoTitleMaxLength) >= 1 && Number(stored.seoTitleMaxLength) <= 140 ? Number(stored.seoTitleMaxLength) : defaults.seoTitleMaxLength,
+    seoTitleMaxLength: ETSY_TITLE_MAX,
     seoAltTextCount: 1,
     seoFileNaming: 'charactername_imagenumber',
   };
