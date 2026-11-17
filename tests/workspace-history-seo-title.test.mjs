@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import {
-  WORKSPACE_TAB_IDS, workspaceHash, isWorkspaceRoute, routeEquals,
+  WORKSPACE_TAB_IDS, workspaceHash, isWorkspaceRoute, isStudioTabEnabled, workspaceShortcut, STUDIO_DISABLED_TABS, routeEquals,
   readWorkspaceHistoryState, routeFromWorkspaceHash,
 } from '../lib/workspace-history.ts';
 import {
@@ -12,7 +12,14 @@ import { normalizeListing, adaptReferenceSeoToCollection, applySeoLimits } from 
 import { auditSeo } from '../lib/seo-intelligence.ts';
 
 test('workspace routes encode tab and collection identity and survive roundtrip', () => {
-  assert.ok(WORKSPACE_TAB_IDS.includes('listing-images'));
+  assert.ok(!WORKSPACE_TAB_IDS.includes('listing-images'));
+  assert.ok(!WORKSPACE_TAB_IDS.includes('thumbnails'));
+  assert.deepEqual([...STUDIO_DISABLED_TABS], ['thumbnails','listing-images']);
+  assert.equal(isStudioTabEnabled('listing-images'), false);
+  assert.equal(isStudioTabEnabled('thumbnails'), false);
+  assert.equal(isStudioTabEnabled('listing'), true);
+  assert.equal(routeFromWorkspaceHash('#paletteiq/thumbnails/some-collection'), null);
+  assert.equal(routeFromWorkspaceHash('#paletteiq/listing-images/some-collection'), null);
   const a = { tab: 'listing', projectId: '3c89f5b8-7380-4184-9144-b3c19601ab2c' };
   const b = { tab: 'prompts', projectId: 'other-collection' };
   assert.deepEqual(routeFromWorkspaceHash(workspaceHash(a)), a);
