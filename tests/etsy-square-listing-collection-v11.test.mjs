@@ -55,7 +55,8 @@ test('simplified /new-listing /revise /next UX has collection as only artwork so
   assert.match(component,/inspectOriginalCollectionSample\(assets\)/);
   assert.match(component,/sample = assets\.slice\(0, 12\)/);
   assert.match(component,/const file = await compose\(background, layout, assets\)/);
-  assert.match(page,/label: 'Etsy Clipart Listing Studio'/);
+  assert.match(page,/isStudioTabEnabled\('listing-images'\) && tab === 'listing-images' && <EtsyListingImageStudio/);
+  assert.doesNotMatch(page.match(/^const steps = (\[[^\n]+\]);/m)?.[1] || '', /listing-images/);
   assert.match(backend,/The actual collection images are NOT provided to you/);
   assert.doesNotMatch(backend,/ZIP file contents sent to AI/);
 });
