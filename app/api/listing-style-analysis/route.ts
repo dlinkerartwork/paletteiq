@@ -1,3 +1,4 @@
+import { sharedProviderSecret } from '@/lib/store-secrets';
 import { env } from 'cloudflare:workers';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '@/db';
@@ -74,7 +75,7 @@ export async function POST(request: Request) {
     validated.push(sample);
   }
   const key = await userCredential(user.userId,'openai') ||
-    (env as unknown as Record<string,string|undefined>).OPENAI_API_KEY;
+    sharedProviderSecret(user.userId, 'OPENAI_API_KEY');
   if (!key) return bad('Configure an OpenAI API key to analyze the collection visual style',503);
   const instruction = [
     'You are an art director and technical illustrator. Analyze the ACTUAL VISUAL STYLE across these original PaletteIQ collection clipart thumbnails.',
