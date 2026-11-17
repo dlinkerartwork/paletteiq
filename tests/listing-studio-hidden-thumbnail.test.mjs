@@ -6,13 +6,13 @@ const page = readFileSync(new URL('../app/page.tsx', import.meta.url), 'utf8');
 const studio = readFileSync(new URL('../components/etsy-listing-image-studio.tsx', import.meta.url), 'utf8');
 const route = readFileSync(new URL('../app/api/listing-image-studio/route.ts', import.meta.url), 'utf8');
 
-test('Thumbnail Designer and original 15-image Listing Studio remain separately accessible', () => {
+test('Thumbnail Designer and Listing Studio are hidden and disabled, but source remains for later reactivation', () => {
   const steps = page.match(/const steps = (\[[^\n]+\]);/)?.[1] || '';
-  assert.ok(steps.includes("'thumbnails'"));
-  assert.ok(steps.includes("'listing-images'"));
-  assert.ok(steps.indexOf("'thumbnails'") < steps.indexOf("'listing-images'"));
-  assert.match(page, /tab === 'thumbnails' && <ThumbnailDesigner/);
-  assert.match(page, /tab === 'listing-images' && <EtsyListingImageStudio/);
+  assert.ok(!steps.includes("'thumbnails'"));
+  assert.ok(!steps.includes("'listing-images'"));
+  assert.match(page, /isStudioTabEnabled\('thumbnails'\) && tab === 'thumbnails' && <ThumbnailDesigner/);
+  assert.match(page, /isStudioTabEnabled\('listing-images'\) && tab === 'listing-images' && <EtsyListingImageStudio/);
+  assert.match(page, /if \(!isStudioTabEnabled\(next\)\)/);
   assert.match(page, /restored.tab && validTabs.includes\(restored.tab\)/);
 });
 
