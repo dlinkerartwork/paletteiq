@@ -32,6 +32,21 @@ export function AccountWorkspaceGate({ children }: { children: React.ReactNode }
       .finally(() => { if (alive) setReady(true); });
     return () => { alive = false; };
   }, []);
+  // New stores created by the Web restore panel must appear in the header
+  // immediately, without changing the active store or discarding the upload.
+  useEffect(() => {
+    let live = true;
+    const refresh = () => {
+      void fetch('/api/account', { cache: 'no-store' })
+        .then(async response => {
+          const data = await response.json() as Session & { error?: string };
+          if (!response.ok) throw Error(data.error || 'Could not refresh stores');
+          if (live) setSession(data);
+        }).catch(e => { if (live) setError(e instanceof Error ? e.message : 'Could not refresh stores'); });
+    };
+    window.addEventListener('paletteiq:stores-updated', refresh);
+    return () => { live = false; window.removeEventListener('paletteiq:stores-updated', refresh); };
+  }, []);
   const submit = async (action: string, extra: Record<string, unknown> = {}) => {
     if (busy) return;
     setBusy(true); setError('');
