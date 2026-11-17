@@ -140,6 +140,10 @@ export async function POST(req: Request) {
           });
         }
       }
+      // GPU Batch manifests are server-owned. Never let a stale Save from an
+      // earlier tab remove a committed remote batch, its email, or job IDs.
+      const remoteUpscaleBatch = (old as { upscaleBatch?: unknown }).upscaleBatch;
+      if (remoteUpscaleBatch) (incoming as typeof incoming & { upscaleBatch?: unknown }).upscaleBatch = remoteUpscaleBatch;
       // Style analysis is server-owned and derived from original collection pixels.
       // A stale browser snapshot must never erase its cached (paid) Vision result.
       const storedStyle = (old as { listingVisualStyle?: unknown }).listingVisualStyle;
