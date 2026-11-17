@@ -240,39 +240,75 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
   };
 
   const runCloudUpscale = async () => {
-    if (!selectedGenerated.length || upscaling) return;
+    if (upscaling) return;
     if (upscaleProvider !== 'remote') { setMessage('Remote GPU Server is not selected.'); return; }
-    // Completed results may be upscaled again; never resubmit an active job.
-    const targets = selectedGenerated.filter(c => !c.upscaleJob);
-    if (!targets.length) { setMessage('Selected images are already queued.'); return; }
+    const staging = project.upscaleBatch?.status === 'staging' ? project.upscaleBatch : null;
+    if (project.upscaleBatch?.status === 'committed') {
+      setMessage('The previous upscale Batch is running. Wait until its jobs finish before submitting another Batch.');
+      return;
+    }
+    const targets = staging
+      ? staging.items.map(item => project.characters.find(c => c.id === item.characterId)).filter((c): c is Character => !!c)
+      : selectedGenerated.filter(c => !c.upscaleJob);
+    if (!targets.length) { setMessage('Select generated PNGs to upscale or resume an existing Batch.'); return; }
     setUpscaling(true);
-    let accepted = 0;
-    const errors: string[] = [];
     try {
-      // The collection is persisted in one JSON record. Submit sequentially to
-      // prevent concurrent POSTs overwriting each other's saved job references.
-      // Do not wait for GPU completion; the remote server owns the durable queue.
-      for (const c of targets) {
-        setMessage(`Uploading ${accepted + errors.length + 1}/${targets.length}: ${c.name}. Keep this client running until all jobs are accepted.`);
-        try {
-          const submitted = await request<{ id: string }>('/api/upscale', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ projectId: project.id, characterId: c.id, factor: upscaleFactor }),
-          });
-          accepted++;
-          latestUpscaleChange.current(c.id, { upscaleJob: {
-            id: submitted.id, submittedAt: Date.now(), factor: upscaleFactor,
-          } });
-          setRemoteProgress(old => ({ ...old, [c.id]: { status: 'queued', elapsed: 0 } }));
-        } catch (error) {
-          errors.push(`${c.name}: ${error instanceof Error ? error.message : String(error)}`);
-        }
+      // One logical Batch per checkbox selection: create -> idempotent uploads
+      // -> one commit. Only after commit can the client PC be switched off.
+      const accepted = await request<{
+        batch: StoredUpscaleBatch; notificationConfigured: boolean;
+      }>('/api/upscale-batches', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: project.id,
+          characterIds: targets.map(c => c.id), factor: staging?.factor || upscaleFactor }),
+      });
+      latestBatchChange.current(accepted.batch);
+      setMessage('GPU Batch created for ' + targets.length + ' selected images. Uploading files…');
+      const recovery = await request<{ receivedIds: string[] }>(
+        '/api/upscale-batches?projectId=' + encodeURIComponent(project.id));
+      const received = new Set(recovery.receivedIds || []);
+      let uploaded = received.size;
+      for (const target of targets) {
+        if (received.has(target.id)) continue;
+        setMessage('Uploading file ' + (uploaded + 1) + '/' + targets.length + ' to the GPU Batch: ' + target.name);
+        await request('/api/upscale-batches', {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId: project.id, characterId: target.id }),
+        });
+        uploaded++;
+        setUpscaleBatchStatus({
+          status: 'staging', received: uploaded, total: targets.length, finished: 0,
+          notificationConfigured: accepted.notificationConfigured,
+          notificationEmail: accepted.batch.notificationEmail,
+        });
       }
-      const notice = `GPU server accepted ${accepted}/${targets.length} upscale jobs. ${errors.length ? `${errors.length} failed to submit:\n${errors.slice(0, 5).join('\n')}${errors.length > 5 ? `\n…and ${errors.length - 5} more failures.` : ''} Retry only failed images after fixing the errors.` : 'You may turn off the client PC now; processing continues on the GPU server.'} ${accepted ? 'Reopen PaletteIQ to import results.' : ''}`;
-      setMessage(notice);
-      // Saved job IDs are now reflected in parent state, which starts status-only polling.
-      // No reload: keep image selection, compare viewer and scroll position intact.
+      setMessage('All ' + targets.length + ' files uploaded. Committing one Batch to the GPU queue…');
+      const committed = await request<{
+        batch: StoredUpscaleBatch; jobs: Array<{ characterId: string; job: Character['upscaleJob'] }>;
+        notificationConfigured?: boolean;
+      }>('/api/upscale-batches', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: project.id }),
+      });
+      latestBatchChange.current(committed.batch);
+      for (const item of committed.jobs || []) {
+        latestUpscaleChange.current(item.characterId, { upscaleJob: item.job });
+        setRemoteProgress(old => ({ ...old, [item.characterId]: { status: 'queued', elapsed: 0 } }));
+      }
+      setUpscaleBatchStatus({
+        status: 'committed', received: targets.length, total: targets.length,
+        finished: 0, notificationConfigured: committed.notificationConfigured,
+        notificationEmail: accepted.batch.notificationEmail,
+      });
+      setSelectedIds([]);
+      setMessage('GPU Batch accepted: ' + targets.length + ' selected files. ' +
+        (committed.notificationConfigured
+          ? 'The GPU Server will email ' + accepted.batch.notificationEmail + ' after all files finish.'
+          : 'SMTP email is not configured on the GPU server; work will still complete.') +
+        ' You can now close PaletteIQ or switch off the client PC.');
+    } catch (error) {
+      setMessage('Upscale Batch upload or commit interrupted: ' + (error instanceof Error ? error.message : String(error)) +
+        '. The Batch manifest is saved. Use Resume GPU Batch to continue; do not submit a duplicate.');
     } finally { setUpscaling(false); }
   };
   const cancelRemoteUpscale = async (character: Character) => {
