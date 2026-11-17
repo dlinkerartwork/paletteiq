@@ -1,3 +1,4 @@
+import { sharedProviderSecret } from '@/lib/store-secrets';
 import { env } from 'cloudflare:workers';
 import { and, eq } from 'drizzle-orm';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
@@ -29,7 +30,7 @@ async function remoteConfig(owner: string) {
   const customUrl = preferences.upscaleServerUrl || '';
   const url = customUrl || variables().PALETTEIQ_UPSCALE_SERVER_URL?.trim();
   if (customUrl && !normalizeUpscaleServerUrl(customUrl)) throw Error('Invalid saved GPU Server URL. Update it in Settings.');
-  const key = rows[0]?.upscaleCredential ? await decryptCredential(rows[0].upscaleCredential, owner) : variables().PALETTEIQ_UPSCALE_SERVER_KEY?.trim();
+  const key = rows[0]?.upscaleCredential ? await decryptCredential(rows[0].upscaleCredential, owner) : sharedProviderSecret(owner, 'PALETTEIQ_UPSCALE_SERVER_KEY');
   if (!url || !key || key.length < 32) throw Error('Remote Upscale is not configured on the PaletteIQ backend.');
   const parsed = new URL(url);
   if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== '/' && parsed.pathname !== '') throw Error('Invalid Remote Upscale server URL');
