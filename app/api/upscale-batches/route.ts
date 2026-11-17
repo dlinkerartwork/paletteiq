@@ -1,3 +1,4 @@
+import { getRecoverableAsset } from '@/lib/recovered-assets';
 import { and, eq } from 'drizzle-orm';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { getAccountSession } from '@/lib/palette-accounts';
@@ -152,7 +153,7 @@ export async function PUT(req: Request) {
     const char = latest.data.characters.find(c => c.id === item.characterId);
     if (!char || char.imageUrl !== item.originalUrl ||
         (char.upscaledImageUrl || char.imageUrl) !== item.sourceUrl) return bad('Source image changed; cannot upload this Batch', 409);
-    const blob = await upscaleBucket()?.get(upscaleSourceKey(user.userId, item.sourceUrl));
+    const blob = await getRecoverableAsset(upscaleBucket(), upscaleSourceKey(user.userId, item.sourceUrl));
     if (!blob) return bad('Stored PNG source not found', 404);
     const bytes = new Uint8Array(await blob.arrayBuffer());
     if (bytes.length > 30 * 1024 * 1024) return bad('Source PNG exceeds 30 MB', 413);
