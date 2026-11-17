@@ -35,7 +35,7 @@ export function assertSameOrigin(req: Request): boolean {
 export type StoreSummary = { id: string; name: string };
 export type AccountSession = {
   accountId: string; email: string; activeStoreId: string;
-  storeName: string; owner: string; tokenHash: string;
+  storeName: string; owner: string; legacyAssetOwner?: string | null; tokenHash: string;
 };
 
 export async function getAccountSession(): Promise<AccountSession | null> {
@@ -55,7 +55,8 @@ export async function getAccountSession(): Promise<AccountSession | null> {
   return {
     accountId: users[0].id, email: users[0].email,
     activeStoreId: stores[0].id, storeName: stores[0].name,
-    owner: scopeForStore(users[0].id, stores[0].id), tokenHash,
+    owner: scopeForStore(users[0].id, stores[0].id),
+    legacyAssetOwner: stores[0].legacyAssetOwner === 'local_seedy' ? 'local_seedy' : null, tokenHash,
   };
 }
 export async function listOwnedStores(accountId: string): Promise<StoreSummary[]> {
