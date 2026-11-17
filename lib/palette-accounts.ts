@@ -74,10 +74,11 @@ export async function verifyAccountsSchema() {
   await db.select({ tokenHash: paletteSessions.tokenHash }).from(paletteSessions).limit(1);
 }
 
-export async function createAccount(emailInput: unknown, password: unknown) {
+export async function createAccount(emailInput: unknown, password: unknown, initialStoreName: unknown) {
   const email = normalizeEmail(emailInput);
   if (!validAccountEmail(email) || !validPassword(password))
     throw Error('Enter a valid email and password of 12–128 characters.');
+  if (!validStoreName(initialStoreName)) throw Error('First store name must contain 2–90 characters.');
   await verifyAccountsSchema();
   const db = getDb(), id = newId(), storeId = newId(), now = Date.now();
   const salt = asHex(crypto.getRandomValues(new Uint8Array(16)));
@@ -86,7 +87,7 @@ export async function createAccount(emailInput: unknown, password: unknown) {
   // real unique-email violation from missing tables or storage failures.
   await db.insert(paletteAccounts).values({ id, email, passwordSalt: salt, passwordHash, createdAt: now });
   try {
-    await db.insert(paletteStores).values({ id: storeId, accountId: id, name: 'My Etsy Store', createdAt: now });
+    await db.insert(paletteStores).values({ id: storeId, accountId: id, name: (initialStoreName as string).trim(), createdAt: now });
   } catch (cause) {
     // Do not leave a login account with no store if the second insert fails.
     // The UUID is server generated; deletion cannot affect another account.
