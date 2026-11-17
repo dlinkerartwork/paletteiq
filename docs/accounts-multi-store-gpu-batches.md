@@ -7,6 +7,13 @@
 - Each store receives its own database owner ID derived from **account UUID + store UUID**. All existing project/image/batch routes obtain this ID from a verified HttpOnly session, never from client-provided store names or IDs.
 - Collections, thumbnails, generated/upscaled image assets, OpenAI/Gemini/Etsy credentials, GPU Server URL/API key and SEO production preferences are separate per store. Switching stores reloads the workspace and resets in-memory collections.
 - Passwords are salted PBKDF2-SHA256 (310,000 iterations). Sessions are SHA-256 token hashes held in the database; the browser receives an HttpOnly SameSite Strict cookie. Lockout begins after five failed logins for fifteen minutes.
+- New email/password stores must save their own OpenAI, Gemini, Etsy and
+  Remote GPU API keys in the selected store's Settings. Global environment
+  fallback credentials are **disabled for these accounts by default**.
+  Private installations can intentionally enable shared provider billing using
+  `PALETTEIQ_ALLOW_SHARED_PROVIDER_KEYS=1` on the backend; do this only when
+  all registered users are trusted to spend the shared provider account's
+  quotas. Credentials remain encrypted under the individual store owner.
 - Account enrollment is open to anyone who can reach this server. **Email verification, invitation policies, password reset and MFA are not implemented.** Do not expose the local desktop server to the public Internet without a TLS gateway and a considered account enrollment policy.
 - ChatGPT-injected identity headers are considered only when `PALETTEIQ_TRUST_CHATGPT_HEADERS=1` is explicitly configured behind a trusted gateway. The previous `PALETTEIQ_LOCAL_NO_AUTH=1` value no longer bypasses login.
 
