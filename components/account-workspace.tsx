@@ -45,6 +45,7 @@ export function AccountWorkspaceGate({ children }: { children: React.ReactNode }
       if (!response.ok) throw Error(data.error || 'Account operation failed');
       setSession(data);
       if (['switch-store','create-store','logout'].includes(action)) {
+        window.dispatchEvent(new Event('paletteiq:store-changing'));
         // Reset in-memory collection, image previews and stored workspace route
         // so an old store cannot temporarily display another store's assets.
         try { localStorage.removeItem('paletteiq-last-workspace'); } catch { /* Optional */ }
@@ -91,21 +92,22 @@ export function StoreSwitcher() {
   const [newStore, setNewStore] = useState('');
   if (!workspace) return null;
   const { session, submit, busy, error } = workspace;
+  const beforeLeavingStore = () => window.confirm('Switch stores or sign out? Any unsaved edits in the current collection will be discarded. Save your work first.');
   if (session.mode === 'trusted-gateway') return <span className="account-store-hint">Existing workspace</span>;
   return <div className="account-store-switcher">
     <Store size={16}/>
     <select aria-label="Active Etsy store" title="Choose store: collections and settings are separate"
       value={session.activeStoreId || ''}
       disabled={busy}
-      onChange={e => void submit('switch-store', { storeId: e.target.value })}>
+      onChange={e => { if (beforeLeavingStore()) void submit('switch-store', { storeId: e.target.value }); }}>
       {session.stores.map(store => <option key={store.id} value={store.id}>{store.name}</option>)}
     </select>
     <button className="account-store-action" type="button" title="Add Etsy store" aria-label="Add Etsy store"
       onClick={() => setCreating(c => !c)} disabled={busy}><Plus size={15}/></button>
     <button className="account-store-action" type="button" title={'Sign out ' + session.email}
-      aria-label="Sign out" onClick={() => void submit('logout')} disabled={busy}><LogOut size={15}/></button>
+      aria-label="Sign out" onClick={() => { if (beforeLeavingStore()) void submit('logout'); }} disabled={busy}><LogOut size={15}/></button>
     {creating && <div className="account-create-store">
-      <form onSubmit={e => { e.preventDefault(); if (newStore.trim().length >= 2) void submit('create-store', { name: newStore.trim() }); }}>
+      <form onSubmit={e => { e.preventDefault(); if (newStore.trim().length >= 2 && beforeLeavingStore()) void submit('create-store', { name: newStore.trim() }); }}>
         <label htmlFor="new-store-name">New Etsy store name</label>
         <input id="new-store-name" minLength={2} maxLength={90} required value={newStore}
           onChange={e => setNewStore(e.target.value)} placeholder="My second Etsy shop"/>
