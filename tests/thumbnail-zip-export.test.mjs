@@ -9,7 +9,7 @@ const mocks={
  'drizzle-orm': 'export const and=(...x)=>x; export const eq=(...x)=>x;',
  '@/app/chatgpt-auth': "export const getChatGPTUser=async()=>({userId:'owner'});",
  '@/db': 'export const getDb=()=>globalThis.__thumbnailExportTest.db;',
- '@/db/schema': "export const projects='projects',studioSettings='settings';",
+ '@/db/schema': "export const projects='projects',studioSettings='settings', paletteStores={id:'id',accountId:'accountId',legacyAssetOwner:'legacyAssetOwner'};",
  '@/lib/native-bridge': 'export const nativeAssetBucket=()=>globalThis.__thumbnailExportTest.bucket;',
 };
 registerHooks({resolve(specifier,context,next){
