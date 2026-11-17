@@ -6,6 +6,9 @@ export function isStudioTabEnabled(tab: string): boolean {
 /** Keyboard shortcuts, identical to common desktop browser navigation keys. */
 export type WorkspaceShortcut = 'back' | 'forward' | 'refresh';
 export function workspaceShortcut(event: Pick<KeyboardEvent, 'key' | 'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey'>): WorkspaceShortcut | null {
+  // Some UI libraries dispatch a synthetic keydown without KeyboardEvent.key.
+  // It must never crash the workspace when a tab or select is activated.
+  if (!event || typeof event.key !== 'string') return null;
   const { key, altKey, ctrlKey, metaKey, shiftKey } = event;
   if (!shiftKey && altKey && !ctrlKey && !metaKey) {
     if (key === 'ArrowLeft') return 'back';
