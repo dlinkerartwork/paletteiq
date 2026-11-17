@@ -29,7 +29,7 @@ if (-not (Test-Path '.dev.vars')) {
   $devVarsText = [System.IO.File]::ReadAllText($devVarsPath)
   if ($devVarsText -notmatch '(?m)^PALETTEIQ_LOCAL_NO_AUTH=1\s*$') {
     [System.IO.File]::AppendAllText($devVarsPath, "`nPALETTEIQ_LOCAL_NO_AUTH=1`n")
-    Write-Host 'Enabled login-free local development.'
+    Write-Host 'Kept local private-development settings. Account sign-in is still required.'
   }
 }
 
@@ -53,7 +53,20 @@ $existingColumnForMigration = @{
   '0004_upscale_credential.sql' = 'upscale_credential'
 }
 foreach ($sqlFile in $sqlFiles) {
-  if ($applied -contains $sqlFile.Name) { continue }
+  $markedApplied = $applied -contains $sqlFile.Name
+  if ($markedApplied -and $sqlFile.Name -eq '0005_accounts_and_stores.sql') {
+    # A previous local DB can have an outdated marker while the active D1
+    # persist directory has no account tables. Reconcile actual schema too.
+    $tableQuery = "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('paletteiq_accounts','paletteiq_stores','paletteiq_sessions');"
+    $schemaOutput = & node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --command $tableQuery 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "Unable to inspect PaletteIQ account tables: $schemaOutput" }
+    $schemaText = $schemaOutput | Out-String
+    $schemaComplete = @('paletteiq_accounts', 'paletteiq_stores', 'paletteiq_sessions') |
+      Where-Object { $schemaText -notmatch [regex]::Escape($_) } |
+      Measure-Object
+    if ($schemaComplete.Count -eq 0) { continue }
+    Write-Host 'Account table migration marked applied but tables are missing; safely rechecking idempotent migration.'
+  } elseif ($markedApplied) { continue }
   # Some older PaletteIQ installations already contain these columns but
   # were created before the per-file migration marker existed. Check the
   # actual database schema before trying to ALTER TABLE again.
@@ -71,8 +84,10 @@ foreach ($sqlFile in $sqlFiles) {
   Write-Host "Applying $($sqlFile.Name) ..."
   & node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file ("drizzle/" + $sqlFile.Name)
   if ($LASTEXITCODE -ne 0) { throw "Migration failed: $($sqlFile.Name)" }
-  Add-Content -Path $appliedPath -Value $sqlFile.Name
-  $applied += $sqlFile.Name
+  if (-not $markedApplied) {
+    Add-Content -Path $appliedPath -Value $sqlFile.Name
+    $applied += $sqlFile.Name
+  }
 }
 
 Write-Host 'Local setup finished.'
