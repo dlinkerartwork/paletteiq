@@ -118,6 +118,6 @@ test('new email/password stores cannot silently spend global paid API credential
   ]){
     const code=file(path);
     assert.match(code,/sharedProviderSecret/,path);
-    assert.doesNotMatch(code,/\\|\\|\\s*\\(env as unknown as Record<string,\\s*string\\s*\\|\\s*undefined>\\)\\.OPENAI_API_KEY/,path);
+    assert.equal(code.includes('.OPENAI_API_KEY'), false, path);
   }
 });
