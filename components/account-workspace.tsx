@@ -22,6 +22,7 @@ export function AccountWorkspaceGate({ children }: { children: React.ReactNode }
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [firstStoreName, setFirstStoreName] = useState('');
   useEffect(() => {
     let alive = true;
     void fetch('/api/account', { cache: 'no-store' }).then(async response => {
@@ -75,7 +76,7 @@ export function AccountWorkspaceGate({ children }: { children: React.ReactNode }
       <div className="account-logo"><UserRound size={23}/><strong>palette<span>IQ</span></strong></div>
       <h1>{mode === 'register' ? 'Create your PaletteIQ account' : 'Sign in to PaletteIQ'}</h1>
       <p>Each account can manage multiple Etsy stores with separate collections, image assets and settings.</p>
-      <form onSubmit={event => { event.preventDefault(); void submit(mode, { email, password }); }}>
+      <form onSubmit={event => { event.preventDefault(); void submit(mode, { email, password, ...(mode === 'register' ? { name: firstStoreName.trim() } : {}) }); }}>
         <label htmlFor="palette-email">Email address</label>
         <input id="palette-email" type="email" autoComplete="email" required maxLength={254}
           value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com"/>
@@ -85,6 +86,11 @@ export function AccountWorkspaceGate({ children }: { children: React.ReactNode }
           required minLength={mode === 'register' ? 12 : 1} maxLength={128}
           value={password} onChange={e => setPassword(e.target.value)}
           placeholder={mode === 'register' ? '12 characters minimum' : 'Enter your password'}/>
+        {mode === 'register' && <><label htmlFor="palette-first-store">First Etsy store name</label>
+          <input id="palette-first-store" type="text" required minLength={2} maxLength={90}
+            value={firstStoreName} onChange={e => setFirstStoreName(e.target.value)}
+            placeholder="e.g. DLinker Artwork" autoComplete="off"/>
+          <p className="account-hint">Your first store will use this name. You can rename it later in Stores.</p></>}
         {error && <p role="alert" className="account-error">{error}</p>}
         <button type="submit" className="account-submit" disabled={busy}>
           {busy && <LoaderCircle size={15} className="spin"/>}
@@ -120,7 +126,7 @@ export function StoreSwitcher() {
     <button className="account-store-action" type="button" title="Add Etsy store" aria-label="Add Etsy store"
       onClick={() => setCreating(c => !c)} disabled={busy}><Plus size={15}/></button>
     <button className="account-store-action" type="button" title={'Sign out ' + session.email}
-      aria-label="Sign out" onClick={() => { if (beforeLeavingStore()) void submit('logout'); }} disabled={busy}><LogOut size={15}/></button>
+      aria-label="Logout" onClick={() => { if (beforeLeavingStore()) void submit('logout'); }} disabled={busy}><LogOut size={15}/><span>Logout</span></button>
     {creating && <div className="account-create-store">
       <form onSubmit={e => { e.preventDefault(); if (newStore.trim().length >= 2 && beforeLeavingStore()) void submit('create-store', { name: newStore.trim() }); }}>
         <label htmlFor="new-store-name">New Etsy store name</label>
