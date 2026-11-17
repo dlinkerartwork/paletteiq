@@ -36,13 +36,13 @@ export async function gpuConfig(owner: string) {
   const address = custom || vars().PALETTEIQ_UPSCALE_SERVER_URL?.trim() || '';
   const key = rows[0]?.upscaleCredential
     ? await decryptCredential(rows[0].upscaleCredential, owner)
-    : vars().PALETTEIQ_UPSCALE_API_KEY?.trim();
-  if (!address || !key) throw Error('Set Remote GPU URL and Key in this store Settings before submitting an upscale batch.');
+    : vars().PALETTEIQ_UPSCALE_SERVER_KEY?.trim();
+  if (!address || !key || key.length < 32) throw Error('Set Remote GPU URL and Key in this store Settings before submitting an upscale batch.');
   const url = new URL(address);
   if (custom && !normalizeUpscaleServerUrl(custom)) throw Error('Invalid Remote GPU URL');
   if (url.username || url.password || url.search || url.hash || url.pathname !== '/') throw Error('Invalid Remote GPU URL');
   const desktop = vars().PALETTEIQ_DESKTOP === '1';
-  const allowHttp = desktop || vars().PALETTEIQ_ALLOW_PRIVATE_HTTP_UPSCALE === '1';
+  const allowHttp = desktop || vars().PALETTEIQ_ALLOW_PRIVATE_HTTP_UPSCALE === '1' || vars().PALETTEIQ_LOCAL_NO_AUTH === '1';
   const privateHost = /^(?:localhost|127\.0\.0\.1|10\.(?:\d{1,3}\.){2}\d{1,3}|192\.168\.(?:\d{1,3}\.)\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.(?:\d{1,3}\.)\d{1,3}|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.(?:\d{1,3}\.)\d{1,3})$/.test(url.hostname);
   if (url.protocol !== 'https:' && !(allowHttp && url.protocol === 'http:' && privateHost)) throw Error('GPU Server requires HTTPS, or an explicitly allowed private HTTP network.');
   const accessId = vars().PALETTEIQ_GPU_ACCESS_CLIENT_ID?.trim();
