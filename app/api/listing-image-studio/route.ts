@@ -1,3 +1,4 @@
+import { sharedProviderSecret } from '@/lib/store-secrets';
 import { env } from 'cloudflare:workers';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '@/db';
@@ -182,7 +183,7 @@ async function critiqueFinalImage(project: StoredProject, number: number, owner:
   let binary='';
   for (let i=0;i<bytes.length;i+=8192) binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
   const keyOpenAi = await userCredential(owner,'openai') ||
-    (env as unknown as Record<string,string|undefined>).OPENAI_API_KEY;
+    sharedProviderSecret(user.userId, 'OPENAI_API_KEY');
   if (!keyOpenAi) throw Error('Configure OpenAI API key for final composition review');
   const spec=LISTING_IMAGE_SPECS[number-1];
   const instruction = [
@@ -573,7 +574,7 @@ export async function POST(request: Request) {
         !['low','medium','high'].includes(quality))
       return bad('Choose a valid GPT image model and quality.');
     const apiKey = await userCredential(user.userId, 'openai') ||
-      (env as unknown as Record<string,string|undefined>).OPENAI_API_KEY;
+      sharedProviderSecret(user.userId, 'OPENAI_API_KEY');
     if (!apiKey) return bad('Configure OpenAI API key in Settings.',503);
     const originals = originalAssets(project.characters || []);
     const allowed = new Set(originals.map(a=>a.id));
@@ -716,7 +717,7 @@ export async function POST(request: Request) {
     let binary = '';
     for (let i=0; i<bytes.length; i+=8192) binary += String.fromCharCode(...bytes.subarray(i,i+8192));
     const keyOpenAi = await userCredential(user.userId, 'openai') ||
-      (env as unknown as Record<string,string|undefined>).OPENAI_API_KEY;
+      sharedProviderSecret(user.userId, 'OPENAI_API_KEY');
     if (!keyOpenAi) return bad('Configure OpenAI API key for Vision positioning', 503);
     const isMockup = input.number >= 8 && input.number <= 12;
     const free = (mode === 'free' || mode === 'ai-first') && !isMockup;
@@ -828,7 +829,7 @@ export async function POST(request: Request) {
   if (!/^gpt-image-[a-z0-9.-]{1,80}$/.test(model)) return bad('Choose an OpenAI image model');
   const quality = input.quality || 'medium';
   if (!['low', 'medium', 'high'].includes(quality)) return bad('Invalid image quality');
-  const key = isPreview ? null : (await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY);
+  const key = isPreview ? null : (await userCredential(user.userId, 'openai') || sharedProviderSecret(user.userId, 'OPENAI_API_KEY'));
   if (!isPreview && !key) return bad('Configure OpenAI API key in Settings', 503);
   // Type and length validation happens BEFORE any paid image generation.
   for (const [key, limit] of [['title', 140], ['subtitle', 140], ['badge', 60]] as const) {
