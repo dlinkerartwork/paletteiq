@@ -4,10 +4,11 @@ import { paletteStores } from '@/db/schema';
 import {
   assertSameOrigin, authenticateAccount, beginAccountSession, changeActiveStore,
   createAccount, createOwnedStore, endAccountSession, getAccountSession,
-  listOwnedStores,
+  listOwnedStores, verifyAccountsSchema,
 } from '@/lib/palette-accounts';
 import { validStoreName } from '@/lib/store-identity';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
+import { classifyAccountStorageFailure } from '@/lib/account-storage-errors';
 
 const error = (message: string, status = 400) => Response.json({ error: message }, { status });
 const statusForAccount = async (accountId: string, activeStoreId: string, email: string) => Response.json({
@@ -31,8 +32,16 @@ const status = async () => {
 };
 
 export async function GET() {
-  try { return await status(); }
-  catch (e) { return error('Accounts database unavailable. Apply migration 0005_accounts_and_stores.sql and retry. ' + (e instanceof Error ? e.message.slice(0, 160) : ''), 503); }
+  try {
+    // A visitor with no session cookie previously skipped database access, so
+    // a missing migration looked like an empty account list until registration.
+    await verifyAccountsSchema();
+    return await status();
+  } catch (cause) {
+    const problem = classifyAccountStorageFailure(cause);
+    console.error('[PaletteIQ account status]', problem.issue);
+    return error(problem.message, problem.status);
+  }
 }
 export async function POST(req: Request) {
   if (!assertSameOrigin(req)) return error('Cross-site account operation denied', 403);
@@ -40,9 +49,19 @@ export async function POST(req: Request) {
   try { input = await req.json() as typeof input; } catch { return error('Invalid request JSON'); }
   try {
     if (input.action === 'register') {
-      const created = await createAccount(input.email, input.password);
-      await beginAccountSession(created.accountId, created.storeId, req);
-      return statusForAccount(created.accountId, created.storeId, String(input.email).trim().toLowerCase());
+      try {
+        const created = await createAccount(input.email, input.password);
+        await beginAccountSession(created.accountId, created.storeId, req);
+        return statusForAccount(created.accountId, created.storeId, String(input.email).trim().toLowerCase());
+      } catch (cause) {
+        // Registration errors must name the actual failure. Never imply that
+        // a new user's email is taken when the local D1 schema is missing.
+        if (cause instanceof Error && /valid email and password/.test(cause.message))
+          return error(cause.message, 400);
+        const problem = classifyAccountStorageFailure(cause);
+        console.error('[PaletteIQ account registration]', problem.issue);
+        return error(problem.message, problem.status);
+      }
     }
     if (input.action === 'login') {
       const signedIn = await authenticateAccount(input.email, input.password);
