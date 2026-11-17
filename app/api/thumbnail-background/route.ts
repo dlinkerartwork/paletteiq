@@ -1,3 +1,4 @@
+import { getRecoverableAsset } from '@/lib/recovered-assets';
 import { env } from 'cloudflare:workers';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '@/db';
@@ -79,7 +80,7 @@ export async function GET(req: Request) {
   const format = url.searchParams.get('format') || '';
   if (!/^[0-9a-f-]{36}$/.test(assetId) || !['png','jpg'].includes(format)) return bad('Invalid image identifier');
   if (!await belongsToOwner(projectId, user.userId)) return bad('Collection not found', 404);
-  const result = await bucket()?.get('generated/' + user.userId + '/' + assetId + '.' + format);
+  const result = await getRecoverableAsset(bucket(), 'generated/' + user.userId + '/' + assetId + '.' + format);
   if (!result) return bad('Background not found', 404);
   return new Response(await result.arrayBuffer(), { headers: { 'Content-Type': format === 'png' ? 'image/png' : 'image/jpeg', 'Cache-Control': 'private, max-age=3600', 'X-Content-Type-Options': 'nosniff' } });
 }
