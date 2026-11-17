@@ -1,10 +1,26 @@
 /** In-app workspace entries backed by the browser's native history stack. */
+export const STUDIO_DISABLED_TABS = ['thumbnails', 'listing-images'] as const;
+export function isStudioTabEnabled(tab: string): boolean {
+  return !(STUDIO_DISABLED_TABS as readonly string[]).includes(tab);
+}
+/** Keyboard shortcuts, identical to common desktop browser navigation keys. */
+export type WorkspaceShortcut = 'back' | 'forward' | 'refresh';
+export function workspaceShortcut(event: Pick<KeyboardEvent, 'key' | 'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey'>): WorkspaceShortcut | null {
+  const { key, altKey, ctrlKey, metaKey, shiftKey } = event;
+  if (!shiftKey && altKey && !ctrlKey && !metaKey) {
+    if (key === 'ArrowLeft') return 'back';
+    if (key === 'ArrowRight') return 'forward';
+  }
+  if (!altKey && (key === 'F5' && !shiftKey && !ctrlKey && !metaKey ||
+    key.toLowerCase() === 'r' && !shiftKey && (ctrlKey !== metaKey))) return 'refresh';
+  return null;
+}
 export type WorkspaceRoute = { tab: string; projectId: string };
 export type WorkspaceHistoryEntry = WorkspaceRoute & { index: number; session: string };
 
 export const WORKSPACE_TAB_IDS = [
   'overview', 'collections', 'multi-production', 'settings', 'analysis', 'characters',
-  'prompts', 'production', 'listing', 'thumbnails', 'listing-images',
+  'prompts', 'production', 'listing', // Thumbnail Designer and Listing Studio are temporarily disabled.
 ] as const;
 
 export function isWorkspaceRoute(value: unknown): value is WorkspaceRoute {
