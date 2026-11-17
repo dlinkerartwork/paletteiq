@@ -1,5 +1,5 @@
 import type { EtsyListingDraft } from './etsy-listing';
-import { ETSY_TITLE_IDEAL_MIN, ETSY_TITLE_MAX, isNearEtsyTitleLimit, removeClipartQuantity } from './seo-title-policy';
+import { ETSY_TITLE_IDEAL_MIN, ETSY_TITLE_MAX, isNearEtsyTitleLimit, removeClipartQuantity } from './seo-title-policy.ts';
 
 export type SeoAuditResult = { score: number; passed: number; total: number; checks: Array<{ id: string; label: string; passed: boolean; weight: number; fix: string }> };
 
