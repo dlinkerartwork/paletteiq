@@ -91,3 +91,37 @@ test('AI SEO instructions target 140 chars and exclude clipart counts, including
   assert.match(settings,/Max 140 characters · target 125–140/);
   assert.doesNotMatch(settings,/TITLE MAX CHARACTERS \(1–140\)/);
 });
+
+test('workspace browser keyboard shortcuts are recognized only with exact modifiers', () => {
+  const key = (input) => ({ key: 'x', altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, ...input });
+  assert.equal(workspaceShortcut(key({ key: 'ArrowLeft', altKey: true })), 'back');
+  assert.equal(workspaceShortcut(key({ key: 'ArrowRight', altKey: true })), 'forward');
+  assert.equal(workspaceShortcut(key({ key: 'r', ctrlKey: true })), 'refresh');
+  assert.equal(workspaceShortcut(key({ key: 'R', metaKey: true })), 'refresh');
+  assert.equal(workspaceShortcut(key({ key: 'F5' })), 'refresh');
+  assert.equal(workspaceShortcut(key({ key: 'ArrowLeft' })), null);
+  assert.equal(workspaceShortcut(key({ key: 'ArrowRight', altKey: true, ctrlKey: true })), null);
+  assert.equal(workspaceShortcut(key({ key: 'ArrowLeft', altKey: true, shiftKey: true })), null);
+  assert.equal(workspaceShortcut(key({ key: 'r' })), null);
+  assert.equal(workspaceShortcut(key({ key: 'r', ctrlKey: true, shiftKey: true })), null);
+  assert.equal(workspaceShortcut(key({ key: 'r', ctrlKey: true, metaKey: true })), null);
+});
+test('history buttons provide hover tooltips and keyboard shortcuts while inactive tabs remain gated', () => {
+  const page = readFileSync(new URL('../app/page.tsx', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
+  assert.match(page, /aria-keyshortcuts="Alt\+ArrowLeft"/);
+  assert.match(page, /aria-keyshortcuts="Alt\+ArrowRight"/);
+  assert.match(page, /aria-keyshortcuts="Control\+R Meta\+R F5"/);
+  assert.match(page, /workspaceShortcut\(event\)/);
+  assert.match(page, /window.addEventListener\('keydown', onKeyDown, true\)/);
+  assert.match(page, /event.preventDefault\(\)/);
+  assert.match(page, /data-tooltip="Go Back · Alt \+ ←"/);
+  assert.match(page, /data-tooltip="Go Forward · Alt \+ →"/);
+  assert.match(page, /data-tooltip="Refresh · Ctrl\/⌘ \+ R or F5"/);
+  assert.match(css, /\.workspace-history-tip:hover::after/);
+  assert.match(css, /\.workspace-history-tip:focus-within::after/);
+  assert.match(page, /if \(!isStudioTabEnabled\(next\)\)/);
+  assert.match(page, /isStudioTabEnabled\('thumbnails'\) && tab === 'thumbnails'/);
+  assert.match(page, /isStudioTabEnabled\('listing-images'\) && tab === 'listing-images'/);
+  assert.match(page, /window.history.replaceState\(\{ \.\.\.event.state, paletteiqWorkspace: repaired \}/);
+});
