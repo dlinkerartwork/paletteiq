@@ -1,3 +1,4 @@
+import { getRecoverableAsset, headRecoverableAsset } from '@/lib/recovered-assets';
 import { sharedProviderSecret } from '@/lib/store-secrets';
 import { env } from 'cloudflare:workers';
 import { and, eq } from 'drizzle-orm';
@@ -175,7 +176,7 @@ async function critiqueFinalImage(project: StoredProject, number: number, owner:
   if (!key || !key.endsWith('.jpg')) throw Error('Invalid saved final JPG');
   const storage = bucket();
   if (!storage) throw Error('Image storage unavailable');
-  const saved = await storage.get(key);
+  const saved = await getRecoverableAsset(storage,key);
   if (!saved) throw Error('Saved final JPG was not found');
   const bytes = new Uint8Array(await saved.arrayBuffer());
   if (bytes.length < 100 || bytes.length > 12_000_000)
@@ -276,9 +277,9 @@ export async function GET(request: Request) {
   for (const spec of LISTING_IMAGE_SPECS) {
     const item = selected[spec.number - 1]!;
     const key = savedAssetKey(item.renderedImageUrl!, projectId, user.userId);
-    if (!key || !key.endsWith('.jpg') || !(await storage.head(key)))
+    if (!key || !key.endsWith('.jpg') || !(await headRecoverableAsset(storage,key)))
       return bad('Missing saved JPG for image ' + spec.number + '. Re-render this listing image.', 409);
-    entries.push({ name: listingFilename(spec.number), stream: async () => (await storage.get(key))?.body || null });
+    entries.push({ name: listingFilename(spec.number), stream: async () => (await getRecoverableAsset(storage,key))?.body || null });
   }
   const name = sanitizedText(project.name || 'collection', 55).toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'collection';
   return new Response(zipStream(entries), {
@@ -486,7 +487,7 @@ export async function POST(request: Request) {
       const asset=byId.get(ids[i])!;
       const ref=originalAssetStorageKey(asset,user.userId);
       if(!ref) return bad('Selected artwork does not point to a managed original image: '+asset.name,409);
-      if(!(await storage.head(ref.key)))
+      if(!(await headRecoverableAsset(storage,ref.key)))
         return bad('Original artwork is missing from storage: '+asset.name,409);
       refs.push({asset,key:ref.key,name:sourceZipFilename(i,asset,ref.extension)});
     }
@@ -514,7 +515,7 @@ export async function POST(request: Request) {
     const meta=JSON.stringify(manifest,null,2);
     const entries:ZipEntry[]=[
       {name:'paletteiq-source-manifest.json',stream:async()=>new Blob([meta],{type:'application/json'}).stream()},
-      ...refs.map(({name,key}):ZipEntry=>({name,stream:async()=> (await storage.get(key))?.body||null}))
+      ...refs.map(({name,key}):ZipEntry=>({name,stream:async()=> (await getRecoverableAsset(storage,key))?.body||null}))
     ];
     const safe=(project.name||'collection').replace(/[^a-zA-Z0-9-_ ]/g,'').replace(/\s+/g,'-').slice(0,64)||'collection';
     return new Response(zipStream(entries),{headers:{
@@ -657,7 +658,7 @@ export async function POST(request: Request) {
       for(const asset of detailCandidates){
         const source=originalAssetStorageKey(asset,user.userId);
         if(!source)continue;
-        const storedOriginal=await bucket()?.get(source.key);
+        const storedOriginal=await getRecoverableAsset(bucket(),source.key);
         if(!storedOriginal)continue;
         const bytes=new Uint8Array(await storedOriginal.arrayBuffer());
         const png=source.extension==='png' && bytes[0]===137 && bytes[1]===80 &&
@@ -710,7 +711,7 @@ export async function POST(request: Request) {
       return bad('Invalid original collection placement plan');
     const key = savedAssetKey(input.backgroundUrl || '', input.projectId, user.userId);
     if (!key || !key.endsWith('.png')) return bad('Invalid AI background');
-    const storedBackground = await bucket()?.get(key);
+    const storedBackground = await getRecoverableAsset(bucket(),key);
     if (!storedBackground) return bad('AI background not found', 404);
     const bytes = new Uint8Array(await storedBackground.arrayBuffer());
     if (bytes.length > 20_000_000) return bad('AI background exceeds Vision limit', 413);
