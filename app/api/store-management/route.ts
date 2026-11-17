@@ -32,6 +32,9 @@ export async function GET(req: Request) {
     } });
   }
   const stores = await listOwnedStores(session.accountId);
+  const ownedRows = await getDb().select({ id: paletteStores.id, legacyAssetOwner: paletteStores.legacyAssetOwner }).from(paletteStores)
+    .where(eq(paletteStores.accountId, session.accountId));
+  const legacyIds = new Set(ownedRows.filter(row => row.legacyAssetOwner === 'local_seedy').map(row => row.id));
   const allProjects = await getDb().select({ id: projects.id, owner: projects.owner }).from(projects);
   const batches = await getDb().select({ id: imageBatches.id, owner: imageBatches.owner, status: imageBatches.status }).from(imageBatches);
   return Response.json({
@@ -39,7 +42,7 @@ export async function GET(req: Request) {
     stores: stores.map(store => {
       const owner = scopeForStore(session.accountId, store.id);
       const jobs = batches.filter(job => job.owner === owner);
-      return { ...store, collections: allProjects.filter(project => project.owner === owner).length,
+      return { ...store, legacyProtected: legacyIds.has(store.id), collections: allProjects.filter(project => project.owner === owner).length,
         batches: jobs.length, activeJobs: jobs.filter(job => !['completed','failed','cancelled','expired','completed_with_errors'].includes(job.status)).length };
     }),
   }, { headers: noCache });
@@ -60,6 +63,7 @@ export async function POST(req: Request) {
   const target = owned[0];
   if (!target) return fail('Store not found in your account', 403);
   if (target.id === session.activeStoreId) return fail('Switch to another store before deleting the active store.', 409);
+  if (target.legacyAssetOwner === 'local_seedy') return fail('This store holds recovered legacy images. Transfer its legacy R2 assets to another store before deleting it.', 409);
   if (body.storeName !== target.name || body.confirmation !== 'DELETE STORE')
     return fail('Type the exact store name and DELETE STORE to confirm', 400);
   const stores = await listOwnedStores(session.accountId);
