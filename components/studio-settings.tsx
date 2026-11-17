@@ -16,6 +16,7 @@ export type StudioPreferences = {
 };
 export const defaultPrefs: StudioPreferences = { target: 120, model: 'gpt-image-1-mini', quality: 'low', analysisModel: 'gpt-4.1-mini', output: 'png', background: 'transparent', variations: 1, defaultStyle: 'Soft hand-painted watercolor illustration', autoSave: false, seoProvider: 'openai', seoGeminiModel: 'gemini-2.5-pro', seoOpenaiModel: 'gpt-6.1-terra', seoDraftFields: [...defaultSeoDraftFields], seoTitleMaxLength: 140, seoAltTextCount: 1, seoFileNaming: 'charactername_imagenumber', seoPrompts: { ...defaultSeoPrompts }, upscaleProvider: 'remote', upscaleServerUrl: '', upscaleFactor: 4, upscaleRequireTransparency: true, upscaleQc: true, upscaleModel: 'realesrgan-x4plus', upscaleCleanup: false, upscaleCleanupStrength: 'low' };
 type Props = { preferences: StudioPreferences; onPreferences: (prefs: StudioPreferences) => void; projects: unknown[] };
+type SettingsPane = 'credentials' | 'production' | 'upscale' | 'seo' | 'backup';
 type SettingsResponse = { error?: string; credentials: { etsy: boolean; openai: boolean; gemini: boolean; upscale: boolean }; geminiKeyCount?: number };
 const readSettingsResponse = async (res: Response): Promise<SettingsResponse> => {
   const raw = await res.text();
@@ -39,6 +40,9 @@ export default function StudioSettings({ preferences, onPreferences, projects }:
   const [visible, setVisible] = useState({ etsy: false, openai: false, gemini: false });
   const [active, setActive] = useState('');
   const [message, setMessage] = useState('');
+  const [pane, setPane] = useState<SettingsPane>('credentials');
+  useEffect(() => { try { const saved = sessionStorage.getItem('paletteiq-settings-pane'); if (saved && ['credentials','production','upscale','seo','backup'].includes(saved)) setPane(saved as SettingsPane); } catch {} }, []);
+  const changePane = (value: SettingsPane) => { setPane(value); try { sessionStorage.setItem('paletteiq-settings-pane', value); } catch {} };
   const [geminiModels, setGeminiModels] = useState<Array<{ id: string; name: string }>>([]);
   const [geminiModelsLoaded, setGeminiModelsLoaded] = useState(false);
   const [openaiSeoModels, setOpenaiSeoModels] = useState<Array<{ id: string; name: string }>>([]);
@@ -116,16 +120,27 @@ export default function StudioSettings({ preferences, onPreferences, projects }:
     ['digitalFiles', 'Digital files', 'File plan; do not invent specs.'],
     ['licenseNotes', 'License notes', 'License wording; do not invent rights.'],
   ];
-  return <div className="settings-layout">
+  return <div className="settings-layout settings-tabbed-layout">
+    <nav className="settings-tabs" role="tablist" aria-label="Settings sections">
+      {([
+        ['credentials','API Credentials'],
+        ['production','Production Defaults'],
+        ['upscale','Remote GPU Upscale'],
+        ['seo','SEO AI Prompts'],
+        ['backup','Backup & Restore'],
+      ] as const).map(([value,label]) =>
+        <button type="button" key={value} role="tab" id={`settings-tab-${value}`}
+          aria-selected={pane===value} aria-controls={`settings-panel-${value}`}
+          tabIndex={pane===value?0:-1} className={pane===value?'active':''}
+          onClick={()=>changePane(value)}>{label}</button>)}
+    </nav>
     {message && <div className="notice" role="status" style={{ gridColumn: '1 / -1', width: '100%' }}><ShieldCheck size={17}/>{message}</div>}
-    <section className="panel settings-panel settings-credentials"><div className="settings-header"><div className="heading-icon amber"><KeyRound size={21}/></div><div><h2>API credentials</h2><p>Keep your credentials private. Stored encrypted on the server and never included in JSON exports.</p></div></div>
+    {pane === 'credentials' && <section id="settings-panel-credentials" role="tabpanel" aria-labelledby="settings-tab-credentials" className="panel settings-panel settings-credentials"><div className="settings-header"><div className="heading-icon amber"><KeyRound size={21}/></div><div><h2>API credentials</h2><p>Keep your credentials private. Stored encrypted on the server and never included in JSON exports.</p></div></div>
       {([{ id: 'openai', label: 'OpenAI API key', hint: 'Required for AI analysis, character expansion and image generation.', placeholder: 'sk-...' }, { id: 'gemini', label: 'Google Gemini API key', hint: 'Used only when Gemini is selected for SEO drafting/review.', placeholder: 'Gemini API key' }, { id: 'etsy', label: 'Etsy API credential', hint: 'Enter the Etsy keystring and shared secret separated by a colon.', placeholder: 'keystring:shared_secret' }] as const).map(c => <div className="secret-row" key={c.id}><div className="secret-heading"><div><b>{c.label}</b><p>{c.hint}</p></div><span className={`credential-status ${credentials[c.id] ? 'connected' : ''}`}>{credentials[c.id] ? <><CheckCircle2 size={13}/> Saved</> : 'Not configured'}</span></div><div className="secret-input"><input autoComplete="off" type={visible[c.id] ? 'text' : 'password'} value={secrets[c.id]} placeholder={c.id === 'gemini' ? 'Add another Gemini API key' : credentials[c.id] ? '•••••••••••• (replace existing key)' : c.placeholder} onChange={e => setSecrets(s => ({ ...s, [c.id]: e.target.value }))}/><button aria-label={visible[c.id] ? 'Hide key' : 'Show key'} onClick={() => setVisible(v => ({ ...v, [c.id]: !v[c.id] }))}>{visible[c.id] ? <EyeOff size={17}/> : <Eye size={17}/>}</button><button className="primary-btn" disabled={!secrets[c.id] || Boolean(active)} onClick={() => saveKey(c.id)}><Save size={15}/> {active === c.id ? 'Saving…' : c.id === 'gemini' ? 'Add key' : 'Save key'}</button>{credentials[c.id] && c.id !== 'gemini' && <button className="outline-btn danger-btn" disabled={Boolean(active)} onClick={() => saveKey(c.id, true)} title="Remove stored key"><Trash2 size={15}/></button>}</div>{c.id === 'gemini' && <div className="sub" style={{ marginTop: 8 }}><p>{geminiKeyCount} Gemini API key(s) configured. Rotation follows the order below on quota exhaustion.</p>{Array.from({ length: geminiKeyCount }, (_, index) => <div key={index} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}><span>Key {index + 1} · ••••••••</span><button type="button" className="outline-btn" disabled={Boolean(active)} onClick={() => removeGeminiKey(index)}><Trash2 size={14}/> Remove</button></div>)}</div>}</div>)}
       <div className="security-note"><LockKeyhole size={16}/><span>API keys are encrypted with a server-held encryption key. Stored keys are never sent back to the browser. Your backup intentionally excludes credentials.</span></div>
-    </section>
+    </section>}
 
-
-
-    <section className="panel settings-panel settings-production"><div className="settings-header"><div className="heading-icon violet"><Settings2 size={21}/></div><div><h2>Production defaults</h2><p>Applied when opening the studio and creating new collections.</p></div></div><div className="settings-fields">
+    {pane === 'production' && <section id="settings-panel-production" role="tabpanel" aria-labelledby="settings-tab-production" className="panel settings-panel settings-production"><div className="settings-header"><div className="heading-icon violet"><Settings2 size={21}/></div><div><h2>Production defaults</h2><p>Applied when opening the studio and creating new collections.</p></div></div><div className="settings-fields">
       <div><label className="input-label">TARGET CHARACTERS</label><input type="number" min={1} max={1000} value={preferences.target} onChange={e => edit('target', Number(e.target.value))}/></div>
       <div><label className="input-label">VARIATIONS (RESERVED FOR BULK QUEUE)</label><input type="number" min={1} max={8} value={preferences.variations} onChange={e => edit('variations', Number(e.target.value))}/></div>
       <div><label className="input-label">IMAGE GENERATION MODEL</label><select value={preferences.model} onChange={e => edit('model', e.target.value)}>{!openaiImageModels.some(m => m.id === preferences.model) && <option value={preferences.model}>{preferences.model} (saved model)</option>}{openaiImageModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select><button type="button" onClick={() => void loadOpenaiModels()}>Refresh OpenAI image models</button><p className="sub">{openaiModelsError || "Models are fetched from OpenAI. Only GPT Image family IDs are shown; transparency requires PNG and model API support."}</p></div>
@@ -133,9 +148,9 @@ export default function StudioSettings({ preferences, onPreferences, projects }:
       <div><label className="input-label">IMAGE FILE FORMAT</label><select value={preferences.output} onChange={e => edit('output', e.target.value)}><option value="png">PNG</option><option value="jpg">JPG</option></select></div>
       <div><label className="input-label">BACKGROUND</label><select value={preferences.background} onChange={e => edit('background', e.target.value)}><option value="transparent">Transparent</option><option value="opaque">Opaque</option></select></div>
       <div className="full"><label className="input-label">DEFAULT VISUAL STYLE</label><textarea rows={3} value={preferences.defaultStyle} onChange={e => edit('defaultStyle', e.target.value)} /></div>
-    </div><div className="settings-actions"><button className="primary-btn" disabled={Boolean(active)} onClick={() => act('preferences', async () => { if (preferences.output === 'jpg' && preferences.background === 'transparent') throw new Error('JPG requires an opaque background. Choose PNG for transparency.'); await request({ action: 'preferences', preferences }); })}><Save size={16}/> {active === 'preferences' ? 'Saving…' : 'Save preferences'}</button></div></section>
+    </div><div className="settings-actions"><button className="primary-btn" disabled={Boolean(active)} onClick={() => act('preferences', async () => { if (preferences.output === 'jpg' && preferences.background === 'transparent') throw new Error('JPG requires an opaque background. Choose PNG for transparency.'); await request({ action: 'preferences', preferences }); })}><Save size={16}/> {active === 'preferences' ? 'Saving…' : 'Save preferences'}</button></div></section>}
 
-    <section className="panel settings-panel">
+    {pane === 'upscale' && <section id="settings-panel-upscale" role="tabpanel" aria-labelledby="settings-tab-upscale" className="panel settings-panel">
       <div className="settings-header"><div className="heading-icon violet"><Settings2 size={21}/></div><div><h2>Remote GPU Upscale</h2><p>Upscaling runs on your PaletteIQ GPU Server. Enter its LAN address here; your API key is stored encrypted.</p></div></div>
       <div className="secret-row"><div className="secret-heading"><div><b>GPU Server URL / IP address</b><p>Use the address of the computer running PaletteIQ GPU Server, including its port (e.g. http://192.168.1.10:8000). Leave empty to use the backend default.</p></div></div><div className="secret-input"><input aria-label="GPU Server URL" type="url" autoComplete="off" value={preferences.upscaleServerUrl ?? ''} placeholder="http://192.168.1.10:8000" onChange={e => edit('upscaleServerUrl', e.target.value)}/></div><p className="sub">For safety, custom URLs accept only private LAN IPv4 addresses or localhost. Save upscale settings before testing the connection. HTTP requires the backend's private-network allowance.</p></div>
       <div className="secret-row"><div className="secret-heading"><div><b>GPU Server API key</b><p>Enter the same key configured as PALETTEIQ_API_KEY on your GPU server.</p></div><span className={`credential-status ${credentials.upscale ? 'connected' : ''}`}>{credentials.upscale ? <><CheckCircle2 size={13}/> Saved</> : 'Using backend default / not saved'}</span></div>
@@ -153,13 +168,13 @@ export default function StudioSettings({ preferences, onPreferences, projects }:
         <p className="sub full">Server URL: PALETTEIQ_UPSCALE_SERVER_URL on the backend. A saved API key above overrides PALETTEIQ_UPSCALE_SERVER_KEY. Web deployments require authenticated HTTPS. The original image remains intact.</p>
       </div>
       <div className="settings-actions"><button className="outline-btn" disabled={Boolean(active)} onClick={async () => { setActive('upscale-test'); setMessage('Checking GPU Server connection…'); try { const response = await fetch('/api/upscale?check=1'); const data = await response.json() as { connected?: boolean; error?: string; engineReady?: boolean; queueDepth?: number }; if (!response.ok || !data.connected) throw new Error(data.error || 'GPU server unavailable'); setMessage(`Connected to GPU Server. Engine: ${data.engineReady === false ? 'not ready' : 'ready'} · Queue: ${data.queueDepth ?? 'unknown'}.`); } catch (error) { setMessage(`GPU Server connection failed: ${error instanceof Error ? error.message : String(error)}`); } finally { setActive(''); } }}>Test Connection</button><button className="primary-btn" disabled={Boolean(active)} onClick={() => act('upscale-preferences', async () => { await request({ action: 'preferences', preferences: { ...preferences, upscaleProvider: 'remote' } }); })}><Save size={16}/> Save upscale settings</button></div>
-    </section>
-    <section className="panel settings-panel settings-backup"><div className="settings-header"><div className="heading-icon amber"><CloudDownload size={21}/></div><div><h2>JSON Backup & Restore</h2><p>Export current collections or safely restore a legacy backup into any store owned by your account.</p></div></div>
+    </section>}
+    {pane === 'backup' && <section id="settings-panel-backup" role="tabpanel" aria-labelledby="settings-tab-backup" className="panel settings-panel settings-backup"><div className="settings-header"><div className="heading-icon amber"><CloudDownload size={21}/></div><div><h2>JSON Backup & Restore</h2><p>Export current collections or safely restore a legacy backup into any store owned by your account.</p></div></div>
       <div className="backup-actions"><button className="outline-btn" type="button" onClick={backup}><CloudDownload size={17}/> Export current store (.json)</button></div>
       <RestoreBackupPanel/>
-    </section>
+    </section>}
 
-    <section className="panel settings-panel settings-wide settings-seo"><div className="settings-header"><div className="heading-icon violet"><Settings2 size={21}/></div><div><h2>SEO generation settings & custom prompts</h2><p>Instructions below are included when generating the Etsy listing draft and running Advanced SEO Intelligence. Leave fields blank to use built-in guidance.</p></div></div>
+    {pane === 'seo' && <section id="settings-panel-seo" role="tabpanel" aria-labelledby="settings-tab-seo" className="panel settings-panel settings-wide settings-seo"><div className="settings-header"><div className="heading-icon violet"><Settings2 size={21}/></div><div><h2>SEO generation settings & custom prompts</h2><p>Instructions below are included when generating the Etsy listing draft and running Advanced SEO Intelligence. Leave fields blank to use built-in guidance.</p></div></div>
       <div className="settings-fields seo-generation-options">
         <div><label className="input-label">SEO AI PROVIDER</label><select value={preferences.seoProvider ?? 'openai'} onChange={e => edit('seoProvider', e.target.value)}><option value="openai">OpenAI</option><option value="gemini">Google Gemini</option></select><p className="sub">Selects the provider for SEO Draft generation, image alt text and Advanced SEO review. Etsy API remains the source for title, description and tags.</p></div>
         <div><label className="input-label">OPENAI SEO MODEL</label><select value={preferences.seoOpenaiModel ?? 'gpt-6.1-terra'} onChange={e => edit('seoOpenaiModel', e.target.value)}>{!openaiSeoModels.some(m => m.id === (preferences.seoOpenaiModel ?? 'gpt-6.1-terra')) && <option value={preferences.seoOpenaiModel ?? 'gpt-6.1-terra'}>{preferences.seoOpenaiModel ?? 'gpt-6.1-terra'} (saved/default model)</option>}{openaiSeoModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select><button type="button" onClick={() => void loadOpenaiSeoModels()}>Refresh advanced OpenAI models</button><p className="sub">{openaiSeoModelsError || 'Used when OpenAI is the SEO AI provider.'}</p></div>
@@ -171,9 +186,7 @@ export default function StudioSettings({ preferences, onPreferences, projects }:
       </div>
       <div className="settings-fields">{seoFields.map(([key, label, hint]) => <div className="seo-prompt-field" key={key}><label className="input-label">{label.toUpperCase()}</label><p className="sub">{hint}</p><textarea rows={3} maxLength={2000} placeholder={key === 'description' ? 'Example: Mention the primary keyword naturally in the opening paragraph.' : `Optional custom instructions for ${label.toLowerCase()}…`} value={preferences.seoPrompts?.[key] ?? ''} onChange={e => onPreferences({ ...preferences, seoPrompts: { ...defaultSeoPrompts, ...preferences.seoPrompts, [key]: e.target.value } })}/></div>)}</div>
       <div className="settings-actions"><button className="primary-btn" disabled={Boolean(active)} onClick={() => act('seo-prompts', async () => { await request({ action: 'preferences', preferences }); })}><Save size={16}/> {active === 'seo-prompts' ? 'Saving…' : 'Save SEO prompts'}</button></div>
-    </section>
-
-
+    </section>}
   </div>;
 }
 
