@@ -138,10 +138,20 @@ function settingsError(error: unknown): Response {
 }
 
 export async function GET(req: Request) {
-  try { return await getSettings(req); } catch (error) { return settingsError(error); }
+  try {
+    const response = await getSettings(req);
+    // Every request is scoped to the authenticated active store. Do not let
+    // a browser/proxy reuse another store's settings or credential status.
+    response.headers.set('Cache-Control', 'private, no-store');
+    return response;
+  } catch (error) { return settingsError(error); }
 }
 
 export async function POST(req: Request) {
-  try { return await postSettings(req); } catch (error) { return settingsError(error); }
+  try {
+    const response = await postSettings(req);
+    response.headers.set('Cache-Control', 'private, no-store');
+    return response;
+  } catch (error) { return settingsError(error); }
 }
 
