@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { sharedProviderSecret } from '@/lib/store-secrets';
 import { eq } from 'drizzle-orm';
 import { getDb } from '@/db';
 import { studioSettings } from '@/db/schema';
@@ -19,7 +20,7 @@ const defaults: SeoGenerationPreferences = {
   seoProvider: 'openai', seoGeminiModel: 'gemini-2.5-pro', seoOpenaiModel: 'gpt-6.1-terra', seoTitleMaxLength: ETSY_TITLE_MAX,
   seoAltTextCount: 1, seoFileNaming: 'charactername_imagenumber',
 };
-const secret = (key: string) => (env as unknown as Record<string, string | undefined>)[key];
+
 
 export async function seoPreferences(owner: string): Promise<SeoGenerationPreferences> {
   const rows = await getDb().select().from(studioSettings).where(eq(studioSettings.owner, owner)).limit(1);
@@ -37,7 +38,7 @@ export async function seoPreferences(owner: string): Promise<SeoGenerationPrefer
 
 export async function generateSeoJson(owner: string, instruction: string, provider: 'openai' | 'gemini', modelChoice = 'gemini-2.5-pro'): Promise<unknown> {
   if (provider === 'openai') {
-    const key = await userCredential(owner, 'openai') || secret('OPENAI_API_KEY');
+    const key = await userCredential(owner, 'openai') || sharedProviderSecret(owner, 'OPENAI_API_KEY');
     if (!key) throw new Error('Configure your OpenAI API key in Settings before generating SEO.');
     const response = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
@@ -50,7 +51,7 @@ export async function generateSeoJson(owner: string, instruction: string, provid
     return JSON.parse(text);
   }
   const keys = await userGeminiKeys(owner);
-  if (!keys.length && secret('GEMINI_API_KEY')) keys.push(secret('GEMINI_API_KEY')!);
+  if (!keys.length && sharedProviderSecret(owner, 'GEMINI_API_KEY')) keys.push(sharedProviderSecret(owner, 'GEMINI_API_KEY')!);
   if (!keys.length) throw new Error('Configure a Gemini API key in Settings before generating SEO.');
   const model = /^gemini-[a-z0-9.-]{1,80}$/.test(modelChoice) ? modelChoice : 'gemini-2.5-pro';
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
