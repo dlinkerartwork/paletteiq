@@ -139,6 +139,47 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
   const latestAsset = useRef(onAsset);
   const latestProject = useRef(project);
   useEffect(() => { latestAsset.current = onAsset; latestProject.current = project; }, [onAsset, project]);
+  useEffect(() => {
+    if (!project.upscaleBatch) return;
+    let closed = false, checking = false;
+    const checkBatch = async () => {
+      if (closed || checking || latestProject.current.upscaleBatch?.status === 'completed') return;
+      checking = true;
+      try {
+        const data = await request<{
+          batch?: StoredUpscaleBatch; status: string; totalFiles?: number;
+          completedFiles?: number; receivedIds?: string[];
+          notificationConfigured?: boolean; notificationEmail?: string;
+          notificationStatus?: string;
+          jobs?: Array<{ characterId: string; job: Character['upscaleJob'] }>;
+        }>('/api/upscale-batches?projectId=' + encodeURIComponent(project.id));
+        if (closed) return;
+        setUpscaleBatchStatus({
+          status: data.status, received: data.receivedIds?.length || 0,
+          total: data.totalFiles || data.batch?.items.length || 0,
+          finished: data.completedFiles || 0,
+          notificationConfigured: data.notificationConfigured,
+          notificationEmail: data.notificationEmail,
+          notificationStatus: data.notificationStatus,
+        });
+        if (data.batch && (data.batch.status !== latestProject.current.upscaleBatch?.status ||
+            data.batch.remoteId !== latestProject.current.upscaleBatch?.remoteId))
+          latestBatchChange.current(data.batch);
+        for (const item of data.jobs || []) {
+          const current = latestProject.current.characters.find(c => c.id === item.characterId);
+          if (item.job && current && current.upscaleJob?.id !== item.job.id &&
+              !current.upscaledImageUrl) {
+            latestUpscaleChange.current(item.characterId, { upscaleJob: item.job });
+          }
+        }
+      } catch {
+        // A disconnected GPU host does not cancel or duplicate the remote Batch.
+      } finally { checking = false; }
+    };
+    void checkBatch();
+    const timer = window.setInterval(() => void checkBatch(), 12000);
+    return () => { closed = true; window.clearInterval(timer); };
+  }, [project.id, project.upscaleBatch?.id]);
   const syncBusy = useRef(false);
   const refreshNow = useRef<() => Promise<void>>(async () => {});
   const pending = new Set(jobs.filter(j => isActiveBatchStatus(j.status)).flatMap(j => j.characterIds || []));
@@ -388,7 +429,18 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
       </div>
     </aside>
     </div>
-    <section className="panel image-download-toolbar"><div><h2>Collection images</h2><p className="sub">{selectedIds.length} cards selected · {generated.length} images available · {eligible.length} prompts not yet generated</p></div><div className="image-download-actions"><button className="outline-btn" onClick={() => setSelectedIds(project.characters.map(c => c.id))}>Select all</button><button className="outline-btn" onClick={() => setSelectedIds([])}>Clear</button><select style={{ width: 88, flex: '0 0 88px' }} aria-label="Image upscale factor" value={upscaleFactor} disabled={upscaling} onChange={e => setUpscaleFactor(Number(e.target.value))}>{[2,4,6,8].map(factor => <option key={factor} value={factor}>{factor}×</option>)}</select><button className="outline-btn" disabled={upscaling || !selectedGenerated.some(c => !c.upscaleJob)} onClick={() => void runCloudUpscale()}>{upscaling ? <LoaderCircle size={15} className="spin"/> : <ImageIcon size={15}/>} Remote GPU upscale {upscaleFactor}× ({selectedGenerated.filter(c => !c.upscaleJob).length})</button><button className="outline-btn" disabled={downloading || !selectedGenerated.length} onClick={() => void downloadZip('selected')}><Download size={15}/> Download selected ZIP</button><button className="outline-btn" disabled={downloading || !generated.length} onClick={() => void downloadZip('all')}><Download size={15}/> Download all ZIP</button><button className="primary-btn" title={!project.listing?.title ? 'Create and save an Etsy listing draft first.' : ''} disabled={downloading || !generated.length || !project.listing?.title} onClick={() => void downloadZip('package')}><Download size={15}/> Images + listing draft ZIP</button></div></section>
+    <section className="panel image-download-toolbar"><div><h2>Collection images</h2><p className="sub">{selectedIds.length} cards selected · {generated.length} images available · {eligible.length} prompts not yet generated</p></div><div className="image-download-actions"><button className="outline-btn" onClick={() => setSelectedIds(project.characters.map(c => c.id))}>Select all</button><button className="outline-btn" onClick={() => setSelectedIds([])}>Clear</button><select style={{ width: 88, flex: '0 0 88px' }} aria-label="Image upscale factor" value={upscaleFactor} disabled={upscaling} onChange={e => setUpscaleFactor(Number(e.target.value))}>{[2,4,6,8].map(factor => <option key={factor} value={factor}>{factor}×</option>)}</select><button className="outline-btn" disabled={upscaling || (project.upscaleBatch?.status !== 'staging' && !selectedGenerated.some(c => !c.upscaleJob)) || project.upscaleBatch?.status === 'committed'} onClick={() => void runCloudUpscale()}>{upscaling ? <LoaderCircle size={15} className="spin"/> : <ImageIcon size={15}/>} {project.upscaleBatch?.status === 'staging' ? 'Resume GPU Batch (' + project.upscaleBatch.items.length + ')' : 'GPU Upscale Batch ' + upscaleFactor + '× (' + selectedGenerated.filter(c => !c.upscaleJob).length + ')'}</button><button className="outline-btn" disabled={downloading || !selectedGenerated.length} onClick={() => void downloadZip('selected')}><Download size={15}/> Download selected ZIP</button><button className="outline-btn" disabled={downloading || !generated.length} onClick={() => void downloadZip('all')}><Download size={15}/> Download all ZIP</button><button className="primary-btn" title={!project.listing?.title ? 'Create and save an Etsy listing draft first.' : ''} disabled={downloading || !generated.length || !project.listing?.title} onClick={() => void downloadZip('package')}><Download size={15}/> Images + listing draft ZIP</button></div></section>
+    {(upscaleBatchStatus || project.upscaleBatch) && <div className="panel" aria-live="polite">
+      <strong>Remote GPU Batch</strong>
+      <p className="sub">Status: {upscaleBatchStatus?.status || project.upscaleBatch?.status} ·
+        Upload: {upscaleBatchStatus?.received || 0}/{upscaleBatchStatus?.total || project.upscaleBatch?.items.length || 0} ·
+        Terminal jobs: {upscaleBatchStatus?.finished || 0}/{upscaleBatchStatus?.total || project.upscaleBatch?.items.length || 0}</p>
+      <p className="sub">Completion notice: {upscaleBatchStatus?.notificationConfigured
+        ? 'GPU Server email to ' + (upscaleBatchStatus.notificationEmail || project.upscaleBatch?.notificationEmail)
+        : 'SMTP not configured on GPU Server; no email will be sent.'}
+        {upscaleBatchStatus?.notificationStatus ? ' · ' + upscaleBatchStatus.notificationStatus : ''}</p>
+      <p className="sub">Keep the client open until the whole Batch has been committed. After that, GPU work and email notification continue without the client PC.</p>
+    </div>}
     <div className="assets-grid">{project.characters.map(c => <div className={`asset-card image-select-card ${selectedIds.includes(c.id) ? 'selected' : ''}`} key={c.id}><label className="asset-select"><input type="checkbox" aria-label={`Select ${c.name}`} checked={selectedIds.includes(c.id)} onChange={e => setSelectedIds(ids => e.target.checked ? [...ids, c.id] : ids.filter(id => id !== c.id))}/><span>Select</span></label><div className="asset-image">{c.imageUrl ? <Image unoptimized width={1024} height={1024} src={c.imageUrl} alt={c.name}/> : <ImageIcon size={36}/>}</div><div className="asset-meta"><b>{c.name}</b><span className={`status ${c.status}`}>{c.status}</span></div>{pending.has(c.id) && <p className="asset-pending">Batch pending</p>}{c.upscaleJob && <div className="asset-upscaled"><span>Remote GPU: {remoteProgress[c.id]?.status === 'sync_error' ? 'Import failed' : remoteProgress[c.id]?.status || 'queued'} · {Math.floor((remoteProgress[c.id]?.elapsed || 0) / 60)}m {Math.floor((remoteProgress[c.id]?.elapsed || 0) % 60)}s</span><button className="outline-btn" type="button" onClick={() => void cancelRemoteUpscale(c)}>Cancel upscale</button></div>}{c.upscaledImageUrl && <div className="asset-upscaled"><button type="button" className="outline-btn" onClick={() => c.imageUrl && setUpscalePreview({ name: c.name, originalUrl: c.imageUrl, upscaledUrl: c.upscaledImageUrl! })}>View upscale</button><a className="outline-btn" href={c.upscaledImageUrl + '&download=1'} download>Download upscale</a></div>}{c.imageUrl && <div className={`similarity-note similarity-${c.similarityReview?.status || 'unverified'}`} title={c.similarityReview?.reason || 'Not checked yet'}>{c.similarityReview?.status === 'needs_review' ? `⚠ Similar to reference (${c.similarityReview.score}%) — review / regenerate` : c.similarityReview?.status === 'clear' ? `✓ AI visual review: low similarity (${c.similarityReview.score}%)` : 'Similarity not verified'}{c.similarityReview?.reason && <small>{c.similarityReview.reason}</small>}</div>}{c.error && <p className="asset-error">{c.error}</p>}<div className="asset-card-actions"><button className="outline-btn" disabled={working || pending.has(c.id) || !c.prompt} onClick={() => mode === 'single' ? void generateSingle(c) : void submitBatch([c.id], everGenerated(c))}>{working ? <LoaderCircle size={14} className="spin"/> : <Sparkles size={14}/>} {everGenerated(c) ? 'Regenerate' : 'Generate'} {mode === 'batch' ? '(Batch)' : '(Single)'}</button>{c.imageUrl && <a className="outline-btn" href={`${c.imageUrl}&download=1`} download><Download size={14}/> Download</a>}</div></div>)}</div>
     {upscalePreview && <UpscaleCompare name={upscalePreview.name} originalUrl={upscalePreview.originalUrl} upscaledUrl={upscalePreview.upscaledUrl} onClose={() => setUpscalePreview(null)}/>}
     {!project.characters.length && <div className="panel empty-state"><ImageIcon size={32}/><strong>No image subjects yet</strong><p>Create characters and prompts first.</p></div>}
