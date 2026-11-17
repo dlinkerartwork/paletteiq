@@ -1,3 +1,4 @@
+import { sharedProviderSecret } from '@/lib/store-secrets';
 import { env } from 'cloudflare:workers';
 import { thumbnailImagePrompt } from '@/lib/thumbnail-image-prompt';
 import { buildThumbnailDesignBrief, type ThumbnailBriefSettings } from '@/lib/thumbnail-design-brief';
@@ -217,7 +218,7 @@ export async function POST(req: Request) {
   let imageBase64 = '';
   let imageMime = 'image/png';
   if (provider === 'openai') {
-    const key = await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
+    const key = await userCredential(user.userId, 'openai') || sharedProviderSecret(user.userId, 'OPENAI_API_KEY');
     if (!key) return bad('Configure the OpenAI API key in Settings', 503);
     const response = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
@@ -262,7 +263,7 @@ export async function POST(req: Request) {
   if (mode === 'background-with-typography' || mode === 'background-only') {
     // Fail closed for composition: rejected images are retained for inspection, not accepted.
     // Validation does not compare pixel identity and remains a best-effort visual check.
-    const key = await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
+    const key = await userCredential(user.userId, 'openai') || sharedProviderSecret(user.userId, 'OPENAI_API_KEY');
     if (!key) return bad('OpenAI is required for background illustration validation', 503);
     let review: Response;
     try {
