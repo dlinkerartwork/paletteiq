@@ -264,6 +264,13 @@ export default function Home() {
     return () => window.removeEventListener('popstate', onPop);
   }, [loadDone]);
   useEffect(() => {
+    // AccountWorkspaceGate asks before switching stores; avoid a second native
+    // warning after the server has already changed the active-store session.
+    const onAccountTransition = () => { allowExplicitReload.current = true; };
+    window.addEventListener('paletteiq:store-changing', onAccountTransition);
+    return () => window.removeEventListener('paletteiq:store-changing', onAccountTransition);
+  }, []);
+  useEffect(() => {
     const guard = (event: BeforeUnloadEvent) => {
       if (allowExplicitReload.current) return;
       const current = latestWorkspace.current;
