@@ -59,6 +59,7 @@ export async function POST(req: Request) {
     .where(and(eq(paletteStores.id, body.storeId), eq(paletteStores.accountId, session.accountId))).limit(1);
   const target = owned[0];
   if (!target) return fail('Store not found in your account', 403);
+  if (target.id === session.activeStoreId) return fail('Switch to another store before deleting the active store.', 409);
   if (body.storeName !== target.name || body.confirmation !== 'DELETE STORE')
     return fail('Type the exact store name and DELETE STORE to confirm', 400);
   const stores = await listOwnedStores(session.accountId);
