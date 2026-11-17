@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { CheckCircle2, CloudDownload, CloudUpload, Eye, EyeOff, KeyRound, LockKeyhole, Save, Settings2, ShieldCheck, Trash2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import RestoreBackupPanel from '@/components/restore-backup-panel';
+import { CheckCircle2, CloudDownload, Eye, EyeOff, KeyRound, LockKeyhole, Save, Settings2, ShieldCheck, Trash2 } from 'lucide-react';
 
 export type SeoPromptKey = 'general' | 'title' | 'description' | 'tags' | 'primaryKeyword' | 'secondaryKeywords' | 'longTailKeywords' | 'categorySuggestion' | 'attributes' | 'materials' | 'imageAltTexts' | 'photoPlan' | 'priceSuggestion' | 'sku' | 'digitalFiles' | 'licenseNotes';
 export type SeoPromptSettings = Record<SeoPromptKey, string>;
@@ -14,7 +15,7 @@ export type StudioPreferences = {
   target: number; model: string; quality: string; analysisModel: string; output: string; background: string; variations: number; defaultStyle: string; autoSave: boolean; seoProvider: 'openai' | 'gemini'; seoGeminiModel: string; seoOpenaiModel: string; seoDraftFields: SeoDraftField[]; seoTitleMaxLength: number; seoAltTextCount: number; seoFileNaming: string; seoPrompts: SeoPromptSettings; upscaleProvider: 'remote'; upscaleServerUrl: string; upscaleFactor: 2 | 4 | 6 | 8; upscaleRequireTransparency: boolean; upscaleQc: boolean; upscaleModel: 'realesrgan-x4plus' | 'realesrgan-x4plus-anime' | 'realesrnet-x4plus' | 'realesr-animevideov3' | 'real-hat-gan-sharper-x4'; upscaleCleanup: boolean; upscaleCleanupStrength: 'low' | 'medium' | 'high';
 };
 export const defaultPrefs: StudioPreferences = { target: 120, model: 'gpt-image-1-mini', quality: 'low', analysisModel: 'gpt-4.1-mini', output: 'png', background: 'transparent', variations: 1, defaultStyle: 'Soft hand-painted watercolor illustration', autoSave: false, seoProvider: 'openai', seoGeminiModel: 'gemini-2.5-pro', seoOpenaiModel: 'gpt-6.1-terra', seoDraftFields: [...defaultSeoDraftFields], seoTitleMaxLength: 140, seoAltTextCount: 1, seoFileNaming: 'charactername_imagenumber', seoPrompts: { ...defaultSeoPrompts }, upscaleProvider: 'remote', upscaleServerUrl: '', upscaleFactor: 4, upscaleRequireTransparency: true, upscaleQc: true, upscaleModel: 'realesrgan-x4plus', upscaleCleanup: false, upscaleCleanupStrength: 'low' };
-type Props = { preferences: StudioPreferences; onPreferences: (prefs: StudioPreferences) => void; projects: unknown[]; onImport: (data: { projects: unknown[]; preferences: StudioPreferences }) => Promise<void> };
+type Props = { preferences: StudioPreferences; onPreferences: (prefs: StudioPreferences) => void; projects: unknown[] };
 type SettingsResponse = { error?: string; credentials: { etsy: boolean; openai: boolean; gemini: boolean; upscale: boolean }; geminiKeyCount?: number };
 const readSettingsResponse = async (res: Response): Promise<SettingsResponse> => {
   const raw = await res.text();
@@ -29,7 +30,7 @@ const request = async (body: object): Promise<SettingsResponse> => {
   return readSettingsResponse(res);
 };
 
-export default function StudioSettings({ preferences, onPreferences, projects, onImport }: Props) {
+export default function StudioSettings({ preferences, onPreferences, projects }: Props) {
   const [credentials, setCredentials] = useState({ etsy: false, openai: false, gemini: false, upscale: false });
   const [geminiKeyCount, setGeminiKeyCount] = useState(0);
   const [secrets, setSecrets] = useState({ etsy: '', openai: '', gemini: '' });
@@ -45,7 +46,6 @@ export default function StudioSettings({ preferences, onPreferences, projects, o
   const [openaiImageModels, setOpenaiImageModels] = useState<Array<{ id: string; name: string }>>([]);
   const [openaiModelsError, setOpenaiModelsError] = useState('');
   const [modelsError, setModelsError] = useState('');
-  const picker = useRef<HTMLInputElement>(null);
   useEffect(() => { fetch('/api/settings').then(readSettingsResponse).then(data => { setCredentials(data.credentials); setGeminiKeyCount(data.geminiKeyCount ?? (data.credentials.gemini ? 1 : 0)); }).catch(e => setMessage(e instanceof Error ? e.message : String(e))); }, []);
   const loadOpenaiSeoModels = async () => {
     try {
@@ -98,7 +98,6 @@ export default function StudioSettings({ preferences, onPreferences, projects, o
     setUpscaleSecret('');
   });
   const backup = () => { const payload = { format: 'paletteiq-backup', version: 1, exportedAt: new Date().toISOString(), preferences, projects }; const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }); const href = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = href; a.download = `paletteiq-backup-${new Date().toISOString().slice(0, 10)}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(href), 1000); setMessage('JSON backup downloaded. API keys are excluded.'); };
-  const importBackup = async (file: File | undefined) => { if (!file) return; if (file.size > 10_000_000) { setMessage('Backup file exceeds 10 MB.'); return; } await act('import', async () => { const parsed = JSON.parse(await file.text()); if (parsed.format !== 'paletteiq-backup' || parsed.version !== 1 || !Array.isArray(parsed.projects) || typeof parsed.preferences !== 'object' || !parsed.preferences) throw new Error('Invalid paletteIQ backup format'); if (parsed.projects.length > 500) throw new Error('Backup has too many collections'); await onImport({ projects: parsed.projects, preferences: parsed.preferences }); }); if (picker.current) picker.current.value = ''; };
   const seoFields: Array<[SeoPromptKey, string, string]> = [
     ['general', 'Global SEO instructions', 'Rules applied to the entire Etsy listing.'],
     ['title', 'Title', 'Tone, keyword placement and title structure.'],
@@ -155,7 +154,10 @@ export default function StudioSettings({ preferences, onPreferences, projects, o
       </div>
       <div className="settings-actions"><button className="outline-btn" disabled={Boolean(active)} onClick={async () => { setActive('upscale-test'); setMessage('Checking GPU Server connection…'); try { const response = await fetch('/api/upscale?check=1'); const data = await response.json() as { connected?: boolean; error?: string; engineReady?: boolean; queueDepth?: number }; if (!response.ok || !data.connected) throw new Error(data.error || 'GPU server unavailable'); setMessage(`Connected to GPU Server. Engine: ${data.engineReady === false ? 'not ready' : 'ready'} · Queue: ${data.queueDepth ?? 'unknown'}.`); } catch (error) { setMessage(`GPU Server connection failed: ${error instanceof Error ? error.message : String(error)}`); } finally { setActive(''); } }}>Test Connection</button><button className="primary-btn" disabled={Boolean(active)} onClick={() => act('upscale-preferences', async () => { await request({ action: 'preferences', preferences: { ...preferences, upscaleProvider: 'remote' } }); })}><Save size={16}/> Save upscale settings</button></div>
     </section>
-    <section className="panel settings-panel settings-backup"><div className="settings-header"><div className="heading-icon amber"><CloudDownload size={21}/></div><div><h2>JSON backup & restore</h2><p>Portable backup for all collections, subjects, prompts and non-secret settings.</p></div></div><div className="backup-actions"><button className="outline-btn" onClick={backup}><CloudDownload size={17}/> Export all data (.json)</button><button className="outline-btn" disabled={Boolean(active)} onClick={() => picker.current?.click()}><CloudUpload size={17}/> Import JSON backup</button><input hidden ref={picker} type="file" accept="application/json,.json" onChange={e => void importBackup(e.target.files?.[0])}/></div><p className="backup-footnote">Import updates matching collection IDs and adds new collections. Generated image URLs remain linked to their original account and Site; image binaries are not embedded. Secrets are never exported or imported.</p></section>
+    <section className="panel settings-panel settings-backup"><div className="settings-header"><div className="heading-icon amber"><CloudDownload size={21}/></div><div><h2>JSON Backup & Restore</h2><p>Export current collections or safely restore a legacy backup into any store owned by your account.</p></div></div>
+      <div className="backup-actions"><button className="outline-btn" type="button" onClick={backup}><CloudDownload size={17}/> Export current store (.json)</button></div>
+      <RestoreBackupPanel/>
+    </section>
 
     <section className="panel settings-panel settings-wide settings-seo"><div className="settings-header"><div className="heading-icon violet"><Settings2 size={21}/></div><div><h2>SEO generation settings & custom prompts</h2><p>Instructions below are included when generating the Etsy listing draft and running Advanced SEO Intelligence. Leave fields blank to use built-in guidance.</p></div></div>
       <div className="settings-fields seo-generation-options">
