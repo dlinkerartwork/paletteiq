@@ -1,3 +1,4 @@
+import { headRecoverableAsset } from '@/lib/recovered-assets';
 import { env } from 'cloudflare:workers';
 import { sharedProviderSecret } from '@/lib/store-secrets';
 import { and, desc, eq } from 'drizzle-orm';
@@ -470,7 +471,7 @@ Collection: ${JSON.stringify(brief).slice(0, 14000)}. Etsy API SEO reference (ke
     const recovered: Array<{ id: string; imageUrl: string; status: 'done'; error: string }> = [];
     for (const character of project.characters ?? []) {
       if (character.imageUrl || !/^[\w-]{8,80}$/.test(character.id)) continue;
-      const candidates = await Promise.all(['png', 'jpg'].map(async extension => ({ extension, object: await bucket.head(`generated/${user.userId}/${character.id}.${extension}`) })));
+      const candidates = await Promise.all(['png', 'jpg'].map(async extension => ({ extension, object: await headRecoverableAsset(bucket, `generated/${user.userId}/${character.id}.${extension}`) })));
       const latest = candidates.filter(c => c.object).sort((a, b) => (b.object!.uploaded?.getTime() || 0) - (a.object!.uploaded?.getTime() || 0))[0];
       if (!latest) continue;
       character.imageUrl = `/api/images/${character.id}?format=${latest.extension}&v=${latest.object?.uploaded?.getTime() || Date.now()}`;
