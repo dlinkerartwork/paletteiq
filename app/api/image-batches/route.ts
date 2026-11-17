@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { sharedProviderSecret } from '@/lib/store-secrets';
 import { and, asc, count, desc, eq, notInArray } from 'drizzle-orm';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { getDb } from '@/db';
@@ -53,7 +54,7 @@ export async function POST(req: Request) {
   if (data.characterIds.some(id => activeIds.has(id))) return fail('Some characters already have a pending Batch job.');
   // Validate output storage before creating a chargeable OpenAI Batch.
   if (!(nativeAssetBucket() ?? env.BUCKET)) return fail('Image storage is unavailable. Batch was not submitted to OpenAI.', 503);
-  const secret = (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
+  const secret = sharedProviderSecret(user.userId, 'OPENAI_API_KEY');
   const key = await userCredential(user.userId, 'openai') || secret;
   if (!key) return fail('Configure an OpenAI API key in Settings first.', 503);
   const settings = await db.select().from(studioSettings).where(eq(studioSettings.owner, user.userId)).limit(1);
@@ -188,7 +189,7 @@ export async function GET(req: Request) {
       seenProjects.add(row.projectId);
       return true;
     });
-    const key = await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
+    const key = await userCredential(user.userId, 'openai') || sharedProviderSecret(user.userId, 'OPENAI_API_KEY');
     if (!key || !active.length) return Response.json({ updatedProjectIds: [], pendingJobs: active.length, credentialMissing: !key && active.length > 0 });
     const updatedProjectIds: string[] = [];
     const warnings: string[] = [];
@@ -218,7 +219,7 @@ export async function GET(req: Request) {
   const saved = await db.select().from(projects).where(and(eq(projects.id, projectId), eq(projects.owner, user.userId))).limit(1);
   if (!saved.length) return fail('Unknown project', 404);
   const rows = await db.select().from(imageBatches).where(and(eq(imageBatches.owner, user.userId), eq(imageBatches.projectId, projectId))).orderBy(desc(imageBatches.createdAt)).limit(200);
-  const key = await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
+  const key = await userCredential(user.userId, 'openai') || sharedProviderSecret(user.userId, 'OPENAI_API_KEY');
   const sync = new URL(req.url).searchParams.get('sync') === '1';
   const syncTarget = rows.find(row => isActiveBatchStatus(row.status))?.id;
   const jobs = await Promise.all(rows.map(async row => {
