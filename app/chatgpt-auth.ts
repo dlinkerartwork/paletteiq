@@ -8,6 +8,7 @@ export type ChatGPTUser = {
   displayName: string;
   email: string;
   fullName: string | null;
+  legacyAssetOwner?: string | null;
 };
 
 const USER_ID_HEADER = "oai-authenticated-user-id";
@@ -27,6 +28,7 @@ export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
     displayName: account.storeName,
     email: account.email,
     fullName: null,
+    legacyAssetOwner: account.legacyAssetOwner,
   };
   const requestHeaders = await headers();
   // Legacy ChatGPT identity headers remain available only behind an explicitly
