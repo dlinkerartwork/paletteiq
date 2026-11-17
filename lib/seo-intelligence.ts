@@ -9,7 +9,7 @@ export function auditSeo(draft: EtsyListingDraft): SeoAuditResult {
   const lower = (s: string) => s.trim().toLocaleLowerCase();
   const phrase = lower(draft.primaryKeyword);
   const checks = [
-    { id: 'title', label: 'Descriptive listing title', passed: !!draft.title.trim(), weight: 10, fix: 'Describe the actual clipart product in the title.' },
+    { id: 'title', label: 'Descriptive listing title', passed: !!draft.title.trim(), weight: 5, fix: 'Describe the actual clipart product in the title.' },
     { id: 'title-length', label: 'Title within 140 characters', passed: !!draft.title && draft.title.length <= 140, weight: 10, fix: 'Keep the title at or below 140 characters.' },
     { id: 'title-target', label: 'Title approaches 140 characters', passed: isNearEtsyTitleLimit(draft.title), weight: 5, fix: `Aim for ${ETSY_TITLE_IDEAL_MIN}–${ETSY_TITLE_MAX} characters with relevant, natural keywords. No word-count rule.` },
     { id: 'title-no-count', label: 'Title avoids clipart item counts', passed: removeClipartQuantity(draft.title) === draft.title, weight: 5, fix: 'Remove item/image/clipart quantities from the title. Include exact counts in the description if needed.' },
