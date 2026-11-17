@@ -107,6 +107,11 @@ export function AccountWorkspaceGate({ children }: { children: React.ReactNode }
   return <WorkspaceContext.Provider value={{ session, submit, busy, error }}>{children}</WorkspaceContext.Provider>;
 }
 
+/** Identifier only: Settings must mount under the currently authenticated store. */
+export function useActiveStoreId(): string {
+  return useContext(WorkspaceContext)?.session.activeStoreId || 'trusted';
+}
+
 export function StoreSwitcher() {
   const workspace = useContext(WorkspaceContext);
   const [creating, setCreating] = useState(false);
