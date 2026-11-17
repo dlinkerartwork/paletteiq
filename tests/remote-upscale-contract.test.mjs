@@ -35,7 +35,7 @@ test('ZIP export prioritizes unmodified remote upscale PNGs', () => {
   const zip = read('lib/zip-stream.ts');
   assert.match(upscale, /await bucket\.put\(`generated\/\$\{user\.userId\}\/\$\{assetId\}\.png`, bytes\)/);
   assert.match(route, /character\.upscaledImageUrl \|\| character\.imageUrl/);
-  assert.match(route, /stream: async \(\) => \(await bucket\.get\(key\)\)\?\.body \|\| null/);
+  assert.match(route, /stream: async \(\) => \(await getRecoverableAsset\(bucket, key\)\)\?\.body \|\| null/);
   assert.match(image, /new Response\(obj\.body,/);
   assert.match(zip, /u16\(lv, 8, 0\)/); // ZIP store method: no transcoding.
 });
