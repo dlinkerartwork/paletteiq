@@ -2,6 +2,7 @@ import { cookies } from 'next/headers';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '@/db';
 import { paletteAccounts, paletteSessions, paletteStores } from '@/db/schema';
+import { normalizeEmail, validAccountEmail, validPassword, validStoreName, scopeForStore } from '@/lib/store-identity';
 
 export const PALETTEIQ_SESSION_COOKIE = 'paletteiq_session';
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -11,16 +12,6 @@ const encoder = new TextEncoder();
 const asHex = (bytes: Uint8Array) => Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
 const hexBytes = (value: string) => Uint8Array.from(value.match(/.{2}/g) || [], byte => parseInt(byte, 16));
 const newId = () => crypto.randomUUID();
-
-export const normalizeEmail = (value: unknown) => typeof value === 'string' ? value.trim().toLowerCase() : '';
-export const validAccountEmail = (email: string) =>
-  email.length >= 5 && email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-export const validPassword = (value: unknown): value is string =>
-  typeof value === 'string' && value.length >= 12 && value.length <= 128;
-export const validStoreName = (value: unknown) =>
-  typeof value === 'string' && value.trim().length >= 2 && value.trim().length <= 90;
-export const scopeForStore = (accountId: string, storeId: string) =>
-  'user_' + accountId.replace(/-/g, '') + '_store_' + storeId.replace(/-/g, '');
 
 async function sha256(text: string) {
   return asHex(new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(text))));
