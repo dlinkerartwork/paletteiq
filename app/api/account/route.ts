@@ -10,6 +10,10 @@ import { validStoreName } from '@/lib/store-identity';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 
 const error = (message: string, status = 400) => Response.json({ error: message }, { status });
+const statusForAccount = async (accountId: string, activeStoreId: string, email: string) => Response.json({
+  authenticated: true, mode: 'email-password', email,
+  stores: await listOwnedStores(accountId), activeStoreId,
+});
 const status = async () => {
   const session = await getAccountSession();
   if (!session) {
@@ -38,12 +42,12 @@ export async function POST(req: Request) {
     if (input.action === 'register') {
       const created = await createAccount(input.email, input.password);
       await beginAccountSession(created.accountId, created.storeId, req);
-      return status();
+      return statusForAccount(created.accountId, created.storeId, String(input.email).trim().toLowerCase());
     }
     if (input.action === 'login') {
       const signedIn = await authenticateAccount(input.email, input.password);
       await beginAccountSession(signedIn.accountId, signedIn.storeId, req);
-      return status();
+      return statusForAccount(signedIn.accountId, signedIn.storeId, String(input.email).trim().toLowerCase());
     }
     const session = await getAccountSession();
     if (!session) return error('Please sign in to manage stores', 401);
