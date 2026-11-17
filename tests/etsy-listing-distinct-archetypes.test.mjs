@@ -100,7 +100,7 @@ test('approved Main Cover is ONLY text-derived style context, NEVER fed as an im
 test('image-edit request includes extra real full-detail originals on top of source contact sheets',()=>{
   assert.match(route,/const detailCandidates=aiFirstSampleIndices\(sampled\.length,/);
   assert.match(route,/originalAssetStorageKey\(asset,user\.userId\)/);
-  assert.match(route,/await bucket\(\)\?\.get\(source\.key\)/);
+  assert.match(route,/await getRecoverableAsset\(bucket\(\),source\.key\)/);
   assert.match(route,/HIGH-DETAIL-ORIGINAL-/);
   assert.match(route,/form\.append\('image\[\]'/);
   assert.match(route,/new Blob\(\[new Uint8Array\(bytes\)\]/);
