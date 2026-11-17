@@ -1,3 +1,4 @@
+import { sharedProviderSecret } from '@/lib/store-secrets';
 import { env } from 'cloudflare:workers';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '@/db';
@@ -38,7 +39,7 @@ export async function POST(req: Request) {
   if (provider !== 'openai' && provider !== 'gemini') return Response.json({ error: 'Invalid AI provider' }, { status: 400 });
   const model = body.model || (provider === 'openai' ? 'gpt-4.1-mini' : 'gemini-2.5-pro');
   if (typeof model !== 'string' || !(provider === 'openai' ? /^gpt-[a-z0-9.-]{1,80}$/ : /^gemini-[a-z0-9.-]{1,80}$/).test(model)) return Response.json({ error: 'Invalid AI model' }, { status: 400 });
-  const key = provider === 'openai' ? await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY : undefined;
+  const key = provider === 'openai' ? await userCredential(user.userId, 'openai') || sharedProviderSecret(user.userId, 'OPENAI_API_KEY') : undefined;
   const geminiKeys = provider === 'gemini' ? await userGeminiKeys(user.userId) : [];
   if (provider === 'openai' && !key) return Response.json({ error: 'Configure your OpenAI API key in Settings.' }, { status: 503 });
   if (provider === 'gemini' && !geminiKeys.length) return Response.json({ error: 'Configure your Gemini API key in Settings.' }, { status: 503 });
