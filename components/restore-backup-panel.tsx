@@ -107,6 +107,7 @@ export default function RestoreBackupPanel() {
       const data = await request({ action: 'create-store', name: newStoreName.trim() });
       const created = data.store as StoreSummary;
       setStores(data.stores as StoreSummary[]);
+      window.dispatchEvent(new Event('paletteiq:stores-updated'));
       setStoreId(created.id);
       setNewStoreName(''); setCreateStoreOpen(false);
       setMessage(`Created "${created.name}". It is now the restore destination; your active store was not switched.`);
