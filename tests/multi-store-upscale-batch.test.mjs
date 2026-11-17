@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import {
   scopeForStore, normalizeEmail, validAccountEmail, validPassword, validStoreName,
 } from '../lib/store-identity.ts';
+import { isIsolatedStoreOwner, mayUseSharedProviderKey } from '../lib/store-secret-policy.ts';
 
 const file = path => readFileSync(new URL('../' + path, import.meta.url), 'utf8');
 const account = file('lib/palette-accounts.ts');
@@ -94,4 +95,29 @@ test('selected GPU images are submitted as one resumable Batch using authenticat
   assert.doesNotMatch(submit, /['"]\/api\/upscale['"]/);
   assert.match(view, /Resume GPU Batch/);
   assert.match(view, /notificationConfigured/);
+});
+
+
+test('new email/password stores cannot silently spend global paid API credentials', () => {
+  const a='66e55bd8-e8b9-4d8e-81ac-597d41b93938', b='a764b097-d836-4eb9-8430-a644cd0f986e';
+  const scoped=scopeForStore(a,b);
+  assert.equal(isIsolatedStoreOwner(scoped),true);
+  assert.equal(mayUseSharedProviderKey(scoped,false),false);
+  assert.equal(mayUseSharedProviderKey(scoped,true),true);
+  assert.equal(mayUseSharedProviderKey('legacy-trusted-gateway',false),true);
+  const wrapper=file('lib/store-secrets.ts');
+  assert.match(wrapper,/PALETTEIQ_ALLOW_SHARED_PROVIDER_KEYS === '1'/);
+  for(const path of [
+    'app/api/research-jobs/route.ts','app/api/prompt-jobs/route.ts',
+    'app/api/image-batches/route.ts','app/api/settings/route.ts',
+    'app/api/studio/route.ts','app/api/upscale/route.ts','lib/upscale-batch-transport.ts',
+    'lib/seo-provider.ts','app/api/thumbnail-ai-image/route.ts',
+    'app/api/listing-image-studio/route.ts','app/api/thumbnail-layout/route.ts',
+    'app/api/thumbnail-categories/route.ts','app/api/thumbnail-upscale/route.ts',
+    'app/api/thumbnail-art-direction/route.ts','app/api/listing-style-analysis/route.ts',
+  ]){
+    const code=file(path);
+    assert.match(code,/sharedProviderSecret/,path);
+    assert.doesNotMatch(code,/\\|\\|\\s*\\(env as unknown as Record<string,\\s*string\\s*\\|\\s*undefined>\\)\\.OPENAI_API_KEY/,path);
+  }
 });
