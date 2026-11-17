@@ -180,8 +180,9 @@ export async function POST(req: Request) {
   if (!(isPng || isJpg) || (imageMime === 'image/png' && !isPng) || (imageMime === 'image/jpeg' && !isJpg)) return bad('Provider did not return a valid image', 502);
   const format = isPng ? 'png' : 'jpg';
   if (bytes.length > 20_000_000) return bad('Generated image is too large', 413);
+  let qcRejection = '';
   if (mode === 'background-with-typography' || mode === 'background-only') {
-    // Fail closed: neither decorative background mode may introduce generated clipart or objects.
+    // Fail closed for composition: rejected images are retained for inspection, not accepted.
     // Validation does not compare pixel identity and remains a best-effort visual check.
     const key = await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
     if (!key) return bad('OpenAI is required for background illustration validation', 503);
@@ -204,13 +205,17 @@ export async function POST(req: Request) {
       const raw = validation.output?.flatMap(x=>x.content||[]).map(x=>x.text||'').join('') || '{}';
       const decision = JSON.parse(raw) as {containsObjects?:boolean; containsText?:boolean; reason?:string};
       if (decision.containsObjects !== false) {
-        const reason = typeof decision.reason === 'string' ? decision.reason.replace(/[<>\r\n]/g, ' ').slice(0,150) : '';
-        return bad('AI background contains a recognizable standalone clipart-like subject' + (reason ? ': ' + reason : '') + '. Image rejected; retry with a different design style.', 422);
+        const reason = typeof decision.reason === 'string' ? decision.reason.replace(/[<>\r\n]/g, ' ').slice(0,190) : '';
+        qcRejection = 'Possible AI-generated collection-like object' + (reason ? ': ' + reason : '') + '. Inspect before accepting.';
       }
-      if (mode === 'background-only' && decision.containsText !== false) return bad('Decorative background contains unexpected text. Image rejected; retry generation.', 422);
+      if (mode === 'background-only' && decision.containsText !== false)
+        qcRejection = [qcRejection, 'Unexpected text on decorative-only background.'].filter(Boolean).join(' ');
     } catch { return bad('Background validation returned an unreadable response; image rejected', 502); }
   }
   const assetId = crypto.randomUUID();
   await storage.put('generated/' + user.userId + '/' + assetId + '.' + format, bytes);
-  return Response.json({ imageUrl: '/api/thumbnail-background?projectId=' + encodeURIComponent(input.projectId) + '&assetId=' + assetId + '&format=' + format, prompt });
+  const imageUrl = '/api/thumbnail-background?projectId=' + encodeURIComponent(input.projectId) + '&assetId=' + assetId + '&format=' + format;
+  // Return flagged artwork as a review-only draft. The client MUST NOT composite it
+  // until the user has explicitly checked it contains no invented product objects.
+  return Response.json({ imageUrl, prompt, qcRejected: Boolean(qcRejection), qcReason: qcRejection || undefined });
 }
