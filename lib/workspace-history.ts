@@ -19,7 +19,7 @@ export type WorkspaceRoute = { tab: string; projectId: string };
 export type WorkspaceHistoryEntry = WorkspaceRoute & { index: number; session: string };
 
 export const WORKSPACE_TAB_IDS = [
-  'overview', 'collections', 'multi-production', 'settings', 'analysis', 'characters',
+  'overview', 'collections', 'multi-production', 'stores', 'settings', 'analysis', 'characters',
   'prompts', 'production', 'listing', // Thumbnail Designer and Listing Studio are temporarily disabled.
 ] as const;
 
