@@ -81,8 +81,11 @@ test('remote GPU progress changes only in state; no full-page refresh remains', 
   assert.match(production, /pendingUpscaleKey/);
   assert.match(production, /latestUpscaleChange\.current\(characterId/);
   assert.match(production, /setRemoteProgress\(old =>/);
-  assert.match(production, /latestUpscaleChange\.current\(c\.id/);
+  assert.match(production, /latestUpscaleChange\.current\(item\.characterId/);
+  assert.match(production, /\/api\/upscale-batches/);
+  assert.match(production, /method: 'PATCH'/);
   assert.match(production, /\[project\.id, pendingUpscaleKey\]/);
   assert.match(ui, /onUpscaleChange=\{updateUpscaleChar\}/);
+  assert.match(ui, /onUpscaleBatch=\{updateUpscaleBatch\}/);
   assert.match(ui, /setProjects\(prev => prev\.map\(p => p\.id !== project\.id/);
 });
