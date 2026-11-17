@@ -6,14 +6,15 @@ import UpscaleCompare from '@/components/upscale-compare';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CheckCircle2, CircleAlert, Clock3, Download, Image as ImageIcon, LoaderCircle, RefreshCw, Sparkles } from 'lucide-react';
 import { eligibleForBulk, isActiveBatchStatus, wasPreviouslyGenerated } from '@/lib/production-rules';
+import type { StoredUpscaleBatch } from '@/lib/upscale-batch-transport';
 import type { SimilarityReview } from '@/lib/similarity-review';
 import { isOpenAICreditError, primeProductionAudio, useProductionSounds } from '@/lib/production-sounds';
 
 type Character = { id: string; name: string; prompt: string; status: string; imageUrl?: string; upscaledImageUrl?: string; upscaleJob?: { id: string; submittedAt?: number; factor?: number }; error?: string; similarityReview?: SimilarityReview };
-type Project = { id: string; name: string; characters: Character[]; listing?: { title?: string } };
+type Project = { id: string; name: string; characters: Character[]; listing?: { title?: string }; upscaleBatch?: StoredUpscaleBatch };
 type Job = { id: string; status: string; model: string; total: number; completed: number; failed: number; imported: number; createdAt: number; characterIds: string[]; assets: Array<{ id: string; status: string; imageUrl?: string; error?: string }>; warning?: string };
 type UpscaleUpdate = { upscaleJob?: Character['upscaleJob']; upscaledImageUrl?: string; upscaledAt?: number };
-type Props = { project: Project; model: string; quality: string; onModel: (value: string) => void; onQuality: (value: string) => void; onDownloaded: (receipt: { lastDownloadedAt: number; downloadCount: number; lastDownloadImageCount: number; downloadedImageIds: string[] }) => void; onAsset: (id: string, data: { imageUrl?: string; status: 'done' | 'error'; error?: string; similarityReview?: SimilarityReview }) => void; onUpscaleChange: (id: string, data: UpscaleUpdate) => void };
+type Props = { project: Project; model: string; quality: string; onModel: (value: string) => void; onQuality: (value: string) => void; onDownloaded: (receipt: { lastDownloadedAt: number; downloadCount: number; lastDownloadImageCount: number; downloadedImageIds: string[] }) => void; onAsset: (id: string, data: { imageUrl?: string; status: 'done' | 'error'; error?: string; similarityReview?: SimilarityReview }) => void; onUpscaleChange: (id: string, data: UpscaleUpdate) => void; onUpscaleBatch: (batch: StoredUpscaleBatch) => void };
 
 async function request<T = unknown>(url: string, options?: RequestInit): Promise<T> {
   const r = await fetch(url, options);
@@ -25,7 +26,7 @@ async function request<T = unknown>(url: string, options?: RequestInit): Promise
 // Keep the last known job progress visible immediately when switching tabs.
 const batchJobSnapshot = new Map<string, Job[]>();
 
-export default function ImageProduction({ project, model, quality, onModel, onQuality, onDownloaded, onAsset, onUpscaleChange }: Props) {
+export default function ImageProduction({ project, model, quality, onModel, onQuality, onDownloaded, onAsset, onUpscaleChange, onUpscaleBatch }: Props) {
   const [mode, setMode] = useState<'single' | 'batch'>('batch');
   const [batchModel, setBatchModel] = useState('gpt-image-2.5-flare');
   const [imageModels, setImageModels] = useState<Array<{ id: string; name: string; batchSupported: boolean }>>([]);
@@ -50,6 +51,13 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
   const [upscaleProvider, setUpscaleProvider] = useState<'remote'>('remote');
   const [upscaleFactor, setUpscaleFactor] = useState(4);
   const [upscaling, setUpscaling] = useState(false);
+  const [upscaleBatchStatus, setUpscaleBatchStatus] = useState<{
+    status: string; received: number; total: number; finished: number;
+    notificationConfigured?: boolean; notificationEmail?: string;
+    notificationStatus?: string;
+  } | null>(null);
+  const latestBatchChange = useRef(onUpscaleBatch);
+  useEffect(() => { latestBatchChange.current = onUpscaleBatch; }, [onUpscaleBatch]);
   const [upscalePreview, setUpscalePreview] = useState<{ name: string; originalUrl: string; upscaledUrl: string } | null>(null);
   const [remoteProgress, setRemoteProgress] = useState<Record<string, { status: string; elapsed: number; remaining?: number | null }>>({});
   const latestUpscaleChange = useRef(onUpscaleChange);
