@@ -133,7 +133,7 @@ export async function POST(req: Request) {
     if (!/^[0-9a-f]{32}$/.test(accepted.id)) return bad('GPU Server returned an invalid batch ID', 502);
     const remote = { ...job, remoteId: accepted.id };
     await persistBatch(user.userId, body.projectId, remote);
-    return Response.json({ batchId: accepted.id, status: accepted.status, items: job.items,
+    return Response.json({ batch: remote, batchId: accepted.id, status: accepted.status, items: job.items,
       notificationEmail: job.notificationEmail,
       notificationConfigured: accepted.notification_configured === true }, { status: 202 });
   } catch (e) { return failure(e); }
@@ -178,7 +178,7 @@ export async function PATCH(req: Request) {
     const snapshot = await remote.json() as GpuBatchSnapshot;
     if (snapshot.status !== 'committed') return bad('Remote Batch has not been committed', 409);
     const jobs = await importAcceptedJobs(user.userId, body.projectId, snapshot);
-    return Response.json({ status: snapshot.status, jobs, notificationConfigured: snapshot.notification_configured });
+    return Response.json({ batch: { ...batch, status: 'committed' }, status: snapshot.status, jobs, notificationConfigured: snapshot.notification_configured });
   } catch (e) { return failure(e); }
 }
 export async function GET(req: Request) {
@@ -188,12 +188,13 @@ export async function GET(req: Request) {
     const projectId = new URL(req.url).searchParams.get('projectId') || '';
     if (!projectId) return bad('Collection required');
     const batch = await loadBatch(user.userId, projectId);
-    if (!batch.remoteId) return Response.json({ status: 'staging', items: batch.items,
+    if (!batch.remoteId) return Response.json({ batch, status: 'staging', items: batch.items,
       receivedIds: [], jobs: [], notificationEmail: batch.notificationEmail });
     const remote = await gpuFetch(user.userId, '/v1/batches/' + batch.remoteId);
     const snapshot = await remote.json() as GpuBatchSnapshot;
     const jobs = await importAcceptedJobs(user.userId, projectId, snapshot);
     return Response.json({
+      batch: { ...batch, status: snapshot.completed_files === batch.items.length ? 'completed' : batch.status },
       status: snapshot.status, batchId: snapshot.id, items: batch.items,
       receivedIds: snapshot.files?.map(file => file.client_file_id) || [],
       jobs, completedFiles: snapshot.completed_files || 0,
