@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { sharedProviderSecret } from '@/lib/store-secrets';
 import { and, eq } from 'drizzle-orm';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { getDb } from '@/db';
@@ -10,7 +11,7 @@ import {
 } from '@/lib/prompt-batch-jobs';
 
 const fail = (error: string, status = 400) => Response.json({ error }, { status });
-const getSecret = () => (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
+
 const MAX_PROMPTS = 200;
 const TERMINAL = new Set(['completed', 'failed', 'cancelled', 'expired']);
 type RemoteBatch = {
@@ -80,7 +81,7 @@ export async function POST(req: Request) {
   if (selected.some(c => !c || !c.name.trim())) return fail('Some selected characters are missing or have no names.', 422);
   if (selected.some(c => c?.prompt?.trim()) && body.regenerate !== true)
     return fail('Some prompts already exist. Confirm regeneration before submitting a batch.', 409);
-  const key = await userCredential(user.userId, 'openai') || getSecret();
+  const key = await userCredential(user.userId, 'openai') || sharedProviderSecret(user.userId, 'OPENAI_API_KEY');
   if (!key) return fail('Connect an OpenAI API key in Settings before generating prompts.', 503);
   const generation = buildPromptBatchInput(saved.data, selected as NonNullable<typeof selected[number]>[], model);
   if (generation.jsonl.length > 3_000_000) return fail('Prompt batch is too large. Select fewer characters.', 413);
@@ -149,7 +150,7 @@ async function synchronize(owner: string, projectId: string) {
     }
     return Response.json({ job: safeJob(job) });
   }
-  const key = await userCredential(owner, 'openai') || getSecret();
+  const key = await userCredential(owner, 'openai') || sharedProviderSecret(owner, 'OPENAI_API_KEY');
   if (!key) return fail('OpenAI API key unavailable for background prompt recovery.', 503);
   const remote = await (await openai(key, 'batches/' + encodeURIComponent(job.batchId))).json() as RemoteBatch;
   const processedGroups = (remote.request_counts?.completed || 0) + (remote.request_counts?.failed || 0);
