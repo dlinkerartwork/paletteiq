@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { sharedProviderSecret } from '@/lib/store-secrets';
 import { and, desc, eq } from 'drizzle-orm';
 import { getDb } from '@/db';
 import { imageBatches, projects, studioSettings } from '@/db/schema';
@@ -17,7 +18,7 @@ import { expressionDistribution, familyDistribution, mergeSourceEmotionProfile, 
 import { diversityExpansionInstruction, productionPromptInstruction, researchAnalysisInstruction } from '@/lib/creative-research-prompts';
 
 const fail = (error: string, status = 400) => Response.json({ error }, { status });
-const secret = (key: string) => (env as unknown as Record<string, string | undefined>)[key];
+
 type SubjectInput = { id: string; name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description?: string; prompt?: string; status?: string; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: { id: string }; error?: string; similarityReview?: SimilarityReview };
 type ProjectInput = { id: string; name: string; characters: SubjectInput[]; [key: string]: unknown };
 type StudioRequest = { action: string; id: string; name: string; data: ProjectInput; url: string; project: ProjectInput; draft?: unknown; projectId: string; characterId: string; model: string; quality: string; selectedImages?: unknown[]; characters?: SubjectInput[]; [key: string]: unknown };
@@ -183,7 +184,7 @@ export async function POST(req: Request) {
     if (url.protocol !== 'https:' || !['www.etsy.com','etsy.com'].includes(url.hostname)) return fail('Use an Etsy URL');
     const listingId = url.pathname.match(/^\/listing\/(\d+)/)?.[1];
     if (!listingId) return fail('Etsy listing ID not found');
-    const key = await userCredential(user.userId, 'etsy') || secret('ETSY_API_KEY');
+    const key = await userCredential(user.userId, 'etsy') || sharedProviderSecret(user.userId, 'ETSY_API_KEY');
     if (!key) return fail('Etsy API not connected. Configure ETSY_API_KEY to analyze live listings.', 503);
     const listingRes = await fetch(`https://api.etsy.com/v3/application/listings/${listingId}?includes=Images`, { headers: { 'x-api-key': key } });
     if (!listingRes.ok) return fail(`Etsy API request failed (${listingRes.status}). Verify app permissions.`, 502);
@@ -203,7 +204,7 @@ export async function POST(req: Request) {
     const validModel = provider === 'openai' ? /^gpt-[a-z0-9.-]{1,80}$/ : /^gemini-[a-z0-9.-]{1,80}$/;
     if (provider !== 'openai' && provider !== 'gemini') return fail('Invalid visual analysis provider');
     if (typeof model !== 'string' || !validModel.test(model)) return fail('Unsupported visual analysis model');
-    const aiKey = provider === 'openai' ? await userCredential(user.userId, 'openai') || secret('OPENAI_API_KEY') : null;
+    const aiKey = provider === 'openai' ? await userCredential(user.userId, 'openai') || sharedProviderSecret(user.userId, 'OPENAI_API_KEY') : null;
     const geminiKeys = provider === 'gemini' ? await userGeminiKeys(user.userId) : [];
     if (provider === 'openai' && !aiKey) return fail('OpenAI API not connected. Configure it in Settings to analyze images.', 503);
     if (provider === 'gemini' && !geminiKeys.length) return fail('Gemini API key not connected. Configure it in Settings to analyze images.', 503);
@@ -253,7 +254,7 @@ export async function POST(req: Request) {
     return fail(lastError, 502);
   }
   if (body.action === 'expand') {
-    const aiKey = await userCredential(user.userId, 'openai') || secret('OPENAI_API_KEY');
+    const aiKey = await userCredential(user.userId, 'openai') || sharedProviderSecret(user.userId, 'OPENAI_API_KEY');
     if (!aiKey) return fail('OpenAI API not connected.', 503);
     const count = Math.max(1, Math.min(20, Number(body.count) || 1));
     const images = Array.isArray(body.images) ? body.images.filter((url: unknown) => { try { const parsed = new URL(String(url)); return parsed.protocol === 'https:' && (parsed.hostname === 'etsystatic.com' || parsed.hostname.endsWith('.etsystatic.com')); } catch { return false; } }).slice(0, 3) as string[] : [];
@@ -340,7 +341,7 @@ export async function POST(req: Request) {
     if (referenceUrl.protocol !== 'https:' || !['etsy.com', 'www.etsy.com'].includes(referenceUrl.hostname)) return fail('Use an Etsy reference listing URL.');
     const listingId = referenceUrl.pathname.match(/^\/listing\/(\d+)/)?.[1];
     if (!listingId) return fail('Etsy reference listing ID is missing.');
-    const etsyKey = await userCredential(user.userId, 'etsy') || secret('ETSY_API_KEY');
+    const etsyKey = await userCredential(user.userId, 'etsy') || sharedProviderSecret(user.userId, 'ETSY_API_KEY');
     if (!etsyKey) return fail('Configure your Etsy API key before importing listing SEO.', 503);
     const referenceResponse = await fetch(`https://api.etsy.com/v3/application/listings/${listingId}`, { headers: { 'x-api-key': etsyKey } });
     if (!referenceResponse.ok) return fail(`Could not retrieve reference Etsy SEO (${referenceResponse.status}).`, 502);
@@ -417,7 +418,7 @@ Collection: ${JSON.stringify(brief).slice(0, 14000)}. Etsy API SEO reference (ke
     } catch (error) { return fail(error instanceof Error ? error.message.slice(0, 300) : 'Invalid AI SEO review response', 502); }
   }
   if (body.action === 'generate') {
-    const aiKey = await userCredential(user.userId, 'openai') || secret('OPENAI_API_KEY');
+    const aiKey = await userCredential(user.userId, 'openai') || sharedProviderSecret(user.userId, 'OPENAI_API_KEY');
     if (!aiKey) return fail('OpenAI API not connected.', 503);
     if (!(typeof body.model === 'string' && /^gpt-image-[a-z0-9.-]{1,80}$/.test(body.model)) || !['low','medium','high'].includes(body.quality) || typeof body.projectId !== 'string' || typeof body.characterId !== 'string') return fail('Invalid image settings');
     const db = getDb();
