@@ -15,9 +15,11 @@ function arg(key) { const i = args.indexOf(key); return i >= 0 ? args[i + 1] : u
 function die(reason) { process.stderr.write('Legacy migration refused: ' + reason + '\n'); process.exit(1); }
 const email = (arg('--email') || '').trim().toLowerCase();
 const storeId = arg('--store-id');
-if (!args.includes('--confirm')) die('Add --confirm after backing up and closing PaletteIQ Desktop.');
+const storeName = arg('--store-name');
+const listStores = args.includes('--list-stores');
+if (!args.includes('--confirm') && !listStores) die('Add --confirm after backing up and closing PaletteIQ Desktop.');
 if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) die('Provide the exact registered --email.');
-if (!/^[0-9a-f-]{36}$/.test(storeId || '')) die('Provide a valid store UUID (--store-id).');
+if (storeId && !/^[0-9a-f-]{36}$/.test(storeId)) die('Provide a valid store UUID (--store-id).');
 const base = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
 const workspace = path.resolve(arg('--workspace') || path.join(base, 'PaletteIQ Desktop', 'paletteiq-data'));
 const dbPath = path.join(workspace, 'database', 'paletteiq.db');
@@ -26,8 +28,16 @@ const db = new DatabaseSync(dbPath);
 try {
   const account = db.prepare('SELECT id FROM paletteiq_accounts WHERE email=?').get(email);
   if (!account) die('No registered PaletteIQ account with this email. Sign in once first.');
-  const store = db.prepare('SELECT id,name FROM paletteiq_stores WHERE id=? AND account_id=?').get(storeId, account.id);
-  if (!store) die('Store ID does not belong to the specified account.');
+  const stores = db.prepare('SELECT id,name FROM paletteiq_stores WHERE account_id=?').all(account.id);
+  if (listStores) {
+    for (const row of stores) process.stdout.write(row.id + ' · ' + row.name + '\n');
+    process.exit(0);
+  }
+  const matched = storeId ? stores.filter(row => row.id === storeId)
+    : storeName ? stores.filter(row => row.name.toLowerCase() === storeName.toLowerCase())
+    : stores.length === 1 ? stores : [];
+  if (matched.length !== 1) die('Choose a unique store: --store-name "My Etsy Store" or --store-id STORE_UUID. Use --list-stores.');
+  const store = matched[0];
   const owner = 'user_' + account.id.replace(/-/g, '') + '_store_' + store.id.replace(/-/g, '');
   const legacy = 'local_seedy';
   const count = db.prepare('SELECT COUNT(*) AS n FROM projects WHERE owner=?').get(legacy).n;
