@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers';
-import { mayUseSharedProviderKey } from './store-secret-policy';
+import { mayUseSharedProviderKey } from './store-secret-policy.ts';
 
 /** Store users must configure their own keys unless the deployment owner opts into shared keys. */
 export function sharedProviderSecret(owner: string, variable: string): string | undefined {
