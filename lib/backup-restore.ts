@@ -9,7 +9,7 @@ export type RestoreAction = 'create' | 'replace' | 'skip' | 'keep-both' | 'block
 export type RestorePlanRow = { project: BackupProject; action: RestoreAction; collisionOwner?: string };
 export const MAX_BACKUP_BYTES = 10_000_000;
 export const MAX_BACKUP_PROJECTS = 500;
-const idPattern = /^[\\w-]{8,80}$/;
+const idPattern = /^[a-zA-Z0-9_-]{8,80}$/;
 
 export function readPortableBackup(raw: unknown): PortableBackup {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw Error('Invalid backup JSON');
