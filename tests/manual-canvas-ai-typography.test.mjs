@@ -9,9 +9,7 @@ const api = readFileSync(new URL('../app/api/thumbnail-ai-image/route.ts', impor
 test('Etsy Listing Draft is exactly the fifth production pipeline step', () => {
   const steps = page.match(/^const steps = (\[[^\n]+\]);/m)?.[1] || '';
   const ids = [...steps.matchAll(/id: '([^']+)'/g)].map(x => x[1]);
-  assert.deepEqual(ids.slice(0, 7), [
-    'analysis', 'characters', 'prompts', 'production', 'listing', 'thumbnails', 'listing-images'
-  ]);
+  assert.deepEqual(ids, ['analysis', 'characters', 'prompts', 'production', 'listing']);
 });
 
 test('Reference & Assets uses a manual canvas workflow instead of showing either automatic pack panel', () => {
