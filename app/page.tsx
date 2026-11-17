@@ -16,7 +16,7 @@ import TablePagination from '@/components/table-pagination';
 import EtsyListingDraft, { type SavedSeoReview } from '@/components/etsy-listing-draft';
 import type { EtsyListingDraft as ListingData } from '@/lib/etsy-listing';
 import type { SimilarityReview } from '@/lib/similarity-review';
-import { readWorkspaceHistoryState, routeEquals, routeFromWorkspaceHash, workspaceHash, type WorkspaceRoute, type WorkspaceHistoryEntry, WORKSPACE_TAB_IDS } from '@/lib/workspace-history';
+import { readWorkspaceHistoryState, routeEquals, routeFromWorkspaceHash, workspaceHash, isStudioTabEnabled, workspaceShortcut, type WorkspaceRoute, WORKSPACE_TAB_IDS } from '@/lib/workspace-history';
 import { auditCreativeConcepts, expressionDistribution, familyDistribution, normalizeCreativeAnalysis, normalizeCreativeControls, reverseEngineeringKeys, styleDNAKeys, characterDNAKeys, selectDiverseConcepts, type CreativeAnalysis, type CreativeControls } from '@/lib/creative-intelligence';
 
 type Character = { id: string; name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description: string; prompt: string; status: 'draft' | 'ready' | 'done' | 'error'; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: { id: string; submittedAt?: number; factor?: number }; error?: string; similarityReview?: SimilarityReview; origin: 'listing' | 'ai' | 'manual' };
@@ -54,7 +54,7 @@ const api = async (body: object): Promise<StudioApiResponse> => {
   if (!r.ok) throw new Error(json.error ?? 'Request failed (HTTP ' + r.status + ')');
   return json;
 };
-const steps = [{ id: 'analysis', label: 'Research & analysis' }, { id: 'characters', label: 'Character library' }, { id: 'prompts', label: 'AI Prompts' }, { id: 'production', label: 'Image production' }, { id: 'listing', label: 'Etsy listing draft' }, { id: 'thumbnails', label: 'Thumbnail designer' }, { id: 'listing-images', label: 'Etsy Clipart Listing Studio' }];
+const steps = [{ id: 'analysis', label: 'Research & analysis' }, { id: 'characters', label: 'Character library' }, { id: 'prompts', label: 'AI Prompts' }, { id: 'production', label: 'Image production' }, { id: 'listing', label: 'Etsy listing draft' }];
 const nextIncomplete = (p: Project) => !p.theme && !p.title ? 'analysis' : !p.characters.length ? 'characters' : p.characters.some(c => !c.prompt) ? 'prompts' : p.characters.some(c => c.status !== 'done') ? 'production' : !p.listing?.title ? 'listing' : 'listing';
 
 export default function Home() {
@@ -209,8 +209,22 @@ export default function Home() {
   useEffect(() => {
     if (!loadDone) return;
     const onPop = (event: PopStateEvent) => {
-      const entry = readWorkspaceHistoryState(event.state, historySession.current);
-      if (!entry) return;
+      let entry = readWorkspaceHistoryState(event.state, historySession.current);
+      if (!entry) {
+        // Older saved browser entries can still point to disabled screens.
+        // Repair those entries in-place rather than mounting hidden tools.
+        const old = event.state?.paletteiqWorkspace as
+          { tab?: unknown; projectId?: unknown; index?: unknown; session?: unknown } | undefined;
+        if (!old || typeof old.tab !== 'string' || isStudioTabEnabled(old.tab) ||
+            typeof old.projectId !== 'string' || old.session !== historySession.current ||
+            !Number.isSafeInteger(old.index)) return;
+        const safeRoute: WorkspaceRoute = { tab: 'listing', projectId: old.projectId };
+        const repaired = { ...safeRoute, index: old.index, session: historySession.current };
+        try { window.history.replaceState({ ...event.state, paletteiqWorkspace: repaired }, '', workspaceHash(safeRoute)); }
+        catch { /* Do not render an unavailable tool even if the URL cannot be repaired. */ }
+        entry = readWorkspaceHistoryState({ paletteiqWorkspace: repaired }, historySession.current);
+        if (!entry) return;
+      }
       const current = latestWorkspace.current;
       const next: WorkspaceRoute = { tab: entry.tab, projectId: entry.projectId };
       const previous: WorkspaceRoute = { tab: current.tab, projectId: current.project.id };
@@ -382,6 +396,10 @@ export default function Home() {
     finally { setBusy(''); }
   };
   const navigateTab = (next: string) => {
+    if (!isStudioTabEnabled(next)) {
+      setMessage('This tab is temporarily disabled in PaletteIQ.');
+      return;
+    }
     if (next === tab) return;
     if (tab === 'thumbnails' && thumbnailSaveControlsRef.current?.hasUnsaved()) {
       if (!window.confirm('Thumbnail designs have unsaved changes. Leave without saving?')) return;
@@ -795,8 +813,8 @@ export default function Home() {
       </div>}
       {busy === 'prompts' && <div className="panel"><div className="production-progress"><span>AI prompt progress</span><b>{promptProgress.done}/{promptProgress.total}</b></div><div className="progress"><i style={{ width: `${promptProgress.total ? 100 * promptProgress.done / promptProgress.total : 0}%` }}/></div></div>}<div className="prompt-grid">{project.characters.map((c,i)=><div className="panel prompt-card" key={c.id}><div className="prompt-top"><span className="char-number">{String(i+1).padStart(3,'0')}</span><b>{c.name}</b><span className={`status ${c.prompt ? 'ready' : 'draft'}`}>{c.prompt ? 'Ready' : 'Draft'}</span></div><textarea rows={6} placeholder="Generate an OpenAI prompt or customize one manually..." value={c.prompt} disabled={hasActivePromptJob(project.promptJob)} onChange={e=>updateChar(c.id,{prompt:e.target.value,status:'ready'})}/><div className="prompt-bottom"><small>{c.prompt.length} characters</small><button disabled={!!busy || hasActivePromptJob(project.promptJob)} onClick={()=>generatePrompts([c.id])}><WandSparkles size={14}/> Regenerate with AI</button></div></div>)}</div>{!project.characters.length && <div className="panel empty-state"><BookOpenText size={32}/><strong>No prompts to show</strong><p>Build your character library first.</p></div>}</>}
       {tab === 'production' && <ImageProduction key={project.id} project={project} model={model} quality={quality} onModel={setModel} onQuality={setQuality} onDownloaded={(receipt) => { setProject(prev => ({ ...prev, ...receipt })); setProjects(prev => prev.map(item => item.id === project.id ? { ...item, ...receipt } : item)); }} onAsset={(id,fields) => updateChar(id,fields)} onUpscaleChange={updateUpscaleChar}/>}
-      {tab === 'thumbnails' && <ThumbnailDesigner key={project.id} collectionVisualSettings={{ style: project.style, palette: project.palette, texture: project.texture }} registerSaveControls={controls => { thumbnailSaveControlsRef.current = controls; }} title={project.subtheme || project.theme || project.name} seoListing={project.listing} aiDefaults={{ provider: preferences.seoProvider ?? 'openai', openaiModel: preferences.seoOpenaiModel ?? 'gpt-4.1-mini', geminiModel: preferences.seoGeminiModel ?? 'gemini-2.5-pro' }} projectId={project.id} characters={project.characters} references={project.images} designs={project.thumbnails || []} onChange={thumbnails => update({ thumbnails })} onSave={async thumbnails => { const updated = { ...project, thumbnails }; await api({ action: 'save', id: updated.id, name: updated.name, data: updated }); setProject(updated); setProjects(prev => [updated, ...prev.filter(p => p.id !== updated.id)]); }}/>}
-      {tab === 'listing-images' && <EtsyListingImageStudio key={project.id} projectId={project.id} name={project.name} theme={project.theme} subtheme={project.subtheme} style={project.style} palette={project.palette} texture={project.texture} seoTitle={project.listing?.title} primaryKeyword={project.listing?.primaryKeyword} defaultImageModel={preferences.model} defaultImageQuality={preferences.quality} characters={project.characters} onSaved={listingImages => update({ listingImages })}/>}
+      {isStudioTabEnabled('thumbnails') && tab === 'thumbnails' && <ThumbnailDesigner key={project.id} collectionVisualSettings={{ style: project.style, palette: project.palette, texture: project.texture }} registerSaveControls={controls => { thumbnailSaveControlsRef.current = controls; }} title={project.subtheme || project.theme || project.name} seoListing={project.listing} aiDefaults={{ provider: preferences.seoProvider ?? 'openai', openaiModel: preferences.seoOpenaiModel ?? 'gpt-4.1-mini', geminiModel: preferences.seoGeminiModel ?? 'gemini-2.5-pro' }} projectId={project.id} characters={project.characters} references={project.images} designs={project.thumbnails || []} onChange={thumbnails => update({ thumbnails })} onSave={async thumbnails => { const updated = { ...project, thumbnails }; await api({ action: 'save', id: updated.id, name: updated.name, data: updated }); setProject(updated); setProjects(prev => [updated, ...prev.filter(p => p.id !== updated.id)]); }}/>}
+      {isStudioTabEnabled('listing-images') && tab === 'listing-images' && <EtsyListingImageStudio key={project.id} projectId={project.id} name={project.name} theme={project.theme} subtheme={project.subtheme} style={project.style} palette={project.palette} texture={project.texture} seoTitle={project.listing?.title} primaryKeyword={project.listing?.primaryKeyword} defaultImageModel={preferences.model} defaultImageQuality={preferences.quality} characters={project.characters} onSaved={listingImages => update({ listingImages })}/>}
       {tab === 'listing' && <EtsyListingDraft project={project} seoProvider={preferences.seoProvider ?? 'openai'} seoGeminiModel={preferences.seoGeminiModel ?? 'gemini-2.5-pro'} seoOpenaiModel={preferences.seoOpenaiModel ?? 'gpt-6.1-terra'} seoDraftFields={preferences.seoDraftFields ?? defaultSeoDraftFields} seoTitleMaxLength={preferences.seoTitleMaxLength ?? 120} seoAltTextCount={preferences.seoAltTextCount ?? 10} onDownloaded={(receipt) => { setProject(prev => ({ ...prev, ...receipt })); setProjects(prev => prev.map(item => item.id === project.id ? { ...item, ...receipt } : item)); }} onChange={listing => update({ listing })} onSave={async () => { await api({ action: 'save', id: project.id, name: project.name, data: project }); setProjects(prev => [project, ...prev.filter(p => p.id !== project.id)]); }} onSeoReview={async seoReview => { const updated = { ...project, seoReview }; await api({ action: 'save', id: updated.id, name: updated.name, data: updated }); setProject(updated); setProjects(prev => [updated, ...prev.filter(p => p.id !== updated.id)]); }}/>}
       {stepIndex >= 0 && <div className="panel pipeline-footer"><button className="outline-btn" onClick={() => navigateTab(stepIndex ? steps[stepIndex - 1].id : 'collections')}>{stepIndex ? `← ${steps[stepIndex - 1].label}` : '← Collections'}</button><span>Step {stepIndex + 1} of {steps.length}</span><button className="primary-btn" disabled={!!busy} onClick={advance}>{busy === 'save' ? 'Saving…' : stepIndex < steps.length - 1 ? `Save & next: ${steps[stepIndex + 1].label}` : 'Save & back to collections'} <ArrowRight size={16}/></button></div>}
       <footer>paletteIQ · Independent clipart research and creation studio. Not affiliated with Etsy. Source listings are inspiration for original designs.</footer></div></main>
