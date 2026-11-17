@@ -35,6 +35,24 @@ button:disabled { opacity:.55; cursor:not-allowed; }
 .workspace-history-controls { display:flex; align-items:center; gap:5px; margin-right:15px; flex-shrink:0; }
 .workspace-history-controls .outline-btn { padding:7px; width:34px; height:34px; border-radius:9px; }
 .workspace-history-controls .outline-btn:disabled { opacity:.4; cursor:not-allowed; }
+.workspace-history-tip { position:relative; display:inline-flex; align-items:center; }
+.workspace-history-tip::after {
+  content:attr(data-tooltip);
+  position:absolute; z-index:40; top:calc(100% + 10px); left:50%;
+  transform:translateX(-50%) translateY(-3px);
+  background:#302a2c; color:#fff; padding:8px 10px; border-radius:7px;
+  box-shadow:0 5px 17px #0003; white-space:nowrap;
+  font-size:11px; font-weight:600; line-height:1.3;
+  opacity:0; visibility:hidden; pointer-events:none; transition:opacity .12s ease, transform .12s ease;
+}
+.workspace-history-tip:hover::after,.workspace-history-tip:focus-within::after {
+  opacity:1; visibility:visible; transform:translateX(-50%) translateY(0);
+}
+.workspace-history-tip:first-child::after { left:0; transform:translateY(-3px); }
+.workspace-history-tip:first-child:hover::after,.workspace-history-tip:first-child:focus-within::after { transform:translateY(0); }
+@media (prefers-reduced-motion: reduce) {
+  .workspace-history-tip::after { transition:none; }
+}
 @media(max-width:760px) {
   .workspace-history-controls { gap:3px; margin-right:8px; }
   .workspace-history-controls .outline-btn { width:29px; height:29px; padding:5px; }
