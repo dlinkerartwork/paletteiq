@@ -1,3 +1,4 @@
+import { sharedProviderSecret } from '@/lib/store-secrets';
 import { env } from 'cloudflare:workers';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '@/db';
@@ -19,7 +20,7 @@ export async function POST(request: Request) {
   const items = (data.characters || []).filter(c => c.id && c.name && c.imageUrl).slice(0, 300)
     .map(c => ({ id: String(c.id).slice(0, 85), name: String(c.name).slice(0, 120) }));
   if (items.length < 3) return Response.json({ groups: [] });
-  const key = await userCredential(user.userId, 'openai') || (env as unknown as Record<string,string | undefined>).OPENAI_API_KEY;
+  const key = await userCredential(user.userId, 'openai') || sharedProviderSecret(user.userId, 'OPENAI_API_KEY');
   if (!key) return bad('Configure OpenAI API key to categorize collection artwork', 503);
   const instructions = [
     'Group the supplied original clipart assets into meaningful, honest Etsy product categories.',
