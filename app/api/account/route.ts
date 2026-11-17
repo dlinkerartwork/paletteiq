@@ -50,13 +50,13 @@ export async function POST(req: Request) {
   try {
     if (input.action === 'register') {
       try {
-        const created = await createAccount(input.email, input.password);
+        const created = await createAccount(input.email, input.password, input.name);
         await beginAccountSession(created.accountId, created.storeId, req);
         return statusForAccount(created.accountId, created.storeId, String(input.email).trim().toLowerCase());
       } catch (cause) {
         // Registration errors must name the actual failure. Never imply that
         // a new user's email is taken when the local D1 schema is missing.
-        if (cause instanceof Error && /valid email and password/.test(cause.message))
+        if (cause instanceof Error && /valid email and password|First store name/.test(cause.message))
           return error(cause.message, 400);
         const problem = classifyAccountStorageFailure(cause);
         console.error('[PaletteIQ account registration]', problem.issue);
