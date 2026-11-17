@@ -1,4 +1,5 @@
 import type { EtsyListingDraft } from './etsy-listing';
+import { ETSY_TITLE_IDEAL_MIN, ETSY_TITLE_MAX, isNearEtsyTitleLimit, removeClipartQuantity } from './seo-title-policy';
 
 export type SeoAuditResult = { score: number; passed: number; total: number; checks: Array<{ id: string; label: string; passed: boolean; weight: number; fix: string }> };
 
@@ -10,7 +11,8 @@ export function auditSeo(draft: EtsyListingDraft): SeoAuditResult {
   const checks = [
     { id: 'title', label: 'Descriptive listing title', passed: !!draft.title.trim(), weight: 10, fix: 'Describe the actual clipart product in the title.' },
     { id: 'title-length', label: 'Title within 140 characters', passed: !!draft.title && draft.title.length <= 140, weight: 10, fix: 'Keep the title at or below 140 characters.' },
-    { id: 'title-clarity', label: 'Title is concise (15 words or fewer)', passed: !!draft.title && draft.title.trim().split(/\s+/).length <= 15, weight: 5, fix: 'Use a clear title with fewer repetitive phrases.' },
+    { id: 'title-target', label: 'Title approaches 140 characters', passed: isNearEtsyTitleLimit(draft.title), weight: 5, fix: `Aim for ${ETSY_TITLE_IDEAL_MIN}–${ETSY_TITLE_MAX} characters with relevant, natural keywords. No word-count rule.` },
+    { id: 'title-no-count', label: 'Title avoids clipart item counts', passed: removeClipartQuantity(draft.title) === draft.title, weight: 5, fix: 'Remove item/image/clipart quantities from the title. Include exact counts in the description if needed.' },
     { id: 'keyword', label: 'Primary keyword defined', passed: !!phrase, weight: 5, fix: 'Choose a precise buyer-facing primary keyword.' },
     { id: 'keyword-title', label: 'Primary keyword visible near title start', passed: !!phrase && lower(draft.title.slice(0, 75)).includes(phrase), weight: 10, fix: 'Consider placing the primary keyword early in the title if it reads naturally.' },
     { id: 'tags-count', label: 'All 13 Etsy tags used', passed: tags.length === 13, weight: 10, fix: 'Use up to 13 relevant, distinct Etsy search phrases.' },
