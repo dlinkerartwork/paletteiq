@@ -15,7 +15,7 @@ export type StudioPreferences = {
   target: number; model: string; quality: string; analysisModel: string; output: string; background: string; variations: number; defaultStyle: string; autoSave: boolean; seoProvider: 'openai' | 'gemini'; seoGeminiModel: string; seoOpenaiModel: string; seoDraftFields: SeoDraftField[]; seoTitleMaxLength: number; seoAltTextCount: number; seoFileNaming: string; seoPrompts: SeoPromptSettings; upscaleProvider: 'remote'; upscaleServerUrl: string; upscaleFactor: 2 | 4 | 6 | 8; upscaleRequireTransparency: boolean; upscaleQc: boolean; upscaleModel: 'realesrgan-x4plus' | 'realesrgan-x4plus-anime' | 'realesrnet-x4plus' | 'realesr-animevideov3' | 'real-hat-gan-sharper-x4'; upscaleCleanup: boolean; upscaleCleanupStrength: 'low' | 'medium' | 'high';
 };
 export const defaultPrefs: StudioPreferences = { target: 120, model: 'gpt-image-1-mini', quality: 'low', analysisModel: 'gpt-4.1-mini', output: 'png', background: 'transparent', variations: 1, defaultStyle: 'Soft hand-painted watercolor illustration', autoSave: false, seoProvider: 'openai', seoGeminiModel: 'gemini-2.5-pro', seoOpenaiModel: 'gpt-6.1-terra', seoDraftFields: [...defaultSeoDraftFields], seoTitleMaxLength: 140, seoAltTextCount: 1, seoFileNaming: 'charactername_imagenumber', seoPrompts: { ...defaultSeoPrompts }, upscaleProvider: 'remote', upscaleServerUrl: '', upscaleFactor: 4, upscaleRequireTransparency: true, upscaleQc: true, upscaleModel: 'realesrgan-x4plus', upscaleCleanup: false, upscaleCleanupStrength: 'low' };
-type Props = { preferences: StudioPreferences; onPreferences: (prefs: StudioPreferences) => void; projects: unknown[] };
+type Props = { storeId: string; preferences: StudioPreferences; onPreferences: (prefs: StudioPreferences) => void; projects: unknown[] };
 type SettingsPane = 'credentials' | 'production' | 'upscale' | 'seo' | 'backup';
 type SettingsResponse = { error?: string; credentials: { etsy: boolean; openai: boolean; gemini: boolean; upscale: boolean }; geminiKeyCount?: number };
 const readSettingsResponse = async (res: Response): Promise<SettingsResponse> => {
@@ -31,7 +31,7 @@ const request = async (body: object): Promise<SettingsResponse> => {
   return readSettingsResponse(res);
 };
 
-export default function StudioSettings({ preferences, onPreferences, projects }: Props) {
+export default function StudioSettings({ storeId, preferences, onPreferences, projects }: Props) {
   const [credentials, setCredentials] = useState({ etsy: false, openai: false, gemini: false, upscale: false });
   const [geminiKeyCount, setGeminiKeyCount] = useState(0);
   const [secrets, setSecrets] = useState({ etsy: '', openai: '', gemini: '' });
@@ -41,8 +41,8 @@ export default function StudioSettings({ preferences, onPreferences, projects }:
   const [active, setActive] = useState('');
   const [message, setMessage] = useState('');
   const [pane, setPane] = useState<SettingsPane>('credentials');
-  useEffect(() => { try { const saved = sessionStorage.getItem('paletteiq-settings-pane'); if (saved && ['credentials','production','upscale','seo','backup'].includes(saved)) setPane(saved as SettingsPane); } catch {} }, []);
-  const changePane = (value: SettingsPane) => { setPane(value); try { sessionStorage.setItem('paletteiq-settings-pane', value); } catch {} };
+  useEffect(() => { try { const saved = sessionStorage.getItem('paletteiq-settings-pane-' + storeId); if (saved && ['credentials','production','upscale','seo','backup'].includes(saved)) setPane(saved as SettingsPane); } catch {} }, [storeId]);
+  const changePane = (value: SettingsPane) => { setPane(value); try { sessionStorage.setItem('paletteiq-settings-pane-' + storeId, value); } catch {} };
   const [geminiModels, setGeminiModels] = useState<Array<{ id: string; name: string }>>([]);
   const [geminiModelsLoaded, setGeminiModelsLoaded] = useState(false);
   const [openaiSeoModels, setOpenaiSeoModels] = useState<Array<{ id: string; name: string }>>([]);
@@ -50,7 +50,16 @@ export default function StudioSettings({ preferences, onPreferences, projects }:
   const [openaiImageModels, setOpenaiImageModels] = useState<Array<{ id: string; name: string }>>([]);
   const [openaiModelsError, setOpenaiModelsError] = useState('');
   const [modelsError, setModelsError] = useState('');
-  useEffect(() => { fetch('/api/settings').then(readSettingsResponse).then(data => { setCredentials(data.credentials); setGeminiKeyCount(data.geminiKeyCount ?? (data.credentials.gemini ? 1 : 0)); }).catch(e => setMessage(e instanceof Error ? e.message : String(e))); }, []);
+  useEffect(() => {
+    let alive = true;
+    setCredentials({ etsy: false, openai: false, gemini: false, upscale: false });
+    setGeminiKeyCount(0);
+    void fetch('/api/settings', { cache: 'no-store' })
+      .then(readSettingsResponse)
+      .then(data => { if (alive) { setCredentials(data.credentials); setGeminiKeyCount(data.geminiKeyCount ?? (data.credentials.gemini ? 1 : 0)); } })
+      .catch(e => { if (alive) setMessage(e instanceof Error ? e.message : String(e)); });
+    return () => { alive = false; };
+  }, [storeId]);
   const loadOpenaiSeoModels = async () => {
     try {
       const response = await fetch('/api/settings?models=openai-seo');
