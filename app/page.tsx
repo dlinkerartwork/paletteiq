@@ -3,7 +3,7 @@
 import Image from 'next/image';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, BarChart3, BookOpenText, Check, Copy, CircleHelp, Download, ExternalLink, FileSearch, Image as ImageIcon, Layers3, LoaderCircle, Plus, Search, Settings2, Sparkles, Trash2, WandSparkles, X, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { ArrowRight, BarChart3, BookOpenText, Check, Copy, CircleHelp, Download, ExternalLink, FileSearch, ArrowLeft, ArrowRightCircle, RefreshCw, Image as ImageIcon, Layers3, LoaderCircle, Plus, Search, Settings2, Sparkles, Trash2, WandSparkles, X, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import StudioSettings, { defaultPrefs, defaultSeoPrompts, defaultSeoDraftFields, type StudioPreferences } from '@/components/studio-settings';
 import ImageProduction from '@/components/image-production';
 import ThumbnailDesigner, { type ThumbnailDesign, type ThumbnailSaveControls } from '@/components/thumbnail-designer';
@@ -16,6 +16,7 @@ import TablePagination from '@/components/table-pagination';
 import EtsyListingDraft, { type SavedSeoReview } from '@/components/etsy-listing-draft';
 import type { EtsyListingDraft as ListingData } from '@/lib/etsy-listing';
 import type { SimilarityReview } from '@/lib/similarity-review';
+import { readWorkspaceHistoryState, routeEquals, routeFromWorkspaceHash, workspaceHash, type WorkspaceRoute, type WorkspaceHistoryEntry, WORKSPACE_TAB_IDS } from '@/lib/workspace-history';
 import { auditCreativeConcepts, expressionDistribution, familyDistribution, normalizeCreativeAnalysis, normalizeCreativeControls, reverseEngineeringKeys, styleDNAKeys, characterDNAKeys, selectDiverseConcepts, type CreativeAnalysis, type CreativeControls } from '@/lib/creative-intelligence';
 
 type Character = { id: string; name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description: string; prompt: string; status: 'draft' | 'ready' | 'done' | 'error'; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: { id: string; submittedAt?: number; factor?: number }; error?: string; similarityReview?: SimilarityReview; origin: 'listing' | 'ai' | 'manual' };
@@ -60,6 +61,18 @@ export default function Home() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [project, setProject] = useState<Project>(blank);
   const [tab, setTab] = useState('overview');
+  const historyReady = useRef(false);
+  const historySession = useRef('');
+  const historyIndex = useRef(0);
+  const historyMax = useRef(0);
+  const restoreFromHistory = useRef(false);
+  const lastRoute = useRef<WorkspaceRoute | null>(null);
+  const [historyPosition, setHistoryPosition] = useState({ index: 0, max: 0 });
+  const projectSnapshots = useRef(new Map<string, Project>());
+  const savedProjectSnapshots = useRef(new Map<string, string>());
+  const allowExplicitReload = useRef(false);
+  const latestWorkspace = useRef<{ tab: string; project: Project; projects: Project[] }>({ tab: 'overview', project: blank(), projects: [] });
+  latestWorkspace.current = { tab, project, projects };
   const thumbnailSaveControlsRef = useRef<ThumbnailSaveControls | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [query, setQuery] = useState('');
@@ -140,12 +153,32 @@ export default function Home() {
   });
   useEffect(() => { fetch('/api/studio').then(r => r.ok ? r.json() : [] as { data: Project }[]).then((rows) => {
     const list = (rows as { data: Project }[]).map(r => r.data); setProjects(list);
+    projectSnapshots.current = new Map(list.map(p => [p.id, p]));
+    savedProjectSnapshots.current = new Map(list.map(p => [p.id, JSON.stringify(p)]));
     let restored: { id?: string; tab?: string } = {};
     try { restored = JSON.parse(localStorage.getItem('paletteiq-last-workspace') || '{}'); } catch { /* Ignore invalid prior state. */ }
-    const selectedProject = list.find(p => p.id === restored.id) || list[0];
-    if (selectedProject) { setProject(selectedProject); setSourceUrl(selectedProject.url); }
-    const validTabs = ['overview', 'collections', 'multi-production', 'settings', ...steps.map(s => s.id)];
-    if (restored.tab && validTabs.includes(restored.tab)) setTab(restored.tab);
+    let session = '';
+    try {
+      session = sessionStorage.getItem('paletteiq-history-session') || crypto.randomUUID();
+      sessionStorage.setItem('paletteiq-history-session', session);
+    } catch { session = crypto.randomUUID(); }
+    historySession.current = session;
+    const entry = readWorkspaceHistoryState(window.history.state, session);
+    const routeHint = entry || routeFromWorkspaceHash(window.location.hash);
+    const selectedProject = list.find(p => p.id === routeHint?.projectId)
+      || list.find(p => p.id === restored.id) || list[0] || latestWorkspace.current.project;
+    const validTabs = WORKSPACE_TAB_IDS as readonly string[];
+    const restoredTab = routeHint && validTabs.includes(routeHint.tab) ? routeHint.tab
+      : restored.tab && validTabs.includes(restored.tab) ? restored.tab : 'overview';
+    setProject(selectedProject); setSourceUrl(selectedProject.url); setTab(restoredTab);
+    const route: WorkspaceRoute = { tab: restoredTab, projectId: selectedProject.id };
+    const cursor = entry?.index || 0;
+    let max = cursor;
+    try { max = Math.max(max, Math.min(10000, Number(sessionStorage.getItem('paletteiq-history-max') || '0') || 0)); } catch { /* Optional. */ }
+    historyIndex.current = cursor; historyMax.current = max;
+    lastRoute.current = route; setHistoryPosition({ index: cursor, max });
+    try { window.history.replaceState({ ...window.history.state, paletteiqWorkspace: { ...route, index: cursor, session } }, '', workspaceHash(route)); } catch { /* History API unavailable. */ }
+    historyReady.current = true;
   }).catch(() => {}).finally(() => setLoadDone(true)); }, []);
   useEffect(() => { if (!loadDone) return; try { localStorage.setItem('paletteiq-last-workspace', JSON.stringify({ id: project.id, tab })); } catch { /* Storage is optional. */ } }, [loadDone, project.id, tab]);
   useEffect(() => {
