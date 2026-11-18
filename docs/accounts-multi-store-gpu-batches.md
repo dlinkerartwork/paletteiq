@@ -71,70 +71,97 @@ Cloudflare-hosted data or restored-workspace selectors.
 - Existing uploaded assets and old user data are not automatically migrated across owner IDs.
 
 
-## Email notifications for OpenAI Image Generation Batches
+## PaletteIQ Desktop SMTP for OpenAI Image Generation Batches
 
-Each new Batch submitted in Image Production or Multi-Collection Production
-enrolls the signed-in account email as its notification recipient. The
-recipient, store and collection names are frozen with the Batch manifest
-so renaming a store cannot change the idempotent email identity later.
+**Desktop email does not contact the GPU Upscale Server at all.**
+PaletteIQ Desktop sends SMTP directly from its own Windows Node/Electron backend
+using TLS/STARTTLS. The mail sender is not exposed to the Next/React renderer,
+and the browser does not receive SMTP passwords.
 
-PaletteIQ registers the OpenAI Batch ID, store/collection and owner email
-with the configured GPU server as soon as a new Batch is saved. When OpenAI
-reports the **completed** status, PaletteIQ also queues the email
-immediately on its next status synchronization—**before** recovering and
-importing the generated PNG files.
+The owner email, store and collection names are frozen in each new OpenAI
+Batch record. Whenever the desktop's authenticated poller observes OpenAI
+status `completed`, it sends one email to the stored account owner.
+This is **before** importing PNG files; the message accurately says that
+OpenAI processing is done and imports may continue.
 
-For genuinely immediate offline notification, the GPU Server can accept
-a signed `batch.completed` webhook from OpenAI at
-`https://YOUR-GPU-SERVER-DOMAIN/v1/webhooks/openai`. Configure a public
-HTTPS webhook destination in the matching OpenAI API project, copy its
-`whsec_` signing secret to GPU Server's local `.env` under
-`PALETTEIQ_OPENAI_WEBHOOK_SECRET`, and restart the GPU Server. Only
-previously registered Batch IDs are eligible; unverifiable events are
-rejected. The GPU Server uses administrator-configured SMTP without sending
-the Gmail App Password to any PaletteIQ client.
+**Closing Desktop:** pressing X hides the window in the Windows system tray,
+leaving the local Wrangler backend and React session alive. An Electron
+background monitor polls batch sync every 60 seconds while hidden. Double-click
+the tray icon to reopen; **Quit completely** stops monitoring. Windows sign-out
+or powering off the machine also stops it. Monitoring resumes at next launch.
 
-The GPU server deduplicates receipts, durably queues mail, and retries delivery
-independently of the image queue. PaletteIQ stores a retry marker on the first
-Batch item to retry a failed submission after a disconnect (no D1 migration).
-Batches created before this feature are not retroactively emailed.
-Email problems must never roll back imported images, mark a completed Batch
-failed, or cause duplicate OpenAI Batch creation.
+### Default configuration — builder's .env
 
-**Prerequisites:** configure the store's Remote GPU URL/API key in PaletteIQ
-Settings and set up/test the GPU server's SMTP sender under Server Settings.
-Without these, image generation still works but email delivery is unavailable.
+The builder can put the following lines in the **PaletteIQ client repository
+root** `.env` (not the GPU Server's `.env`):
 
-**Timing:** With a verified OpenAI webhook and the GPU Server running
-behind a reachable HTTPS endpoint, completion emails are queued while the
-browser/desktop is closed. Without a configured webhook, the email is
-queued when PaletteIQ next detects the `completed` status via sync. PNG
-imports remain a separate workflow and may finish later. Previously
-submitted Batches are not auto-registered for webhook delivery.
+```dotenv
+PALETTEIQ_SMTP_HOST=smtp.gmail.com
+PALETTEIQ_SMTP_PORT=587
+PALETTEIQ_SMTP_USERNAME=sender@gmail.com
+PALETTEIQ_SMTP_FROM=sender@gmail.com
+PALETTEIQ_SMTP_PASSWORD=GOOGLE_16_CHARACTER_APP_PASSWORD
+```
 
-## Desktop Close to Tray — background OpenAI Batch email monitoring
+A tracked example exists at `desktop/smtp.example.env`.
+The Windows staging script `scripts/prepare-desktop-bundle.mjs` extracts
+**only the allowlisted SMTP fields** from the builder's local `.env`
+and creates `dist/desktop-runtime/desktop-smtp.env` for the installer.
+No OpenAI/GPU/API encryption keys are copied. The installed Desktop
+automatically loads these defaults; users need no manual setup when the
+bundled configuration is complete.
 
-**On Windows Desktop**, pressing the main window's **X** hides PaletteIQ
-in the **Windows notification area (system tray)** rather than quitting.
-The existing isolated Wrangler server, native SQLite/image storage, signed-in
-session and OpenAI Batch polling remain active; image-generation Batch
-completions are checked in the hidden renderer and an independent Electron
-main-process timer checks `/api/image-batches?syncAll=1` every 60 seconds
-while hidden. When OpenAI returns `completed`, the client registers an
-idempotent notification in the LAN GPU Server's durable SMTP queue.
+In development, `npm run desktop:dev` reads the repository-root `.env`
+directly into the **native SMTP process**, not into Wrangler environment
+variables or a renderer. The build is not required for source testing.
 
-To reopen, double-click the PaletteIQ tray icon or choose **Open PaletteIQ**.
-To exit completely, right-click the tray icon and select **Quit completely
-(stop background monitoring)**. A second launch while already hidden brings
-the existing window forward instead of starting a duplicate local server.
-If the tray icon is unavailable, closing the window retains the old normal
-quit behavior rather than leaving an inaccessible background process.
+**Security limitation:** The SMTP App Password in `desktop-smtp.env` is
+recoverable from the installer, even if the file has restricted permissions.
+There is no way to securely embed a shared password inside a distributable
+offline installer that untrusted recipients can run. Only use bundling on
+trusted PCs under your control, with a dedicated sender account/App Password.
+For customer-distributed installers, do NOT embed a shared SMTP credential;
+let each installed user configure their own account from Settings or use a
+trusted server-side mail relay. Never commit real passwords to source control.
 
-This does **not** install a Windows Service and it does **not** run when
-Windows is logged out, when the machine is powered off, or after explicit
-Quit completely. It does not auto-start at Windows sign-in. A batch accepted
-by OpenAI still completes remotely if the PC is powered off, but status
-checking/email will resume only when PaletteIQ is started again and the
-account is signed in. No external HTTPS webhook is required for the
-Close-to-Tray workflow. Only the LAN connection to the user's configured
-GPU Server is used; SMTP credentials remain on GPU Server, never Desktop.
+### Store-specific override and testing
+
+On Desktop open **Settings → SMTP Email**. The page shows whether the
+installer defaults are available; the password is never reflected back to
+the browser. Leave the fields unchanged to use bundled defaults.
+To override a particular store, supply host, port, username, from email,
+and an App Password, then click Save SMTP. The override is encrypted with
+the Desktop workspace encryption key and stored in local SQLite under the
+store ID, not uploaded to the GPU Server. **Use installer defaults** resets
+the override for that store. **Send test email** always sends to the
+currently authenticated account email, not an arbitrary recipient.
+
+Supported SMTP transports: port **587 with mandatory STARTTLS**, or
+port **465 with TLS/SSL**; certificates are verified and cleartext SMTP
+authentication is not permitted. Gmail requires the username and From
+address to be the same; use a Google App Password rather than the Gmail
+login password.
+
+Email attempts are deduplicated in local SQLite using the store owner
+and image Batch ID. A transient SMTP failure does not roll back image
+generation or interfere with image recovery; the next background sync
+retries the email. As with all SMTP delivery, a process crash immediately
+after the SMTP server accepts a message but before the sent marker is
+written could still result in a second email on retry.
+
+**Web vs Desktop:** browser-based PaletteIQ does not have a local Node
+SMTP service and therefore does not send these direct SMTP notifications.
+The unrelated GPU upscale Batch email notifications continue using the GPU
+Server SMTP separately.
+
+### Installer build
+
+```powershell
+cd C:\dLinker\paletteIQ
+# Add the SMTP keys above to .env (local only; ignored by Git)
+npm run desktop:package:win:no-license
+```
+
+The SMTP configuration is staged with the installer; it is not necessary
+to rebuild the GPU Server. Test using a new OpenAI Batch and verify real
+SMTP acceptance with Settings → SMTP Email → Send test email.
