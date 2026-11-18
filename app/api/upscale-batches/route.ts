@@ -95,7 +95,7 @@ export async function POST(req: Request) {
     const selectedIds = body.characterIds as string[];
     const factor = body.factor ?? 4;
     if (![2,4,6,8].includes(factor)) return bad('Choose 2×, 4×, 6× or 8×');
-    const { data } = await ownedUpscaleProject(user.userId, body.projectId);
+    const { row, data } = await ownedUpscaleProject(user.userId, body.projectId);
     const active = data.upscaleBatch;
     const current = selectedIds.map(id => data.characters.find(c => c.id === id));
     const matching = active && active.items.length === current.length &&
@@ -118,6 +118,7 @@ export async function POST(req: Request) {
         model, factor: factor as 2|4|6|8, cleanup: prefs.upscaleCleanup === true,
         cleanupStrength, requireTransparency: prefs.upscaleRequireTransparency !== false,
         qc: prefs.upscaleQc !== false, createdAt: Date.now(), notificationEmail: user.email,
+        collectionName: row.name.slice(0, 160),
       };
     if (!active || active.status === 'completed') await persistBatch(user.userId, body.projectId, job);
     // Stable client batch ID: network retries cannot create duplicate GPU work.
@@ -128,6 +129,7 @@ export async function POST(req: Request) {
         scale: job.factor, edge_cleanup: job.cleanup, cleanup_strength: job.cleanupStrength,
         notification_email: job.notificationEmail,
         store_name: session?.storeName || 'PaletteIQ Etsy Store',
+        collection_name: (job.collectionName || row.name).slice(0, 160).replace(/[\x00-\x1f]/g, ' '),
       }),
     });
     const accepted = await response.json() as { id: string; status: string; notification_configured?: boolean };
