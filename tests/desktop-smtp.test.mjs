@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { DatabaseSync } from 'node:sqlite';
+import { readFileSync } from 'node:fs';
 
 const require = createRequire(import.meta.url);
 const { createNativeSmtpService } = require('../desktop/native-smtp-service.cjs');
@@ -128,4 +129,15 @@ test('SMTP mail construction validates addresses and prevents header injection',
     ...payload, completed: -1, failed: -1,
   });
   assert.match(notification.body, /not yet available/);
+});
+
+test('SMTP Settings tab remains visible when native service is not ready or the browser is used', () => {
+  const settings = readFileSync(new URL('../components/studio-settings.tsx', import.meta.url), 'utf8');
+  const detail = readFileSync(new URL('../components/desktop-smtp-settings.tsx', import.meta.url), 'utf8');
+  assert.match(settings, /\['smtp','SMTP Email'\]/);
+  assert.doesNotMatch(settings, /desktopSmtpAvailable\s*\?/);
+  assert.match(settings, /pane === 'smtp' && <DesktopSmtpSettings/);
+  assert.match(detail, /SMTP Email — Desktop only/);
+  assert.match(detail, /Retry SMTP connection/);
+  assert.match(detail, /npm run desktop:dev/);
 });
