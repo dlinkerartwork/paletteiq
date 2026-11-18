@@ -30,6 +30,7 @@ async function request(body: Record<string, unknown>) {
 export default function RestoreBackupPanel() {
   const input = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState('');
+  const [desktopMode, setDesktopMode] = useState(false);
   const [payload, setPayload] = useState<Record<string, unknown> | null>(null);
   const [stores, setStores] = useState<StoreSummary[]>([]);
   const [activeStoreId, setActiveStoreId] = useState('');
@@ -54,6 +55,14 @@ export default function RestoreBackupPanel() {
   }, []);
 
   useEffect(() => { void loadStores().catch(e => setError(e instanceof Error ? e.message : String(e))); }, [loadStores]);
+  useEffect(() => {
+    let alive = true;
+    void fetch('/api/desktop-workspace-import', { cache: 'no-store' })
+      .then(r => r.json() as Promise<{ desktop?: boolean }>)
+      .then(data => { if (alive) setDesktopMode(data.desktop === true); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
   const invalidate = () => { setPreview(null); setResult(null); setError(''); setMessage(''); };
 
   const chooseFile = async (file?: File) => {
@@ -115,6 +124,13 @@ export default function RestoreBackupPanel() {
     finally { setBusy(''); }
   };
 
+  // The Web JSON-import endpoint is intentionally unavailable with the
+  // Desktop native SQLite bridge. Display guidance rather than a broken form.
+  if (desktopMode) return <div className="restore-image-note">
+    <AlertTriangle size={17}/> JSON metadata restore into a selected store is currently a Web-only operation.
+    To migrate Desktop collections together with actual PNG/JPG images, use
+    <strong>Desktop Workspace ZIP → Selected Store</strong> above. The JSON export button remains available.
+  </div>;
   return <div className="restore-backup-panel">
     <div className="restore-heading"><ShieldCheck size={19}/><div><strong>Restore legacy backup to a chosen store</strong><p className="sub">Preview first, choose duplicate rules, then confirm. Your original JSON file is never modified.</p></div></div>
     <div className="restore-fields">
