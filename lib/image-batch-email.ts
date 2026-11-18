@@ -14,20 +14,24 @@ export type EmailBatchItem = {
   [key: string]: unknown;
 };
 
-export function pendingImageBatchNotification(job: typeof imageBatches.$inferSelect, now = Date.now()) {
-  if (!['completed', 'completed_with_errors'].includes(job.status)) return false;
+export function pendingImageBatchNotification(
+  job: typeof imageBatches.$inferSelect, now = Date.now(), openAICompleted = false,
+) {
+  if (!openAICompleted && !['completed', 'completed_with_errors'].includes(job.status)) return false;
   let items: EmailBatchItem[];
   try { items = JSON.parse(job.items) as EmailBatchItem[]; } catch { return false; }
   return Boolean(items.length && items[0].notifyEmail === true &&
     !items[0].notificationQueuedAt &&
     (!items[0].notificationLastAttemptAt || now - items[0].notificationLastAttemptAt > 60_000) &&
-    items.length === job.total && items.every(item => item.status === 'done' || item.status === 'error'));
+    items.length === job.total &&
+    (openAICompleted || items.every(item => item.status === 'done' || item.status === 'error')));
 }
 
 /**
- * Deliver a receipt to the trusted GPU server's durable SMTP outbox.
- * This function deliberately does not send SMTP credentials to the browser,
- * and failures cannot roll back generated assets or a completed OpenAI Batch.
+ * Register a completion receipt immediately when the verified OpenAI Batch
+ * status becomes completed, even if its output file is not yet available or
+ * imported. The GPU SMTP outbox is independent from image recovery.
+ * No SMTP credentials are sent to the browser.
  *
  * The first item holds the email enrollment and retry receipt to avoid schema
  * migrations in existing local SQLite / hosted D1 databases.
@@ -38,14 +42,27 @@ export async function queueFinishedImageBatchEmail(
   recipient: string,
   storeName: string,
   collectionName: string,
+  openAICompletedCounts?: { completed?: number; failed?: number },
 ): Promise<boolean> {
-  if (!pendingImageBatchNotification(job)) return false;
+  if (!pendingImageBatchNotification(job, Date.now(), Boolean(openAICompletedCounts))) return false;
   const items = JSON.parse(job.items) as EmailBatchItem[];
   const email = items[0].notificationRecipient || recipient;
   const store = items[0].notificationStoreName || storeName;
   const collection = items[0].notificationCollectionName || collectionName;
-  const success = items.filter(item => item.status === 'done').length;
-  const failed = items.filter(item => item.status === 'error').length;
+  const importedSuccess = items.filter(item => item.status === 'done').length;
+  const importedFailed = items.filter(item => item.status === 'error').length;
+  const countsValid = openAICompletedCounts &&
+    Number.isSafeInteger(openAICompletedCounts.completed) &&
+    Number.isSafeInteger(openAICompletedCounts.failed) &&
+    (openAICompletedCounts.completed ?? -1) >= 0 &&
+    (openAICompletedCounts.failed ?? -1) >= 0 &&
+    (openAICompletedCounts.completed ?? 0) + (openAICompletedCounts.failed ?? 0) === items.length;
+  // -1 means OpenAI has completed the batch but has not provided a
+  // complete request count yet. Never invent success or failure figures.
+  const success = openAICompletedCounts
+    ? (countsValid ? openAICompletedCounts.completed! : -1) : importedSuccess;
+  const failed = openAICompletedCounts
+    ? (countsValid ? openAICompletedCounts.failed! : -1) : importedFailed;
   const now = Date.now();
   try {
     await gpuFetch(owner, '/v1/notifications/image-batches', {
