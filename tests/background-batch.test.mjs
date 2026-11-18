@@ -28,3 +28,14 @@ test('finished image batches enqueue a durable email receipt using the GPU serve
   assert.match(notifier, /notificationLastAttemptAt/);
   assert.match(notifier, /eq\(imageBatches\.items, job\.items\)/);
 });
+
+test('OpenAI completed triggers email before PNG import and registers webhooks', () => {
+  const completion = route.indexOf("batch.status === 'completed'");
+  const earlyEmail = route.indexOf('queueFinishedImageBatchEmail(\n        job, owner');
+  const outputGuard = route.indexOf('if (awaitBatchOutputFiles(batch))');
+  assert.ok(completion >= 0 && earlyEmail > completion);
+  assert.ok(outputGuard > earlyEmail, 'email must be sent before PNG import');
+  assert.match(route, /\/v1\/notifications\/image-batches\/register/);
+  assert.match(route, /openai_batch_id: job\.id/);
+  assert.match(route, /signal: AbortSignal\.timeout\(5000\)/);
+});
