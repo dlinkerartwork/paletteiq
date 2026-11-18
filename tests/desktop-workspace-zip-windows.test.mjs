@@ -5,9 +5,11 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 
 const require = createRequire(import.meta.url);
-const { backupWorkspace, validateWorkspace, prepareWorkspaceStoreImport } =
+const { backupWorkspace, validateWorkspace, prepareWorkspaceStoreImport, restoreWorkspaceSeparate } =
   require('../desktop/workspace-backup.cjs');
 const { applyWorkspaceStoreImport, ownerForStore } = require('../desktop/workspace-store-import.cjs');
 const accountId='4d50ee81-7ce0-4955-9d7c-d150a49a5d97';
@@ -68,6 +70,60 @@ test('Windows Desktop ZIP export -> native extraction -> selected-store PNG impo
   }finally{
     if(oldDB)oldDB.close();
     if(db)db.close();
+    rmSync(root,{recursive:true,force:true});
+  }
+});
+
+test('legacy ZIP containing all four encrypted API keys restores safely without altering source ZIP or PNG bytes', {skip:process.platform!=='win32'}, async () => {
+  const root=mkdtempSync(path.join(tmpdir(),'paletteiq-legacy-zip-secrets-'));
+  const source=path.join(root,'source');
+  const restoredRoot=path.join(root,'target');
+  mkdirSync(path.join(source,'database'),{recursive:true});
+  mkdirSync(path.join(restoredRoot,'database'),{recursive:true});
+  let original;
+  try {
+    writeFileSync(path.join(source,'manifest.json'),JSON.stringify({
+      format:'paletteiq-workspace-backup',version:1,createdAt:'2025-11-01T00:00:00Z',
+    }));
+    original=new DatabaseSync(path.join(source,'database','paletteiq.db'));
+    original.exec('CREATE TABLE projects (id TEXT PRIMARY KEY,owner TEXT,name TEXT,data TEXT,updated_at INTEGER);'+
+      'CREATE TABLE image_batches (id TEXT PRIMARY KEY,owner TEXT,project_id TEXT,status TEXT);'+
+      'CREATE TABLE studio_settings (owner TEXT PRIMARY KEY,preferences TEXT,etsy_credential TEXT,openai_credential TEXT,gemini_credential TEXT,upscale_credential TEXT,updated_at INTEGER)');
+    original.prepare('INSERT INTO projects VALUES (?,?,?,?,?)').run(projectId,'local_seedy','Legacy Project',
+      JSON.stringify({id:projectId,name:'Legacy Project',characters:[{id:characterId,name:'Bear',prompt:'Legacy bear',status:'done',
+        imageUrl:'/api/images/'+characterId+'?format=png&batch='+batchId}]}),Date.now());
+    original.prepare('INSERT INTO studio_settings VALUES (?,?,?,?,?,?,?)')
+      .run('local_seedy',JSON.stringify({target:84}),'old-etsy-secret','old-openai-secret','old-gemini-secret','old-gpu-secret',Date.now());
+    original.close(); original=null;
+    const imageFolder=path.join(source,'images','collections','local_seedy','batches',batchId);
+    mkdirSync(imageFolder,{recursive:true});
+    writeFileSync(path.join(imageFolder,characterId+'.png'),png);
+    const archive=path.join(root,'old-workspace-with-keys.zip');
+    // Deliberately use the pre-credential-scrubbing ZIP format.
+    const command="Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::CreateFromDirectory($env:PALETTEIQ_ZIP_SOURCE,$env:PALETTEIQ_ZIP_DEST)";
+    const packed=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',
+      Buffer.from(command,'utf16le').toString('base64')],{
+      windowsHide:true,encoding:'utf8',
+      env:{...process.env,PALETTEIQ_ZIP_SOURCE:source,PALETTEIQ_ZIP_DEST:archive},
+    });
+    assert.equal(packed.status,0,packed.stderr||packed.error?.message);
+    const oldHash=createHash('sha256').update(readFileSync(archive)).digest('hex');
+    const asWorkspace=await restoreWorkspaceSeparate({source:archive,workspaceRoot:restoredRoot});
+    assert.doesNotThrow(()=>validateWorkspace(asWorkspace));
+    assert.deepEqual(readFileSync(path.join(asWorkspace,'images','collections','local_seedy','batches',batchId,characterId+'.png')),png);
+    const restoredDb=new DatabaseSync(path.join(asWorkspace,'database','paletteiq.db'),{readOnly:true});
+    try {
+      const settings=restoredDb.prepare('SELECT * FROM studio_settings').get();
+      assert.deepEqual([settings.etsy_credential,settings.openai_credential,settings.gemini_credential,settings.upscale_credential],[null,null,null,null]);
+      assert.equal(settings.preferences,'{"target":84}');
+      assert.equal(restoredDb.prepare('SELECT COUNT(*) AS n FROM projects').get().n,1);
+    }finally{restoredDb.close();}
+    const stagedStore=await prepareWorkspaceStoreImport({source:archive,workspaceRoot:restoredRoot});
+    assert.doesNotThrow(()=>validateWorkspace(stagedStore));
+    assert.deepEqual(readFileSync(path.join(stagedStore,'images','collections','local_seedy','batches',batchId,characterId+'.png')),png);
+    assert.equal(createHash('sha256').update(readFileSync(archive)).digest('hex'),oldHash);
+  }finally{
+    if(original) original.close();
     rmSync(root,{recursive:true,force:true});
   }
 });
