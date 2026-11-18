@@ -111,3 +111,30 @@ browser/desktop is closed. Without a configured webhook, the email is
 queued when PaletteIQ next detects the `completed` status via sync. PNG
 imports remain a separate workflow and may finish later. Previously
 submitted Batches are not auto-registered for webhook delivery.
+
+## Desktop Close to Tray — background OpenAI Batch email monitoring
+
+**On Windows Desktop**, pressing the main window's **X** hides PaletteIQ
+in the **Windows notification area (system tray)** rather than quitting.
+The existing isolated Wrangler server, native SQLite/image storage, signed-in
+session and OpenAI Batch polling remain active; image-generation Batch
+completions are checked in the hidden renderer and an independent Electron
+main-process timer checks `/api/image-batches?syncAll=1` every 60 seconds
+while hidden. When OpenAI returns `completed`, the client registers an
+idempotent notification in the LAN GPU Server's durable SMTP queue.
+
+To reopen, double-click the PaletteIQ tray icon or choose **Open PaletteIQ**.
+To exit completely, right-click the tray icon and select **Quit completely
+(stop background monitoring)**. A second launch while already hidden brings
+the existing window forward instead of starting a duplicate local server.
+If the tray icon is unavailable, closing the window retains the old normal
+quit behavior rather than leaving an inaccessible background process.
+
+This does **not** install a Windows Service and it does **not** run when
+Windows is logged out, when the machine is powered off, or after explicit
+Quit completely. It does not auto-start at Windows sign-in. A batch accepted
+by OpenAI still completes remotely if the PC is powered off, but status
+checking/email will resume only when PaletteIQ is started again and the
+account is signed in. No external HTTPS webhook is required for the
+Close-to-Tray workflow. Only the LAN connection to the user's configured
+GPU Server is used; SMTP credentials remain on GPU Server, never Desktop.
