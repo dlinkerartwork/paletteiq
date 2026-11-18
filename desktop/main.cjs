@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, shell, safeStorage, Menu } = require('electron');
+const { app, BrowserWindow, dialog, shell, safeStorage, Menu, Tray } = require('electron');
 const { spawn } = require('node:child_process');
 const { mkdirSync, existsSync, readFileSync, writeFileSync, unlinkSync, copyFileSync, appendFileSync, statSync, renameSync } = require('node:fs');
 const { randomBytes } = require('node:crypto');
@@ -7,6 +7,7 @@ const { loadOrCreateKey } = require('./key-vault.cjs');
 const { startNativeStorage } = require('./native-storage.cjs');
 const { backupWorkspace, restoreWorkspaceSeparate, validateWorkspace } = require('./workspace-backup.cjs');
 const { windowsDeviceCode, readValidLicense } = require('./license.cjs');
+const { pollHiddenImageBatches } = require('./background-batch-monitor.cjs');
 
 const ROOT = app.isPackaged ? path.join(process.resourcesPath, 'paletteiq-runtime') : path.resolve(__dirname, '..');
 const SERVER_PORT = 18763;
@@ -16,6 +17,12 @@ let server = null;
 let nativeStorage = null;
 let closing = false;
 let activeDirectory = null;
+let mainWindow = null;
+let tray = null;
+let backgroundMonitorTimer = null;
+let trayInfoDisplayed = false;
+const BACKGROUND_POLL_MS = 60_000;
+
 
 function workspaceRoot() {
   const directory = path.join(app.getPath('userData'), 'paletteiq-data');
@@ -260,6 +267,63 @@ async function requireActivation() {
   }
 }
 
+function showPaletteIQ() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+async function configureBackgroundTray(window, diagnostics) {
+  try {
+    // Use the installed executable's Windows icon. Unlike a generated path,
+    // this also works from app.asar without shipping additional icon files.
+    const icon = await app.getFileIcon(process.execPath, { size: 'small' });
+    if (icon.isEmpty()) throw new Error('No usable Windows tray icon');
+    tray = new Tray(icon);
+    tray.setToolTip('PaletteIQ Desktop — monitoring OpenAI image batches in the background');
+    tray.setContextMenu(Menu.buildFromTemplate([
+      { label: 'Open PaletteIQ', click: showPaletteIQ },
+      { label: 'Batch completion emails continue while signed in', enabled: false },
+      { type: 'separator' },
+      { label: 'Quit completely (stop background monitoring)', click: () => app.quit() },
+    ]));
+    tray.on('double-click', showPaletteIQ);
+  } catch (error) {
+    // Do not hide the window if there is no system-tray icon to restore it.
+    tray = null;
+    diagnostics.write('tray', 'Cannot enable Close to Tray: ' +
+      (error instanceof Error ? error.message : String(error)));
+    return;
+  }
+  window.on('close', event => {
+    if (closing || !tray) return;
+    event.preventDefault();
+    window.hide();
+    // Background polling runs as long as this Electron process remains alive.
+    // Existing React pollers also continue because throttling is disabled.
+    void pollHiddenImageBatches(window, diagnostics.write);
+    if (!trayInfoDisplayed) {
+      trayInfoDisplayed = true;
+      try {
+        tray.displayBalloon({
+          title: 'PaletteIQ is still running',
+          content: 'OpenAI Batch monitoring and email notifications continue in the Windows system tray. Use Quit completely to stop.',
+          iconType: 'info',
+          noSound: true,
+        });
+      } catch { /* Windows notification preferences may suppress balloons. */ }
+    }
+  });
+  backgroundMonitorTimer = setInterval(() => {
+    void pollHiddenImageBatches(window, diagnostics.write);
+  }, BACKGROUND_POLL_MS);
+}
+
+const singleInstanceLock = app.requestSingleInstanceLock();
+if (!singleInstanceLock) app.quit();
+app.on('second-instance', showPaletteIQ);
+
 async function launch() {
   await requireActivation();
   const directory = dataDirectory();
@@ -291,16 +355,21 @@ async function launch() {
   server.on('exit', () => { server = null; if (!closing) app.quit(); });
   await waitForLocalServer();
   configureWorkspaceMenu(directory);
-  const window = new BrowserWindow({ width: 1440, height: 940, minWidth: 1050, minHeight: 680, title: 'PaletteIQ Desktop', webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true } });
+  const window = new BrowserWindow({ width: 1440, height: 940, minWidth: 1050, minHeight: 680, title: 'PaletteIQ Desktop', webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, backgroundThrottling: false } });
+  mainWindow = window;
+  window.on('closed', () => { if (mainWindow === window) mainWindow = null; });
   window.webContents.setWindowOpenHandler(({ url }) => { if (url.startsWith('https://')) void shell.openExternal(url); return { action: 'deny' }; });
   window.webContents.on('will-navigate', (event, url) => { if (!url.startsWith(`${SERVER_URL}/`) && url !== SERVER_URL) event.preventDefault(); });
   await window.loadURL(SERVER_URL);
+  await configureBackgroundTray(window, diagnostics);
 }
 
-app.whenReady().then(() => launch().catch(async error => { await dialog.showMessageBox({ type: 'error', title: 'PaletteIQ Desktop', message: error.message || String(error) }); app.quit(); }));
-app.on('window-all-closed', () => app.quit());
+if (singleInstanceLock) app.whenReady().then(() => launch().catch(async error => { await dialog.showMessageBox({ type: 'error', title: 'PaletteIQ Desktop', message: error.message || String(error) }); app.quit(); }));
+app.on('window-all-closed', () => { if (!tray || closing) app.quit(); });
 app.on('before-quit', () => {
   closing = true;
+  if (backgroundMonitorTimer) { clearInterval(backgroundMonitorTimer); backgroundMonitorTimer = null; }
+  if (tray) { tray.destroy(); tray = null; }
   if (server && !server.killed) server.kill();
   if (nativeStorage) { nativeStorage.server.close(); nativeStorage.database.close(); }
   // .dev.vars is needed by the local Worker only while the app runs.
