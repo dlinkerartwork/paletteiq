@@ -50,7 +50,7 @@ export default function StudioSettings({ storeId, preferences, onPreferences, pr
     let cancelled = false;
     setDesktopSmtpAvailable(false);
     void fetch('/api/desktop-smtp', { cache:'no-store' })
-      .then(response => response.ok ? response.json() : null)
+      .then(async response => response.ok ? (await response.json()) as { available?: boolean } : null)
       .then(data => { if (!cancelled) setDesktopSmtpAvailable(data?.available === true); })
       .catch(() => { if (!cancelled) setDesktopSmtpAvailable(false); });
     return () => { cancelled = true; };
