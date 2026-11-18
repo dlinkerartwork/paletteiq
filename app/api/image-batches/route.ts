@@ -13,10 +13,11 @@ import { acquireProductionLocks } from '@/lib/production-locks';
 import { mergeNewBatchResults } from '@/lib/batch-recovery';
 import { batchAssetKey, batchAssetUrl } from '@/lib/batch-assets';
 import { awaitBatchOutputFiles } from '@/lib/batch-status';
+import { pendingImageBatchNotification, queueFinishedImageBatchEmail, type EmailBatchItem } from '@/lib/image-batch-email';
 
 const MODELS = ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
 const syncingJobIds = new Set<string>();
-type BatchItem = { id: string; status: 'pending' | 'done' | 'error'; imageUrl?: string; error?: string; similarityReview?: SimilarityReview };
+type BatchItem = EmailBatchItem & { imageUrl?: string; error?: string; similarityReview?: SimilarityReview };
 type OpenAIBatch = { id: string; status: string; output_file_id?: string | null; error_file_id?: string | null; request_counts?: { total: number; completed: number; failed: number } };
 const fail = (message: string, code = 400) => Response.json({ error: message }, { status: code });
 const openai = async (key: string, path: string, init: RequestInit = {}) => {
@@ -71,7 +72,7 @@ export async function POST(req: Request) {
     const job = await (await openai(key, 'batches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input_file_id: uploaded.id, endpoint: '/v1/images/generations', completion_window: '24h', metadata: { application: 'paletteiq', project: data.projectId } }) })).json() as OpenAIBatch;
     createdBatchId = job.id;
     const now = Date.now();
-    const record = { id: crypto.randomUUID(), owner: user.userId, projectId: data.projectId, openaiBatchId: job.id, model: data.model!, format, status: job.status, total: selected.length, completed: 0, failed: 0, items: JSON.stringify(data.characterIds.map(id => ({ id, status: 'pending' }))), outputFileId: null, errorFileId: null, createdAt: now, updatedAt: now };
+    const record = { id: crypto.randomUUID(), owner: user.userId, projectId: data.projectId, openaiBatchId: job.id, model: data.model!, format, status: job.status, total: selected.length, completed: 0, failed: 0, items: JSON.stringify(data.characterIds.map((id, index) => ({ id, status: 'pending', ...(index === 0 ? { notifyEmail: true } : {}) }))), outputFileId: null, errorFileId: null, createdAt: now, updatedAt: now };
     await db.insert(imageBatches).values(record);
     createdBatchId = null;
     return Response.json({ job: safeJob(record) });
@@ -105,7 +106,7 @@ async function* jsonlLines(stream: ReadableStream<Uint8Array>) {
   } finally { await reader.cancel().catch(() => {}); }
 }
 
-async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner: string) {
+async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner: string, userEmail: string, storeName: string) {
   if (syncingJobIds.has(job.id)) return job;
   syncingJobIds.add(job.id);
   try {
@@ -169,7 +170,14 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
     } else throw new Error('Batch import paused: original collection missing; job remains recoverable.');
   }
   await db.update(imageBatches).set({ status, completed: Math.max(requestCompleted, newCompleted), failed: Math.max(requestFailed, newFailed), items: JSON.stringify(items), outputFileId: batch.output_file_id ?? null, errorFileId: batch.error_file_id ?? null, updatedAt: Date.now() }).where(and(eq(imageBatches.id, job.id), eq(imageBatches.owner, owner)));
-  return { ...job, status, completed: Math.max(requestCompleted, newCompleted), failed: Math.max(requestFailed, newFailed), items: JSON.stringify(items) };
+  const savedJob = { ...job, status, completed: Math.max(requestCompleted, newCompleted), failed: Math.max(requestFailed, newFailed), items: JSON.stringify(items) };
+  // Enqueue SMTP only after all images have been recovered and the batch
+  // bookkeeping is durable. A mail relay outage never invalidates a paid Batch.
+  if (importedAll && savedProject.length && pendingImageBatchNotification(savedJob)) {
+    try { await queueFinishedImageBatchEmail(savedJob, owner, userEmail, storeName, savedProject[0].name); }
+    catch { /* Keep the completion durable; notification can retry on syncAll. */ }
+  }
+  return savedJob;
   } finally { syncingJobIds.delete(job.id); }
 }
 
@@ -190,14 +198,32 @@ export async function GET(req: Request) {
       return true;
     });
     const key = await userCredential(user.userId, 'openai') || sharedProviderSecret(user.userId, 'OPENAI_API_KEY');
-    if (!key || !active.length) return Response.json({ updatedProjectIds: [], pendingJobs: active.length, credentialMissing: !key && active.length > 0 });
     const updatedProjectIds: string[] = [];
     const warnings: string[] = [];
-    for (const row of active) {
-      try { await syncJob(row, key, user.userId); updatedProjectIds.push(row.projectId); }
+    if (key) for (const row of active) {
+      try { await syncJob(row, key, user.userId, user.email, user.displayName); updatedProjectIds.push(row.projectId); }
       catch (error) { warnings.push(error instanceof Error ? error.message : 'Batch recovery failed'); }
     }
-    return Response.json({ updatedProjectIds: [...new Set(updatedProjectIds)], pendingJobs: active.length, warnings });
+    // Opportunistic durable mail retries after reopening the browser or
+    // desktop. Previously created batches are not enrolled automatically.
+    const recentFinished = await db.select().from(imageBatches)
+      .where(and(eq(imageBatches.owner, user.userId), notInArray(imageBatches.status,
+        ['queued', 'validating', 'in_progress', 'finalizing', 'importing'])))
+      .orderBy(desc(imageBatches.updatedAt)).limit(60);
+    const pendingMail = recentFinished.filter(row => pendingImageBatchNotification(row)).slice(0, 3);
+    if (pendingMail.length) {
+      const known = await db.select({ id: projects.id, name: projects.name }).from(projects)
+        .where(eq(projects.owner, user.userId));
+      const names = new Map(known.map(project => [project.id, project.name]));
+      for (const job of pendingMail) {
+        const collectionName = names.get(job.projectId);
+        if (!collectionName) continue;
+        try { await queueFinishedImageBatchEmail(job, user.userId, user.email, user.displayName, collectionName); }
+        catch { /* Next sync retry keeps this independent of image recovery. */ }
+      }
+    }
+    return Response.json({ updatedProjectIds: [...new Set(updatedProjectIds)],
+      pendingJobs: active.length, credentialMissing: !key && active.length > 0, warnings });
   }
   if (url.searchParams.get('activity') === '1') {
     const pageSize = Number(url.searchParams.get('limit') || '25');
@@ -224,7 +250,7 @@ export async function GET(req: Request) {
   const syncTarget = rows.find(row => isActiveBatchStatus(row.status))?.id;
   const jobs = await Promise.all(rows.map(async row => {
     if (!sync || !key || row.id !== syncTarget) return safeJob(row);
-    try { return safeJob(await syncJob(row, key, user.userId)); }
+    try { return safeJob(await syncJob(row, key, user.userId, user.email, user.displayName)); }
     catch (error) { return { ...safeJob(row), warning: error instanceof Error ? error.message : 'Unable to sync' }; }
   }));
   return Response.json({ jobs });
