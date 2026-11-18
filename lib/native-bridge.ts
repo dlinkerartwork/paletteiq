@@ -99,8 +99,10 @@ export async function nativeSmtpOperation(
 ): Promise<Record<string, unknown>> {
   const bridge = bridgeConfig();
   if (!bridge) throw new Error('SMTP email notifications require PaletteIQ Desktop (not the web browser).');
-  if (typeof owner !== 'string' || !/^[0-9a-f-]{36}$/i.test(owner))
-    throw new Error('Invalid active store for SMTP');
+  // Authenticated PaletteIQ store owners are scoped identifiers returned by
+  // scopeForStore(accountId, storeId), NOT bare store UUIDs.
+  if (typeof owner !== 'string' || !/^user_[0-9a-f]{32}_store_[0-9a-f]{32}$/i.test(owner))
+    throw new Error('Invalid active PaletteIQ store owner for SMTP');
   const response = await bridgeRequest(bridge, '/smtp', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
