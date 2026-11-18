@@ -11,7 +11,25 @@ const marker = 'paletteiq-workspace-backup';
 
 async function zipCommand(source, destination, extract = false) {
   const command = extract
-    ? `Add-Type -AssemblyName System.IO.Compression.FileSystem; $z=[System.IO.Compression.ZipFile]::OpenRead($env:PALETTEIQ_ZIP_SOURCE); try { if ($z.Entries.Count -gt 20000) { throw 'Too many archive entries' }; $total=[int64]0; foreach($e in $z.Entries) { $n=$e.FullName.Replace('\\','/'); if ($n.StartsWith('/') -or $n.Contains('../') -or $n.Contains('/..') -or $n.Contains(':') -or $n.StartsWith('\\') -or $e.Length -gt 2147483648) { throw 'Invalid archive path or size' }; $total += $e.Length; if ($total -gt 8589934592) { throw 'Archive too large' }; if ($n -and -not ($n -eq 'manifest.json' -or $n -eq 'database/paletteiq.db' -or $n -match '^images/collections/[a-zA-Z0-9_-]{1,120}/(?:batches/[0-9a-f-]{36}/)?[0-9a-f-]{36}\\.(png|jpg))) { throw 'Unexpected archive entry' } }; [System.IO.Compression.ZipFileExtensions]::ExtractToDirectory($z, $env:PALETTEIQ_ZIP_DEST) } finally { $z.Dispose() }`
+    ? `Add-Type -AssemblyName System.IO.Compression.FileSystem;
+$z=[System.IO.Compression.ZipFile]::OpenRead($env:PALETTEIQ_ZIP_SOURCE);
+try {
+ if ($z.Entries.Count -gt 20000) { throw 'Too many archive entries' };
+ $total=[int64]0;
+ foreach ($e in $z.Entries) {
+   $n=$e.FullName.Replace([string][char]92,'/');
+   if ($n.StartsWith('/') -or $n.Contains('../') -or $n.Contains('/..') -or $n.Contains(':') -or
+       $e.Length -gt 2147483648) { throw 'Invalid archive path or size' };
+   $total += $e.Length;
+   if ($total -gt 8589934592) { throw 'Archive too large' };
+   $valid = ($n -eq 'manifest.json' -or $n -eq 'database/paletteiq.db' -or
+      $n -eq 'database/' -or $n -eq 'images/' -or $n -eq 'images/collections/' -or
+      $n -match '^images/collections/[a-zA-Z0-9_-]{1,120}/(?:batches/[0-9a-f-]{36}/)?[0-9a-f-]{36}[.](png|jpg)$' -or
+      $n -match '^images/collections/[a-zA-Z0-9_-]{1,120}/(?:batches/(?:[0-9a-f-]{36}/)?)?$');
+   if ($n -and -not $valid) { throw 'Unexpected archive entry: ' + $n };
+ }
+ [System.IO.Compression.ZipFileExtensions]::ExtractToDirectory($z,$env:PALETTEIQ_ZIP_DEST);
+} finally { $z.Dispose() }`
     : `Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::CreateFromDirectory($env:PALETTEIQ_ZIP_SOURCE, $env:PALETTEIQ_ZIP_DEST, [System.IO.Compression.CompressionLevel]::Optimal, $false)`;
   await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(command, 'utf16le').toString('base64')], {
     windowsHide: true, timeout: 30 * 60 * 1000, maxBuffer: 1024 * 1024,
