@@ -252,6 +252,7 @@ function applyWorkspaceStoreImport({ archiveFolder,database,directory,accountId,
   const imageRoot=path.join(directory,'images','collections',plan.destination.owner);
   fs.mkdirSync(imageRoot,{recursive:true});
   const added=[];
+  let committed = false;
   try {
     for (const file of imports.flatMap(row=>row.files).filter(f=>f.present)) {
       const destination=path.join(imageRoot,file.newAssetId+'.'+file.format);
@@ -292,6 +293,7 @@ function applyWorkspaceStoreImport({ archiveFolder,database,directory,accountId,
           .run(plan.destination.owner,JSON.stringify(merged),now);
       }
       database.exec('COMMIT');
+      committed = true;
     } catch(error){ database.exec('ROLLBACK');throw error; }
     const report={
       format:'paletteiq-workspace-store-import',version:1,
@@ -300,12 +302,15 @@ function applyWorkspaceStoreImport({ archiveFolder,database,directory,accountId,
       imagesCopied:added.length,imagesMissing:plan.filesMissing,
       preservedOldBatches:true,
     };
-    fs.writeFileSync(receipt,JSON.stringify(report,null,2),{mode:0o600});
+    // The SQL transaction is already committed. A failed optional receipt
+    // must never cause us to remove committed image files.
+    try { fs.writeFileSync(receipt,JSON.stringify(report,null,2),{mode:0o600}); }
+    catch { report.receiptWarning = 'The optional import receipt could not be written; safety SQLite snapshot still exists.'; }
     return {...report,backupId};
   } catch(error) {
     // New UUIDs guarantee these were not pre-existing store assets.
     // On SQL rollback, deleting only our freshly created files is safe.
-    for(const image of added) { try { fs.rmSync(image,{force:true}); } catch {} }
+    if (!committed) for(const image of added) { try { fs.rmSync(image,{force:true}); } catch {} }
     throw error;
   }
 }
