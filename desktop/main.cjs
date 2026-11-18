@@ -30,7 +30,29 @@ function dataDirectory() {
   const name = JSON.parse(readFileSync(pointer, 'utf8')).name;
   if (typeof name !== 'string' || !/^restored-[0-9]+-[0-9a-f]{8}$/.test(name)) throw new Error('Invalid active workspace selector');
   const directory = path.join(root, 'restored-workspaces', name);
-  validateWorkspace(directory, { requireNoCredentials: false });
+  try {
+    // Users can delete an old restored workspace while the selector still
+    // points to it. Never fail with an opaque SQLite/manifest error at startup.
+    if (!existsSync(directory)) throw new Error('The restored workspace folder no longer exists.');
+    validateWorkspace(directory, { requireNoCredentials: false });
+  } catch (cause) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    const choice = dialog.showMessageBoxSync({
+      type: 'warning',
+      title: 'Restored workspace unavailable',
+      message: 'PaletteIQ cannot open the selected restored workspace.',
+      detail: `Workspace: ${name}\nReason: ${reason}\n\nYou can open the original workspace without deleting its database or images. The old workspace selector will be preserved as a backup.`,
+      buttons: ['Open original workspace', 'Exit'],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    });
+    if (choice !== 0) throw new Error('The selected restored workspace is unavailable. The original workspace was not changed.');
+    // Keep a recoverable record of the previous selection. Never delete user
+    // data or recreate an empty folder under the missing restored workspace.
+    renameSync(pointer, path.join(root, `active-workspace.missing-${Date.now()}.json`));
+    return root;
+  }
   return directory;
 }
 
