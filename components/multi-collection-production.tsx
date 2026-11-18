@@ -292,7 +292,7 @@ export default function MultiCollectionProduction({ onGeneratePrompts }: { onGen
       <button className="outline-btn" onClick={() => setSelected(visible.filter(row => row.incomplete).map(row => row.collection.id))}>Select incomplete</button>
       <button className="outline-btn" onClick={() => setSelected([])}>Clear selection</button>
     </div>
-    <p className="sub">OpenAI Batch completion emails use the GPU Server SMTP account and go to the store owner when OpenAI reports completed, before PNG import. A verified webhook can trigger delivery while PaletteIQ is closed; otherwise the next PaletteIQ synchronization queues the notice.</p>
+    <p className="sub">On PaletteIQ Desktop, OpenAI Batch completion emails are sent from the local SMTP sender at completed status, before PNG import. Close to the Windows system tray to keep monitoring; no GPU server or HTTPS webhook is required. Web-only sessions do not send direct SMTP.</p>
     <p className="sub">{selected.length} collections selected · {requestCount} new prompts · {retryCount} safe failed-image retries · 50 images per OpenAI Batch job. For missing prompts, use the per-collection Generate Prompts button.</p>
     {creditAlert && <div className="notice" role="alert"><CircleAlert size={16}/><strong>{creditAlert}</strong><button type="button" onClick={() => setCreditAlert('')}>Dismiss</button></div>}
     {message && <div className="notice"><CircleAlert size={16}/>{message}</div>}
