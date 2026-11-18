@@ -171,7 +171,7 @@ function configureWorkspaceMenu(directory) {
       const choice = await dialog.showOpenDialog({ properties: ['openFile'], filters: [{ name: 'PaletteIQ ZIP', extensions: ['zip'] }] });
       if (choice.canceled || !choice.filePaths[0]) return;
       const restored = await restoreWorkspaceSeparate({ source: choice.filePaths[0], workspaceRoot: workspaceRoot() });
-      await dialog.showMessageBox({ type: 'info', message: 'Backup restored separately. Active workspace was not changed.', detail: `Restored to: ${restored}\nUse Workspace → Switch workspace to open the restored copy.` });
+      await dialog.showMessageBox({ type: 'info', message: 'Backup restored separately. Active workspace was not changed.', detail: `Restored to: ${restored}\nLegacy encrypted API keys are excluded from the restored workspace. Re-enter any API credentials in Settings after switching.\nTo import collections and PNG files into a chosen store instead, use Settings → Backup & Restore → Desktop Workspace ZIP.` });
     } catch (e) { await error(e); } } },
     { label: 'Switch to restored workspace…', click: async () => { try {
       const root = path.join(workspaceRoot(), 'restored-workspaces');
