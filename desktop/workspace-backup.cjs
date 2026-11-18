@@ -31,10 +31,24 @@ try {
  [System.IO.Compression.ZipFileExtensions]::ExtractToDirectory($z,$env:PALETTEIQ_ZIP_DEST);
 } finally { $z.Dispose() }`
     : `Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::CreateFromDirectory($env:PALETTEIQ_ZIP_SOURCE, $env:PALETTEIQ_ZIP_DEST, [System.IO.Compression.CompressionLevel]::Optimal, $false)`;
-  await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(command, 'utf16le').toString('base64')], {
-    windowsHide: true, timeout: 30 * 60 * 1000, maxBuffer: 1024 * 1024,
-    env: { ...process.env, PALETTEIQ_ZIP_SOURCE: source, PALETTEIQ_ZIP_DEST: destination },
-  });
+  // Keep the base64 command out of user-facing errors. PowerShell exceptions
+  // must be turned into concise stderr before Node's execFile formats them.
+  const script = `$ErrorActionPreference = 'Stop'; try {\n${command}\n} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }`;
+  try {
+    await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
+      windowsHide: true, timeout: 30 * 60 * 1000, maxBuffer: 1024 * 1024,
+      env: { ...process.env, PALETTEIQ_ZIP_SOURCE: source, PALETTEIQ_ZIP_DEST: destination },
+    });
+  } catch (error) {
+    const stderr = typeof error.stderr === 'string' ? error.stderr.trim() : '';
+    const stdout = typeof error.stdout === 'string' ? error.stdout.trim() : '';
+    // Prefer the actual ZIP/PowerShell error over the multi-kilobyte -EncodedCommand.
+    const detail = stderr || stdout ||
+      (error.code === 'ENOENT' ? 'Windows PowerShell could not be found' :
+      error.killed ? 'PowerShell timed out while processing the archive' :
+      `PowerShell exited with code ${error.code ?? 'unknown'}`);
+    throw new Error(`Workspace ZIP ${extract ? 'extraction' : 'creation'} failed: ${detail.slice(0, 900)}`);
+  }
 }
 
 function validateWorkspace(folder, { requireNoCredentials = true } = {}) {
