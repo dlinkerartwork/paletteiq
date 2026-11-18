@@ -58,7 +58,7 @@ export async function gpuFetch(owner: string, path: string, init: RequestInit = 
       ...(config.accessId && config.accessSecret ? {
         'CF-Access-Client-Id': config.accessId, 'CF-Access-Client-Secret': config.accessSecret,
       } : {}), ...init.headers },
-    cache: 'no-store', signal: AbortSignal.timeout(120_000),
+    cache: 'no-store', signal: init.signal ?? AbortSignal.timeout(120_000),
   });
   if (!result.ok) throw Error('GPU Server HTTP ' + result.status + ': ' + (await result.text()).slice(0, 240));
   return result;
