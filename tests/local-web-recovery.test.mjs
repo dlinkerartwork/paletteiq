@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { stripVTControlCharacters } from 'node:util';
 
 const source = fileURLToPath(new URL('../scripts/recover-local-web-collections.cjs', import.meta.url));
 const accountId = '389f8dca-87ec-49b3-85e4-60cf9c432a14';
@@ -43,7 +44,8 @@ test('local Web recovery makes a FULL verified R2+D1 backup before moving only l
     const before=run();
     assert.equal(before.status,0,before.stderr);
     assert.match(before.stdout,/READ-ONLY PREVIEW/);
-    assert.match(before.stdout,/Legacy collections: 1/);
+    // Windows terminals may force ANSI colors around numeric values in console output.
+    assert.match(stripVTControlCharacters(before.stdout),/Legacy collections: 1/);
     assert.equal(db.prepare("SELECT owner FROM projects WHERE id='legacy-coll'").get().owner,'local_seedy');
     const missing=run(['--apply']);
     assert.notEqual(missing.status,0);
