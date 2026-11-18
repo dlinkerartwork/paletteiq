@@ -73,15 +73,24 @@ function visit(value, fn, depth = 0) {
 function sourceAssetPath(archiveFolder, owner, asset) {
   if (!OWNER.test(owner)) throw Error('Invalid owner directory in legacy backup');
   const root = path.join(archiveFolder,'images','collections',owner);
-  return asset.kind === 'image' && asset.batch
+  const candidate = asset.kind === 'image' && asset.batch
     ? path.join(root,'batches',asset.batch,asset.id+'.'+asset.format)
     : path.join(root,asset.id+'.'+asset.format);
+  if (fs.existsSync(candidate)) {
+    const base = fs.realpathSync(path.join(archiveFolder,'images','collections'));
+    const resolved = fs.realpathSync(candidate);
+    if (!resolved.startsWith(base + path.sep))
+      throw Error('Workspace ZIP image resolves outside the extracted archive');
+  }
+  return candidate;
 }
 
 function isImageFile(file, format) {
   try {
+    const link = fs.lstatSync(file);
+    if (link.isSymbolicLink()) return false;
     const info = fs.statSync(file);
-    if (!info.isFile() || info.size < 8 || info.size > 200_000_000) return false;
+    if (!info.isFile() || info.size < 8 || info.size > 2_147_483_648) return false;
     const data = Buffer.alloc(8);
     const fd = fs.openSync(file,'r');
     try { fs.readSync(fd,data,0,8,0); } finally { fs.closeSync(fd); }
@@ -205,7 +214,7 @@ function convertProject(row, owner, allowMissing) {
   rewritten.id=row.newId;
   if (row.action==='keep-both') rewritten.name=String(rewritten.name).slice(0,132)+' (restored)';
   for (const character of rewritten.characters) {
-    if (character && character.status==='done' && !character.imageUrl) {
+    if (character && character.status==='done' && !character.imageUrl && !character.upscaledImageUrl) {
       character.status='ready'; // old PNG missing: do not claim image is generated
     }
     // Old async jobs should not resume in a new store by accident.
@@ -253,7 +262,13 @@ function applyWorkspaceStoreImport({ archiveFolder,database,directory,accountId,
           fs.statSync(file.source).size!==fs.statSync(temporary).size ||
           fileHash(file.source)!==fileHash(temporary))
           throw Error('Image verification failed for '+path.basename(file.source));
-        fs.renameSync(temporary,destination);
+        // Hard links create the destination atomically and fail if it exists;
+        // unlike rename(), they cannot replace another store image.
+        try { fs.linkSync(temporary,destination); }
+        catch (cause) {
+          if (!['ENOSYS','EPERM','EOPNOTSUPP','EXDEV'].includes(cause.code)) throw cause;
+          fs.copyFileSync(temporary,destination,fs.constants.COPYFILE_EXCL);
+        }
         added.push(destination);
       } finally { if(fs.existsSync(temporary)) fs.rmSync(temporary,{force:true}); }
     }
