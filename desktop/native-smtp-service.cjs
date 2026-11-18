@@ -4,7 +4,8 @@ const { createCipheriv, createDecipheriv, randomBytes } = require('node:crypto')
 const { sendSmtpMessage, validateSmtpConfig, completionMessage } = require('./smtp-mailer.cjs');
 
 const ADDRESS = /^[^\s@<>"()[\],;:]{1,64}@[A-Za-z0-9.-]{1,189}$/;
-const OWNER = /^[0-9a-f-]{36}$/i;
+// Matches the authenticated store namespace created by scopeForStore(accountId, storeId).
+const OWNER = /^user_[0-9a-f]{32}_store_[0-9a-f]{32}$/i;
 const BATCH = /^[0-9a-f-]{36}$/i;
 const SAFE_ID = /^batch_[a-z0-9_-]{1,120}$/i;
 
