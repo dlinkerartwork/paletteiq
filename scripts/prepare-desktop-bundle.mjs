@@ -1,6 +1,9 @@
 import { cpSync, existsSync, mkdirSync, copyFileSync, rmSync, statSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const { formatDesktopSmtpForBundle } = require('../desktop/smtp-config.cjs');
 
 const root = process.cwd();
 if (process.platform !== 'win32') throw new Error('Windows desktop installers must be built on Windows x64.');
@@ -48,6 +51,17 @@ if (!unlicensedEdition) copyFileSync(publicKey, path.join(stage, 'license-public
 cpSync(path.join(root, 'dist', 'server'), path.join(stage, 'dist', 'server'), { recursive: true });
 cpSync(path.join(root, 'dist', 'client'), path.join(stage, 'dist', 'client'), { recursive: true });
 cpSync(path.join(root, 'drizzle'), path.join(stage, 'drizzle'), { recursive: true });
+// SMTP defaults can be supplied once by the installer builder's local .env.
+// Copy ONLY allowlisted SMTP fields; NEVER stage the entire private .env.
+const smtpEnvSource = path.join(root, '.env');
+if (existsSync(smtpEnvSource)) {
+  const smtpSubset = formatDesktopSmtpForBundle(readFileSync(smtpEnvSource, 'utf8'));
+  if (smtpSubset) {
+    writeFileSync(path.join(stage, 'desktop-smtp.env'), smtpSubset, { mode: 0o600 });
+    console.warn('WARNING: Installer includes a shared SMTP App Password that can be extracted by recipients. Use a dedicated restricted sender, not your primary account.');
+    console.log('Desktop SMTP defaults bundled from .env (SMTP fields only).');
+  }
+}
 
 // pnpm uses a virtual .pnpm store and symlinks. Copying its root packages
 // breaks transitive resolution (e.g. Wrangler needs esbuild). Create a fully
