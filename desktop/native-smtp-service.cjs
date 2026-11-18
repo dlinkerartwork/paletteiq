@@ -124,18 +124,20 @@ function createNativeSmtpService(db, options = {}) {
       .get(owner, Date.now() - 86_400_000).n >= 100) throw new Error('Daily SMTP notification limit reached');
     const settings = config(owner);
     ongoing.add(pendingKey);
-    db.prepare('INSERT INTO desktop_smtp_mail ' +
-        '(owner,batch_id,recipient,store_name,collection_name,status,attempts,created_at) ' +
-        "VALUES(?,?,?,?,?,'sending',1,?) " +
-        "ON CONFLICT(owner,batch_id) DO UPDATE SET status='sending',attempts=attempts+1")
-      .run(owner, id, payload.recipient, payload.storeName, payload.collectionName, Date.now());
+    let claimed = false;
     try {
+      db.prepare('INSERT INTO desktop_smtp_mail ' +
+          '(owner,batch_id,recipient,store_name,collection_name,status,attempts,created_at) ' +
+          "VALUES(?,?,?,?,?,'sending',1,?) " +
+          "ON CONFLICT(owner,batch_id) DO UPDATE SET status='sending',attempts=attempts+1")
+        .run(owner, id, payload.recipient, payload.storeName, payload.collectionName, Date.now());
+      claimed = true;
       await deliver(settings, completionMessage(payload));
       db.prepare("UPDATE desktop_smtp_mail SET status='sent',sent_at=? WHERE owner=? AND batch_id=?")
         .run(Date.now(), owner, id);
       return { accepted: true, alreadySent: false };
     } catch (error) {
-      db.prepare("UPDATE desktop_smtp_mail SET status='retry' WHERE owner=? AND batch_id=?")
+      if (claimed) db.prepare("UPDATE desktop_smtp_mail SET status='retry' WHERE owner=? AND batch_id=?")
         .run(owner, id);
       throw error;
     } finally { ongoing.delete(pendingKey); }
