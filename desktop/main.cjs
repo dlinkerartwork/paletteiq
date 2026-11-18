@@ -8,6 +8,7 @@ const { startNativeStorage } = require('./native-storage.cjs');
 const { backupWorkspace, restoreWorkspaceSeparate, validateWorkspace } = require('./workspace-backup.cjs');
 const { windowsDeviceCode, readValidLicense } = require('./license.cjs');
 const { pollHiddenImageBatches } = require('./background-batch-monitor.cjs');
+const { loadDesktopSmtpDefaults } = require('./smtp-config.cjs');
 
 const ROOT = app.isPackaged ? path.join(process.resourcesPath, 'paletteiq-runtime') : path.resolve(__dirname, '..');
 const SERVER_PORT = 18763;
@@ -70,7 +71,7 @@ function sanitizeDiagnostic(value) {
     .replace(/sk-[A-Za-z0-9_-]{12,}/g, '[REDACTED_API_KEY]')
     .replace(/(Bearer\s+)[^\s"'<>]+/gi, '$1[REDACTED]')
     .replace(/(X-API-Key\s*[:=]\s*)[^\s,"'}]+/gi, '$1[REDACTED]')
-    .replace(/(STUDIO_CREDENTIAL_ENCRYPTION_KEY|PALETTEIQ_NATIVE_BRIDGE_TOKEN|PALETTEIQ_UPSCALE_SERVER_KEY|api[_-]?key|password|authorization|access[_-]?token)(\s*[=:]\s*)[^\s,"'}]+/gi, '$1$2[REDACTED]');
+    .replace(/(STUDIO_CREDENTIAL_ENCRYPTION_KEY|PALETTEIQ_NATIVE_BRIDGE_TOKEN|PALETTEIQ_UPSCALE_SERVER_KEY|PALETTEIQ_SMTP_PASSWORD|api[_-]?key|password|authorization|access[_-]?token)(\s*[=:]\s*)[^\s,"'}]+/gi, '$1$2[REDACTED]');
 }
 function diagnosticLogger(directory) {
   const folder = path.join(directory, 'logs');
@@ -332,6 +333,7 @@ async function launch() {
   const nativeBridge = { token: randomBytes(32).toString('hex') };
   nativeStorage = await startNativeStorage({
     directory, migrationsDir: path.join(ROOT, 'drizzle'), token: nativeBridge.token,
+    smtpDefaults: loadDesktopSmtpDefaults(ROOT, app.isPackaged), smtpEncryptionKey: secret,
     chooseWorkspaceZip: async () => {
       // Only Electron's native file picker can authorize a local ZIP path.
       // The renderer/Worker never supplies filesystem paths to the native bridge.
