@@ -81,7 +81,7 @@ export async function POST(req: Request) {
     // Registration failure must never cancel or duplicate a paid OpenAI Batch.
     try {
       const clean = (value: string, length: number) =>
-        value.slice(0, length).replace(/[\\x00-\\x1f\\x7f]/g, ' ').trim();
+        value.slice(0, length).replace(/[\x00-\x1f\x7f]/g, ' ').trim();
       await gpuFetch(user.userId, '/v1/notifications/image-batches/register', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         signal: AbortSignal.timeout(5000),
