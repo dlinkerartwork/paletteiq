@@ -24,6 +24,8 @@ export default function DesktopSmtpSettings({ storeId }: { storeId: string }) {
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState('');
   const [ready, setReady] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const update = (next: SmtpInfo) => {
     setInfo(next);
@@ -36,16 +38,16 @@ export default function DesktopSmtpSettings({ storeId }: { storeId: string }) {
   };
   useEffect(() => {
     let mounted = true;
-    setReady(false); setNotice('');
+    setReady(false); setNotice(''); setLoadError('');
     fetch('/api/desktop-smtp', { cache: 'no-store' })
       .then(async res => {
         const body = await res.json() as SmtpInfo;
         if (!res.ok) throw new Error(body.error || 'Unable to load SMTP settings');
         return body;
       }).then(body => { if (mounted) update(body); })
-      .catch(error => { if (mounted) { setReady(true); setNotice(error instanceof Error ? error.message : String(error)); } });
+      .catch(error => { if (mounted) { setReady(true); setInfo({ ...EMPTY, available: false }); setLoadError(error instanceof Error ? error.message : String(error)); } });
     return () => { mounted = false; };
-  }, [storeId]);
+  }, [storeId, refreshKey]);
 
   async function perform(action: 'save' | 'reset' | 'test') {
     setBusy(action); setNotice('');
@@ -70,9 +72,19 @@ export default function DesktopSmtpSettings({ storeId }: { storeId: string }) {
   }
 
   if (!ready) return <section className="panel settings-panel"><p className="sub">Loading Desktop SMTP configuration…</p></section>;
-  if (!info.available) return <section className="panel settings-panel"><p className="sub">SMTP is configured only in PaletteIQ Desktop.</p></section>;
+  if (loadError) return <section className="panel settings-panel" role="tabpanel" aria-labelledby="settings-tab-smtp">
+    <div className="settings-header"><div className="heading-icon violet"><Mail size={21}/></div><div><h2>SMTP Email</h2><p>Unable to connect to the Desktop SMTP service.</p></div></div>
+    <p className="notice" role="alert">{loadError}</p>
+    <p className="sub">If you are using PaletteIQ Desktop, restart the application and its local backend. If you are using <code>npm run dev</code> in a browser, SMTP requires <code>npm run desktop:dev</code> or the updated Windows installer.</p>
+    <button className="outline-btn" type="button" onClick={() => setRefreshKey(k => k + 1)}>Retry SMTP connection</button>
+  </section>;
+  if (!info.available) return <section className="panel settings-panel" role="tabpanel" aria-labelledby="settings-tab-smtp">
+    <div className="settings-header"><div className="heading-icon violet"><Mail size={21}/></div><div><h2>SMTP Email — Desktop only</h2><p>The local SMTP sender is not available in this PaletteIQ session.</p></div></div>
+    <p className="sub">You are viewing the Web/Next.js runtime rather than the Windows Electron Desktop service. To configure SMTP and send batch completion notifications directly from this computer, run <code>npm run desktop:dev</code> or install the updated PaletteIQ Desktop. The browser version cannot access local SMTP passwords.</p>
+    <button className="outline-btn" type="button" onClick={() => setRefreshKey(k => k + 1)}>Check again</button>
+  </section>;
 
-  return <section className="panel settings-panel">
+  return <section className="panel settings-panel" role="tabpanel" aria-labelledby="settings-tab-smtp">
     <div className="settings-header">
       <div className="heading-icon violet"><Mail size={21}/></div>
       <div><h2>Desktop SMTP Email Notifications</h2>
