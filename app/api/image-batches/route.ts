@@ -115,8 +115,24 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
   const reviewSources = savedProject.length ? JSON.parse(savedProject[0].data) as { selectedImageUrls?: string[]; images?: string[] } : {};
   const references = reviewSources.selectedImageUrls ?? reviewSources.images ?? [];
   const batch = await (await openai(key, `batches/${encodeURIComponent(job.openaiBatchId)}`)).json() as OpenAIBatch;
+  // Email is triggered by OpenAI's verified completed status, not by the
+  // later PNG download, similarity review or collection import. OpenAI may
+  // mark a Batch completed before its output files are available.
+  if (batch.status === 'completed' && savedProject.length &&
+      pendingImageBatchNotification(job, Date.now(), true)) {
+    try {
+      await queueFinishedImageBatchEmail(
+        job, owner, userEmail, storeName, savedProject[0].name, batch.request_counts ?? {},
+      );
+    } catch { /* SMTP relay errors cannot prevent recovering paid image assets. */ }
+  }
+  // The completion receipt was stored in items, so reload that version before
+  // rewriting imported image URLs. Otherwise import could erase the receipt
+  // and cause duplicate emails on the next sync.
+  const persisted = await db.select().from(imageBatches)
+    .where(and(eq(imageBatches.id, job.id), eq(imageBatches.owner, owner))).limit(1);
   if (awaitBatchOutputFiles(batch)) throw new Error('Batch completed at OpenAI, but result files are not yet available. Recovery will retry automatically.');
-  const items = JSON.parse(job.items) as BatchItem[];
+  const items = JSON.parse(persisted[0]?.items ?? job.items) as BatchItem[];
   const byId = new Map(items.map(i => [i.id, i]));
   const changedIds = new Set<string>();
   const isTerminal = ['completed', 'expired', 'cancelled', 'failed'].includes(batch.status);
@@ -173,8 +189,11 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
   const savedJob = { ...job, status, completed: Math.max(requestCompleted, newCompleted), failed: Math.max(requestFailed, newFailed), items: JSON.stringify(items) };
   // Enqueue SMTP only after all images have been recovered and the batch
   // bookkeeping is durable. A mail relay outage never invalidates a paid Batch.
-  if (importedAll && savedProject.length && pendingImageBatchNotification(savedJob)) {
-    try { await queueFinishedImageBatchEmail(savedJob, owner, userEmail, storeName, savedProject[0].name); }
+  // Recovery fallback: if the relay was temporarily unavailable at OpenAI
+  // completion, keep retrying after images import successfully.
+  if (importedAll && batch.status === 'completed' && savedProject.length &&
+      pendingImageBatchNotification(savedJob)) {
+    try { await queueFinishedImageBatchEmail(savedJob, owner, userEmail, storeName, savedProject[0].name, batch.request_counts ?? {}); }
     catch { /* Keep the completion durable; notification can retry on syncAll. */ }
   }
   return savedJob;
