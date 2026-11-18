@@ -136,9 +136,9 @@ async function sendSmtpMessage(raw, message) {
         minVersion: 'TLSv1.2', rejectUnauthorized: true,
       });
       socket.setTimeout(18000, () => socket.destroy(new Error('SMTP timeout')));
+      reader = new SmtpReader(socket);
       await connected(socket, 'secureConnect');
       if (!socket.authorized) throw new Error('SMTP server TLS certificate invalid');
-      reader = new SmtpReader(socket);
     } else {
       socket = net.createConnection({ host: config.host, port: config.port });
       socket.setTimeout(18000, () => socket.destroy(new Error('SMTP timeout')));
