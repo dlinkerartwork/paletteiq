@@ -43,18 +43,8 @@ export default function StudioSettings({ storeId, preferences, onPreferences, pr
   const [active, setActive] = useState('');
   const [message, setMessage] = useState('');
   const [pane, setPane] = useState<SettingsPane>('credentials');
-  const [desktopSmtpAvailable, setDesktopSmtpAvailable] = useState(false);
   useEffect(() => { try { const saved = sessionStorage.getItem('paletteiq-settings-pane-' + storeId); if (saved && ['credentials','production','upscale','smtp','seo','backup'].includes(saved)) setPane(saved as SettingsPane); } catch {} }, [storeId]);
   const changePane = (value: SettingsPane) => { setPane(value); try { sessionStorage.setItem('paletteiq-settings-pane-' + storeId, value); } catch {} };
-  useEffect(() => {
-    let cancelled = false;
-    setDesktopSmtpAvailable(false);
-    void fetch('/api/desktop-smtp', { cache:'no-store' })
-      .then(async response => response.ok ? (await response.json()) as { available?: boolean } : null)
-      .then(data => { if (!cancelled) setDesktopSmtpAvailable(data?.available === true); })
-      .catch(() => { if (!cancelled) setDesktopSmtpAvailable(false); });
-    return () => { cancelled = true; };
-  }, [storeId]);
   const [geminiModels, setGeminiModels] = useState<Array<{ id: string; name: string }>>([]);
   const [geminiModelsLoaded, setGeminiModelsLoaded] = useState(false);
   const [openaiSeoModels, setOpenaiSeoModels] = useState<Array<{ id: string; name: string }>>([]);
@@ -147,7 +137,7 @@ export default function StudioSettings({ storeId, preferences, onPreferences, pr
         ['credentials','API Credentials'],
         ['production','Production Defaults'],
         ['upscale','Remote GPU Upscale'],
-        ...(desktopSmtpAvailable ? [['smtp','SMTP Email'] as const] : []),
+        ['smtp','SMTP Email'],
         ['seo','SEO AI Prompts'],
         ['backup','Backup & Restore'],
       ] as const).map(([value,label]) =>
@@ -191,7 +181,7 @@ export default function StudioSettings({ storeId, preferences, onPreferences, pr
       </div>
       <div className="settings-actions"><button className="outline-btn" disabled={Boolean(active)} onClick={async () => { setActive('upscale-test'); setMessage('Checking GPU Server connection…'); try { const response = await fetch('/api/upscale?check=1'); const data = await response.json() as { connected?: boolean; error?: string; engineReady?: boolean; queueDepth?: number }; if (!response.ok || !data.connected) throw new Error(data.error || 'GPU server unavailable'); setMessage(`Connected to GPU Server. Engine: ${data.engineReady === false ? 'not ready' : 'ready'} · Queue: ${data.queueDepth ?? 'unknown'}.`); } catch (error) { setMessage(`GPU Server connection failed: ${error instanceof Error ? error.message : String(error)}`); } finally { setActive(''); } }}>Test Connection</button><button className="primary-btn" disabled={Boolean(active)} onClick={() => act('upscale-preferences', async () => { await request({ action: 'preferences', preferences: { ...preferences, upscaleProvider: 'remote' } }); })}><Save size={16}/> Save upscale settings</button></div>
     </section>}
-    {pane === 'smtp' && desktopSmtpAvailable && <DesktopSmtpSettings storeId={storeId}/>}
+    {pane === 'smtp' && <DesktopSmtpSettings storeId={storeId}/>}
     {pane === 'backup' && <section id="settings-panel-backup" role="tabpanel" aria-labelledby="settings-tab-backup" className="panel settings-panel settings-backup"><div className="settings-header"><div className="heading-icon amber"><CloudDownload size={21}/></div><div><h2>JSON Backup & Restore</h2><p>Export current collections or safely restore a legacy backup into any store owned by your account.</p></div></div>
       <div className="backup-actions"><button className="outline-btn" type="button" onClick={backup}><CloudDownload size={17}/> Export current store (.json)</button></div>
       <DesktopWorkspaceImportPanel/>
