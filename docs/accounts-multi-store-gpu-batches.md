@@ -78,11 +78,21 @@ enrolls the signed-in account email as its notification recipient. The
 recipient, store and collection names are frozen with the Batch manifest
 so renaming a store cannot change the idempotent email identity later.
 
-After PaletteIQ has synchronized an OpenAI Batch **and imported all its
-images**, it registers one completion receipt with the configured
-per-store GPU server (`/v1/notifications/image-batches`). The GPU server
-uses the administrator's SMTP account; **no SMTP App Password or other
-mail credential is exposed to PaletteIQ clients**.
+PaletteIQ registers the OpenAI Batch ID, store/collection and owner email
+with the configured GPU server as soon as a new Batch is saved. When OpenAI
+reports the **completed** status, PaletteIQ also queues the email
+immediately on its next status synchronization—**before** recovering and
+importing the generated PNG files.
+
+For genuinely immediate offline notification, the GPU Server can accept
+a signed `batch.completed` webhook from OpenAI at
+`https://YOUR-GPU-SERVER-DOMAIN/v1/webhooks/openai`. Configure a public
+HTTPS webhook destination in the matching OpenAI API project, copy its
+`whsec_` signing secret to GPU Server's local `.env` under
+`PALETTEIQ_OPENAI_WEBHOOK_SECRET`, and restart the GPU Server. Only
+previously registered Batch IDs are eligible; unverifiable events are
+rejected. The GPU Server uses administrator-configured SMTP without sending
+the Gmail App Password to any PaletteIQ client.
 
 The GPU server deduplicates receipts, durably queues mail, and retries delivery
 independently of the image queue. PaletteIQ stores a retry marker on the first
@@ -95,8 +105,9 @@ failed, or cause duplicate OpenAI Batch creation.
 Settings and set up/test the GPU server's SMTP sender under Server Settings.
 Without these, image generation still works but email delivery is unavailable.
 
-**Background limitation:** OpenAI processes accepted Batches while
-PaletteIQ is closed, but image recovery / SMTP receipt registration currently
-requires a subsequent PaletteIQ synchronization. An always-on hosted
-background worker or verified OpenAI batch webhooks are required for
-immediate emails with the local client PC powered off.
+**Timing:** With a verified OpenAI webhook and the GPU Server running
+behind a reachable HTTPS endpoint, completion emails are queued while the
+browser/desktop is closed. Without a configured webhook, the email is
+queued when PaletteIQ next detects the `completed` status via sync. PNG
+imports remain a separate workflow and may finish later. Previously
+submitted Batches are not auto-registered for webhook delivery.
