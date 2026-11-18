@@ -5,8 +5,9 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdi
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-const source = new URL('../scripts/recover-local-web-collections.cjs', import.meta.url).pathname;
+const source = fileURLToPath(new URL('../scripts/recover-local-web-collections.cjs', import.meta.url));
 const accountId = '389f8dca-87ec-49b3-85e4-60cf9c432a14';
 const storeId = '504bfe69-1f8b-4d68-bafc-9ea8f27065b3';
 
