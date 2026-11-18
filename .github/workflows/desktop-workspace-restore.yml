@@ -1,0 +1,27 @@
+name: Desktop Workspace ZIP Restore checks
+
+on:
+  push:
+    branches:
+      - feature/reference-assets-thumbnail-prompt
+    paths:
+      - 'desktop/workspace-backup.cjs'
+      - 'desktop/workspace-store-import.cjs'
+      - 'desktop/native-storage.cjs'
+      - 'desktop/main.cjs'
+      - 'tests/desktop-workspace-*.test.mjs'
+      - '.github/workflows/desktop-workspace-restore.yml'
+  workflow_dispatch:
+
+jobs:
+  windows-zip-roundtrip:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify Windows ZIP extraction and real image restoration
+        shell: pwsh
+        run: node --test tests/desktop-workspace-store-import.test.mjs tests/desktop-workspace-zip-windows.test.mjs
