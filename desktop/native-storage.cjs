@@ -3,6 +3,9 @@ const { DatabaseSync } = require('node:sqlite');
 const { mkdirSync, readFileSync, writeFileSync, existsSync, createReadStream, statSync, openSync, fsyncSync, closeSync, renameSync, unlinkSync } = require('node:fs');
 const { randomUUID } = require('node:crypto');
 const path = require('node:path');
+const { prepareWorkspaceStoreImport } = require('./workspace-backup.cjs');
+const { planWorkspaceStoreImport, applyWorkspaceStoreImport } = require('./workspace-store-import.cjs');
+const { rmSync } = require('node:fs');
 
 const TABLES = ['projects', 'studio_settings', 'image_batches'];
 const assetKey = /^generated\/([\w-]{1,120})\/(?:batches\/([0-9a-f-]{36})\/)?([0-9a-f-]{36})\.(png|jpg)$/;
@@ -83,10 +86,19 @@ function readPayload(req, limit = 12 * 1024 * 1024) {
   });
 }
 
-function startNativeStorage({ directory, migrationsDir, token }) {
+function startNativeStorage({ directory, migrationsDir, token, chooseWorkspaceZip }) {
   const database = openNativeDb(directory, migrationsDir);
   const imagesRoot = path.join(directory, 'images', 'collections');
   mkdirSync(imagesRoot, { recursive: true });
+  let selectedArchive = null;
+  let importBusy = false;
+  const discardSelected = () => {
+    if (selectedArchive) {
+      try { rmSync(selectedArchive.folder, { recursive: true, force: true }); }
+      catch { /* Cleanup will be retried at next application startup. */ }
+      selectedArchive = null;
+    }
+  };
   const server = createServer(async (req, res) => {
     const finish = (code, body) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(body)); };
     if (req.headers.authorization !== `Bearer ${token}`) return finish(401, { error: 'Unauthorized' });
@@ -101,6 +113,61 @@ function startNativeStorage({ directory, migrationsDir, token }) {
         if (statement.columns().length) return finish(200, { results: statement.all(...params) });
         const run = statement.run(...params);
         return finish(200, { results: [], success: true, meta: { changes: Number(run.changes), last_row_id: Number(run.lastInsertRowid) } });
+      }
+      if (req.method === 'POST' && req.url === '/workspace-store-import') {
+        // Only requests carrying the private native bridge token can reach
+        // this handler; the public Worker route separately validates session,
+        // origin, account ID and destination store membership.
+        if (importBusy) return finish(409, { error: 'Another workspace import operation is already running' });
+        const body = JSON.parse((await readPayload(req, 64 * 1024)).toString('utf8'));
+        if (!body || !['select','preview','apply','cancel'].includes(body.action) ||
+            typeof body.accountId !== 'string' || !/^[0-9a-f-]{36}$/.test(body.accountId))
+          return finish(400, { error: 'Invalid workspace import operation' });
+        importBusy = true;
+        try {
+          if (body.action === 'select') {
+            if (typeof chooseWorkspaceZip !== 'function')
+              return finish(503, { error: 'Windows workspace file picker is unavailable' });
+            const source = await chooseWorkspaceZip();
+            if (!source) return finish(200, { cancelled: true });
+            const folder = await prepareWorkspaceStoreImport({ source, workspaceRoot: directory });
+            discardSelected();
+            selectedArchive = { id: randomUUID(), accountId:body.accountId, folder, name:path.basename(source), createdAt:Date.now() };
+            return finish(200, { selectionId:selectedArchive.id, fileName:selectedArchive.name });
+          }
+          if (!selectedArchive || selectedArchive.accountId !== body.accountId ||
+              selectedArchive.id !== body.selectionId ||
+              Date.now() - selectedArchive.createdAt > 60 * 60 * 1000)
+            return finish(409, { error: 'Workspace ZIP selection expired. Choose the file again.' });
+          if (body.action === 'cancel') {
+            discardSelected();
+            return finish(200, { cancelled:true });
+          }
+          if (typeof body.storeId !== 'string' || !/^[0-9a-f-]{36}$/.test(body.storeId) ||
+              !['skip','replace','keep-both'].includes(body.mode))
+            return finish(400, { error: 'Choose a destination store and conflict mode' });
+          const params = { archiveFolder:selectedArchive.folder, database, directory,
+            accountId:body.accountId, storeId:body.storeId, mode:body.mode };
+          if (body.action === 'preview') {
+            const plan = planWorkspaceStoreImport(params);
+            return finish(200, {
+              destination:{id:plan.destination.id,name:plan.destination.name},
+              counts:plan.counts, filesTotal:plan.filesTotal, filesAvailable:plan.filesAvailable,
+              filesMissing:plan.filesMissing, characters:plan.characters,
+              sourceCollections:plan.sourceCollections, sourceOwners:plan.sourceOwners,
+              warning:'Completed image files will be copied under new unique asset IDs. Historic OpenAI image batches are not restarted.',
+            });
+          }
+          if (typeof body.allowMissing !== 'boolean' || typeof body.importPreferences !== 'boolean')
+            return finish(400, { error: 'Choose missing-image and settings options' });
+          const result = applyWorkspaceStoreImport({
+            ...params, allowMissing:body.allowMissing, importPreferences:body.importPreferences,
+          });
+          discardSelected();
+          return finish(200, { ok:true, ...result });
+        } catch (error) {
+          return finish(400, { error:error instanceof Error ? error.message.slice(0,350) : 'Workspace import failed' });
+        } finally { importBusy = false; }
       }
       if (req.method === 'GET' && req.url === '/legacy-count') {
         const totals = Object.fromEntries(TABLES.map(table => [table, database.prepare(`SELECT count(*) AS total FROM ${table}`).get().total]));
@@ -143,6 +210,7 @@ function startNativeStorage({ directory, migrationsDir, token }) {
       return finish(404, { error: 'Not found' });
     } catch (error) { return finish(error?.statusCode === 413 ? 413 : 500, { error: String(error instanceof Error ? error.message : error) }); }
   });
+  server.on('close', discardSelected);
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(0, '127.0.0.1', () => {
