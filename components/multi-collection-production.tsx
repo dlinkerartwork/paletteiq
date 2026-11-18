@@ -292,6 +292,7 @@ export default function MultiCollectionProduction({ onGeneratePrompts }: { onGen
       <button className="outline-btn" onClick={() => setSelected(visible.filter(row => row.incomplete).map(row => row.collection.id))}>Select incomplete</button>
       <button className="outline-btn" onClick={() => setSelected([])}>Clear selection</button>
     </div>
+    <p className="sub">OpenAI Batch image completion emails use the current store's GPU Server SMTP settings. Results continue processing on OpenAI when the browser is closed; email is queued after the next PaletteIQ synchronization and successful image import.</p>
     <p className="sub">{selected.length} collections selected · {requestCount} new prompts · {retryCount} safe failed-image retries · 50 images per OpenAI Batch job. For missing prompts, use the per-collection Generate Prompts button.</p>
     {creditAlert && <div className="notice" role="alert"><CircleAlert size={16}/><strong>{creditAlert}</strong><button type="button" onClick={() => setCreditAlert('')}>Dismiss</button></div>}
     {message && <div className="notice"><CircleAlert size={16}/>{message}</div>}
