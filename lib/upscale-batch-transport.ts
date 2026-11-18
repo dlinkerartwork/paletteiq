@@ -15,7 +15,7 @@ export type StoredUpscaleBatch = {
   id: string; remoteId?: string; status: 'staging' | 'committed' | 'completed' | 'failed';
   items: UpscaleBatchItem[]; model: string; factor: 2|4|6|8;
   cleanup: boolean; cleanupStrength: string; requireTransparency: boolean;
-  qc: boolean; createdAt: number; notificationEmail: string;
+  qc: boolean; createdAt: number; notificationEmail: string; collectionName?: string;
 };
 export type UpscaleBatchProject = {
   characters: Array<{ id: string; imageUrl?: string; upscaledImageUrl?: string;
