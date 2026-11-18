@@ -6,6 +6,9 @@ import { gpuFetch } from '@/lib/upscale-batch-transport';
 export type EmailBatchItem = {
   id: string; status: 'pending' | 'done' | 'error';
   notifyEmail?: boolean;
+  notificationRecipient?: string;
+  notificationStoreName?: string;
+  notificationCollectionName?: string;
   notificationQueuedAt?: number;
   notificationLastAttemptAt?: number;
   [key: string]: unknown;
@@ -38,6 +41,9 @@ export async function queueFinishedImageBatchEmail(
 ): Promise<boolean> {
   if (!pendingImageBatchNotification(job)) return false;
   const items = JSON.parse(job.items) as EmailBatchItem[];
+  const email = items[0].notificationRecipient || recipient;
+  const store = items[0].notificationStoreName || storeName;
+  const collection = items[0].notificationCollectionName || collectionName;
   const success = items.filter(item => item.status === 'done').length;
   const failed = items.filter(item => item.status === 'error').length;
   const now = Date.now();
@@ -45,9 +51,9 @@ export async function queueFinishedImageBatchEmail(
     await gpuFetch(owner, '/v1/notifications/image-batches', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        client_batch_id: job.id, notification_email: recipient,
-        store_name: storeName.slice(0, 90).replace(/[\x00-\x1f\x7f]/g, ' ').trim() || 'PaletteIQ Store',
-        collection_name: collectionName.slice(0, 160).replace(/[\x00-\x1f\x7f]/g, ' ').trim() || 'Untitled Collection',
+        client_batch_id: job.id, notification_email: email,
+        store_name: store.slice(0, 90).replace(/[\x00-\x1f\x7f]/g, ' ').trim() || 'PaletteIQ Store',
+        collection_name: collection.slice(0, 160).replace(/[\x00-\x1f\x7f]/g, ' ').trim() || 'Untitled Collection',
         total: items.length, completed: success, failed,
       }),
     });
