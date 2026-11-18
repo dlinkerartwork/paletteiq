@@ -72,7 +72,7 @@ export async function POST(req: Request) {
     const job = await (await openai(key, 'batches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input_file_id: uploaded.id, endpoint: '/v1/images/generations', completion_window: '24h', metadata: { application: 'paletteiq', project: data.projectId } }) })).json() as OpenAIBatch;
     createdBatchId = job.id;
     const now = Date.now();
-    const record = { id: crypto.randomUUID(), owner: user.userId, projectId: data.projectId, openaiBatchId: job.id, model: data.model!, format, status: job.status, total: selected.length, completed: 0, failed: 0, items: JSON.stringify(data.characterIds.map((id, index) => ({ id, status: 'pending', ...(index === 0 ? { notifyEmail: true } : {}) }))), outputFileId: null, errorFileId: null, createdAt: now, updatedAt: now };
+    const record = { id: crypto.randomUUID(), owner: user.userId, projectId: data.projectId, openaiBatchId: job.id, model: data.model!, format, status: job.status, total: selected.length, completed: 0, failed: 0, items: JSON.stringify(data.characterIds.map((id, index) => ({ id, status: 'pending', ...(index === 0 ? { notifyEmail: true, notificationRecipient: user.email, notificationStoreName: user.displayName, notificationCollectionName: saved[0].name } : {}) }))), outputFileId: null, errorFileId: null, createdAt: now, updatedAt: now };
     await db.insert(imageBatches).values(record);
     createdBatchId = null;
     return Response.json({ job: safeJob(record) });
