@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import RestoreBackupPanel from '@/components/restore-backup-panel';
+import DesktopWorkspaceImportPanel from '@/components/desktop-workspace-import';
 import { CheckCircle2, CloudDownload, Eye, EyeOff, KeyRound, LockKeyhole, Save, Settings2, ShieldCheck, Trash2 } from 'lucide-react';
 
 export type SeoPromptKey = 'general' | 'title' | 'description' | 'tags' | 'primaryKeyword' | 'secondaryKeywords' | 'longTailKeywords' | 'categorySuggestion' | 'attributes' | 'materials' | 'imageAltTexts' | 'photoPlan' | 'priceSuggestion' | 'sku' | 'digitalFiles' | 'licenseNotes';
@@ -180,6 +181,7 @@ export default function StudioSettings({ storeId, preferences, onPreferences, pr
     </section>}
     {pane === 'backup' && <section id="settings-panel-backup" role="tabpanel" aria-labelledby="settings-tab-backup" className="panel settings-panel settings-backup"><div className="settings-header"><div className="heading-icon amber"><CloudDownload size={21}/></div><div><h2>JSON Backup & Restore</h2><p>Export current collections or safely restore a legacy backup into any store owned by your account.</p></div></div>
       <div className="backup-actions"><button className="outline-btn" type="button" onClick={backup}><CloudDownload size={17}/> Export current store (.json)</button></div>
+      <DesktopWorkspaceImportPanel/>
       <RestoreBackupPanel/>
     </section>}
 
