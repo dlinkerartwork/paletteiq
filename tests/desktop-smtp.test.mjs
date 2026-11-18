@@ -9,7 +9,7 @@ const { createNativeSmtpService } = require('../desktop/native-smtp-service.cjs'
 const { validateSmtpConfig, completionMessage, smtpBody } = require('../desktop/smtp-mailer.cjs');
 const { formatDesktopSmtpForBundle, parseDotEnv } = require('../desktop/smtp-config.cjs');
 
-const owner = '00000000-0000-4000-8000-000000000001';
+const owner = 'user_' + '0'.repeat(32) + '_store_' + '1'.repeat(32);
 const batchId = '11111111-1111-4111-8111-111111111111';
 const defaults = {
   host: 'smtp.gmail.com', port: 587, username: 'artist@gmail.com',
@@ -140,4 +140,22 @@ test('SMTP Settings tab remains visible when native service is not ready or the 
   assert.match(detail, /SMTP Email — Desktop only/);
   assert.match(detail, /Retry SMTP connection/);
   assert.match(detail, /npm run desktop:dev/);
+});
+
+
+test('SMTP native and Worker bridges agree on the real account-scoped store identity', async () => {
+  const bridge = readFileSync(new URL('../lib/native-bridge.ts', import.meta.url), 'utf8');
+  const account = readFileSync(new URL('../lib/store-identity.ts', import.meta.url), 'utf8');
+  assert.match(account, /return 'user_' \+ accountId\.replace/);
+  assert.match(bridge, /user_\[0-9a-f\]\{32\}_store_\[0-9a-f\]\{32\}/);
+  const { db, service } = setup();
+  try {
+    assert.equal((await service.handle({ action: 'status', owner })).status, 200);
+    assert.equal((await service.handle({
+      action: 'status', owner: '00000000-0000-4000-8000-000000000001',
+    })).status, 400);
+    assert.equal((await service.handle({
+      action: 'status', owner: 'user_' + '0'.repeat(32) + '_store_' + '1'.repeat(31) + 'z',
+    })).status, 400);
+  } finally { db.close(); }
 });
