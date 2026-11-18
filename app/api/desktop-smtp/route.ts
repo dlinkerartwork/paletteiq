@@ -14,8 +14,25 @@ export async function GET() {
   if (!supportsNativeSmtp()) return privateJson({ available: false, configured: false });
   try {
     return privateJson(await nativeSmtpOperation(user.userId, { action: 'status' }));
-  } catch {
-    return privateJson({ error: 'Desktop SMTP settings unavailable. Check the local backend logs.' }, 503);
+  } catch (error) {
+    // Do not expose exception bodies or native bridge tokens to the browser.
+    // Return actionable categories without reflecting credentials.
+    const reason = error instanceof Error ? error.message : String(error);
+    const category = /Invalid active PaletteIQ store owner|Invalid store ID/.test(reason)
+      ? 'store-identity'
+      : /Desktop storage: 401/.test(reason) ? 'native-auth'
+      : /Desktop storage: 400/.test(reason) ? 'native-request'
+      : /fetch failed|ECONNREFUSED|ETIMEDOUT|TimeoutError|AbortError/i.test(reason)
+        ? 'native-unreachable' : 'native-error';
+    console.warn('Desktop SMTP settings status check failed:', category);
+    const message = category === 'store-identity'
+      ? 'SMTP store identity rejected. Update PaletteIQ Desktop and restart it completely.'
+      : category === 'native-auth'
+        ? 'Desktop SMTP native bridge authorization failed. Quit Desktop completely and restart.'
+        : category === 'native-unreachable'
+          ? 'Desktop SMTP local backend is unreachable. Quit Desktop completely and restart.'
+          : 'Desktop SMTP local backend returned an error. Restart the updated Desktop app.';
+    return privateJson({ error: message, code: category }, 503);
   }
 }
 
