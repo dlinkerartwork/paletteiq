@@ -4,9 +4,10 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readdirSync, rmSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 
-const script = new URL('../scripts/migrate-legacy-desktop-to-store.cjs', import.meta.url);
+const script = fileURLToPath(new URL('../scripts/migrate-legacy-desktop-to-store.cjs', import.meta.url));
 const accountId='ddf32abb-d05e-4da7-95bd-8d8a25a4c75e';
 const storeId='33e7c871-e67c-45c2-bf90-3e4e810e542d';
 
@@ -31,10 +32,10 @@ test('explicit offline Desktop migration preserves old collections/assets and ne
     const oldPath=join(root,'images','collections',oldOwner);
     mkdirSync(oldPath,{recursive:true});
     writeFileSync(join(oldPath,'fake-image.png'), Buffer.from([137,80,78,71]));
-    const list=spawnSync(process.execPath,[script.pathname,'--email','owner@example.com','--workspace',root,'--list-stores'],{encoding:'utf8'});
+    const list=spawnSync(process.execPath,[script,'--email','owner@example.com','--workspace',root,'--list-stores'],{encoding:'utf8'});
     assert.equal(list.status,0,list.stderr);
     assert.match(list.stdout,/My Etsy Store/);
-    const migrate=spawnSync(process.execPath,[script.pathname,'--email','owner@example.com',
+    const migrate=spawnSync(process.execPath,[script,'--email','owner@example.com',
       '--workspace',root,'--store-name','My Etsy Store','--confirm'],{encoding:'utf8'});
     assert.equal(migrate.status,0,migrate.stderr);
     assert.match(migrate.stdout,/Migrated 1 legacy collections/);
@@ -46,7 +47,7 @@ test('explicit offline Desktop migration preserves old collections/assets and ne
     assert.ok(existsSync(join(root,'images','collections',newOwner,'fake-image.png')));
     assert.ok(!existsSync(join(root,'images','collections',oldOwner)));
     assert.ok(readdirSync(join(root,'database','upgrade-backups')).some(name=>name.endsWith('.db')));
-    const repeat=spawnSync(process.execPath,[script.pathname,'--email','owner@example.com',
+    const repeat=spawnSync(process.execPath,[script,'--email','owner@example.com',
       '--workspace',root,'--confirm'],{encoding:'utf8'});
     assert.notEqual(repeat.status,0);
   } finally { db.close(); rmSync(root,{recursive:true,force:true}); }
