@@ -244,7 +244,19 @@ async function launch() {
   activeDirectory = directory;
   const secret = ensureCredentials(directory);
   const nativeBridge = { token: randomBytes(32).toString('hex') };
-  nativeStorage = await startNativeStorage({ directory, migrationsDir: path.join(ROOT, 'drizzle'), token: nativeBridge.token });
+  nativeStorage = await startNativeStorage({
+    directory, migrationsDir: path.join(ROOT, 'drizzle'), token: nativeBridge.token,
+    chooseWorkspaceZip: async () => {
+      // Only Electron's native file picker can authorize a local ZIP path.
+      // The renderer/Worker never supplies filesystem paths to the native bridge.
+      const result = await dialog.showOpenDialog({
+        title: 'Select an old PaletteIQ workspace backup',
+        properties: ['openFile'],
+        filters: [{ name: 'PaletteIQ workspace ZIP', extensions: ['zip'] }],
+      });
+      return result.canceled ? null : result.filePaths[0] || null;
+    },
+  });
   const configPath = runtimeConfig(directory, secret, { ...nativeBridge, port: nativeStorage.port });
   await migrateLegacyDatabase(directory, secret, configPath, { ...nativeStorage, token: nativeBridge.token });
   const diagnostics = diagnosticLogger(directory);
