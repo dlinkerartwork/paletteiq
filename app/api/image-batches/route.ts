@@ -14,7 +14,6 @@ import { mergeNewBatchResults } from '@/lib/batch-recovery';
 import { batchAssetKey, batchAssetUrl } from '@/lib/batch-assets';
 import { awaitBatchOutputFiles } from '@/lib/batch-status';
 import { pendingImageBatchNotification, queueFinishedImageBatchEmail, type EmailBatchItem } from '@/lib/image-batch-email';
-import { gpuFetch } from '@/lib/upscale-batch-transport';
 
 const MODELS = ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
 const syncingJobIds = new Set<string>();
@@ -76,24 +75,9 @@ export async function POST(req: Request) {
     const record = { id: crypto.randomUUID(), owner: user.userId, projectId: data.projectId, openaiBatchId: job.id, model: data.model!, format, status: job.status, total: selected.length, completed: 0, failed: 0, items: JSON.stringify(data.characterIds.map((id, index) => ({ id, status: 'pending', ...(index === 0 ? { notifyEmail: true, notificationRecipient: user.email, notificationStoreName: user.displayName, notificationCollectionName: saved[0].name } : {}) }))), outputFileId: null, errorFileId: null, createdAt: now, updatedAt: now };
     await db.insert(imageBatches).values(record);
     createdBatchId = null;
-    // Best-effort registration lets OpenAI's signed batch.completed webhook
-    // trigger email directly on the GPU server, even if PaletteIQ is closed.
-    // Registration failure must never cancel or duplicate a paid OpenAI Batch.
-    try {
-      const clean = (value: string, length: number) =>
-        value.slice(0, length).replace(/[\x00-\x1f\x7f]/g, ' ').trim();
-      await gpuFetch(user.userId, '/v1/notifications/image-batches/register', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(5000),
-        body: JSON.stringify({
-          client_batch_id: record.id, openai_batch_id: job.id,
-          notification_email: user.email,
-          store_name: clean(user.displayName, 90) || 'PaletteIQ Store',
-          collection_name: clean(saved[0].name, 160) || 'Untitled Collection',
-          total: record.total,
-        }),
-      });
-    } catch { /* The signed webhook is optional; sync polling still sends email. */ }
+    // SMTP delivery is handled by PaletteIQ Desktop's local native service
+    // when its authenticated background monitor observes OpenAI completed.
+    // Image generation never requires or contacts the GPU upscale server.
     return Response.json({ job: safeJob(record) });
   } catch (error) {
     if (createdBatchId) {
