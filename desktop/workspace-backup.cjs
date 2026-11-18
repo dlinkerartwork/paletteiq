@@ -56,6 +56,32 @@ function validateWorkspace(folder, { requireNoCredentials = true } = {}) {
   return manifest;
 }
 
+/**
+ * Legacy Desktop ZIPs may contain credentials encrypted with an old
+ * workspace-specific key. They cannot be safely reused after restoration.
+ * Sanitize only the extracted SQLite copy, never the ZIP or live database.
+ */
+function stripWorkspaceCredentials(folder) {
+  const databasePath = path.join(folder, 'database', 'paletteiq.db');
+  const database = new DatabaseSync(databasePath);
+  try {
+    const columns = new Set(database.prepare('PRAGMA table_info(studio_settings)').all().map(row => row.name));
+    const sensitive = ['etsy_credential', 'openai_credential', 'gemini_credential', 'upscale_credential']
+      .filter(name => columns.has(name));
+    if (!sensitive.length) return;
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      database.exec('UPDATE studio_settings SET ' + sensitive.map(name => name + '=NULL').join(', '));
+      database.exec('COMMIT');
+    } catch (cause) {
+      database.exec('ROLLBACK');
+      throw cause;
+    }
+  } finally {
+    database.close();
+  }
+}
+
 async function backupWorkspace({ directory, database, destination }) {
   const temporary = mkdtempSync(path.join(os.tmpdir(), 'paletteiq-backup-'));
   try {
@@ -85,6 +111,11 @@ async function restoreWorkspaceSeparate({ source, workspaceRoot }) {
   const staging = mkdtempSync(path.join(restores, '.pending-'));
   try {
     await zipCommand(source, staging, true);
+    // Historic ZIP backups were created before credential-scrubbing was
+    // enforced. Validate the source structure, remove secrets from the
+    // extracted copy, and *then* require the safe modern backup contract.
+    validateWorkspace(staging, { requireNoCredentials: false });
+    stripWorkspaceCredentials(staging);
     validateWorkspace(staging);
     const destination = path.join(restores, `restored-${Date.now()}-${randomUUID().slice(0, 8)}`);
     renameSync(staging, destination);
@@ -100,11 +131,13 @@ async function prepareWorkspaceStoreImport({ source, workspaceRoot }) {
   const staging = mkdtempSync(path.join(imports, '.pending-'));
   try {
     await zipCommand(source, staging, true);
-    // Old ZIP archives may have encrypted credentials, but store migration
-    // never reads or imports them. Do not accept non-PaletteIQ archives.
+    // The original ZIP is immutable. Scrub its extracted SQLite copy so
+    // historic credentials never linger in the temporary import workspace.
     validateWorkspace(staging, { requireNoCredentials: false });
+    stripWorkspaceCredentials(staging);
+    validateWorkspace(staging);
     return staging;
   } catch (error) { rmSync(staging, { recursive: true, force: true }); throw error; }
 }
 
-module.exports = { backupWorkspace, restoreWorkspaceSeparate, validateWorkspace, prepareWorkspaceStoreImport };
+module.exports = { backupWorkspace, restoreWorkspaceSeparate, validateWorkspace, prepareWorkspaceStoreImport, stripWorkspaceCredentials };
