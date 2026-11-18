@@ -63,3 +63,24 @@ export function nativeAssetBucket(): R2Bucket | null {
     },
   } as unknown as R2Bucket;
 }
+
+/** Server-only Desktop ZIP workflow. The browser never receives bridge credentials
+ * or chooses filesystem paths; Electron's OS dialog handles that separately. */
+export function hasNativeWorkspaceImport(): boolean {
+  return bridgeConfig() !== null;
+}
+export async function runNativeWorkspaceImport(body: {
+  action: 'select' | 'preview' | 'apply' | 'cancel';
+  accountId: string; selectionId?: string; storeId?: string;
+  mode?: 'skip' | 'replace' | 'keep-both';
+  allowMissing?: boolean; importPreferences?: boolean;
+}): Promise<{ status: number; body: Record<string, unknown> }> {
+  const config = bridgeConfig();
+  if (!config) throw new Error('Native Desktop workspace import is unavailable');
+  const response = await fetch(config.url + '/workspace-store-import', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + config.token, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return { status: response.status, body: await response.json() as Record<string, unknown> };
+}
