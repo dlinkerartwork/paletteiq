@@ -84,3 +84,32 @@ export async function runNativeWorkspaceImport(body: {
   });
   return { status: response.status, body: await response.json() as Record<string, unknown> };
 }
+
+
+/** Desktop-only SMTP bridge: never sends mail to GPU Server or exposes the
+ * installed SMTP App Password to the browser. */
+export type DesktopSmtpInfo = {
+  available: boolean; configured: boolean; source: string;
+  hasOverride: boolean; bundledConfigured: boolean; passwordConfigured: boolean;
+  host: string; port: number; username: string; sender: string;
+};
+export async function nativeSmtpOperation(
+  owner: string,
+  operation: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const bridge = bridgeConfig();
+  if (!bridge) throw new Error('SMTP email notifications require PaletteIQ Desktop (not the web browser).');
+  if (typeof owner !== 'string' || !/^[0-9a-f-]{36}$/i.test(owner))
+    throw new Error('Invalid active store for SMTP');
+  const response = await bridgeRequest(bridge, '/smtp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...operation, owner }),
+    signal: AbortSignal.timeout(24_000),
+  });
+  return await response.json() as Record<string, unknown>;
+}
+
+export function supportsNativeSmtp(): boolean {
+  return bridgeConfig() !== null;
+}
