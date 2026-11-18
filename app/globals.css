@@ -563,3 +563,16 @@ h1,h2,.stat strong,.step b,.source-card strong,.asset-meta b { color:#302721; }
 .store-delete-actions { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:9px; margin-top:7px; }
 .store-danger-confirm { background:#b82720 !important; color:#fff !important; display:inline-flex; align-items:center; gap:7px; }
 @media (max-width:760px) { .settings-tabs button { padding:10px; font-size:11px; } .store-list-head { align-items:flex-start; } .store-row-actions { width:100%; } .account-store-switcher .account-store-action:last-child { min-width:68px; font-size:11px; padding:0 7px; } }
+
+
+/* Desktop native workspace ZIP import lives alongside portable JSON restore. */
+.desktop-workspace-import { margin:22px 0 24px; padding:20px; border:1px solid #e4d5c7; border-radius:14px; background:linear-gradient(135deg,#fffcf8,#fff5eb); display:grid; gap:17px; }
+.desktop-workspace-import .restore-heading { color:#b35823; }
+.desktop-workspace-import .restore-fields select { display:block; padding:10px 12px; width:100%; max-width:460px; border-radius:9px; border:1px solid #e8d8cb; background:#fff; }
+.desktop-workspace-import .restore-image-note { margin:0; }
+.desktop-workspace-import .restore-result p { overflow-wrap:anywhere; }
+.desktop-workspace-import .restore-result p .sub { margin-top:9px; }
+.desktop-workspace-import .restore-result code { font-size:11px; }
+.desktop-workspace-import .restore-result .sub svg { display:inline; vertical-align:middle; }
+.desktop-workspace-import .restore-error { display:flex; gap:8px; align-items:flex-start; }
+@media(max-width:640px) { .desktop-workspace-import { padding:14px; } }
