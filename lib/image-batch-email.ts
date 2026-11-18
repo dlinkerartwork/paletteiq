@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '@/db';
 import { imageBatches } from '@/db/schema';
-import { gpuFetch } from '@/lib/upscale-batch-transport';
+import { nativeSmtpOperation, supportsNativeSmtp } from '@/lib/native-bridge';
 
 export type EmailBatchItem = {
   id: string; status: 'pending' | 'done' | 'error';
@@ -28,10 +28,9 @@ export function pendingImageBatchNotification(
 }
 
 /**
- * Register a completion receipt immediately when the verified OpenAI Batch
- * status becomes completed, even if its output file is not yet available or
- * imported. The GPU SMTP outbox is independent from image recovery.
- * No SMTP credentials are sent to the browser.
+ * Send the verified OpenAI Batch completion email through the Desktop's
+ * private Node/Electron SMTP service without contacting the GPU Server.
+ * SMTP secrets remain in the native process or in an encrypted local store.
  *
  * The first item holds the email enrollment and retry receipt to avoid schema
  * migrations in existing local SQLite / hosted D1 databases.
@@ -44,7 +43,7 @@ export async function queueFinishedImageBatchEmail(
   collectionName: string,
   openAICompletedCounts?: { completed?: number; failed?: number },
 ): Promise<boolean> {
-  if (!pendingImageBatchNotification(job, Date.now(), Boolean(openAICompletedCounts))) return false;
+  if (!supportsNativeSmtp() || !pendingImageBatchNotification(job, Date.now(), Boolean(openAICompletedCounts))) return false;
   const items = JSON.parse(job.items) as EmailBatchItem[];
   const email = items[0].notificationRecipient || recipient;
   const store = items[0].notificationStoreName || storeName;
@@ -65,19 +64,17 @@ export async function queueFinishedImageBatchEmail(
     ? (countsValid ? openAICompletedCounts.failed! : -1) : importedFailed;
   const now = Date.now();
   try {
-    await gpuFetch(owner, '/v1/notifications/image-batches', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        client_batch_id: job.id, notification_email: email,
-        store_name: store.slice(0, 90).replace(/[\x00-\x1f\x7f]/g, ' ').trim() || 'PaletteIQ Store',
-        collection_name: collection.slice(0, 160).replace(/[\x00-\x1f\x7f]/g, ' ').trim() || 'Untitled Collection',
-        total: items.length, completed: success, failed,
-      }),
+    await nativeSmtpOperation(owner, {
+      action: 'send', batchId: job.id, openaiBatchId: job.openaiBatchId,
+      recipient: email,
+      storeName: store.slice(0, 90).replace(/[\x00-\x1f\x7f]/g, ' ').trim() || 'PaletteIQ Store',
+      collectionName: collection.slice(0, 160).replace(/[\x00-\x1f\x7f]/g, ' ').trim() || 'Untitled Collection',
+      total: items.length, completed: success, failed,
     });
     items[0] = { ...items[0], notificationQueuedAt: now, notificationLastAttemptAt: now };
   } catch {
-    // Retry on the next session / background synchronization, not on the
-    // current image import transaction. Never hide or corrupt generated files.
+    // Retry on the next Desktop background poll. Email failures must not
+    // roll back paid image generation or produce duplicate OpenAI batches.
     items[0] = { ...items[0], notificationLastAttemptAt: now };
   }
   const receiptSaved = Boolean(items[0].notificationQueuedAt);
