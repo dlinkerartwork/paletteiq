@@ -5,6 +5,7 @@ const { randomUUID } = require('node:crypto');
 const path = require('node:path');
 const { prepareWorkspaceStoreImport } = require('./workspace-backup.cjs');
 const { planWorkspaceStoreImport, applyWorkspaceStoreImport } = require('./workspace-store-import.cjs');
+const { createNativeSmtpService } = require('./native-smtp-service.cjs');
 const { rmSync } = require('node:fs');
 
 const TABLES = ['projects', 'studio_settings', 'image_batches'];
@@ -86,8 +87,11 @@ function readPayload(req, limit = 12 * 1024 * 1024) {
   });
 }
 
-function startNativeStorage({ directory, migrationsDir, token, chooseWorkspaceZip }) {
+function startNativeStorage({ directory, migrationsDir, token, chooseWorkspaceZip, smtpDefaults, smtpEncryptionKey, smtpSendMail }) {
   const database = openNativeDb(directory, migrationsDir);
+  const smtpService = createNativeSmtpService(database, {
+    smtpDefaults, smtpEncryptionKey, sendMail: smtpSendMail,
+  });
   const imagesRoot = path.join(directory, 'images', 'collections');
   mkdirSync(imagesRoot, { recursive: true });
   let selectedArchive = null;
@@ -103,6 +107,11 @@ function startNativeStorage({ directory, migrationsDir, token, chooseWorkspaceZi
     const finish = (code, body) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(body)); };
     if (req.headers.authorization !== `Bearer ${token}`) return finish(401, { error: 'Unauthorized' });
     try {
+      if (req.method === 'POST' && req.url === '/smtp') {
+        const body = JSON.parse((await readPayload(req, 12 * 1024)).toString('utf8'));
+        const result = await smtpService.handle(body);
+        return finish(result.status, result.body);
+      }
       if (req.method === 'POST' && req.url === '/sql') {
         const body = JSON.parse((await readPayload(req)).toString('utf8'));
         if (typeof body.sql !== 'string' || body.sql.length > 50_000 || !Array.isArray(body.params) || body.params.length > 1000) return finish(400, { error: 'Invalid SQL request' });
