@@ -36,6 +36,10 @@ const resumeStage = (f?: Flow): Stage =>
     ? f.resumeStage : 'research';
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 const busy = new Set<string>();
+// Up to three independent collections advance per scheduler cycle. Each
+// collection keeps its own optimistic lease, paid-job receipts and target.
+const MULTI_COLLECTION_TICK_LIMIT = 3;
+const TICK_SCAN_LIMIT = 100;
 async function load(owner: string, id: string) {
   const rows = await getDb().select().from(projects).where(and(eq(projects.owner, owner), eq(projects.id, id))).limit(1);
   return rows[0] ? { row: rows[0], p: JSON.parse(rows[0].data) as Project } : null;
@@ -346,7 +350,7 @@ async function tickCloudCollections(req: Request) {
   const candidates = await db.select().from(projects).where(sql`
     json_extract(${projects.data}, '$.fullAutomation.enabled') = 1
     AND json_extract(${projects.data}, '$.fullAutomation.stage') NOT IN ('completed','paused')
-  `).orderBy(asc(projects.updatedAt)).limit(2);
+  `).orderBy(asc(projects.updatedAt)).limit(MULTI_COLLECTION_TICK_LIMIT);
   const results: Array<{ projectId: string; waiting?: boolean; error?: string; stage?: string }> = [];
   for (const row of candidates) {
     const parsed = /^user_([0-9a-f]{32})_store_([0-9a-f]{32})$/i.exec(row.owner);
@@ -404,12 +408,19 @@ export async function POST(req:Request) {
   let body:{action?:string;projectId?:string;target?:number;model?:string;syncAll?:boolean};
   try {body=await req.json();} catch {return bad('Invalid JSON');}
   if (body.action==='tick' && body.syncAll===true) {
+    // Least recently updated collections go first. Their tick mutates
+    // updatedAt, rotating the queue so long-running Research/Batch jobs do
+    // not starve later collections when there are more than three.
     const rows=await getDb().select().from(projects).where(eq(projects.owner,user.userId))
-      .orderBy(asc(projects.updatedAt)).limit(100);
+      .orderBy(asc(projects.updatedAt)).limit(TICK_SCAN_LIMIT);
     const active=rows.map(x=>({id:x.id,flow:(JSON.parse(x.data) as Project).fullAutomation}))
-      .filter(x=>isActive(x.flow)).slice(0,2);
-    const results=[];for(const item of active)results.push(await tick(req,user.userId,item.id));
-    return Response.json({active:active.length,results});
+      .filter(x=>isActive(x.flow));
+    const selected=active.slice(0,MULTI_COLLECTION_TICK_LIMIT);
+    const results=await Promise.all(selected.map(async item=>{
+      try { return {projectId:item.id,...await tick(req,user.userId,item.id)}; }
+      catch(error){return {projectId:item.id,error:error instanceof Error?error.message.slice(0,240):'Workflow tick failed'};}
+    }));
+    return Response.json({active:active.length,processed:selected.length,results});
   }
   if (!idValid(body.projectId)) return bad('Invalid collection ID');
   const id=body.projectId;
