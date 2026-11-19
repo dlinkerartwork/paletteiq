@@ -217,8 +217,16 @@ async function tick(req: Request, owner: string, id: string) {
       }
     } else if (f.stage === 'prompts') {
       const missing=p.characters.filter(c=>!c.prompt?.trim());
+      // Never automatically create another paid Prompt Batch when the earlier
+      // job failed, became uncertain, expired, or completed with missing items.
+      // In particular, progressive mode may have accepted a Batch ID that
+      // failed to persist; only a person can review that charge risk.
+      if (p.promptJob && ['failed','cancelled','expired','completed_with_errors'].includes(p.promptJob.status))
+        throw Error('Prompt Batch needs review before any paid retry. '+missing.length+' prompts remain. Check OpenAI Batch activity first.');
       if (!missing.length) await setStage(owner,id,'images');
       else if (p.promptJob && isActivePromptBatch(p.promptJob)) await apiGet(req,promptGet,id);
+      else if (p.promptJob && p.promptJob.status==='completed')
+        throw Error('Prompt Batch completed with '+missing.length+' missing prompts. Review saved results before another paid request.');
       else if ((f.promptAttempts||0)<3) {
         await save(owner,id,latest=>({...latest,fullAutomation:{
           ...latest.fullAutomation!,promptAttempts:(latest.fullAutomation?.promptAttempts||0)+1,updatedAt:Date.now()}}));
