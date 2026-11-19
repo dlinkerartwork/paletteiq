@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { env } from "cloudflare:workers";
 import { getAccountSession } from "@/lib/palette-accounts";
+import { cloudAutomationUser } from "@/lib/cloud-automation-context";
 
 export type ChatGPTUser = {
   userId: string;
@@ -22,6 +23,8 @@ const SIGN_OUT_PATH = "/signout-with-chatgpt";
 const CALLBACK_PATH = "/callback";
 
 export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
+  const scheduledUser = cloudAutomationUser();
+  if (scheduledUser) return scheduledUser;
   const account = await getAccountSession();
   if (account) return {
     userId: account.owner,
