@@ -27,11 +27,16 @@ async function getSettings(req: Request) {
     if (!response.ok) return bad(`Unable to list OpenAI models (HTTP ${response.status}).`, 502);
     const payload = await response.json() as { data?: Array<{ id?: string }> };
     if (new URL(req.url).searchParams.get('models') === 'openai-seo') {
-      const preferred = ['gpt-6.1-terra','gpt-6.1-sol','gpt-6-astra','gpt-6-luna','gpt-5.6','gpt-5.2','gpt-5','gpt-4.1'];
+      // Both Research & Analysis and SEO use this list. Do not force a paid
+      // heavyweight model or hide the user's smaller available GPT models.
+      // /v1/models reports access, not vision/JSON/Batch capability; each
+      // downstream API validates that when a model is submitted.
+      const preferred = ['gpt-4.1-mini','gpt-4.1','gpt-5.6','gpt-6.1-terra'];
       return Response.json({ models: (payload.data || [])
-        .filter(row => typeof row.id === 'string' && /^gpt-[a-z0-9.-]{1,80}$/.test(row.id) && !/(image|audio|realtime|transcribe|tts|search|codex|mini|nano|micro|lite|instruct)/i.test(row.id))
+        .filter(row => typeof row.id === 'string' && /^gpt-[a-z0-9.-]{1,80}$/.test(row.id) &&
+          !/(image|audio|realtime|transcribe|tts|search|codex|instruct|embedding)/i.test(row.id))
         .map(row => ({ id: row.id!, name: row.id! }))
-        .sort((a, b) => { const ai = preferred.indexOf(a.id); const bi = preferred.indexOf(b.id); return (ai < 0 ? 100 : ai) - (bi < 0 ? 100 : bi) || b.id.localeCompare(a.id, undefined, { numeric: true }); }).slice(0, 6) });
+        .sort((a, b) => { const ai = preferred.indexOf(a.id); const bi = preferred.indexOf(b.id); return (ai < 0 ? 100 : ai) - (bi < 0 ? 100 : bi) || b.id.localeCompare(a.id, undefined, { numeric: true }); }).slice(0, 100) });
     }
     // The models endpoint returns IDs, not transparency capability flags.
     // Limit options to the GPT Image family; the image API validates capabilities on use.
