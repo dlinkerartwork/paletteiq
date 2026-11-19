@@ -484,14 +484,26 @@ export default function Home() {
       let startedNewAutomation = false;
       try {
         if (fullAutoRequested) {
-          const previous = await refreshAutomationStatus(project.id);
-          if (previous?.enabled && previous.stage !== 'completed') {
-            setMessage(previous.stage === 'paused'
-              ? 'This collection has a paused Full Automation workflow. Use Resume Full Automation above; do not start another paid research job.'
-              : 'Full Automation is already running (' + previous.stage + '). The saved status is restored above; do not start another paid research job.');
-            return;
+          // A newly created collection only lives in browser state. Do NOT
+          // demand a server-side Full Automation record before the first Save;
+          // GET /api/full-automation correctly returns 404 for an unsaved ID.
+          // For a persisted ID, still inspect the authoritative workflow and
+          // reject existing paid jobs BEFORE any browser Save can overwrite it.
+          const saved = await fetch('/api/studio?projectId=' +
+            encodeURIComponent(project.id), { cache:'no-store' });
+          if (!saved.ok) throw Error('Unable to verify collection storage before starting automation (HTTP ' + saved.status + ')');
+          const savedRows = await saved.json() as Array<{ id:string }>;
+          if (savedRows.some(item => item.id === project.id)) {
+            const previous = await refreshAutomationStatus(project.id);
+            if (previous?.enabled && previous.stage !== 'completed') {
+              setMessage(previous.stage === 'paused'
+                ? 'This collection has a paused Full Automation workflow. Use its recovery controls above; do not start another paid research job.'
+                : 'Full Automation is already running (' + previous.stage + '). The saved status is restored above; do not start another paid research job.');
+              return;
+            }
           }
         }
+        // Persist new collections first, then initialize their workflow.
         await api({ action: 'save', id: project.id, name: project.name, data: project });
         let fullAutomation: FullAutomation | undefined = project.fullAutomation;
         if (fullAutoRequested) {
