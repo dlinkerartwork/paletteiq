@@ -50,7 +50,7 @@ test('Store Management provides explicit rename, delete safeguards and metadata 
 test('settings uses five independent panels and puts Backup & Restore last', () => {
   const ui = file('components/studio-settings.tsx');
   const tabs = Array.from(ui.matchAll(/\['(credentials|production|upscale|seo|backup)','([^']+)'\]/g));
-  assert.deepEqual(tabs.map(m=>m[1]), ['credentials','production','upscale','seo','backup']);
+  assert.deepEqual(tabs.map(m=>m[1]), ['credentials','production','seo','upscale','backup']);
   for(const tab of ['credentials','production','upscale','seo','backup'])
     assert.match(ui,new RegExp("pane === '"+tab+"' && <section"));
   assert.match(ui,/role="tablist"/);
