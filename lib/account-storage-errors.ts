@@ -32,7 +32,7 @@ function diagnosticChain(error: unknown): string {
 
 export function classifyAccountStorageFailure(error: unknown): AccountStorageFailure {
   const detail = diagnosticChain(error);
-  if (/no such table|table (?:[\\w.]+ )?does not exist|SQLITE_ERROR.*missing table|no such column|unknown column/i.test(detail))
+  if (/no such table|table (?:[\w.]+ )?does not exist|SQLITE_ERROR.*missing table|no such column|unknown column/i.test(detail))
     return {
       issue: 'schema_missing', status: 503,
       message: 'PaletteIQ account database tables are missing. Apply migration 0005_accounts_and_stores.sql. On Windows local web, stop npm run dev and run: PowerShell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\setup-local.ps1 -SkipInstall',
