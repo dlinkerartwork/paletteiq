@@ -25,7 +25,7 @@ test('Progressive prompt mode uses immutable JSONL, at most three concurrent pai
   assert.match(route,/status:'uncertain',error:'Submission may have reached OpenAI/);
   assert.match(route,/if\(group\.status==='submitting'&&!group\.batchId/);
   assert.match(route,/group\.key===groupKey && !\['completed','failed','uncertain'\]/);
-  assert.match(route,/if\(job\.mode==='progressive'\) return synchronizeProgressive/);
+  assert.match(route,/if \(job\.mode==='progressive'\) return synchronizeProgressive/);
   assert.match(route,/progressPromptBatches\(owner,id,job\.id,key\)/);
   assert.match(automation,/progressive:p\.progressivePrompts===true/);
 });
