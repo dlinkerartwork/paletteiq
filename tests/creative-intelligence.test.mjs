@@ -79,7 +79,8 @@ test('niche, keywords and source-title context reach expansion and image prompts
 test('UI and API use the same research context, family selection and production brief', () => {
   const page = readFileSync(new URL('../app/page.tsx', import.meta.url), 'utf8');
   const api = readFileSync(new URL('../app/api/studio/route.ts', import.meta.url), 'utf8');
-  assert.match(page,/creativeContext\(project\)/);
+  // Foreground retries use the latest checkpointed project snapshot instead of a stale tab.
+  assert.match(page,/creativeContext\((?:project|current)\)/);
   assert.match(page,/selectDiverseConcepts\(proposals, working\.characters/);
   assert.match(page,/selectDiverseConcepts\(proposals, current\.characters/);
   assert.match(page,/Detailed source research/);
