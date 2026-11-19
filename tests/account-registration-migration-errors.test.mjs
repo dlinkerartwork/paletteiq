@@ -83,3 +83,30 @@ test('0005 is idempotent on SQLite and does not delete existing collections', ()
       .run('different-id','first@example.com','salt','hash',insertedAt), /UNIQUE constraint failed: paletteiq_accounts.email/);
   } finally { db.close(); }
 });
+
+test('Drizzle wrapped SQLite causes report actual missing schema instead of generic database error', () => {
+  const nested = new Error('D1_ERROR: no such table: paletteiq_accounts: SQLITE_ERROR');
+  const outer = new Error('Failed query: select id from paletteiq_accounts', { cause: nested });
+  const result = classifyAccountStorageFailure(outer);
+  assert.equal(result.issue, 'schema_missing');
+  assert.equal(result.status, 503);
+  assert.match(result.message, /migration 0005/);
+});
+
+test('Drizzle wrapped duplicate email cause is classified without exposing bound SQL parameters', () => {
+  const nested = new Error('UNIQUE constraint failed: paletteiq_accounts.email');
+  const outer = new Error('Failed query: insert into paletteiq_accounts (...) values (?)\\nparams: private@example.com,sensitive-password', { cause: nested });
+  const result = classifyAccountStorageFailure(outer);
+  assert.equal(result.issue, 'email_taken');
+  assert.equal(result.status, 409);
+  assert.doesNotMatch(result.message, /private@example.com|sensitive-password|params:/);
+});
+
+test('cyclic nested database errors do not hang or echo database credentials', () => {
+  const outer = new Error('Failed query: insert into paletteiq_accounts; secret=password-secret');
+  Object.assign(outer, { cause: outer });
+  const result = classifyAccountStorageFailure(outer);
+  assert.equal(result.issue, 'unexpected');
+  assert.equal(result.status, 500);
+  assert.doesNotMatch(result.message, /password-secret|insert into/);
+});
