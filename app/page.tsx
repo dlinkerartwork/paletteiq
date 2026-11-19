@@ -684,11 +684,14 @@ export default function Home() {
         if (closed || !result.job || result.job.id !== jobId) return;
         if (result.project && result.job.status === 'completed') {
           const editor = latestWorkspace.current;
-          if (editor.project.id === projectId &&
-              !collectionHasUnsavedEdits(editor.project, savedProjectSnapshots.current.get(projectId)))
+          const hasLocalEdits = editor.project.id === projectId &&
+            collectionHasUnsavedEdits(editor.project, savedProjectSnapshots.current.get(projectId));
+          if (!hasLocalEdits) {
             savedProjectSnapshots.current.set(projectId, JSON.stringify(result.project));
-          setProjects(previous => [result.project!, ...previous.filter(p => p.id !== projectId)]);
-          setProject(previous => previous.id === projectId ? result.project! : previous);
+            projectSnapshots.current.set(projectId, result.project);
+            setProjects(previous => [result.project!, ...previous.filter(p => p.id !== projectId)]);
+            setProject(previous => previous.id === projectId ? result.project! : previous);
+          }
           setAnalysisProgress({ done: result.job.completedCount, total: result.job.target });
           setMessage('Background research and Style DNA merge completed: ' + result.job.completedCount + '/' + result.job.target + ' subjects saved. Full Automation will open AI Prompts after any missing subjects are filled.');
         } else {
@@ -722,8 +725,15 @@ export default function Home() {
         if (!response.ok) throw Error(result.error || 'Could not retrieve OpenAI prompt batch status');
         if (closed || !result.job || result.job.id !== jobId) return;
         if (result.project && !hasActivePromptJob(result.job)) {
-          setProjects(previous => [result.project!, ...previous.filter(p => p.id !== projectId)]);
-          setProject(previous => previous.id === projectId ? result.project! : previous);
+          const editor = latestWorkspace.current;
+          const hasLocalEdits = editor.project.id === projectId &&
+            collectionHasUnsavedEdits(editor.project, savedProjectSnapshots.current.get(projectId));
+          if (!hasLocalEdits) {
+            savedProjectSnapshots.current.set(projectId, JSON.stringify(result.project));
+            projectSnapshots.current.set(projectId, result.project);
+            setProjects(previous => [result.project!, ...previous.filter(p => p.id !== projectId)]);
+            setProject(previous => previous.id === projectId ? result.project! : previous);
+          }
           setMessage(result.job.status === 'completed'
             ? 'OpenAI Batch finished. ' + result.job.imported + ' prompts were saved automatically. Review them before image generation.'
             : 'OpenAI Batch finished with ' + result.job.imported + ' imported prompts and ' + result.job.failed + ' missing or skipped. Review the remaining characters before retrying.');
@@ -781,8 +791,14 @@ export default function Home() {
             !thumbnailSaveControlsRef.current?.hasUnsaved()) {
           setTab(toTab);
         }
-        setProjects(previous => [updated, ...previous.filter(p => p.id !== id)]);
-        setProject(previous => previous.id === id ? updated : previous);
+        if (clean) {
+          setProjects(previous => [updated, ...previous.filter(p => p.id !== id)]);
+          setProject(previous => previous.id === id ? updated : previous);
+        } else {
+          // Keep the locally edited collection. Server processing continues,
+          // but never silently replaces unsaved names, characters or designs.
+          setProjects(previous => previous.map(p => p.id === id ? view.project : p));
+        }
         if (updated.fullAutomation?.stage === 'paused')
           setMessage('Full Automation paused: ' + (updated.fullAutomation.lastError || 'Manual review required') + '. Check Batch activity before resuming.');
         else if (updated.fullAutomation?.stage === 'completed')
