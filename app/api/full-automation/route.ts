@@ -284,7 +284,8 @@ export async function POST(req:Request) {
   if (body.action==='start') {
     const target=Number(body.target);
     if (!Number.isInteger(target)||target<1||target>200) return bad('Full automation supports 1–200 characters');
-    if (isActive(current.p.fullAutomation)) return bad('Automation already running',409);
+    if (current.p.fullAutomation && current.p.fullAutomation.stage !== 'completed')
+      return bad('An automation workflow already exists. Resume the paused workflow rather than submitting duplicate paid work.',409);
     if (current.p.characters.some(c=>c.imageUrl)) return bad('Full automation must start before image generation',409);
     const now=Date.now();
     const flow:Flow={enabled:true,stage:'research',target,startedAt:now,updatedAt:now,
