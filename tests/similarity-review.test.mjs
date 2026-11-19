@@ -11,7 +11,9 @@ test('similarity check compares generated image with selected Etsy references an
   assert.match(moduleText, /selected Etsy reference images/);
   assert.match(moduleText, /status: 'unverified'/);
   assert.match(moduleText, /flagged \|\|= parsed\.tooSimilar \|\| score >= 75/);
-  assert.match(moduleText, /offset < urls\.length; offset \+= 5/);
+  assert.match(moduleText, /offset < urls\.length; offset \+= 10/);
+  assert.match(moduleText, /Promise\.all\(offsets\.map\(compareGroup\)\)/);
+  assert.match(moduleText, /index < urls\.length/);
 });
 
 test('single production persists similarity review after saving generated asset', () => {
