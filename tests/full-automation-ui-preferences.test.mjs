@@ -10,7 +10,8 @@ const rewrite = file('app/api/regenerate-prompt/route.ts');
 const modelList = file('app/api/settings/route.ts');
 
 test('Full Automation uses a user-chosen model initialized from saved Settings', () => {
-  assert.match(page, /project\.fullAutomation\?\.textModel \|\| project\.researchModel/);
+  assert.match(page, /project\.fullAutomation\?\.textModel : undefined\) \|\|/);
+  assert.match(page, /project\.researchModel \|\|/);
   assert.match(page, /project\.researchJob\?\.model \|\| preferences\.analysisModel/);
   assert.match(page, /id="source-analysis-model" value=\{visualModel\}/);
   assert.doesNotMatch(page, /id="source-analysis-model"[^\n]*disabled=\{!!busy \|\| fullAutoRequested\}/);
