@@ -53,6 +53,16 @@ test('paused research provides reason when restart is disallowed', () => {
   assert.match(endpoint, /job\.status === 'failed'/);
   assert.match(endpoint, /state:'missing-references'/);
   assert.match(endpoint, /researchRecovery: researchRecovery\(p\)/);
-  assert.match(page, /Research recovery: \{researchRecovery\?\.message/);
+  assert.match(page, /Saved research status: \{savedResearchStatus\}/);
+  assert.match(page, /Refresh Full Automation status/);
   assert.match(page, /Saved research job error:/);
+});
+
+test('repeated pause preserves original recovery stage and server exposes job status', () => {
+  assert.match(endpoint, /const resumeStage = \(f\?: Flow\): Stage =>/);
+  assert.match(endpoint, /f\.resumeStage !== 'paused'/);
+  assert.match(endpoint, /if \(current\.p\.fullAutomation\.stage === 'paused'\)/);
+  assert.match(endpoint, /stage:resumeStage\(p\.fullAutomation\)/);
+  assert.match(endpoint, /researchJobStatus: p\.researchJob\?\.status \|\| 'not_started'/);
+  assert.match(page, /Last research error:/);
 });
