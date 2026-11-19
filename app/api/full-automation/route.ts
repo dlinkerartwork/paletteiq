@@ -24,7 +24,7 @@ type Flow = { enabled: boolean; stage: Stage; target: number; startedAt: number;
 type Subject = PromptProject['characters'][number] & { imageUrl?: string; origin?: string;
   similarityReview?: { status?: string; score?: number; reason?: string } };
 type Project = Omit<PromptProject, 'characters'> & Pick<PromptProject, 'id' | 'name' | 'title' | 'theme' | 'subtheme' | 'microtheme' | 'style' | 'palette' | 'texture' | 'primaryKeyword' | 'keywords' | 'longTailKeywords' | 'notes' | 'emotionDirection' | 'ageDirection' | 'cutenessDirection' | 'creativeControls' | 'research' | 'promptJob'> & { characters: Subject[]; fullAutomation?: Flow;
-  researchJob?: { status: string; error?: string; responseId?: string }; listing?: { title?: string };
+  researchJob?: { status: string; error?: string; responseId?: string; selectedImages?: string[] }; listing?: { title?: string };
   url?: string; images?: string[]; selectedImageUrls?: string[] };
 type Prefs = { automationPromptModel?: string; automationImageModel?: string;
   quality?: string; seoProvider?: string; seoOpenaiModel?: string; seoGeminiModel?: string };
@@ -66,9 +66,10 @@ function canRestartMissingResearch(p: Project) {
 }
 function canRetryRejectedResearch(p: Project) {
   return p.fullAutomation?.enabled && p.fullAutomation.stage === 'paused' &&
-    (p.fullAutomation.resumeStage || 'research') === 'research' &&
+    resumeStage(p.fullAutomation) === 'research' &&
     !p.characters.length && !!p.url &&
-    !!(p.selectedImageUrls ?? p.images ?? []).length &&
+    !!(p.researchJob?.selectedImages?.length ||
+      (p.selectedImageUrls ?? p.images ?? []).length) &&
     safeRejectedImageResearch(p.researchJob);
 }
 function researchRecovery(p: Project) {
