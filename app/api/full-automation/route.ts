@@ -9,6 +9,7 @@ import { isActiveBatchStatus, retryableFailedImage, eligibleForBulk } from '@/li
 import { selectDiverseConcepts, normalizeCreativeControls } from '@/lib/creative-intelligence';
 import { projectPromptContext, isActivePromptBatch, type PromptProject } from '@/lib/prompt-batch-jobs';
 import { normalizeListing } from '@/lib/etsy-listing';
+import { safeRejectedImageResearch } from '@/lib/research-image-input';
 import { GET as researchGet } from '@/app/api/research-jobs/route';
 import { GET as promptGet, POST as promptPost } from '@/app/api/prompt-jobs/route';
 import { GET as imageGet, POST as imagePost } from '@/app/api/image-batches/route';
@@ -23,7 +24,7 @@ type Flow = { enabled: boolean; stage: Stage; target: number; startedAt: number;
 type Subject = PromptProject['characters'][number] & { imageUrl?: string; origin?: string;
   similarityReview?: { status?: string; score?: number; reason?: string } };
 type Project = Omit<PromptProject, 'characters'> & Pick<PromptProject, 'id' | 'name' | 'title' | 'theme' | 'subtheme' | 'microtheme' | 'style' | 'palette' | 'texture' | 'primaryKeyword' | 'keywords' | 'longTailKeywords' | 'notes' | 'emotionDirection' | 'ageDirection' | 'cutenessDirection' | 'creativeControls' | 'research' | 'promptJob'> & { characters: Subject[]; fullAutomation?: Flow;
-  researchJob?: { status: string; error?: string }; listing?: { title?: string };
+  researchJob?: { status: string; error?: string; responseId?: string }; listing?: { title?: string };
   url?: string; images?: string[]; selectedImageUrls?: string[] };
 type Prefs = { automationPromptModel?: string; automationImageModel?: string;
   quality?: string; seoProvider?: string; seoOpenaiModel?: string; seoGeminiModel?: string };
@@ -60,12 +61,21 @@ function canRestartMissingResearch(p: Project) {
     !p.researchJob && !p.characters.length &&
     !!p.url && !!(p.selectedImageUrls ?? p.images ?? []).length;
 }
+function canRetryRejectedResearch(p: Project) {
+  return p.fullAutomation?.enabled && p.fullAutomation.stage === 'paused' &&
+    (p.fullAutomation.resumeStage || 'research') === 'research' &&
+    !p.characters.length && !!p.url &&
+    !!(p.selectedImageUrls ?? p.images ?? []).length &&
+    safeRejectedImageResearch(p.researchJob);
+}
 function researchRecovery(p: Project) {
   const flow = p.fullAutomation;
   const job = p.researchJob;
   if (!flow?.enabled || flow.stage !== 'paused' ||
       (flow.resumeStage || 'research') !== 'research') return null;
   if (job) {
+    if (canRetryRejectedResearch(p)) return { state:'rejected-image-url',
+      message:'OpenAI rejected the image URL with HTTP 400 before creating a background job. PaletteIQ can retry once using downloaded image data. Check OpenAI usage first.' };
     // A failed job may still have reached OpenAI before a network error.
     // Never offer automatic resubmission for an existing research receipt.
     return { state: job.status, message: job.status === 'failed'
@@ -86,6 +96,7 @@ function researchRecovery(p: Project) {
 function progress(p: Project) {
   return { flow: p.fullAutomation || null,
     researchRecovery: researchRecovery(p),
+    canRetryRejectedResearch: Boolean(canRetryRejectedResearch(p)),
     canRestartMissingResearch: Boolean(canRestartMissingResearch(p)), characterCount: p.characters.length,
     promptCount: p.characters.filter(c => !!c.prompt?.trim()).length,
     imageCount: p.characters.filter(c => !!c.imageUrl).length,
