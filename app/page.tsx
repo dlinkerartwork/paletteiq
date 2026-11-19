@@ -27,7 +27,8 @@ type ResearchJobPreview = { id: string; status: 'submitting' | 'queued' | 'in_pr
 const hasActiveResearch = (job?: ResearchJobPreview) => !!job && ['submitting','queued','in_progress'].includes(job.status);
 type PromptJobPreview = { id: string; status: string; total: number; imported: number; failed: number; processedGroups: number; totalGroups: number; model: string; createdAt: number; updatedAt: number; error?: string };
 const hasActivePromptJob = (job?: PromptJobPreview) => !!job && !['completed','completed_with_errors','failed','cancelled','expired'].includes(job.status);
-type Project = { id: string; name: string; url: string; upscaleBatch?: StoredUpscaleBatch; researchJob?: ResearchJobPreview; promptJob?: PromptJobPreview; theme: string; subtheme: string; microtheme?: string; primaryKeyword?: string; longTailKeywords?: string[]; research?: CreativeAnalysis; creativeControls?: CreativeControls; sourceDescription?: string; sourceTags?: string[]; emotionDirection?: string; ageDirection?: string; cutenessDirection?: string; style: string; palette: string; texture: string; keywords: string[]; characters: Character[]; title: string; images: string[]; selectedImageUrls?: string[]; notes: string; listing?: ListingData; seoReview?: SavedSeoReview; thumbnails?: ThumbnailDesign[]; listingImages?: ListingImageRecord[]; listingStudioSettings?: ListingStudioConfig; lastDownloadedAt?: number; downloadCount?: number; lastDownloadImageCount?: number; downloadedImageIds?: string[] };
+type FullAutomation = { enabled: boolean; stage: 'research' | 'expanding' | 'prompts' | 'images' | 'revising' | 'regenerating' | 'verifying' | 'listing' | 'completed' | 'paused'; target: number; updatedAt: number; lastError?: string; reviewQueue?: string[]; revisedIds?: string[] };
+type Project = { fullAutomation?: FullAutomation; id: string; name: string; url: string; upscaleBatch?: StoredUpscaleBatch; researchJob?: ResearchJobPreview; promptJob?: PromptJobPreview; theme: string; subtheme: string; microtheme?: string; primaryKeyword?: string; longTailKeywords?: string[]; research?: CreativeAnalysis; creativeControls?: CreativeControls; sourceDescription?: string; sourceTags?: string[]; emotionDirection?: string; ageDirection?: string; cutenessDirection?: string; style: string; palette: string; texture: string; keywords: string[]; characters: Character[]; title: string; images: string[]; selectedImageUrls?: string[]; notes: string; listing?: ListingData; seoReview?: SavedSeoReview; thumbnails?: ThumbnailDesign[]; listingImages?: ListingImageRecord[]; listingStudioSettings?: ListingStudioConfig; lastDownloadedAt?: number; downloadCount?: number; lastDownloadImageCount?: number; downloadedImageIds?: string[] };
 const etsyListingId = (value: string) => { try { const url = new URL(value.trim()); return ['etsy.com', 'www.etsy.com'].includes(url.hostname) ? url.pathname.match(/^\/listing\/(\d+)/)?.[1] || null : null; } catch { return null; } };
 const uid = () => crypto.randomUUID();
 const blank = (): Project => ({ id: uid(), name: 'Untitled collection', url: '', theme: '', subtheme: '', microtheme: '', primaryKeyword: '', longTailKeywords: [], style: '', palette: '', texture: '', keywords: [], characters: [], title: '', images: [], notes: '' });
@@ -117,6 +118,8 @@ export default function Home() {
   }, []);
   const [message, setMessage] = useState('');
   const [target, setTarget] = useState(120);
+  const [fullAutoRequested, setFullAutoRequested] = useState(false);
+  useEffect(() => { setFullAutoRequested(Boolean(project.fullAutomation?.enabled)); }, [project.id]);
   const [model, setModel] = useState('gpt-image-1-mini');
   const [quality, setQuality] = useState('low');
   const [selected, setSelected] = useState<string[]>([]);
@@ -467,27 +470,41 @@ export default function Home() {
     if (project.url !== sourceUrl.trim() || !project.images.length) { setMessage('Load listing images first.'); return; }
     const chosenImages = project.selectedImageUrls ?? project.images;
     if (!chosenImages.length) { setMessage('Select at least one image to analyze.'); return; }
-    if (analysisProvider === 'openai') {
+    if (analysisProvider === 'openai' || fullAutoRequested) {
       // One persisted, asynchronous OpenAI response can analyze the selected
       // visual references and prepare the full 120-subject library remotely.
       // The browser is only a status viewer, never the job runner.
       setBusy('research-start'); setMessage('Saving the collection and submitting OpenAI background research…');
       try {
         await api({ action: 'save', id: project.id, name: project.name, data: project });
+        let fullAutomation: FullAutomation | undefined = project.fullAutomation;
+        if (fullAutoRequested) {
+          const res = await fetch('/api/full-automation', { method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'start', projectId: project.id, target }) });
+          const next = await res.json() as { error?: string; flow?: FullAutomation };
+          if (!res.ok || !next.flow) throw Error(next.error || 'Unable to start Full Automation');
+          fullAutomation = next.flow;
+        }
         const started = await fetch('/api/research-jobs', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ projectId: project.id, url: sourceUrl.trim(),
-            selectedImages: chosenImages, target, model: visualModel }),
+            selectedImages: chosenImages, target, model: fullAutoRequested ? preferences.analysisModel : visualModel }),
         });
         const result = await started.json() as { error?: string; job?: ResearchJobPreview };
         if (!started.ok || !result.job) throw new Error(result.error || 'Could not create background research job');
-        const snapshot = { ...project, researchJob: result.job };
+        const snapshot = { ...project, fullAutomation, researchJob: result.job };
         setProject(snapshot);
         setProjects(previous => [snapshot, ...previous.filter(p => p.id !== snapshot.id)]);
         setAnalysisProgress({ done: result.job.completedCount, total: result.job.target });
-        setMessage('OpenAI background research accepted. You may close PaletteIQ or shut down this PC; OpenAI continues processing. Reopen PaletteIQ to import the completed characters automatically. For a target above 160, use AI Fill afterward.');
+        setMessage(fullAutoRequested
+          ? 'Full Automation started. PaletteIQ will expand missing characters, generate prompts and images, revise similarity-flagged prompts once, then create the Etsy listing draft. OpenAI jobs run remotely; next workflow stages resume when PaletteIQ runs (including Desktop tray).'
+          : 'OpenAI background research accepted. You may close PaletteIQ or shut down this PC; OpenAI continues processing. Reopen PaletteIQ to import the completed characters automatically. For a target above 160, use AI Fill afterward.');
       } catch (error) {
-        setMessage('Background research not started: ' + (error instanceof Error ? error.message : String(error)) + '. Check the saved job before retrying to avoid duplicate API charges.');
+        if (fullAutoRequested) void fetch('/api/full-automation', { method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'pause', projectId: project.id }) }).catch(() => {});
+        setMessage('Background research not started:  + (error instanceof Error ? error.message : String(error)) + '. Check the saved job before retrying to avoid duplicate API charges.');
       } finally { setBusy(''); }
       return;
     }
