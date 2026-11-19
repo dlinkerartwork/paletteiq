@@ -7,7 +7,8 @@ import { imageBatches, projects, studioSettings } from '@/db/schema';
 import { userCredential } from '@/lib/credentials';
 import { eligibleForBulk, retryableFailedImage, isActiveBatchStatus } from '@/lib/production-rules';
 import { originalImagePrompt } from '@/lib/originality';
-import { reviewImageSimilarity, type SimilarityReview } from '@/lib/similarity-review';
+import type { SimilarityReview } from '@/lib/similarity-review';
+import { BATCH_IMPORT_LIMIT, BATCH_REVIEW_LIMIT, needsBatchReview, pendingBatchReviewCount, reviewStoredBatchImage } from '@/lib/image-review-queue';
 import { nativeAssetBucket } from '@/lib/native-bridge';
 import { acquireProductionLocks } from '@/lib/production-locks';
 import { mergeNewBatchResults } from '@/lib/batch-recovery';
@@ -164,23 +165,43 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
           const extension = job.format === 'jpeg' ? 'jpg' : 'png';
           await bucket.put(batchAssetKey(owner, record.custom_id!, extension, job.id), Uint8Array.from(atob(b64), c => c.charCodeAt(0)), { httpMetadata: { contentType: extension === 'jpg' ? 'image/jpeg' : 'image/png' } });
           item.status = 'done'; item.imageUrl = batchAssetUrl(record.custom_id!, extension, job.id);
-          // Similarity QC is advisory. A review outage must never block paid image recovery.
-          try {
-            item.similarityReview = await reviewImageSimilarity(key, b64, extension === 'jpg' ? 'image/jpeg' : 'image/png', references);
-          } catch { item.similarityReview = undefined; }
+          // Save the paid image first. The independent review queue will read it
+          // from durable storage on later syncs, without blocking PNG import.
         } else { item.status = 'error'; item.error = String(record.error?.message || record.response?.body?.error?.message || 'Batch item failed').slice(0, 260); }
         changedIds.add(item.id);
         handled++;
-        if (handled >= 5) { interrupted = true; break; }
+        if (handled >= BATCH_IMPORT_LIMIT) { interrupted = true; break; }
       }
-      if (handled >= 5) break;
+      if (handled >= BATCH_IMPORT_LIMIT) break;
     }
     if (!interrupted) for (const item of items) if (item.status === 'pending') { item.status = 'error'; item.error = 'No output returned by OpenAI for this item.'; changedIds.add(item.id); }
+  }
+  // Review at most two already-persisted images per sync, independently of
+  // the import budget. Keep the Batch active as "reviewing" until every saved
+  // asset has a verdict; Full Automation must not treat unchecked as clear.
+  if (bucket && isTerminal) {
+    const reviewQueue = items.filter(needsBatchReview).slice(0, BATCH_REVIEW_LIMIT);
+    for (const item of reviewQueue) {
+      const extension = job.format === 'jpeg' ? 'jpg' : 'png';
+      try {
+        item.similarityReview = await reviewStoredBatchImage(
+          bucket, batchAssetKey(owner, item.id, extension, job.id),
+          extension === 'jpg' ? 'image/jpeg' : 'image/png', key, references);
+      } catch (error) {
+        item.similarityReview = { status: 'unverified',
+          reason: 'Similarity review failed: ' +
+            (error instanceof Error ? error.message.slice(0,180) : 'unknown error'),
+          checkedAt: Date.now() };
+      }
+      changedIds.add(item.id);
+    }
   }
   const newCompleted = items.filter(i => i.status === 'done').length;
   const newFailed = items.filter(i => i.status === 'error').length;
   const importedAll = isTerminal && items.every(i => i.status !== 'pending');
-  const status = importedAll ? (newFailed ? 'completed_with_errors' : 'completed') : isTerminal ? 'importing' : batch.status;
+  const status = importedAll
+    ? pendingBatchReviewCount(items) ? 'reviewing' : (newFailed ? 'completed_with_errors' : 'completed')
+    : isTerminal ? 'importing' : batch.status;
   const requestCompleted = batch.request_counts?.completed || 0;
   const requestFailed = batch.request_counts?.failed || 0;
   // Persist asset references in the collection BEFORE advancing job bookkeeping.
@@ -199,7 +220,7 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
   // bookkeeping is durable. A mail relay outage never invalidates a paid Batch.
   // Recovery fallback: if the relay was temporarily unavailable at OpenAI
   // completion, keep retrying after images import successfully.
-  if (importedAll && batch.status === 'completed' && savedProject.length &&
+  if (importedAll && !pendingBatchReviewCount(items) && batch.status === 'completed' && savedProject.length &&
       pendingImageBatchNotification(savedJob)) {
     try { await queueFinishedImageBatchEmail(savedJob, owner, userEmail, storeName, savedProject[0].name, batch.request_counts ?? {}); }
     catch { /* Keep the completion durable; notification can retry on syncAll. */ }
