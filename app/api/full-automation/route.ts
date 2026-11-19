@@ -17,15 +17,15 @@ import { POST as studioPost } from '@/app/api/studio/route';
 import { POST as rewritePost } from '@/app/api/regenerate-prompt/route';
 
 type Stage = 'research'|'expanding'|'prompts'|'images'|'revising'|'regenerating'|'verifying'|'listing'|'completed'|'paused';
-type Flow = { enabled: boolean; stage: Stage; target: number; startedAt: number; updatedAt: number;
+type Flow = { enabled: boolean; stage: Stage; target: number; textModel?: string; startedAt: number; updatedAt: number;
   resumeStage?: Stage; lastError?: string; leaseUntil?: number; expandAttempts?: number;
   promptAttempts?: number; imageAttempts?: number; revisionAttempts?: number;
   reviewQueue?: string[]; revisedIds?: string[]; regenerationBatchId?: string };
 type Subject = PromptProject['characters'][number] & { imageUrl?: string; origin?: string;
   similarityReview?: { status?: string; score?: number; reason?: string } };
 type Project = Omit<PromptProject, 'characters'> & Pick<PromptProject, 'id' | 'name' | 'title' | 'theme' | 'subtheme' | 'microtheme' | 'style' | 'palette' | 'texture' | 'primaryKeyword' | 'keywords' | 'longTailKeywords' | 'notes' | 'emotionDirection' | 'ageDirection' | 'cutenessDirection' | 'creativeControls' | 'research' | 'promptJob'> & { characters: Subject[]; fullAutomation?: Flow;
-  researchJob?: { status: string; error?: string; responseId?: string; selectedImages?: string[] }; listing?: { title?: string };
-  url?: string; images?: string[]; selectedImageUrls?: string[] };
+  researchJob?: { status: string; error?: string; responseId?: string; selectedImages?: string[]; model?: string }; listing?: { title?: string };
+  url?: string; images?: string[]; selectedImageUrls?: string[]; characterTarget?: number; researchModel?: string };
 type Prefs = { automationPromptModel?: string; automationImageModel?: string;
   quality?: string; seoProvider?: string; seoOpenaiModel?: string; seoGeminiModel?: string };
 const idValid = (x: unknown): x is string => typeof x === 'string' && /^[\w-]{8,80}$/.test(x);
@@ -138,6 +138,12 @@ async function jobs(owner: string, id: string) {
 const imageModel = (prefs: Prefs) =>
   ['gpt-image-2.5-flare','gpt-image-2.5-sunburst'].includes(prefs.automationImageModel || '')
     ? prefs.automationImageModel! : 'gpt-image-2.5-flare';
+// A collection's text model is frozen when Full Automation starts. Changes to
+// Settings must not silently switch models on already accepted paid jobs.
+const textModel = (p: Project, fallback = 'gpt-4.1-mini') => {
+  const saved = p.fullAutomation?.textModel || p.researchJob?.model;
+  return saved && /^gpt-[a-z0-9.-]{1,80}$/.test(saved) ? saved : fallback;
+};
 const quality = (prefs: Prefs) =>
   ['low','medium','high'].includes(prefs.quality || '') ? prefs.quality! : 'low';
 
@@ -178,6 +184,7 @@ async function tick(req: Request, owner: string, id: string) {
         const out=await apiPost(req,studioPost,{
           action:'expand',count:n,target:f.target,title:p.title||p.name,
           analysis:projectPromptContext(p),images:p.selectedImageUrls||p.images,
+          model:textModel(p),
           existing:p.characters.map(c=>({name:c.name,family:c.family,expression:c.expression})),
         });
         const proposals=(Array.isArray(out.characters)?out.characters:[]) as Array<Record<string,string>>;
@@ -205,7 +212,7 @@ async function tick(req: Request, owner: string, id: string) {
         await save(owner,id,latest=>({...latest,fullAutomation:{
           ...latest.fullAutomation!,promptAttempts:(latest.fullAutomation?.promptAttempts||0)+1,updatedAt:Date.now()}}));
         const config=await prefs(owner);
-        const model=/^gpt-[a-z0-9.-]{1,80}$/.test(config.automationPromptModel||'')?config.automationPromptModel!:'gpt-4.1-mini';
+        const model=textModel(p,config.automationPromptModel||'gpt-4.1-mini');
         await apiPost(req,promptPost,{projectId:id,characterIds:missing.slice(0,200).map(c=>c.id),model,regenerate:false});
       } else throw Error('Incomplete prompts after three attempts. Review missing prompts before resuming.');
     } else if (f.stage === 'images') {
@@ -280,8 +287,8 @@ async function tick(req: Request, owner: string, id: string) {
       else {
         const config=await prefs(owner);
         const result=await apiPost(req,studioPost,{action:'listing-draft',project:p,
-          seoProvider:config.seoProvider||'openai',
-          seoOpenaiModel:config.seoOpenaiModel||'gpt-4.1-mini',
+          seoProvider:p.fullAutomation?.textModel?'openai':(config.seoProvider||'openai'),
+          seoOpenaiModel:textModel(p,config.seoOpenaiModel||'gpt-4.1-mini'),
           seoGeminiModel:config.seoGeminiModel||'gemini-2.5-pro',
           analyzeWithAi:true});
         const draft=normalizeListing(result.draft);
@@ -389,7 +396,7 @@ export async function POST(req:Request) {
   const user=await getChatGPTUser();
   if (!user) return bad('Sign in required',401);
   if (!assertSameOrigin(req)) return bad('Cross-site automation request denied',403);
-  let body:{action?:string;projectId?:string;target?:number;syncAll?:boolean};
+  let body:{action?:string;projectId?:string;target?:number;model?:string;syncAll?:boolean};
   try {body=await req.json();} catch {return bad('Invalid JSON');}
   if (body.action==='tick' && body.syncAll===true) {
     const rows=await getDb().select().from(projects).where(eq(projects.owner,user.userId))
@@ -406,13 +413,15 @@ export async function POST(req:Request) {
   if (body.action==='start') {
     const target=Number(body.target);
     if (!Number.isInteger(target)||target<1||target>200) return bad('Full automation supports 1–200 characters');
+    const requestedModel=String(body.model||'gpt-4.1-mini');
+    if (!/^gpt-[a-z0-9.-]{1,80}$/.test(requestedModel)) return bad('Choose a valid OpenAI text/vision model');
     if (current.p.fullAutomation && current.p.fullAutomation.stage !== 'completed')
       return bad('An automation workflow already exists. Resume the paused workflow rather than submitting duplicate paid work.',409);
     if (current.p.characters.some(c=>c.imageUrl)) return bad('Full automation must start before image generation',409);
     const now=Date.now();
-    const flow:Flow={enabled:true,stage:'research',target,startedAt:now,updatedAt:now,
+    const flow:Flow={enabled:true,stage:'research',target,textModel:requestedModel,startedAt:now,updatedAt:now,
       expandAttempts:0,promptAttempts:0,imageAttempts:0};
-    return Response.json(progress(await save(user.userId,id,p=>({...p,fullAutomation:flow}))));
+    return Response.json(progress(await save(user.userId,id,p=>({...p,characterTarget:target,researchModel:requestedModel,fullAutomation:flow}))));
   }
   if (body.action==='pause') {
     if (!current.p.fullAutomation) return bad('No Full Automation workflow exists',409);
