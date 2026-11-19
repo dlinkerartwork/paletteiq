@@ -60,8 +60,32 @@ function canRestartMissingResearch(p: Project) {
     !p.researchJob && !p.characters.length &&
     !!p.url && !!(p.selectedImageUrls ?? p.images ?? []).length;
 }
+function researchRecovery(p: Project) {
+  const flow = p.fullAutomation;
+  const job = p.researchJob;
+  if (!flow?.enabled || flow.stage !== 'paused' ||
+      (flow.resumeStage || 'research') !== 'research') return null;
+  if (job) {
+    // A failed job may still have reached OpenAI before a network error.
+    // Never offer automatic resubmission for an existing research receipt.
+    return { state: job.status, message: job.status === 'failed'
+      ? 'Saved research job failed. Check OpenAI usage and the original job error before attempting new paid research.'
+      : job.status === 'submitting'
+        ? 'Research submission may be pending or ambiguous. Do not create a second paid job.'
+        : job.status === 'completed'
+          ? 'Research completed. Resume the workflow to import or advance.'
+          : 'A saved research job exists. Resume to check its status; do not submit another research request.' };
+  }
+  if (!p.url) return { state:'missing-source', message:'No Etsy source URL is saved. Load the Etsy listing and save the collection before recovery.' };
+  if (!(p.selectedImageUrls ?? p.images ?? []).length) return { state:'missing-references',
+    message:'No selected Etsy reference images are saved. Load and select reference images before recovery.' };
+  if (p.characters.length) return { state:'existing-characters',
+    message:'This collection already has characters. Do not reset its research state.' };
+  return { state:'ready', message:'No saved research job is present. Check OpenAI usage before starting missing research once.' };
+}
 function progress(p: Project) {
   return { flow: p.fullAutomation || null,
+    researchRecovery: researchRecovery(p),
     canRestartMissingResearch: Boolean(canRestartMissingResearch(p)), characterCount: p.characters.length,
     promptCount: p.characters.filter(c => !!c.prompt?.trim()).length,
     imageCount: p.characters.filter(c => !!c.imageUrl).length,
