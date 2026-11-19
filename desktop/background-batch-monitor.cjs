@@ -6,10 +6,17 @@
  * background Electron process and its local Wrangler worker to remain alive.
  * No OpenAI credentials or SMTP secrets cross into Electron's main process.
  */
-const SYNC_SCRIPT = `fetch('/api/image-batches?syncAll=1', {
-  credentials: 'same-origin',
-  cache: 'no-store'
-}).then(response => response.ok).catch(() => false)`;
+const SYNC_SCRIPT = `Promise.all([
+  fetch('/api/image-batches?syncAll=1', {
+    credentials: 'same-origin', cache: 'no-store'
+  }).then(response => response.ok).catch(() => false),
+  fetch('/api/full-automation', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'tick', syncAll: true })
+  }).then(response => response.ok).catch(() => false)
+]).then(results => results.some(Boolean))`;
 
 async function pollHiddenImageBatches(window, log = () => {}) {
   if (!window || window.isDestroyed() || window.isVisible()) return false;
