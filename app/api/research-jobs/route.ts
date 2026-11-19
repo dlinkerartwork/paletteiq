@@ -30,12 +30,33 @@ type Collection = {
 type ApiResponse = { id?: string; status?: string; output?: Array<{ content?: Array<{ text?: string }> }>; error?: { message?: string }; incomplete_details?: { reason?: string } };
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 
+const workerPreview = (worker: HybridWorker) => {
+  // These are NONFINAL candidate ideas only. Never expose raw provider JSON
+  // as markup, count them as saved assets, or import them before Style DNA merge.
+  let parsed: {theme?:unknown;style?:unknown;characters?:unknown} = {};
+  try { if (worker.status==='completed' && worker.resultText)
+    parsed=JSON.parse(worker.resultText) as typeof parsed; } catch { /* no provisional preview */ }
+  const candidates=Array.isArray(parsed.characters)?parsed.characters:[];
+  const concepts=candidates.slice(0,60).flatMap((raw): Array<{name:string;family:string;description:string}>=>{
+    if (!raw || typeof raw!=='object') return [];
+    const item=raw as Record<string,unknown>;
+    if (typeof item.name!=='string'||!item.name.trim()) return [];
+    return [{name:item.name.trim().slice(0,120),
+      family:typeof item.family==='string'?item.family.slice(0,80):'',
+      description:typeof item.description==='string'?item.description.slice(0,160):''}];
+  });
+  return {index:worker.index,status:worker.status,imageCount:worker.images.length,
+    theme:typeof parsed.theme==='string'?parsed.theme.slice(0,120):'',
+    style:typeof parsed.style==='string'?parsed.style.slice(0,160):'',
+    concepts,error:worker.error?.slice(0,180)};
+};
 const safeJob = (job: ResearchJob) => ({
   id: job.id, status: job.status, target: job.target, requested: job.requested,
   completedCount: job.completedCount, model: job.model, createdAt: job.createdAt,
   updatedAt: job.updatedAt, error: job.error,
   workersCompleted: job.workers?.filter(w => w.status === 'completed').length,
   workersTotal: job.workers?.length, mergeStatus: job.mergeStatus,
+  workerPreviews:job.workers?.map(workerPreview),
 });
 const active = (job?: ResearchJob) => job && ['submitting', 'queued', 'in_progress'].includes(job.status);
 const openai = (key: string, path: string, init?: RequestInit) => fetch('https://api.openai.com/v1/' + path, {
