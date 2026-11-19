@@ -101,6 +101,14 @@ export async function POST(req: Request) {
     if (current.length) {
       // An older browser snapshot must not erase assets already persisted by the image worker.
       const old = JSON.parse(current[0].data) as { thumbnails?: Array<{ id: string; upscaledImageUrl?: string; upscaleJob?: { id: string } }>; characters?: Array<{ id: string; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: { id: string }; status?: string; similarityReview?: SimilarityReview }>; lastDownloadedAt?: number; downloadCount?: number; lastDownloadImageCount?: number; downloadedImageIds?: string[] };
+      // The Full Automation worker owns its durable stage, new character
+      // additions and paid prompt/image results. A stale browser Save must
+      // never roll them back while the workflow is active.
+      const existingWorkflow = (old as { fullAutomation?: { enabled?: boolean; stage?: string } }).fullAutomation;
+      if (existingWorkflow?.enabled && !['paused','completed'].includes(existingWorkflow.stage || '')) {
+        return fail('Full Automation is running. Pause automation before manually saving this collection.', 409);
+      }
+      if (existingWorkflow) incoming.fullAutomation = existingWorkflow;
       // A background research run is server-owned. A stale page or a Save from
       // another tab must never erase its tracking ID or imported concepts.
       const serverResearch = (old as { researchJob?: { id: string; status: string } }).researchJob;
