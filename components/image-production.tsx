@@ -31,8 +31,6 @@ export default function ImageProduction({ project, model, batchPreferredModel, q
   const [mode, setMode] = useState<'single' | 'standard-bulk' | 'batch'>('batch');
   const automationActive = !!project.fullAutomation?.enabled && !['paused','completed'].includes(project.fullAutomation.stage);
   const [batchModel, setBatchModel] = useState(batchPreferredModel);
-  // Match the saved Settings/Full Automation selection across tab remounts.
-  useEffect(() => { if (!working) setBatchModel(batchPreferredModel); }, [batchPreferredModel, working]);
   const [imageModels, setImageModels] = useState<Array<{ id: string; name: string; batchSupported: boolean }>>([]);
   const [imageModelError, setImageModelError] = useState('');
   useEffect(() => {
@@ -50,6 +48,8 @@ export default function ImageProduction({ project, model, batchPreferredModel, q
   const [jobsLoaded, setJobsLoaded] = useState(() => batchJobSnapshot.has(project.id));
   useEffect(() => { batchJobSnapshot.set(project.id, jobs); }, [project.id, jobs]);
   const [working, setWorking] = useState(false);
+  // Match the saved Settings/Full Automation selection across tab remounts.
+  useEffect(() => { if (!working) setBatchModel(batchPreferredModel); }, [batchPreferredModel, working]);
   const [refreshing, setRefreshing] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [upscaleProvider, setUpscaleProvider] = useState<'remote'>('remote');
