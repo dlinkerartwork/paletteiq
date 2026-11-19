@@ -27,7 +27,7 @@ async function request<T = unknown>(url: string, options?: RequestInit): Promise
 const batchJobSnapshot = new Map<string, Job[]>();
 
 export default function ImageProduction({ project, model, quality, onModel, onQuality, onDownloaded, onAsset, onPromptChange, onUpscaleChange, onUpscaleBatch }: Props) {
-  const [mode, setMode] = useState<'single' | 'batch'>('batch');
+  const [mode, setMode] = useState<'single' | 'standard-bulk' | 'batch'>('batch');
   const automationActive = !!project.fullAutomation?.enabled && !['paused','completed'].includes(project.fullAutomation.stage);
   const [batchModel, setBatchModel] = useState('gpt-image-2.5-flare');
   const [imageModels, setImageModels] = useState<Array<{ id: string; name: string; batchSupported: boolean }>>([]);
@@ -73,6 +73,7 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
     return () => { live = false; };
   }, []);
   const [singleProgress, setSingleProgress] = useState({ done: 0, total: 0 });
+  const [bulkWorkers, setBulkWorkers] = useState(3);
   const [message, setMessage] = useState('');
   useEffect(() => { try { const notice = sessionStorage.getItem('paletteiq-upscale-submission-notice'); if (notice) { setMessage(notice); sessionStorage.removeItem('paletteiq-upscale-submission-notice'); } } catch { /* Optional notice. */ } }, []);
   useEffect(() => {
@@ -277,6 +278,48 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
     finally { setWorking(false); }
   };
 
+  const generateStandardBulk = async () => {
+    if (!jobsLoaded || working || automationActive || !selectedBatchIds.length) return;
+    const selected = project.characters.filter(c => selectedBatchIds.includes(c.id));
+    if (soundEnabled) primeProductionAudio();
+    setWorking(true);
+    setSingleProgress({ done: 0, total: selected.length });
+    setMessage('Standard Bulk started. Keep PaletteIQ running until all requests finish; paid requests cannot be cancelled safely by closing this tab.');
+    let next = 0;
+    let completed = 0;
+    let failed = 0;
+    try {
+      await request('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'save', id: project.id, name: project.name, data: project }) });
+      const worker = async () => {
+        while (next < selected.length) {
+          const item = selected[next++];
+          try {
+            const data = await request<{ imageUrl: string; similarityReview?: SimilarityReview }>(
+              '/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'generate', model, quality, projectId: project.id, characterId: item.id }) });
+            onAsset(item.id, { imageUrl: data.imageUrl, status: 'done', error: '', similarityReview: data.similarityReview });
+          } catch (error) {
+            failed++;
+            reportCredit(error);
+            // Uncertain API responses are not automatically retried (they may
+            // already have been billed). Recovery runs once after all workers.
+          } finally {
+            completed++;
+            setSingleProgress({ done: completed, total: selected.length });
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(bulkWorkers, selected.length) }, () => worker()));
+      await recoverImages(true);
+      setMessage('Standard Bulk finished: ' + (completed - failed) + ' succeeded, ' + failed +
+        ' need review. Check recovered images and API usage before retrying any failed request.');
+      if (!failed) playSound('completed');
+    } catch (error) {
+      setMessage('Standard Bulk could not start: ' + (error instanceof Error ? error.message : String(error)));
+    } finally { setWorking(false); }
+  };
+
   const submitBatch = async (ids = selectedBatchIds, regenerate = false) => {
     if (!jobsLoaded || !ids.length || ids.some(id => pending.has(id))) return;
     if (soundEnabled) primeProductionAudio();
@@ -402,21 +445,23 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
     <div className="production-dashboard">
     <div className="production-dashboard-main">
     <section className="panel production-setup">
-      <div className="production-mode-head"><div><h2>Generation mode</h2><p className="sub">Images and their collection records are automatically saved. Generate one character or submit a discounted Batch job.</p></div><div className="mode-switch"><button className={mode === 'single' ? 'active' : ''} onClick={() => setMode('single')}>Single</button><button className={mode === 'batch' ? 'active' : ''} onClick={() => setMode('batch')}>Batch <span>Save ~50%</span></button></div></div>
+      <div className="production-mode-head"><div><h2>Generation mode</h2><p className="sub">Images and their collection records are automatically saved. Generate one image, generate multiple images with Standard Bulk (3–5 workers), or submit a discounted Batch job.</p></div><div className="mode-switch"><button className={mode === 'single' ? 'active' : ''} onClick={() => setMode('single')}>Single</button><button className={mode === 'standard-bulk' ? 'active' : ''} onClick={() => setMode('standard-bulk')}>Standard Bulk</button><button className={mode === 'batch' ? 'active' : ''} onClick={() => setMode('batch')}>Batch <span>Save ~50%</span></button></div></div>
       <div className="image-download-actions"><button className="outline-btn" disabled={working} onClick={() => void recoverImages()}><RefreshCw size={14}/> Recover images</button><button type="button" className="outline-btn" onClick={toggleSound} aria-label="Toggle generation sound alerts">{soundEnabled ? '🔊 Sound alerts on' : '🔇 Sound alerts off'}</button></div>
       {automationActive && <p className="sub">Full Automation owns image submission and similarity-regeneration Batches. Pause it in the Research & analysis workflow before running manual generation or prompt revisions.</p>}
       {creditAlert && <div className="notice production-notice" role="alert"><CircleAlert size={16}/><strong>{creditAlert}</strong><button type="button" onClick={() => setCreditAlert('')}>Dismiss</button></div>}
       <div className="production-controls">
-        <div><label className="input-label">{mode === 'single' ? 'IMAGE MODEL' : 'BATCH IMAGE MODEL'}</label>{mode === 'single' ? <select value={model} onChange={e => onModel(e.target.value)}>{!imageModels.some(m => m.id === model) && <option value={model}>{model} (saved model)</option>}{imageModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select> : <select value={batchModel} onChange={e => setBatchModel(e.target.value)}>{!imageModels.some(m => m.id === batchModel && m.batchSupported) && <option value={batchModel}>{batchModel} (saved batch model)</option>}{imageModels.filter(m => m.batchSupported).map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select>}{imageModelError && <p className="sub">{imageModelError}</p>}</div>
+        <div><label className="input-label">{mode !== 'batch' ? 'IMAGE MODEL' : 'BATCH IMAGE MODEL'}</label>{mode !== 'batch' ? <select value={model} onChange={e => onModel(e.target.value)}>{!imageModels.some(m => m.id === model) && <option value={model}>{model} (saved model)</option>}{imageModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select> : <select value={batchModel} onChange={e => setBatchModel(e.target.value)}>{!imageModels.some(m => m.id === batchModel && m.batchSupported) && <option value={batchModel}>{batchModel} (saved batch model)</option>}{imageModels.filter(m => m.batchSupported).map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select>}{imageModelError && <p className="sub">{imageModelError}</p>}</div>
         <div><label className="input-label">QUALITY</label><select value={quality} onChange={e => onQuality(e.target.value)}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></div>
+        {mode === 'standard-bulk' && <div><label className="input-label">PARALLEL WORKERS</label><select value={bulkWorkers} onChange={e => setBulkWorkers(Number(e.target.value))}><option value={3}>3 workers</option><option value={4}>4 workers</option><option value={5}>5 workers</option></select></div>}
         {mode === 'single' && <div className="character-choice"><label className="input-label">CHOOSE NEVER-GENERATED CHARACTER</label><select value={chosenSingle?.id ?? ''} onChange={e => setSingleId(e.target.value)}><option value="" disabled>Select a character...</option>{eligible.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>}
-        <button className="primary-btn" disabled={automationActive || working || downloading || !jobsLoaded || (mode === 'single' ? !chosenSingle : !selectedBatchIds.length)} onClick={() => mode === 'single' ? void generateSingle() : void submitBatch()}>{working ? <LoaderCircle size={17} className="spin"/> : <Sparkles size={17}/>} {mode === 'single' ? 'Generate single image' : `Submit ${selectedBatchIds.length} new prompts to Batch`}</button>
+        <button className="primary-btn" disabled={automationActive || working || downloading || !jobsLoaded || (mode === 'single' ? !chosenSingle : !selectedBatchIds.length)} onClick={() => mode === 'single' ? void generateSingle() : mode === 'standard-bulk' ? void generateStandardBulk() : void submitBatch()}>{working ? <LoaderCircle size={17} className="spin"/> : <Sparkles size={17}/>} {mode === 'single' ? 'Generate single image' : mode === 'standard-bulk' ? `Generate ${selectedBatchIds.length} images in Standard Bulk` : `Submit ${selectedBatchIds.length} new prompts to Batch`}</button>
       </div>
       {mode === 'batch' && <p className="sub">On PaletteIQ Desktop, OpenAI Batch completion emails are sent directly via the built-in SMTP settings (installer .env defaults or store override). Close to tray keeps monitoring while Windows is signed in. No GPU server, LAN, public HTTPS or OpenAI webhook is required; PNG import may still be pending.</p>}
+      {mode === 'standard-bulk' && <p className="sub">Standard Bulk uses live requests and requires this app to stay open. Select image cards to limit the job; otherwise all eligible prompts are used. Failed or uncertain requests are not retried automatically.</p>}
       {mode === 'batch' && <div className="batch-selector"><div className="batch-selector-head"><div><b>New prompt submission</b><small>{eligible.length} never-generated prompts available. Selected cards limit submission to eligible prompts; otherwise all eligible prompts are submitted (automatically split into groups of 50).</small></div><button onClick={() => setSelectedIds([])}>Clear selection</button></div><p className="batch-hint"><Clock3 size={15}/> Previously generated items are never included in bulk submission. Use per-card Regenerate for an explicit rerun. Batch jobs continue after closing the browser.</p></div>}
       {message && <div className="notice production-notice"><CircleAlert size={16}/>{message}</div>}
       <div className="production-progress"><div><span>Collection images produced</span><b>{completedTotal} / {project.characters.length}</b></div><div className="progress"><i style={{ width: `${project.characters.length ? completedTotal / project.characters.length * 100 : 0}%` }}/></div></div>
-      {mode === 'single' && working && <div className="single-loading"><LoaderCircle className="spin" size={16}/> Single image in progress · {singleProgress.done}/{singleProgress.total} completed</div>}
+      {mode !== 'batch' && working && <div className="single-loading"><LoaderCircle className="spin" size={16}/> {mode === 'single' ? 'Single image' : 'Standard Bulk'} in progress · {singleProgress.done}/{singleProgress.total} completed</div>}
     </section>
     </div>
     <aside className="panel production-activity" aria-label="Production activity">
@@ -462,7 +507,7 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
         {upscaleBatchStatus?.notificationStatus ? ' · ' + upscaleBatchStatus.notificationStatus : ''}</p>
       <p className="sub">Keep the client open until the whole Batch has been committed. After that, GPU work and email notification continue without the client PC.</p>
     </div>}
-    <div className="assets-grid">{project.characters.map(c => <div className={`asset-card image-select-card ${selectedIds.includes(c.id) ? 'selected' : ''}`} key={c.id}><label className="asset-select"><input type="checkbox" aria-label={`Select ${c.name}`} checked={selectedIds.includes(c.id)} onChange={e => setSelectedIds(ids => e.target.checked ? [...ids, c.id] : ids.filter(id => id !== c.id))}/><span>Select</span></label><div className="asset-image">{c.imageUrl ? <Image unoptimized width={1024} height={1024} src={c.imageUrl} alt={c.name}/> : <ImageIcon size={36}/>}</div><div className="asset-meta"><b>{c.name}</b><span className={`status ${c.status}`}>{c.status}</span></div>{pending.has(c.id) && <p className="asset-pending">Batch pending</p>}{c.upscaleJob && <div className="asset-upscaled"><span>Remote GPU: {remoteProgress[c.id]?.status === 'sync_error' ? 'Import failed' : remoteProgress[c.id]?.status || 'queued'} · {Math.floor((remoteProgress[c.id]?.elapsed || 0) / 60)}m {Math.floor((remoteProgress[c.id]?.elapsed || 0) % 60)}s</span><button className="outline-btn" type="button" onClick={() => void cancelRemoteUpscale(c)}>Cancel upscale</button></div>}{c.upscaledImageUrl && <div className="asset-upscaled"><button type="button" className="outline-btn" onClick={() => c.imageUrl && setUpscalePreview({ name: c.name, originalUrl: c.imageUrl, upscaledUrl: c.upscaledImageUrl! })}>View upscale</button><a className="outline-btn" href={c.upscaledImageUrl + '&download=1'} download>Download upscale</a></div>}{c.imageUrl && <div className={`similarity-note similarity-${c.similarityReview?.status || 'unverified'}`} title={c.similarityReview?.reason || 'Not checked yet'}>{c.similarityReview?.status === 'needs_review' ? `⚠ Similar to reference (${c.similarityReview.score}%) — review / regenerate` : c.similarityReview?.status === 'clear' ? `✓ AI visual review: low similarity (${c.similarityReview.score}%)` : 'Similarity not verified'}{c.similarityReview?.reason && <small>{c.similarityReview.reason}</small>}</div>}{c.error && <p className="asset-error">{c.error}</p>}<div className="asset-card-actions">{c.similarityReview?.status === 'needs_review' && <button type="button" className="outline-btn" disabled={automationActive || working || pending.has(c.id)} onClick={() => void rewriteSimilarityPrompt(c)}><Sparkles size={14}/> Regenerate prompt (too similar)</button>}<button className="outline-btn" disabled={automationActive || working || pending.has(c.id) || !c.prompt} onClick={() => mode === 'single' ? void generateSingle(c) : void submitBatch([c.id], everGenerated(c))}>{working ? <LoaderCircle size={14} className="spin"/> : <Sparkles size={14}/>} {everGenerated(c) ? 'Regenerate' : 'Generate'} {mode === 'batch' ? '(Batch)' : '(Single)'}</button>{c.imageUrl && <a className="outline-btn" href={`${c.imageUrl}&download=1`} download><Download size={14}/> Download</a>}</div></div>)}</div>
+    <div className="assets-grid">{project.characters.map(c => <div className={`asset-card image-select-card ${selectedIds.includes(c.id) ? 'selected' : ''}`} key={c.id}><label className="asset-select"><input type="checkbox" aria-label={`Select ${c.name}`} checked={selectedIds.includes(c.id)} onChange={e => setSelectedIds(ids => e.target.checked ? [...ids, c.id] : ids.filter(id => id !== c.id))}/><span>Select</span></label><div className="asset-image">{c.imageUrl ? <Image unoptimized width={1024} height={1024} src={c.imageUrl} alt={c.name}/> : <ImageIcon size={36}/>}</div><div className="asset-meta"><b>{c.name}</b><span className={`status ${c.status}`}>{c.status}</span></div>{pending.has(c.id) && <p className="asset-pending">Batch pending</p>}{c.upscaleJob && <div className="asset-upscaled"><span>Remote GPU: {remoteProgress[c.id]?.status === 'sync_error' ? 'Import failed' : remoteProgress[c.id]?.status || 'queued'} · {Math.floor((remoteProgress[c.id]?.elapsed || 0) / 60)}m {Math.floor((remoteProgress[c.id]?.elapsed || 0) % 60)}s</span><button className="outline-btn" type="button" onClick={() => void cancelRemoteUpscale(c)}>Cancel upscale</button></div>}{c.upscaledImageUrl && <div className="asset-upscaled"><button type="button" className="outline-btn" onClick={() => c.imageUrl && setUpscalePreview({ name: c.name, originalUrl: c.imageUrl, upscaledUrl: c.upscaledImageUrl! })}>View upscale</button><a className="outline-btn" href={c.upscaledImageUrl + '&download=1'} download>Download upscale</a></div>}{c.imageUrl && <div className={`similarity-note similarity-${c.similarityReview?.status || 'unverified'}`} title={c.similarityReview?.reason || 'Not checked yet'}>{c.similarityReview?.status === 'needs_review' ? `⚠ Similar to reference (${c.similarityReview.score}%) — review / regenerate` : c.similarityReview?.status === 'clear' ? `✓ AI visual review: low similarity (${c.similarityReview.score}%)` : 'Similarity not verified'}{c.similarityReview?.reason && <small>{c.similarityReview.reason}</small>}</div>}{c.error && <p className="asset-error">{c.error}</p>}<div className="asset-card-actions">{c.similarityReview?.status === 'needs_review' && <button type="button" className="outline-btn" disabled={automationActive || working || pending.has(c.id)} onClick={() => void rewriteSimilarityPrompt(c)}><Sparkles size={14}/> Regenerate prompt (too similar)</button>}<button className="outline-btn" disabled={automationActive || working || pending.has(c.id) || !c.prompt} onClick={() => mode !== 'batch' ? void generateSingle(c) : void submitBatch([c.id], everGenerated(c))}>{working ? <LoaderCircle size={14} className="spin"/> : <Sparkles size={14}/>} {everGenerated(c) ? 'Regenerate' : 'Generate'} {mode === 'batch' ? '(Batch)' : '(Single)'}</button>{c.imageUrl && <a className="outline-btn" href={`${c.imageUrl}&download=1`} download><Download size={14}/> Download</a>}</div></div>)}</div>
     {upscalePreview && <UpscaleCompare name={upscalePreview.name} originalUrl={upscalePreview.originalUrl} upscaledUrl={upscalePreview.upscaledUrl} onClose={() => setUpscalePreview(null)}/>}
     {!project.characters.length && <div className="panel empty-state"><ImageIcon size={32}/><strong>No image subjects yet</strong><p>Create characters and prompts first.</p></div>}
   </>;
