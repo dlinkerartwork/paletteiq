@@ -6,6 +6,7 @@ import UpscaleCompare from '@/components/upscale-compare';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CheckCircle2, CircleAlert, Clock3, Download, Image as ImageIcon, LoaderCircle, RefreshCw, Sparkles } from 'lucide-react';
 import { eligibleForBulk, isActiveBatchStatus, wasPreviouslyGenerated } from '@/lib/production-rules';
+import { runBoundedQueue } from '@/lib/standard-bulk-queue';
 import type { StoredUpscaleBatch } from '@/lib/upscale-batch-transport';
 import type { SimilarityReview } from '@/lib/similarity-review';
 import { isOpenAICreditError, primeProductionAudio, useProductionSounds } from '@/lib/production-sounds';
@@ -285,36 +286,24 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
     setWorking(true);
     setSingleProgress({ done: 0, total: selected.length });
     setMessage('Standard Bulk started. Keep PaletteIQ running until all requests finish; paid requests cannot be cancelled safely by closing this tab.');
-    let next = 0;
-    let completed = 0;
-    let failed = 0;
     try {
       await request('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'save', id: project.id, name: project.name, data: project }) });
-      const worker = async () => {
-        while (next < selected.length) {
-          const item = selected[next++];
-          try {
-            const data = await request<{ imageUrl: string; similarityReview?: SimilarityReview }>(
-              '/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'generate', model, quality, projectId: project.id, characterId: item.id }) });
-            onAsset(item.id, { imageUrl: data.imageUrl, status: 'done', error: '', similarityReview: data.similarityReview });
-          } catch (error) {
-            failed++;
-            reportCredit(error);
-            // Uncertain API responses are not automatically retried (they may
-            // already have been billed). Recovery runs once after all workers.
-          } finally {
-            completed++;
-            setSingleProgress({ done: completed, total: selected.length });
-          }
+      const result = await runBoundedQueue(selected, bulkWorkers, async item => {
+        try {
+          const data = await request<{ imageUrl: string; similarityReview?: SimilarityReview }>(
+            '/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'generate', model, quality, projectId: project.id, characterId: item.id }) });
+          onAsset(item.id, { imageUrl: data.imageUrl, status: 'done', error: '', similarityReview: data.similarityReview });
+        } catch (error) {
+          reportCredit(error);
+          throw error; // Never retry uncertain or already-billed API requests.
         }
-      };
-      await Promise.all(Array.from({ length: Math.min(bulkWorkers, selected.length) }, () => worker()));
+      }, (done, total) => setSingleProgress({ done, total }));
       await recoverImages(true);
-      setMessage('Standard Bulk finished: ' + (completed - failed) + ' succeeded, ' + failed +
+      setMessage('Standard Bulk finished: ' + (result.completed - result.failed) + ' succeeded, ' + result.failed +
         ' need review. Check recovered images and API usage before retrying any failed request.');
-      if (!failed) playSound('completed');
+      if (!result.failed) playSound('completed');
     } catch (error) {
       setMessage('Standard Bulk could not start: ' + (error instanceof Error ? error.message : String(error)));
     } finally { setWorking(false); }
