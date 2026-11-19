@@ -327,9 +327,17 @@ async function synchronizeProgressive(owner:string,id:string,job:PromptBatchJob)
   if(!updated)return fail('Progressive job missing',409);
   const groups=updated.progressiveBatches||[];
   if(groups.some(g=>g.status==='uncertain')){
+    // Continue importing all ALREADY accepted groups before pausing the
+    // workflow. Never send planned groups once any receipt is uncertain.
+    const running=groups.some(g=>['submitting','queued','in_progress'].includes(g.status));
+    if(running){
+      const fresh=await ownedProject(owner,id);
+      return Response.json({job:safeJob(fresh?.data.promptJob||updated),project:fresh?.data});
+    }
     const failed=await saveJob(owner,id,job.id,{status:'failed',
       error:'A progressive group has uncertain paid submission status. Check OpenAI Batch activity before retrying.'});
-    return Response.json({job:safeJob(failed||updated)});
+    const fresh=await ownedProject(owner,id);
+    return Response.json({job:safeJob(failed||updated),project:fresh?.data});
   }
   if(groups.every(g=>['completed','failed'].includes(g.status))){
     const finished=await saveJob(owner,id,job.id,{
