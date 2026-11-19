@@ -138,7 +138,11 @@ export async function POST(req: Request) {
         incoming.promptJob = serverPromptJob;
         const browserSawCompletion = browserPromptJob?.id === serverPromptJob.id &&
           browserPromptJob.status === serverPromptJob.status;
-        if (!browserSawCompletion && ['completed','completed_with_errors','failed','cancelled','expired'].includes(serverPromptJob.status)) {
+        // Progressive groups can commit valid prompts WHILE the overall job is
+        // still running. A stale Save must preserve those paid, already-imported
+        // outputs rather than overwrite them with an older blank prompt.
+        const jobStillRunning = !['completed','completed_with_errors','failed','cancelled','expired'].includes(serverPromptJob.status);
+        if (!browserSawCompletion || jobStillRunning) {
           const completedIds = new Set((serverPromptJob.items || []).filter(item => item.status === 'done').map(item => item.id));
           const storedPrompts = new Map((old.characters || []).filter(c => completedIds.has(c.id)).map(c => [c.id, c]));
           incoming.characters = incoming.characters.map(c => {
