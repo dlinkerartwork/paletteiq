@@ -667,21 +667,41 @@ export default function Home() {
       } finally { setBusy(''); }
       return;
     }
-    // Gemini retains its existing foreground prompt-generation implementation.
+    // Gemini remains foreground. Use small groups to reduce truncation. Preserve
+    // valid prompts even when one response omits a subject, and checkpoint each
+    // group before moving to the next; a lost tab does not discard paid work.
     setBusy('prompts'); setPromptProgress({ done: 0, total: chosen.length }); setMessage('');
     let completed = 0;
+    let current = project;
     try {
-      for (let i = 0; i < chosen.length; i += 10) {
-        const group = chosen.slice(i, i + 10);
-        const result = await api({ action: 'generate-prompts', promptProvider, promptModel, title: project.title || project.name, analysis: creativeContext(project), characters: group });
-        const generated = new Map<string, string>((result.prompts as { id: string; prompt: string }[]).map(p => [p.id, p.prompt]));
-        if (generated.size !== group.length) throw new Error('AI returned an incomplete group.');
-        setProject(prev => ({ ...prev, characters: prev.characters.map(c => generated.has(c.id) ? { ...c, prompt: generated.get(c.id)!, status: c.status === 'done' ? 'done' : 'ready' } : c) }));
-        completed += group.length; setPromptProgress({ done: completed, total: chosen.length });
+      const foregroundGroupSize = 5;
+      for (let i = 0; i < chosen.length; i += foregroundGroupSize) {
+        const group = chosen.slice(i, i + foregroundGroupSize);
+        const result = await api({ action: 'generate-prompts', promptProvider, promptModel,
+          title: current.title || current.name, analysis: creativeContext(current), characters: group });
+        const allowed = new Set(group.map(c => c.id));
+        const generated = new Map<string, string>((result.prompts || [])
+          .filter(p => allowed.has(p.id) && typeof p.prompt === 'string' && p.prompt.trim().length > 60)
+          .map(p => [p.id, p.prompt]));
+        if (generated.size) {
+          current = { ...current, characters: current.characters.map(c => generated.has(c.id)
+            ? { ...c, prompt: generated.get(c.id)!, status: c.status === 'done' ? 'done' as const : 'ready' as const }
+            : c) };
+          setProject(current);
+          // Persist only accepted IDs; no redraw or re-generation is needed for
+          // previously saved prompts after a failed or partial response.
+          await api({ action: 'save', id: current.id, name: current.name, data: current });
+          setProjects(previous => [current, ...previous.filter(p => p.id !== current.id)]);
+          completed += generated.size;
+        }
+        setPromptProgress({ done: completed, total: chosen.length });
       }
-      setMessage(`${completed} prompts generated with ${promptProvider === 'gemini' ? 'Gemini' : 'OpenAI'}. Review and save your collection.`);
-    } catch (error) { setMessage(`${completed}/${chosen.length} prompts generated. ${error instanceof Error ? error.message : 'AI request failed'} You may retry the remaining characters.`); }
-    finally { setBusy(''); }
+      setMessage(completed === chosen.length
+        ? `${completed} prompts generated and saved with Gemini. Review your collection.`
+        : `${completed}/${chosen.length} prompts generated and saved. ${chosen.length - completed} missing or invalid; use Generate again to retry only characters without prompts.`);
+    } catch (error) {
+      setMessage(`${completed}/${chosen.length} prompts generated and saved. ${error instanceof Error ? error.message : 'AI request failed'} Review the current collection, save any unsaved edits, then retry only characters without prompts.`);
+    } finally { setBusy(''); }
   };
   const conceptAudit = auditCreativeConcepts(project.characters, normalizeCreativeAnalysis(project.research).styleDNA);
   const filtered = useMemo(() => project.characters.filter(c => `${c.name} ${c.description} ${c.expression || ''} ${c.family || ''} ${c.shape || ''} ${c.silhouette || ''} ${c.accessories || ''}`.toLowerCase().includes(query.toLowerCase())), [project.characters, query]);
