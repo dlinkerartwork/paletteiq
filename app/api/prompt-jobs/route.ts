@@ -20,13 +20,14 @@ type RemoteBatch = {
   errors?: { data?: Array<{ message?: string }> };
 };
 type PromptRequest = {
-  projectId?: string; characterIds?: string[]; model?: string; regenerate?: boolean;
+  projectId?: string; characterIds?: string[]; model?: string; regenerate?: boolean; progressive?: boolean;
 };
 const safeJob = (job: PromptBatchJob) => ({
   id: job.id, status: job.status, total: job.total, imported: job.imported,
   failed: job.failed, processedGroups: job.processedGroups,
   totalGroups: job.totalGroups, model: job.model, createdAt: job.createdAt,
   updatedAt: job.updatedAt, error: job.error,
+  mode:job.mode||'batch',groupStates:job.progressiveBatches?.map(g=>({key:g.key,status:g.status,error:g.error})),
 });
 async function openai(key: string, path: string, options: RequestInit = {}) {
   const response = await fetch('https://api.openai.com/v1/' + path, {
@@ -103,6 +104,7 @@ export async function POST(req: Request) {
     createdAt: now, updatedAt: now, total: selected.length,
     imported: 0, failed: 0, processedGroups: 0, totalGroups: generation.groups.length,
     groups: generation.groups, regenerate: body.regenerate === true,
+    ...(body.progressive===true ? {mode:'progressive' as const,progressiveBatches:generation.groups.map(g=>({key:g.key,status:'planned' as const}))} : {}),
     items: selected.map(c => ({ id: c!.id, originalFingerprint: promptFingerprint(c!.prompt || ''), status: 'pending' })),
   };
   // Claim the collection atomically before spending credits. Closing the
@@ -113,6 +115,19 @@ export async function POST(req: Request) {
     .where(and(eq(projects.id, projectId), eq(projects.owner, user.userId), eq(projects.updatedAt, saved.row.updatedAt)))
     .returning({ id: projects.id });
   if (!claimed.length) return fail('Collection changed in another tab. Refresh and retry.', 409);
+  if (job.mode==='progressive') {
+    // Progressive mode was explicitly selected and the collection claimed
+    // BEFORE any paid submission. Each group is one independent OpenAI Batch.
+    // The first three are launched now; further groups start when the previous
+    // groups finish, via the persisted scheduler. None is ever re-submitted.
+    try {
+      const submitted=await progressPromptBatches(user.userId,projectId,job.id,key, generation.jsonl);
+      return Response.json({job:safeJob(submitted||job)},{status:202});
+    } catch(error) {
+      return fail('Progressive prompt submission needs inspection: ' +
+        (error instanceof Error?error.message:String(error)).slice(0,250),503);
+    }
+  }
   let remoteBatchId: string | null = null;
   try {
     const form = new FormData();
@@ -148,12 +163,194 @@ export async function POST(req: Request) {
   }
 }
 
+const PROGRESSIVE_ACTIVE_LIMIT=3;
+const progressiveLocks=new Set<string>();
+async function updateProgressiveJob(owner:string, projectId:string, jobId:string,
+  transform:(job:PromptBatchJob)=>PromptBatchJob):Promise<PromptBatchJob|null> {
+  for(let attempt=0;attempt<8;attempt++){
+    const saved=await ownedProject(owner,projectId);
+    if(!saved||saved.data.promptJob?.id!==jobId) return null;
+    const changed={...transform(saved.data.promptJob),updatedAt:Date.now()};
+    const result=await getDb().update(projects)
+      .set({data:JSON.stringify({...saved.data,promptJob:changed}),
+        updatedAt:Math.max(Date.now(),saved.row.updatedAt+1)})
+      .where(and(eq(projects.id,projectId),eq(projects.owner,owner),eq(projects.updatedAt,saved.row.updatedAt)))
+      .returning({id:projects.id});
+    if(result.length) return changed;
+  }
+  throw Error('Concurrent prompt Batch status update. No retry of paid submissions was attempted.');
+}
+async function progressiveGroupUpdate(owner:string,id:string,jobId:string,groupKey:string,
+  update:Partial<NonNullable<PromptBatchJob['progressiveBatches']>[number]>) {
+  return updateProgressiveJob(owner,id,jobId,job=>({
+    ...job,progressiveBatches:(job.progressiveBatches||[]).map(group=>
+      group.key===groupKey?{...group,...update}:group),
+  }));
+}
+async function submitProgressiveGroup(owner:string,id:string,jobId:string,key:string,groupKey:string,line:string) {
+  let claimed=false;
+  const job=await updateProgressiveJob(owner,id,jobId,current=>{
+    const group=current.progressiveBatches?.find(g=>g.key===groupKey);
+    claimed=group?.status==='planned';
+    return claimed?{...current,progressiveBatches:current.progressiveBatches?.map(g=>g.key===groupKey?
+      {...g,status:'submitting' as const,startedAt:Date.now()}:g)}:current;
+  });
+  if(!claimed||!job) return;
+  try{
+    const form=new FormData();
+    form.set('purpose','batch');
+    form.set('file',new Blob([line+'\n'],{type:'application/jsonl'}),'paletteiq-progressive-'+groupKey+'.jsonl');
+    const upload=await (await openai(key,'files',{method:'POST',body:form})).json() as {id?:string};
+    if(!upload.id) throw Error('No OpenAI input file ID');
+    const remote=await (await openai(key,'batches',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({input_file_id:upload.id,endpoint:'/v1/responses',
+        completion_window:'24h',metadata:{app:'paletteiq',action:'progressive_prompts',group:groupKey}}),
+    })).json() as RemoteBatch;
+    if(!remote.id) throw Error('No OpenAI Batch receipt ID');
+    await progressiveGroupUpdate(owner,id,jobId,groupKey,{batchId:remote.id,status:'queued'});
+  }catch(error){
+    // Even with no saved batch ID a provider-side acceptance is possible.
+    // Never submit the same group again automatically.
+    await progressiveGroupUpdate(owner,id,jobId,groupKey,{
+      status:'uncertain',error:'Submission may have reached OpenAI. Inspect Batch activity before retrying: '+
+        (error instanceof Error?error.message:String(error)).slice(0,180),
+    }).catch(()=>{});
+  }
+}
+async function progressPromptBatches(owner:string,id:string,jobId:string,key:string,jsonl?:string) {
+  const lock=owner+':'+id+':progressive-prompts';
+  if(progressiveLocks.has(lock)) return (await ownedProject(owner,id))?.data.promptJob||null;
+  progressiveLocks.add(lock);
+  try {
+    const stored=await ownedProject(owner,id);
+    const job=stored?.data.promptJob;
+    if(!job||job.id!==jobId||job.mode!=='progressive') return null;
+    const groups=job.progressiveBatches||[];
+    const active=groups.filter(g=>['submitting','queued','in_progress'].includes(g.status)).length;
+    const capacity=Math.max(0,PROGRESSIVE_ACTIVE_LIMIT-active);
+    if(!capacity) return job;
+    const planned=groups.filter(g=>g.status==='planned').slice(0,capacity);
+    if(!planned.length)return job;
+    // Recreate the original JSONL from immutable selected character IDs, not
+    // the currently edited UI. Do not generate new text content after edits.
+    let lines=jsonl?.trim().split('\n')||[];
+    if(!jsonl) {
+      const byId=new Map(stored!.data.characters.map(c=>[c.id,c]));
+      const selected=job.items.map(item=>byId.get(item.id)).filter(
+        (c):c is NonNullable<typeof c>=>!!c);
+      if(selected.length!==job.items.length) return job;
+      lines=buildPromptBatchInput(stored!.data,selected,job.model).jsonl.trim().split('\n');
+    }
+    const groupLines=new Map(job.groups.map((group,index)=>[group.key,lines[index]]));
+    await Promise.all(planned.map(g=>groupLines.get(g.key)?
+      submitProgressiveGroup(owner,id,jobId,key,g.key,groupLines.get(g.key)!):Promise.resolve()));
+    return (await ownedProject(owner,id))?.data.promptJob||job;
+  }finally{progressiveLocks.delete(lock);}
+}
+async function synchronizeProgressive(owner:string,id:string,job:PromptBatchJob) {
+  const key=await userCredential(owner,'openai')||sharedProviderSecret(owner,'OPENAI_API_KEY');
+  if(!key) return fail('OpenAI key missing for progressive prompt recovery',503);
+  // Read each original receipt only. Polling may run in multiple windows;
+  // versioned imports ensure a group cannot import twice.
+  const settled=await Promise.all((job.progressiveBatches||[])
+    .filter(g=>g.batchId&&['queued','in_progress'].includes(g.status))
+    .map(async group=>{
+      try{
+        const remote=await (await openai(key,'batches/'+encodeURIComponent(group.batchId!))).json() as RemoteBatch;
+        if(!TERMINAL.has(remote.status)){
+          await progressiveGroupUpdate(owner,id,job.id,group.key,{status:'in_progress'});
+          return;
+        }
+        if(remote.status==='completed'&&!remote.output_file_id&&!remote.error_file_id) return;
+        const parts:string[]=[];
+        for(const fileId of [remote.output_file_id,remote.error_file_id].filter((x):x is string=>!!x)){
+          const text=await (await openai(key,'files/'+encodeURIComponent(fileId)+'/content')).text();
+          if(text.length>3_000_000)throw Error('Group result file too large');
+          parts.push(text);
+        }
+        // Each progressive group imports only its own expected IDs.
+        const groupSpec=job.groups.filter(g=>g.key===group.key);
+        const parsed=parsePromptBatchOutput(parts.join('\n'),groupSpec);
+        for(let attempt=0;attempt<6;attempt++){
+          const current=await ownedProject(owner,id);
+          if(!current||current.data.promptJob?.id!==job.id)return;
+          if(['completed','failed'].includes(current.data.promptJob.progressiveBatches?.find(g=>g.key===group.key)?.status||''))return;
+          const chars=current.data.characters.map(c=>({...c}));
+          const byId=new Map(chars.map(c=>[c.id,c]));
+          const items=current.data.promptJob.items.map(item=>{
+            if(!groupSpec[0]?.ids.includes(item.id)||item.status!=='pending')return item;
+            const character=byId.get(item.id);
+            if(!character||promptFingerprint(character.prompt||'')!==item.originalFingerprint)
+              return {...item,status:'skipped' as const,error:'Manually edited or deleted; original prompt preserved.'};
+            const prompt=parsed.prompts.get(item.id);
+            if(!prompt)return {...item,status:'error' as const,error:parsed.errors.get(item.id)||'No valid prompt'};
+            character.prompt=prompt;
+            if(character.status!=='done')character.status='ready';
+            return {...item,status:'done' as const};
+          });
+          const nextGroups=current.data.promptJob.progressiveBatches?.map(g=>g.key===group.key?
+            {...g,status:(remote.status==='completed'?'completed':'failed') as 'completed'|'failed',
+              ...(remote.status!=='completed'?{error:remote.status}:{})}:g);
+          const newJob={...current.data.promptJob,progressiveBatches:nextGroups,items,
+            imported:items.filter(i=>i.status==='done').length,
+            failed:items.filter(i=>['error','skipped'].includes(i.status)).length,
+            processedGroups:nextGroups?.filter(g=>['completed','failed','uncertain'].includes(g.status)).length||0,
+            updatedAt:Date.now()};
+          const committed=await getDb().update(projects).set({
+            data:JSON.stringify({...current.data,characters:chars,promptJob:newJob}),
+            updatedAt:Math.max(Date.now(),current.row.updatedAt+1),
+          }).where(and(eq(projects.id,id),eq(projects.owner,owner),eq(projects.updatedAt,current.row.updatedAt)))
+            .returning({id:projects.id});
+          if(committed.length)return;
+        }
+      }catch(error){
+        // Import/network failures do not resubmit the paid group.
+        await progressiveGroupUpdate(owner,id,job.id,group.key,{
+          error:'Prompt result status needs inspection: '+
+            (error instanceof Error?error.message:String(error)).slice(0,180),
+        }).catch(()=>{});
+      }
+    }));
+  void settled;
+  const latest=await ownedProject(owner,id);
+  let updated=latest?.data.promptJob;
+  if(!updated||updated.id!==job.id)return fail('Progressive job tracking changed',409);
+  // Interruption with no Batch ID is ambiguous, not an invitation to retry.
+  for(const group of updated.progressiveBatches||[]){
+    if(group.status==='submitting'&&!group.batchId &&
+      Date.now()-(group.startedAt||updated.createdAt)>120000)
+      await progressiveGroupUpdate(owner,id,job.id,group.key,{status:'uncertain',
+        error:'No saved Batch ID after interrupted submission. Check OpenAI usage.'});
+  }
+  updated=(await ownedProject(owner,id))?.data.promptJob;
+  if(!updated)return fail('Progressive job missing',409);
+  const groups=updated.progressiveBatches||[];
+  if(groups.some(g=>g.status==='uncertain')){
+    const failed=await saveJob(owner,id,job.id,{status:'failed',
+      error:'A progressive group has uncertain paid submission status. Check OpenAI Batch activity before retrying.'});
+    return Response.json({job:safeJob(failed||updated)});
+  }
+  if(groups.every(g=>['completed','failed'].includes(g.status))){
+    const finished=await saveJob(owner,id,job.id,{
+      status:updated.failed||groups.some(g=>g.status==='failed')?'completed_with_errors':'completed',
+      processedGroups:groups.length,
+    });
+    const fresh=await ownedProject(owner,id);
+    return Response.json({job:safeJob(finished||updated),project:fresh?.data});
+  }
+  await progressPromptBatches(owner,id,job.id,key);
+  const fresh=await ownedProject(owner,id);
+  return Response.json({job:safeJob(fresh?.data.promptJob||updated),project:fresh?.data});
+}
+
 async function synchronize(owner: string, projectId: string) {
   const saved = await ownedProject(owner, projectId);
   if (!saved) return fail('Collection not found', 404);
   const job = saved.data.promptJob;
   if (!job) return Response.json({ job: null });
   if (!isActivePromptBatch(job)) return Response.json({ job: safeJob(job) });
+  if (job.mode==='progressive') return synchronizeProgressive(owner,projectId,job);
   if (!job.batchId) {
     if (job.status === 'submitting' && Date.now() - job.createdAt > 120_000) {
       const failed = await markFailed(owner, projectId, job.id,
