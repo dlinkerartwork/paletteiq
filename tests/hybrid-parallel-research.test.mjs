@@ -44,3 +44,12 @@ test('Auto-follow skips Character Library after merge and prompt generation rema
   assert.match(prompts,/index \+= 10/);
   assert.match(prompts,/custom_id: key, method: 'POST', url: '\/v1\/responses'/);
 });
+
+test('Hybrid mode can be disabled to use the original single request and warns before new charges',()=>{
+  assert.match(page,/hybridResearch\?: boolean/);
+  assert.match(page,/Hybrid Parallel Research \(3 workers \+ Style DNA merge\)/);
+  assert.match(page,/hybridResearch: fullAutoRequested && project\.hybridResearch !== false/);
+  assert.match(page,/up to 3 paid OpenAI analysis requests, followed by 1 paid Style DNA merge request/);
+  assert.match(research,/body\.retryFailed !== true && body\.hybridResearch !== false/);
+  assert.match(research,/Worker submission interrupted before a tracking ID was saved/);
+});
