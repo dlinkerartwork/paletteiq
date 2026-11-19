@@ -23,7 +23,7 @@ import { readWorkspaceHistoryState, routeEquals, routeFromWorkspaceHash, workspa
 import { auditCreativeConcepts, expressionDistribution, familyDistribution, normalizeCreativeAnalysis, normalizeCreativeControls, reverseEngineeringKeys, styleDNAKeys, characterDNAKeys, selectDiverseConcepts, type CreativeAnalysis, type CreativeControls } from '@/lib/creative-intelligence';
 
 type Character = { id: string; name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description: string; prompt: string; status: 'draft' | 'ready' | 'done' | 'error'; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: { id: string; submittedAt?: number; factor?: number }; error?: string; similarityReview?: SimilarityReview; origin: 'listing' | 'ai' | 'manual' };
-type ResearchJobPreview = { id: string; status: 'submitting' | 'queued' | 'in_progress' | 'completed' | 'failed'; target: number; requested: number; completedCount: number; model: string; createdAt: number; updatedAt: number; error?: string };
+type ResearchJobPreview = { workersCompleted?: number; workersTotal?: number; mergeStatus?: string; id: string; status: 'submitting' | 'queued' | 'in_progress' | 'completed' | 'failed'; target: number; requested: number; completedCount: number; model: string; createdAt: number; updatedAt: number; error?: string };
 const hasActiveResearch = (job?: ResearchJobPreview) => !!job && ['submitting','queued','in_progress'].includes(job.status);
 type PromptJobPreview = { id: string; status: string; total: number; imported: number; failed: number; processedGroups: number; totalGroups: number; model: string; createdAt: number; updatedAt: number; error?: string };
 const hasActivePromptJob = (job?: PromptJobPreview) => !!job && !['completed','completed_with_errors','failed','cancelled','expired'].includes(job.status);
@@ -65,7 +65,9 @@ const nextIncomplete = (p: Project) => !p.theme && !p.title ? 'analysis' : !p.ch
 const automationStageTab = (stage?: FullAutomation['stage']): string | null => {
   if (!stage || stage === 'paused') return null;
   if (stage === 'research') return 'analysis';
-  if (stage === 'expanding') return 'characters';
+  // Research synthesis and character completion stay on Research; only jump
+  // directly to AI Prompts once the entire target has been saved.
+  if (stage === 'expanding') return 'analysis';
   if (stage === 'prompts') return 'prompts';
   if (['images','revising','regenerating','verifying'].includes(stage)) return 'production';
   if (stage === 'listing' || stage === 'completed') return 'listing';
@@ -685,7 +687,7 @@ export default function Home() {
           setProjects(previous => [result.project!, ...previous.filter(p => p.id !== projectId)]);
           setProject(previous => previous.id === projectId ? result.project! : previous);
           setAnalysisProgress({ done: result.job.completedCount, total: result.job.target });
-          setMessage('Background research completed: ' + result.job.completedCount + '/' + result.job.target + ' subjects saved. Open Character Library to review family and expression variety.');
+          setMessage('Background research and Style DNA merge completed: ' + result.job.completedCount + '/' + result.job.target + ' subjects saved. Full Automation will open AI Prompts after any missing subjects are filled.');
         } else {
           setProject(previous => {
             if (previous.id !== projectId || previous.researchJob?.id !== jobId) return previous;
@@ -1122,7 +1124,8 @@ export default function Home() {
       {hasActiveResearch(project.researchJob) && <section className="panel analysis-progress" aria-live="polite">
         <div className="production-progress"><span><LoaderCircle size={16} className="spin"/> OpenAI research: {project.researchJob?.status === 'submitting' ? 'submitting' : project.researchJob?.status === 'queued' ? 'queued' : 'processing'} (remote)</span>
           <b>{project.researchJob?.completedCount || 0} saved / {project.researchJob?.target} target</b></div>
-        <p className="sub">The OpenAI background response continues when this browser or PC is closed. PaletteIQ imports its finished output when the app is next opened. Live percentage is not available from OpenAI.</p>
+        {project.researchJob?.workersTotal && <p className="sub">Hybrid Parallel Research: {project.researchJob.workersCompleted || 0}/{project.researchJob.workersTotal} reference groups analyzed · Merge &amp; Style DNA: {project.researchJob.mergeStatus || 'pending'}. After the target characters are saved, Auto-follow opens AI Prompts directly.</p>}
+        <p className="sub">OpenAI Background research continues remotely while the PC is closed. PaletteIQ imports and synthesizes finished results when the app resumes. Character counts become available after Merge &amp; Style DNA.</p>
         {project.researchJob && project.researchJob.target > project.researchJob.requested && <p className="sub">The first remote stage is capped at {project.researchJob.requested} subjects. Use AI Fill for the rest after it completes.</p>}
       </section>}
       {busy === 'analyze' && <div className="panel analysis-progress"><div className="production-progress"><span>Analyzing Etsy images and building {target} original subjects with OpenAI…</span><b>{analysisProgress.done}/{analysisProgress.total}</b></div><div className="progress"><i style={{ width: `${analysisProgress.total ? Math.min(100, 100 * analysisProgress.done / analysisProgress.total) : 0}%` }}/></div><p className="sub">Visual research runs first, then AI generates unique additions in small groups. Please keep this page open until the collection is saved.</p></div>}
