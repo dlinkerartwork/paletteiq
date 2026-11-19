@@ -17,8 +17,8 @@ test('similarity check compares generated image with selected Etsy references an
 });
 
 test('single production persists similarity review after saving generated asset', () => {
-  assert.match(studio, /character\.similarityReview = await reviewImageSimilarity/);
-  assert.match(studio, /similarityReview: character\.similarityReview/);
+  assert.match(studio, /similarityReview = await reviewImageSimilarity/);
+  assert.match(studio, /current\.similarityReview = similarityReview/);
 });
 
 test('batch imports persist similarity checks alongside generated assets', () => {
