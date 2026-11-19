@@ -120,6 +120,7 @@ export default function Home() {
   const [target, setTarget] = useState(120);
   const [fullAutoRequested, setFullAutoRequested] = useState(false);
   const [canRestartMissingResearch, setCanRestartMissingResearch] = useState(false);
+  const [researchRecovery, setResearchRecovery] = useState<{state:string;message:string}|null>(null);
   useEffect(() => { setFullAutoRequested(Boolean(project.fullAutomation?.enabled)); }, [project.id, project.fullAutomation?.enabled]);
   const [model, setModel] = useState('gpt-image-1-mini');
   const [quality, setQuality] = useState('low');
@@ -685,10 +686,11 @@ export default function Home() {
   const refreshAutomationStatus = async (projectId: string): Promise<FullAutomation | null> => {
     const response = await fetch('/api/full-automation?projectId=' + encodeURIComponent(projectId),
       { cache: 'no-store' });
-    const state = await response.json() as { error?: string; flow?: FullAutomation | null; canRestartMissingResearch?: boolean };
+    const state = await response.json() as { error?: string; flow?: FullAutomation | null; canRestartMissingResearch?: boolean; researchRecovery?: {state:string;message:string}|null };
     if (!response.ok) throw Error(state.error || 'Unable to check saved Full Automation status');
     const flow = state.flow ?? null;
     setCanRestartMissingResearch(Boolean(state.canRestartMissingResearch));
+    setResearchRecovery(state.researchRecovery ?? null);
     setProject(prev => prev.id === projectId ? { ...prev, fullAutomation: flow ?? undefined } : prev);
     setProjects(prev => prev.map(item => item.id === projectId
       ? { ...item, fullAutomation: flow ?? undefined } : item));
@@ -701,10 +703,11 @@ export default function Home() {
       try {
         const response = await fetch('/api/full-automation?projectId=' + encodeURIComponent(project.id),
           { cache: 'no-store' });
-        const state = await response.json() as { flow?: FullAutomation | null; canRestartMissingResearch?: boolean };
+        const state = await response.json() as { flow?: FullAutomation | null; canRestartMissingResearch?: boolean; researchRecovery?: {state:string;message:string}|null };
         if (!response.ok || cancelled) return;
         const flow = state.flow ?? null;
         setCanRestartMissingResearch(Boolean(state.canRestartMissingResearch));
+        setResearchRecovery(state.researchRecovery ?? null);
         setProject(prev => prev.id === project.id ? { ...prev, fullAutomation: flow ?? undefined } : prev);
         setProjects(prev => prev.map(item => item.id === project.id
           ? { ...item, fullAutomation: flow ?? undefined } : item));
@@ -947,6 +950,8 @@ export default function Home() {
         <div className="production-progress"><span><Sparkles size={16}/> Full Automation · {project.fullAutomation.stage.replaceAll('_',' ')}</span><b>{project.characters.filter(c=>c.imageUrl).length} images / {project.fullAutomation.target} target</b></div>
         <p className="sub">Characters {project.characters.length}/{project.fullAutomation.target} · Prompts {project.characters.filter(c=>c.prompt.trim()).length}/{project.fullAutomation.target} · Similarity-flagged {project.characters.filter(c=>c.similarityReview?.status==='needs_review').length}. AI research, image Batches and SEO use your saved Settings models. Workflow transitions need PaletteIQ running or hidden in system tray.</p>
         {project.fullAutomation.lastError && <p className="sub" role="alert">{project.fullAutomation.lastError}</p>}
+        {project.fullAutomation.stage === 'paused' && <p className="sub" role="status">Research recovery: {researchRecovery?.message || 'Checking the saved research job and source images…'}</p>}
+        {project.fullAutomation.stage === 'paused' && project.researchJob?.error && <p className="sub" role="alert">Saved research job error: {project.researchJob.error}</p>}
         {project.fullAutomation.stage === 'paused' && canRestartMissingResearch && <div className="sub" role="status">No background research job is recorded for this workflow. Resuming alone would pause again. Start the missing research only after checking OpenAI activity for any untracked charge.</div>}
         {project.fullAutomation.stage === 'paused' && canRestartMissingResearch && <button type="button" className="outline-btn" disabled={!!busy} onClick={() => void recoverMissingResearch()}>Start missing research (check OpenAI usage first)</button>}
         {project.fullAutomation.stage === 'paused' && !canRestartMissingResearch && <button type="button" className="outline-btn" disabled={!!busy} onClick={() => void changeAutomation('resume')}>Resume Full Automation (review costs/jobs first)</button>}
