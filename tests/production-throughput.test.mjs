@@ -51,8 +51,9 @@ test('Standard Bulk marks failures without secretly repeating billed attempts', 
 test('Batch import and QC remain separate, resumable, and safe for Full Automation', () => {
   assert.match(batch, /handled >= BATCH_IMPORT_LIMIT/);
   assert.match(queue, /BATCH_IMPORT_LIMIT = 12/);
-  assert.match(queue, /BATCH_REVIEW_LIMIT = 2/);
+  assert.match(queue, /BATCH_REVIEW_LIMIT = 4/);
   assert.match(batch, /reviewStoredBatchImage\(/);
+  assert.match(batch, /Promise\.all\(reviewQueue\.map\(async item =>/);
   assert.match(batch, /pendingBatchReviewCount\(items\) \? 'reviewing'/);
   assert.match(batch, /mergeNewBatchResults\(project\.characters, items, changedIds\)/);
   assert.match(automation, /isActiveBatchStatus\(row\.status\)/);
