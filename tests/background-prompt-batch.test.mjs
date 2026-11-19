@@ -122,3 +122,15 @@ test('older project saves preserve completed paid prompts and all remote job IDs
   assert.match(save, /prompt: \(saved as SubjectInput\).prompt/);
   assert.match(save, /const serverResearch =/);
 });
+
+test('foreground Gemini retains partial valid prompt groups and checkpoints every group', () => {
+  const studio = readFileSync(new URL('../app/api/studio/route.ts', import.meta.url), 'utf8');
+  assert.match(studio, /const accepted = new Map<string, string>\(\)/);
+  assert.match(studio, /const missingIds = characters\.filter/);
+  assert.match(studio, /return Response\.json\(\{ prompts, missingIds, requested: characters\.length \}\)/);
+  assert.doesNotMatch(studio, /AI returned incomplete prompts\. Please retry this group\./);
+  assert.match(page, /const foregroundGroupSize = 5/);
+  assert.match(page, /const generated = new Map<string, string>\(\(result\.prompts \|\| \[\]\)/);
+  assert.match(page, /await api\(\{ action: 'save', id: current\.id, name: current\.name, data: current \}\)/);
+  assert.match(page, /retry only characters without prompts/);
+});
