@@ -7,6 +7,7 @@ import { projects } from '@/db/schema';
 import { userCredential } from '@/lib/credentials';
 import { mergeSourceEmotionProfile, normalizeCreativeAnalysis, normalizeCreativeControls, selectDiverseConcepts } from '@/lib/creative-intelligence';
 import { researchAnalysisInstruction } from '@/lib/creative-research-prompts';
+import { fetchResearchImageDataUrls, safeRejectedImageResearch } from '@/lib/research-image-input';
 
 type Concept = { name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description?: string };
 type StoredCharacter = { id: string; name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description?: string; status?: string; prompt?: string; origin?: string; imageUrl?: string };
@@ -148,12 +149,18 @@ async function finish(owner: string, projectId: string, job: ResearchJob, respon
 export async function POST(req: Request) {
   const user = await getChatGPTUser();
   if (!user) return bad('Sign in required', 401);
-  let body: { projectId?: string; url?: string; selectedImages?: unknown[]; target?: number; model?: string };
+  let body: { projectId?: string; url?: string; selectedImages?: unknown[]; target?: number; model?: string; retryFailed?: boolean };
   try { body = await req.json(); } catch { return bad('Invalid JSON'); }
   const projectId = String(body.projectId || '');
   const saved = await getCollection(user.userId, projectId).catch(() => null);
   if (!saved) return bad('Save your collection first, then start background research.', 404);
   if (active(saved.data.researchJob)) return Response.json({ job: safeJob(saved.data.researchJob!) }, { status: 409 });
+  // A rejected 400 download failure contains no OpenAI background response ID.
+  // All other existing jobs require manual investigation, not resubmission.
+  if (saved.data.researchJob && !(body.retryFailed === true && safeRejectedImageResearch(saved.data.researchJob)))
+    return bad('A saved research job exists. Check its status and OpenAI usage before starting another paid request.',409);
+  if (body.retryFailed === true && !safeRejectedImageResearch(saved.data.researchJob))
+    return bad('This research job is not eligible for a safe retry.',409);
   const url = String(body.url || '');
   const id = listingId(url);
   if (!id || saved.data.url !== url) return bad('Saved collection must contain the same valid Etsy reference URL');
@@ -178,6 +185,20 @@ export async function POST(req: Request) {
   const allowed = new Set(source.images);
   const selectedImages = [...new Set(candidates.filter(value => allowed.has(value)))].slice(0, 24);
   if (!selectedImages.length) return bad('Select at least one actual Etsy listing image');
+  // OpenAI cannot consistently fetch remote Etsy CDN URLs itself.
+  // Use smaller legitimate Etsy thumbnails where the listing API supplies them.
+  // Download and validate ALL references before claiming a paid response.
+  const referenceUrls = selectedImages.map(url => {
+    const image = listing.images?.find(entry => entry.url_fullxfull === url || entry.url_570xN === url);
+    return image?.url_570xN && validImage(image.url_570xN) ? image.url_570xN : url;
+  });
+  let imageDataUrls: string[];
+  try { imageDataUrls = await fetchResearchImageDataUrls(referenceUrls); }
+  catch (error) {
+    return bad('Research images could not be prepared: ' +
+      (error instanceof Error ? error.message : 'image download failed') +
+      '. No new OpenAI background job was submitted.', 422);
+  }
   const now = Date.now();
   const job: ResearchJob = { id: crypto.randomUUID(), status: 'submitting', model, target, requested,
     createdAt: now, updatedAt: now, completedCount: saved.data.characters?.length || 0,
@@ -195,7 +216,7 @@ export async function POST(req: Request) {
       normalizeCreativeControls(saved.data.creativeControls));
     const input = [{ role: 'user', content: [
       { type: 'input_text', text: instruction },
-      ...selectedImages.map(image_url => ({ type: 'input_image', image_url })),
+      ...imageDataUrls.map(image_url => ({ type: 'input_image', image_url })),
     ] }];
     const ai = await openai(aiKey, 'responses', {
       method: 'POST',
