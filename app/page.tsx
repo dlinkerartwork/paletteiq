@@ -726,7 +726,9 @@ export default function Home() {
         const result = await response.json() as { error?: string; job?: PromptJobPreview; project?: Project };
         if (!response.ok) throw Error(result.error || 'Could not retrieve OpenAI prompt batch status');
         if (closed || !result.job || result.job.id !== jobId) return;
-        if (result.project && !hasActivePromptJob(result.job)) {
+        if (result.project) {
+          // Progressive groups are imported independently. Show saved prompts
+          // immediately even while the remaining Batch receipts are active.
           const editor = latestWorkspace.current;
           const hasLocalEdits = editor.project.id === projectId &&
             collectionHasUnsavedEdits(editor.project, savedProjectSnapshots.current.get(projectId));
@@ -736,9 +738,9 @@ export default function Home() {
             setProjects(previous => [result.project!, ...previous.filter(p => p.id !== projectId)]);
             setProject(previous => previous.id === projectId ? result.project! : previous);
           }
-          setMessage(result.job.status === 'completed'
-            ? 'OpenAI Batch finished. ' + result.job.imported + ' prompts were saved automatically. Review them before image generation.'
-            : 'OpenAI Batch finished with ' + result.job.imported + ' imported prompts and ' + result.job.failed + ' missing or skipped. Review the remaining characters before retrying.');
+          if (!hasActivePromptJob(result.job)) setMessage(result.job.status === 'completed'
+            ? 'OpenAI prompt jobs finished. ' + result.job.imported + ' prompts saved.'
+            : 'OpenAI prompt jobs finished with ' + result.job.imported + ' imported prompts. Review failed groups before retrying.');
         } else {
           setProject(previous => previous.id === projectId && previous.promptJob?.id === jobId
             ? { ...previous, promptJob: result.job } : previous);
