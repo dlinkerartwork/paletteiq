@@ -198,6 +198,10 @@ async function tick(req: Request, owner: string, id: string) {
     } else if (f.stage === 'regenerating') {
       if (!(f.reviewQueue||[]).length) await setStage(owner,id,'listing');
       else {
+        // A single review regeneration Batch has a hard upper bound. Never
+        // silently split or repeatedly charge for a larger flagged queue.
+        if ((f.reviewQueue||[]).length > 120)
+          throw Error('More than 120 images were flagged for similarity. Review and split manually; Full Automation will not submit multiple regeneration Batches.');
         const records=await jobs(owner,id);
         const active=records.find(row=>isActiveBatchStatus(row.status)&&
           (JSON.parse(row.items) as Array<{id:string}>).some(item=>(f.reviewQueue||[]).includes(item.id)));
