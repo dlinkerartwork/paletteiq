@@ -15,9 +15,10 @@ import { GET as promptGet, POST as promptPost } from '@/app/api/prompt-jobs/rout
 import { GET as imageGet, POST as imagePost } from '@/app/api/image-batches/route';
 import { POST as studioPost } from '@/app/api/studio/route';
 import { POST as rewritePost } from '@/app/api/regenerate-prompt/route';
+import { isImageBatchModel, imageBatchModelError, DEFAULT_IMAGE_BATCH_MODEL } from '@/lib/image-batch-models';
 
 type Stage = 'research'|'expanding'|'prompts'|'images'|'revising'|'regenerating'|'verifying'|'listing'|'completed'|'paused';
-type Flow = { enabled: boolean; stage: Stage; target: number; textModel?: string; startedAt: number; updatedAt: number;
+type Flow = { enabled: boolean; stage: Stage; target: number; textModel?: string; batchImageModel?: string; imageQuality?: string; startedAt: number; updatedAt: number;
   resumeStage?: Stage; lastError?: string; leaseUntil?: number; expandAttempts?: number;
   promptAttempts?: number; imageAttempts?: number; revisionAttempts?: number;
   reviewQueue?: string[]; revisedIds?: string[]; regenerationBatchId?: string };
@@ -135,9 +136,13 @@ async function jobs(owner: string, id: string) {
   return getDb().select().from(imageBatches)
     .where(and(eq(imageBatches.owner,owner),eq(imageBatches.projectId,id)));
 }
-const imageModel = (prefs: Prefs) =>
-  ['gpt-image-2.5-flare','gpt-image-2.5-sunburst'].includes(prefs.automationImageModel || '')
-    ? prefs.automationImageModel! : 'gpt-image-2.5-flare';
+// A Batch model is a user-selected setting, not a fallback. An unsupported
+// value must stop before a paid request rather than change the model silently.
+const imageModel = (p: Project, prefs: Prefs) => {
+  const selected = p.fullAutomation?.batchImageModel || prefs.automationImageModel || DEFAULT_IMAGE_BATCH_MODEL;
+  if (!isImageBatchModel(selected)) throw Error(imageBatchModelError(selected));
+  return selected;
+};
 // A collection's text model is frozen when Full Automation starts. Changes to
 // Settings must not silently switch models on already accepted paid jobs.
 const textModel = (p: Project, fallback = 'gpt-4.1-mini') => {
@@ -232,7 +237,7 @@ async function tick(req: Request, owner: string, id: string) {
             ...latest.fullAutomation!,imageAttempts:(latest.fullAutomation?.imageAttempts||0)+1,updatedAt:Date.now()}}));
           const config=await prefs(owner);
           await apiPost(req,imagePost,{projectId:id,characterIds:selected.map(c=>c.id),
-            model:imageModel(config),quality:quality(config),regenerate:!fresh.length});
+            model:imageModel(p,config),quality:f.imageQuality || quality(config),regenerate:!fresh.length});
         } else {
           const unverified=p.characters.filter(c=>c.imageUrl &&
             c.similarityReview?.status!=='clear' && c.similarityReview?.status!=='needs_review');
@@ -267,7 +272,7 @@ async function tick(req: Request, owner: string, id: string) {
         else {
           const config=await prefs(owner);
           const result=await apiPost(req,imagePost,{projectId:id,characterIds:f.reviewQueue,
-            model:imageModel(config),quality:quality(config),regenerate:true});
+            model:imageModel(p,config),quality:f.imageQuality || quality(config),regenerate:true});
           const batch=result.job as {id?:string}|undefined;
           await setStage(owner,id,'verifying',{regenerationBatchId:batch?.id});
         }
@@ -418,8 +423,11 @@ export async function POST(req:Request) {
     if (current.p.fullAutomation && current.p.fullAutomation.stage !== 'completed')
       return bad('An automation workflow already exists. Resume the paused workflow rather than submitting duplicate paid work.',409);
     if (current.p.characters.some(c=>c.imageUrl)) return bad('Full automation must start before image generation',409);
+    const config=await prefs(user.userId);
+    const selectedBatchImageModel=config.automationImageModel || DEFAULT_IMAGE_BATCH_MODEL;
+    if (!isImageBatchModel(selectedBatchImageModel)) return bad(imageBatchModelError(selectedBatchImageModel),422);
     const now=Date.now();
-    const flow:Flow={enabled:true,stage:'research',target,textModel:requestedModel,startedAt:now,updatedAt:now,
+    const flow:Flow={enabled:true,stage:'research',target,textModel:requestedModel,batchImageModel:selectedBatchImageModel,imageQuality:quality(config),startedAt:now,updatedAt:now,
       expandAttempts:0,promptAttempts:0,imageAttempts:0};
     return Response.json(progress(await save(user.userId,id,p=>({...p,characterTarget:target,researchModel:requestedModel,fullAutomation:flow}))));
   }
