@@ -53,3 +53,10 @@ test('Hybrid mode can be disabled to use the original single request and warns b
   assert.match(research,/body\.retryFailed !== true && body\.hybridResearch !== false/);
   assert.match(research,/Worker submission interrupted before a tracking ID was saved/);
 });
+
+test('hybrid receipts accept real OpenAI response IDs and no response is silently re-sent',()=>{
+  assert.equal(research.includes(String.raw`/^resp_[\\w-]+$/`),false,'double-escaped regexp would reject all real response IDs');
+  assert.ok(research.split(String.raw`/^resp_[\w-]+$/`).length>=3,'worker and merge must validate true response IDs');
+  assert.match(research,/Worker submission may have reached OpenAI/);
+  assert.match(research,/Style DNA merge may have been submitted/);
+});
