@@ -50,3 +50,11 @@ test('research prepares verified image bytes before creating paid job receipt', 
   assert.match(page, /Retry rejected image research \(check OpenAI usage first\)/);
   assert.match(page, /retryFailed:true/);
 });
+
+test('failed-job references survive stale collection selection and are revalidated', () => {
+  assert.match(automation, /p\.researchJob\?\.selectedImages\?\.length/);
+  assert.match(automation, /resumeStage\(p\.fullAutomation\) === 'research'/);
+  assert.match(research, /saved\.data\.researchJob\?\.selectedImages\?\.length/);
+  assert.match(research, /\? saved\.data\.researchJob\.selectedImages : supplied/);
+  assert.match(research, /candidates\.filter\(value => allowed\.has\(value\)\)/);
+});
