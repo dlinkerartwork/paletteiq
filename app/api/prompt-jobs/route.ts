@@ -185,7 +185,8 @@ async function progressiveGroupUpdate(owner:string,id:string,jobId:string,groupK
   update:Partial<NonNullable<PromptBatchJob['progressiveBatches']>[number]>) {
   return updateProgressiveJob(owner,id,jobId,job=>({
     ...job,progressiveBatches:(job.progressiveBatches||[]).map(group=>
-      group.key===groupKey?{...group,...update}:group),
+      group.key===groupKey && !['completed','failed','uncertain'].includes(group.status)
+        ? {...group,...update}:group),
   }));
 }
 async function submitProgressiveGroup(owner:string,id:string,jobId:string,key:string,groupKey:string,line:string) {
@@ -241,7 +242,10 @@ async function progressPromptBatches(owner:string,id:string,jobId:string,key:str
     const groupLines=new Map(job.groups.map((group,index)=>[group.key,lines[index]]));
     await Promise.all(planned.map(g=>groupLines.get(g.key)?
       submitProgressiveGroup(owner,id,jobId,key,g.key,groupLines.get(g.key)!):Promise.resolve()));
-    return (await ownedProject(owner,id))?.data.promptJob||job;
+    const refreshed=(await ownedProject(owner,id))?.data.promptJob||job;
+    if(refreshed.status==='submitting' && refreshed.progressiveBatches?.some(g=>!!g.batchId))
+      return await saveJob(owner,id,jobId,{status:'in_progress'})||refreshed;
+    return refreshed;
   }finally{progressiveLocks.delete(lock);}
 }
 async function synchronizeProgressive(owner:string,id:string,job:PromptBatchJob) {
