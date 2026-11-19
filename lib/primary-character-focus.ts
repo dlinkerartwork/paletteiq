@@ -36,5 +36,5 @@ export function isPrimaryCharacter(
   if (subject==='fairy') return /\b(?:fairy|fairies|faerie|faeries|fae)\b/i.test(group);
   if (subject==='princess') return /\b(?:princess|princesses)\b/i.test(group);
   if (subject==='teddy bear') return /\bteddy\s*bear(?:s)?\b/i.test(group);
-  return new RegExp('\\\b'+subject+'s?\\\b','i').test(group);
+  return group.includes(subject);
 }
