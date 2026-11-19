@@ -27,8 +27,8 @@ type ResearchJobPreview = { id: string; status: 'submitting' | 'queued' | 'in_pr
 const hasActiveResearch = (job?: ResearchJobPreview) => !!job && ['submitting','queued','in_progress'].includes(job.status);
 type PromptJobPreview = { id: string; status: string; total: number; imported: number; failed: number; processedGroups: number; totalGroups: number; model: string; createdAt: number; updatedAt: number; error?: string };
 const hasActivePromptJob = (job?: PromptJobPreview) => !!job && !['completed','completed_with_errors','failed','cancelled','expired'].includes(job.status);
-type FullAutomation = { enabled: boolean; stage: 'research' | 'expanding' | 'prompts' | 'images' | 'revising' | 'regenerating' | 'verifying' | 'listing' | 'completed' | 'paused'; target: number; updatedAt: number; lastError?: string; reviewQueue?: string[]; revisedIds?: string[] };
-type Project = { fullAutomation?: FullAutomation; id: string; name: string; url: string; upscaleBatch?: StoredUpscaleBatch; researchJob?: ResearchJobPreview; promptJob?: PromptJobPreview; theme: string; subtheme: string; microtheme?: string; primaryKeyword?: string; longTailKeywords?: string[]; research?: CreativeAnalysis; creativeControls?: CreativeControls; sourceDescription?: string; sourceTags?: string[]; emotionDirection?: string; ageDirection?: string; cutenessDirection?: string; style: string; palette: string; texture: string; keywords: string[]; characters: Character[]; title: string; images: string[]; selectedImageUrls?: string[]; notes: string; listing?: ListingData; seoReview?: SavedSeoReview; thumbnails?: ThumbnailDesign[]; listingImages?: ListingImageRecord[]; listingStudioSettings?: ListingStudioConfig; lastDownloadedAt?: number; downloadCount?: number; lastDownloadImageCount?: number; downloadedImageIds?: string[] };
+type FullAutomation = { enabled: boolean; textModel?: string; stage: 'research' | 'expanding' | 'prompts' | 'images' | 'revising' | 'regenerating' | 'verifying' | 'listing' | 'completed' | 'paused'; target: number; updatedAt: number; lastError?: string; reviewQueue?: string[]; revisedIds?: string[] };
+type Project = { fullAutomation?: FullAutomation; characterTarget?: number; researchModel?: string; id: string; name: string; url: string; upscaleBatch?: StoredUpscaleBatch; researchJob?: ResearchJobPreview; promptJob?: PromptJobPreview; theme: string; subtheme: string; microtheme?: string; primaryKeyword?: string; longTailKeywords?: string[]; research?: CreativeAnalysis; creativeControls?: CreativeControls; sourceDescription?: string; sourceTags?: string[]; emotionDirection?: string; ageDirection?: string; cutenessDirection?: string; style: string; palette: string; texture: string; keywords: string[]; characters: Character[]; title: string; images: string[]; selectedImageUrls?: string[]; notes: string; listing?: ListingData; seoReview?: SavedSeoReview; thumbnails?: ThumbnailDesign[]; listingImages?: ListingImageRecord[]; listingStudioSettings?: ListingStudioConfig; lastDownloadedAt?: number; downloadCount?: number; lastDownloadImageCount?: number; downloadedImageIds?: string[] };
 const etsyListingId = (value: string) => { try { const url = new URL(value.trim()); return ['etsy.com', 'www.etsy.com'].includes(url.hostname) ? url.pathname.match(/^\/listing\/(\d+)/)?.[1] || null : null; } catch { return null; } };
 const uid = () => crypto.randomUUID();
 const blank = (): Project => ({ id: uid(), name: 'Untitled collection', url: '', theme: '', subtheme: '', microtheme: '', primaryKeyword: '', longTailKeywords: [], style: '', palette: '', texture: '', keywords: [], characters: [], title: '', images: [], notes: '' });
@@ -95,9 +95,14 @@ export default function Home() {
   const [promptModel, setPromptModel] = useState('gpt-4.1-mini');
   const [analysisModels, setAnalysisModels] = useState<Record<'openai' | 'gemini', Array<{ id: string; name: string }>>>({ openai: [], gemini: [] });
   const [analysisModelsError, setAnalysisModelsError] = useState('');
+  const [autoFollowAutomation, setAutoFollowAutomation] = useState(true);
+  const autoFollowRef = useRef(true);
+  autoFollowRef.current = autoFollowAutomation;
+  // A model chosen by the user must not be replaced just because the API
+  // model-list endpoint filters it out or loads after the dropdown renders.
   useEffect(() => {
-    const options = analysisModels[analysisProvider];
-    if (options.length && !options.some(m => m.id === visualModel)) setVisualModel(options[0].id);
+    if (analysisProvider === 'openai' && !/^gpt-[a-z0-9.-]{1,80}$/.test(visualModel))
+      setVisualModel(analysisModels.openai[0]?.id || 'gpt-4.1-mini');
   }, [analysisModels, analysisProvider, visualModel]);
   useEffect(() => {
     const options = analysisModels[promptProvider];
@@ -119,6 +124,11 @@ export default function Home() {
   const [message, setMessage] = useState('');
   const [target, setTarget] = useState(120);
   const [fullAutoRequested, setFullAutoRequested] = useState(false);
+  const setCollectionTarget = (requested: number) => {
+    const next = Math.max(1, Math.min(fullAutoRequested ? 200 : 1000, Math.floor(requested || 1)));
+    setTarget(next);
+    setProject(prev => ({ ...prev, characterTarget: next }));
+  };
   const [canRestartMissingResearch, setCanRestartMissingResearch] = useState(false);
   const [canRetryRejectedResearch, setCanRetryRejectedResearch] = useState(false);
   const [researchRecovery, setResearchRecovery] = useState<{state:string;message:string}|null>(null);
@@ -134,6 +144,29 @@ export default function Home() {
   const [sourceUrl, setSourceUrl] = useState('');
   const [duplicateListing, setDuplicateListing] = useState<{ url: string; collections: string[] } | null>(null);
   const [preferences, setPreferences] = useState<StudioPreferences>(defaultPrefs);
+  // The collection's entered target takes precedence over Settings defaults
+  // and is restored in every workflow tab and after relaunch.
+  useEffect(() => {
+    const saved = project.fullAutomation?.target ?? project.characterTarget ??
+      project.researchJob?.target ?? preferences.target;
+    if (Number.isInteger(saved) && saved >= 1 && saved <= 1000) setTarget(saved);
+  }, [project.id, project.characterTarget, project.fullAutomation?.target,
+      project.researchJob?.target, preferences.target]);
+  useEffect(() => {
+    const saved = project.fullAutomation?.textModel || project.researchModel ||
+      project.researchJob?.model || preferences.analysisModel;
+    if (/^gpt-[a-z0-9.-]{1,80}$/.test(saved || '')) setVisualModel(saved);
+  }, [project.id, project.fullAutomation?.textModel, project.researchModel,
+      project.researchJob?.model, preferences.analysisModel]);
+  useEffect(() => {
+    try { setAutoFollowAutomation(localStorage.getItem('paletteiq-auto-follow-automation') !== '0'); }
+    catch { /* Keep the default on when browser storage is unavailable. */ }
+  }, []);
+  const updateAutoFollowAutomation = (enabled: boolean) => {
+    setAutoFollowAutomation(enabled);
+    try { localStorage.setItem('paletteiq-auto-follow-automation', enabled ? '1' : '0'); }
+    catch { /* Optional local UI preference. */ }
+  };
 
   async function copyAllPrompts() {
     const prompts = project.characters.map(character => character.prompt.trim()).filter(Boolean);
@@ -392,7 +425,7 @@ export default function Home() {
     return () => { stopped = true; window.clearInterval(timer); };
   }, [loadDone, tab]);
   useEffect(() => { window.scrollTo({ top: 0, left: 0, behavior: 'instant' }); const main = document.querySelector('.main'); if (main && main.scrollTop) main.scrollTop = 0; document.title = `${['overview','collections','multi-production','stores','settings'].includes(tab) ? tab[0].toUpperCase() + tab.slice(1) : `${project.name} · ${steps.find(s => s.id === tab)?.label || tab}`} | PaletteIQ`; }, [tab, project.id, project.name]);
-  const updatePreferences = useCallback((prefs: StudioPreferences) => { setPreferences(prefs); setTarget(prefs.target); setModel(prefs.model); setQuality(prefs.quality); }, []);
+  const updatePreferences = useCallback((prefs: StudioPreferences) => { setPreferences(prefs); setModel(prefs.model); setQuality(prefs.quality); }, []);
   useEffect(() => {
     // Store switching changes the authenticated data scope, not just the name
     // shown in the header. Never retain one store's draft preferences in another.
@@ -509,7 +542,7 @@ export default function Home() {
         if (fullAutoRequested) {
           const res = await fetch('/api/full-automation', { method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'start', projectId: project.id, target }) });
+            body: JSON.stringify({ action: 'start', projectId: project.id, target, model: visualModel }) });
           const next = await res.json() as { error?: string; flow?: FullAutomation };
           if (!res.ok || !next.flow) throw Error(next.error || 'Unable to start Full Automation');
           fullAutomation = next.flow;
@@ -518,11 +551,12 @@ export default function Home() {
         const started = await fetch('/api/research-jobs', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ projectId: project.id, url: sourceUrl.trim(),
-            selectedImages: chosenImages, target, model: fullAutoRequested ? preferences.analysisModel : visualModel }),
+            selectedImages: chosenImages, target, model: visualModel }),
         });
         const result = await started.json() as { error?: string; job?: ResearchJobPreview };
         if (!started.ok || !result.job) throw new Error(result.error || 'Could not create background research job');
-        const snapshot = { ...project, fullAutomation, researchJob: result.job };
+        const snapshot = { ...project, characterTarget:target, researchModel:visualModel, fullAutomation, researchJob: result.job };
+        savedProjectSnapshots.current.set(project.id, JSON.stringify(snapshot));
         setProject(snapshot);
         setProjects(previous => [snapshot, ...previous.filter(p => p.id !== snapshot.id)]);
         setAnalysisProgress({ done: result.job.completedCount, total: result.job.target });
@@ -756,7 +790,7 @@ export default function Home() {
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({projectId:project.id, url:project.url,
           selectedImages:project.selectedImageUrls ?? project.images,
-          target:armed.flow.target,model:preferences.analysisModel})});
+          target:armed.flow.target,model:armed.flow.textModel || project.researchModel || preferences.analysisModel})});
       const data = await res.json() as {error?:string;job?:ResearchJobPreview};
       if (!res.ok || !data.job) throw Error(data.error || 'Research submission not confirmed');
       setProject(prev => prev.id === project.id ? {...prev,researchJob:data.job} : prev);
@@ -788,7 +822,7 @@ export default function Home() {
         body:JSON.stringify({ projectId:project.id, url:project.url,
           selectedImages,
           target:project.fullAutomation.target,
-          model:project.researchJob?.model || preferences.analysisModel,
+          model:project.fullAutomation?.textModel || project.researchJob?.model || project.researchModel || preferences.analysisModel,
           retryFailed:true }) });
       const data = await response.json() as {error?:string;job?:ResearchJobPreview};
       if (!response.ok || !data.job) throw Error(data.error || 'Research retry not confirmed');
@@ -970,7 +1004,7 @@ export default function Home() {
   };
   const openCollection = (p: Project) => { if (p.id !== project.id && !canSwitchCollection()) return; setLibraryPage(1); setProject(p); setSourceUrl(p.url); setSelected([]); setMessage(''); setTab(nextIncomplete(p)); };
   const openCollectionPrompts = (id: string) => { const target = projects.find(p => p.id === id); if (!target) { setMessage('Collection not found. Refresh collections and retry.'); return; } if (target.id !== project.id && !canSwitchCollection()) return; setLibraryPage(1); setProject(target); setSourceUrl(target.url); setSelected([]); setMessage('Generate the missing image prompts below, then save the collection.'); setTab(target.characters.length ? 'prompts' : 'characters'); };
-  const createCollection = () => { if (!canSwitchCollection()) return; const p = blank(); setLibraryPage(1); setProject(p); setSourceUrl(''); setSelected([]); setTab('analysis'); };
+  const createCollection = () => { if (!canSwitchCollection()) return; const p = { ...blank(), characterTarget: preferences.target, researchModel: preferences.analysisModel }; setLibraryPage(1); setProject(p); setSourceUrl(''); setSelected([]); setTab('analysis'); };
   const advance = async () => {
     if (busy) return;
     setBusy('save');
