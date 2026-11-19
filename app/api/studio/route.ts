@@ -280,7 +280,11 @@ export async function POST(req: Request) {
       distribution: familyDistribution(existing), expressionCounts: expressionDistribution(existing),
     });
     const input = [{ role: 'user', content: [{ type: 'input_text', text: instruction }, ...images.map(image_url => ({ type: 'input_image', image_url }))] }];
-    const ai = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'gpt-4.1-mini', input, text: { format: { type: 'json_object' } } }) });
+    // Full Automation can pass its chosen OpenAI text model. The image
+    // generator continues to use a separate image-capable model.
+    const expansionModel = typeof body.model === 'string' && /^gpt-[a-z0-9.-]{1,80}$/.test(body.model)
+      ? body.model : 'gpt-4.1-mini';
+    const ai = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: expansionModel, input, text: { format: { type: 'json_object' } } }) });
     if (!ai.ok) return fail(`AI expansion returned ${ai.status}`, 502);
     try { const result = JSON.parse(extractText(await ai.json())) as { characters?: Array<{ name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description?: string }> }; const characters = Array.isArray(result.characters) ? result.characters.filter(c => c && typeof c.name === 'string' && c.name.trim()).slice(0, count).map(c => ({ name: c.name.trim().slice(0,160), family: String(c.family || '').slice(0,120), expression: String(c.expression || '').slice(0,160), shape: String(c.shape || '').slice(0,180), silhouette: String(c.silhouette || '').slice(0,180), accessories: String(c.accessories || '').slice(0,180), colorPlan: String(c.colorPlan || '').slice(0,180), description: String(c.description || '').slice(0,500) })) : []; return Response.json({ characters }); } catch { return fail('Invalid AI response', 502); }
   }
