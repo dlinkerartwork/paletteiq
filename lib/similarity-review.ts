@@ -27,7 +27,8 @@ export async function reviewImageSimilarity(apiKey: string, generatedBase64: str
       const raw = result.output?.flatMap(item => item.content || []).map(item => item.text || '').join('') || '{}';
       const parsed = JSON.parse(raw) as { similarityScore?: number; tooSimilar?: boolean; reason?: string };
       if (typeof parsed.similarityScore !== 'number' || !Number.isFinite(parsed.similarityScore) || typeof parsed.tooSimilar !== 'boolean') throw new Error('Incomplete visual comparison');
-      return parsed;
+      return { similarityScore: parsed.similarityScore as number,
+        tooSimilar: parsed.tooSimilar as boolean, reason: parsed.reason };
     };
     for (let offset = 0; offset < urls.length; offset += 10) {
       const offsets = [offset, offset + 5].filter(index => index < urls.length);
