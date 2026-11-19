@@ -3,7 +3,7 @@
 // worker output into one collection Style DNA and original character library.
 export type HybridWorker = {
   index: number; images: string[]; status: 'planned'|'submitting'|'queued'|'in_progress'|'completed'|'failed'|'uncertain';
-  responseId?: string; resultText?: string; error?: string;
+  responseId?: string; resultText?: string; error?: string; startedAt?: number;
 };
 export function splitResearchImages(images: string[], concurrency = 3): string[][] {
   if (!images.length) return [];
