@@ -35,3 +35,15 @@ test('failure path cannot pause a pre-existing paid workflow', () => {
   assert.match(endpoint, /An automation workflow already exists/);
   assert.match(page, /Resume Full Automation \(review costs\/jobs first\)/);
 });
+
+test('missing research offers a guarded recovery path without resetting an existing paid job', () => {
+  assert.match(endpoint, /function canRestartMissingResearch\(p: Project\)/);
+  assert.match(endpoint, /!p\.researchJob && !p\.characters\.length/);
+  assert.match(endpoint, /body\.action==='restart-missing-research'/);
+  assert.match(endpoint, /if \(!canRestartMissingResearch\(current\.p\)\)/);
+  assert.match(endpoint, /if \(!canRestartMissingResearch\(p\)\) throw Error/);
+  assert.match(endpoint, /stage:'research',startedAt:now/);
+  assert.match(page, /Start missing research \(check OpenAI usage first\)/);
+  assert.match(page, /target:armed\.flow\.target/);
+  assert.match(page, /if \(!res\.ok \|\| !data\.job\)/);
+});
