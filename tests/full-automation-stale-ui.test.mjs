@@ -47,3 +47,12 @@ test('missing research offers a guarded recovery path without resetting an exist
   assert.match(page, /target:armed\.flow\.target/);
   assert.match(page, /if \(!res\.ok \|\| !data\.job\)/);
 });
+
+test('paused research provides reason when restart is disallowed', () => {
+  assert.match(endpoint, /function researchRecovery\(p: Project\)/);
+  assert.match(endpoint, /job\.status === 'failed'/);
+  assert.match(endpoint, /state:'missing-references'/);
+  assert.match(endpoint, /researchRecovery: researchRecovery\(p\)/);
+  assert.match(page, /Research recovery: \{researchRecovery\?\.message/);
+  assert.match(page, /Saved research job error:/);
+});
