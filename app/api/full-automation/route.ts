@@ -1,8 +1,10 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
+import { env } from 'cloudflare:workers';
 import { getDb } from '@/db';
-import { projects, imageBatches, studioSettings } from '@/db/schema';
+import { projects, imageBatches, studioSettings, paletteAccounts, paletteStores } from '@/db/schema';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { assertSameOrigin } from '@/lib/palette-accounts';
+import { runWithCloudAutomationUser } from '@/lib/cloud-automation-context';
 import { isActiveBatchStatus, retryableFailedImage, eligibleForBulk } from '@/lib/production-rules';
 import { selectDiverseConcepts, normalizeCreativeControls } from '@/lib/creative-intelligence';
 import { projectPromptContext, isActivePromptBatch, type PromptProject } from '@/lib/prompt-batch-jobs';
@@ -255,6 +257,68 @@ async function tick(req: Request, owner: string, id: string) {
     await save(owner,id,p=>p.fullAutomation?({...p,fullAutomation:{...p.fullAutomation,leaseUntil:0}}):p).catch(()=>{});
   }
 }
+// Only the independently deployed Cloudflare Cron Worker may request this tick.
+// HMAC verification is mandatory: the endpoint never trusts a client-supplied
+// account/store identifier and does not expose a general privileged API.
+const CLOUD_TICK_MESSAGE = ':paletteiq-full-automation-v1';
+async function verifiedCloudTick(req: Request) {
+  const secret = (env as unknown as Record<string, string | undefined>).PALETTEIQ_CLOUD_AUTOMATION_SECRET;
+  const time = req.headers.get('x-paletteiq-cloud-timestamp') || '';
+  const signature = req.headers.get('x-paletteiq-cloud-signature') || '';
+  if (!secret || secret.length < 32 || !/^\\d{13}$/.test(time) ||
+      !/^[0-9a-f]{64}$/i.test(signature) ||
+      Math.abs(Date.now() - Number(time)) > 90_000) return false;
+  const bytes = Uint8Array.from(signature.match(/.{2}/g)!, hex => parseInt(hex, 16));
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']);
+  return crypto.subtle.verify('HMAC', key, bytes,
+    new TextEncoder().encode(time + CLOUD_TICK_MESSAGE));
+}
+function uuidFromCompact(compact: string) {
+  return compact.slice(0,8)+'-'+compact.slice(8,12)+'-'+compact.slice(12,16)+'-'+
+    compact.slice(16,20)+'-'+compact.slice(20);
+}
+async function tickCloudCollections(req: Request) {
+  // Cloud mode MUST have persistent D1 and R2 bindings. Never use a desktop
+  // loopback DB from an external scheduler.
+  if (!env.DB || !env.BUCKET) return { active: 0, error: 'Cloud D1/R2 bindings are not configured' };
+  const db = getDb();
+  const candidates = await db.select().from(projects).where(sql`
+    json_extract(${projects.data}, '$.fullAutomation.enabled') = 1
+    AND json_extract(${projects.data}, '$.fullAutomation.stage') NOT IN ('completed','paused')
+  `).orderBy(asc(projects.updatedAt)).limit(2);
+  const results: Array<{ projectId: string; waiting?: boolean; error?: string; stage?: string }> = [];
+  for (const row of candidates) {
+    const parsed = /^user_([0-9a-f]{32})_store_([0-9a-f]{32})$/i.exec(row.owner);
+    if (!parsed) { results.push({ projectId: row.id, error: 'Invalid store scope' }); continue; }
+    const accountId = uuidFromCompact(parsed[1]);
+    const storeId = uuidFromCompact(parsed[2]);
+    const [accounts, stores] = await Promise.all([
+      db.select().from(paletteAccounts).where(eq(paletteAccounts.id, accountId)).limit(1),
+      db.select().from(paletteStores).where(and(eq(paletteStores.id, storeId),
+        eq(paletteStores.accountId, accountId))).limit(1),
+    ]);
+    if (!accounts[0] || !stores[0]) {
+      results.push({ projectId: row.id, error: 'Account or store no longer exists' });
+      continue;
+    }
+    try {
+      const status = await runWithCloudAutomationUser({
+        userId: row.owner, email: accounts[0].email,
+        displayName: stores[0].name, fullName: null,
+      }, () => tick(req, row.owner, row.id));
+      results.push({ projectId: row.id,
+        waiting: 'waiting' in status ? Boolean(status.waiting) : false,
+        error: 'error' in status ? String(status.error) : undefined,
+        stage: 'flow' in status ? status.flow?.stage : undefined });
+    } catch (error) {
+      results.push({ projectId: row.id,
+        error: error instanceof Error ? error.message.slice(0,240) : 'Cloud tick failed' });
+    }
+  }
+  return { active: candidates.length, results };
+}
+
 export async function GET(req:Request) {
   const user=await getChatGPTUser();
   if (!user) return bad('Sign in required',401);
@@ -264,6 +328,16 @@ export async function GET(req:Request) {
   return found?Response.json(progress(found.p),{headers:{'Cache-Control':'no-store'}}):bad('Collection not found',404);
 }
 export async function POST(req:Request) {
+  // Privileged path has no browser session and is accepted only with a
+  // short-lived signature from the separately configured cloud scheduler.
+  if (req.headers.has('x-paletteiq-cloud-timestamp') ||
+      req.headers.has('x-paletteiq-cloud-signature')) {
+    if (!(await verifiedCloudTick(req))) return bad('Invalid cloud scheduler signature',403);
+    let payload: { action?: string };
+    try { payload = await req.json(); } catch { return bad('Invalid cloud scheduler request'); }
+    if (payload.action !== 'cloud-tick') return bad('Invalid cloud scheduler action',403);
+    return Response.json(await tickCloudCollections(req), { headers: { 'Cache-Control':'no-store' } });
+  }
   const user=await getChatGPTUser();
   if (!user) return bad('Sign in required',401);
   if (!assertSameOrigin(req)) return bad('Cross-site automation request denied',403);
