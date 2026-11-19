@@ -261,7 +261,7 @@ export async function POST(req: Request) {
         const subjectCount = Math.ceil(requested / workers.length);
         const instruction = researchAnalysisInstruction(source, worker.images.length, subjectCount,
           normalizeCreativeControls(saved.data.creativeControls)) +
-          '\\nHYBRID WORKER ' + (worker.index + 1) + '/' + workers.length +
+          '\nHYBRID WORKER ' + (worker.index + 1) + '/' + workers.length +
           ': analyze ONLY your supplied image group. Final cross-group Style DNA synthesis follows.';
         const input = [{ role:'user', content:[
           { type:'input_text', text:instruction },
@@ -280,7 +280,7 @@ export async function POST(req: Request) {
           return;
         }
         const result=await ai.json() as ApiResponse;
-        if (!result.id || !/^resp_[\\w-]+$/.test(result.id))
+        if (!result.id || !/^resp_[\w-]+$/.test(result.id))
           throw Error('OpenAI accepted a worker but did not provide a tracking ID');
         await updateWorker(user.userId,projectId,job.id,worker.index,{
           status:result.status==='in_progress'?'in_progress':'queued',responseId:result.id,
@@ -428,7 +428,7 @@ export async function GET(req: Request) {
             return Response.json({job:safeJob(failed||mergeJob)});
           }
           const response=await ai.json() as ApiResponse;
-          if (!response.id||!/^resp_[\\w-]+$/.test(response.id))
+          if (!response.id||!/^resp_[\w-]+$/.test(response.id))
             throw Error('Merge response accepted without a resumable tracking ID');
           const updated=await persistJob(user.userId,projectId,job.id,{
             responseId:response.id,mergeStatus:response.status==='in_progress'?'in_progress':'queued',
