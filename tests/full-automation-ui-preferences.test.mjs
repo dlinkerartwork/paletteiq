@@ -52,7 +52,7 @@ test('Auto-follow navigates only on a safe server-confirmed stage transition', (
   assert.match(page, /oldStage !== newStage && fromTab && toTab && fromTab !== toTab/);
   assert.match(page, /view\.tab === fromTab && isStudioTabEnabled\(toTab\)/);
   assert.match(page, /!thumbnailSaveControlsRef\.current\?\.hasUnsaved\(\)/);
-  assert.match(page, /const clean = savedProjectSnapshots\.current\.get\(id\) === JSON\.stringify\(view\.project\)/);
+  assert.match(page, /const clean = !collectionHasUnsavedEdits\(view\.project, savedProjectSnapshots\.current\.get\(id\)\)/);
   assert.match(page, /autoFollowRef\.current && view\.project\.id === id && clean/);
   assert.match(page, /paletteiq-auto-follow-automation/);
   assert.match(page, /Auto-follow Full Automation \(switch tabs when stages complete\)/);
