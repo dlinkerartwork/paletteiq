@@ -27,7 +27,7 @@ type Subject = PromptProject['characters'][number] & { imageUrl?: string; origin
   similarityReview?: { status?: string; score?: number; reason?: string } };
 type Project = Omit<PromptProject, 'characters'> & Pick<PromptProject, 'id' | 'name' | 'title' | 'theme' | 'subtheme' | 'microtheme' | 'style' | 'palette' | 'texture' | 'primaryKeyword' | 'keywords' | 'longTailKeywords' | 'notes' | 'emotionDirection' | 'ageDirection' | 'cutenessDirection' | 'creativeControls' | 'research' | 'promptJob'> & { characters: Subject[]; fullAutomation?: Flow;
   researchJob?: { status: string; error?: string; responseId?: string; selectedImages?: string[]; model?: string }; listing?: { title?: string };
-  url?: string; images?: string[]; selectedImageUrls?: string[]; characterTarget?: number; researchModel?: string };
+  url?: string; images?: string[]; selectedImageUrls?: string[]; characterTarget?: number; researchModel?: string; progressivePrompts?: boolean };
 type Prefs = { automationPromptModel?: string; automationImageModel?: string;
   quality?: string; seoProvider?: string; seoOpenaiModel?: string; seoGeminiModel?: string };
 const idValid = (x: unknown): x is string => typeof x === 'string' && /^[\w-]{8,80}$/.test(x);
@@ -224,7 +224,7 @@ async function tick(req: Request, owner: string, id: string) {
           ...latest.fullAutomation!,promptAttempts:(latest.fullAutomation?.promptAttempts||0)+1,updatedAt:Date.now()}}));
         const config=await prefs(owner);
         const model=textModel(p,config.automationPromptModel||'gpt-4.1-mini');
-        await apiPost(req,promptPost,{projectId:id,characterIds:missing.slice(0,200).map(c=>c.id),model,regenerate:false});
+        await apiPost(req,promptPost,{projectId:id,characterIds:missing.slice(0,200).map(c=>c.id),model,regenerate:false,progressive:p.progressivePrompts===true});
       } else throw Error('Incomplete prompts after three attempts. Review missing prompts before resuming.');
     } else if (f.stage === 'images') {
       const records=await jobs(owner,id);
