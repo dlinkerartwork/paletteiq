@@ -8,6 +8,7 @@ import { userCredential } from '@/lib/credentials';
 import { mergeSourceEmotionProfile, normalizeCreativeAnalysis, normalizeCreativeControls, selectDiverseConcepts } from '@/lib/creative-intelligence';
 import { researchAnalysisInstruction } from '@/lib/creative-research-prompts';
 import { fetchResearchImageDataUrls, safeRejectedImageResearch } from '@/lib/research-image-input';
+import { splitResearchImages, hybridMergeInstruction, type HybridWorker } from '@/lib/hybrid-research';
 
 type Concept = { name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description?: string };
 type StoredCharacter = { id: string; name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description?: string; status?: string; prompt?: string; origin?: string; imageUrl?: string };
@@ -17,6 +18,7 @@ type ResearchJob = {
   model: string; responseId?: string; createdAt: number; updatedAt: number;
   target: number; requested: number; completedCount: number;
   selectedImages: string[]; source: Source; error?: string;
+  workers?: HybridWorker[]; mergeStatus?: 'planned'|'submitting'|'queued'|'in_progress'|'completed'|'failed'|'uncertain';
 };
 type Collection = {
   id: string; name: string; url?: string; title?: string; images?: string[];
@@ -31,6 +33,8 @@ const safeJob = (job: ResearchJob) => ({
   id: job.id, status: job.status, target: job.target, requested: job.requested,
   completedCount: job.completedCount, model: job.model, createdAt: job.createdAt,
   updatedAt: job.updatedAt, error: job.error,
+  workersCompleted: job.workers?.filter(w => w.status === 'completed').length,
+  workersTotal: job.workers?.length, mergeStatus: job.mergeStatus,
 });
 const active = (job?: ResearchJob) => job && ['submitting', 'queued', 'in_progress'].includes(job.status);
 const openai = (key: string, path: string, init?: RequestInit) => fetch('https://api.openai.com/v1/' + path, {
@@ -58,14 +62,30 @@ async function getCollection(owner: string, projectId: string) {
   const rows = await getDb().select().from(projects).where(and(eq(projects.id, projectId), eq(projects.owner, owner))).limit(1);
   return rows[0] ? { row: rows[0], data: JSON.parse(rows[0].data) as Collection } : null;
 }
+async function mutateJob(owner: string, projectId: string, jobId: string, mutate: (job: ResearchJob) => ResearchJob) {
+  // Compare-and-swap is essential: three concurrent workers must not erase
+  // each other's response IDs or accidentally start duplicate paid merges.
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const saved = await getCollection(owner, projectId);
+    if (!saved || saved.data.researchJob?.id !== jobId) return null;
+    const job = { ...mutate(saved.data.researchJob), updatedAt: Date.now() };
+    const stamp = Math.max(Date.now(), saved.row.updatedAt + 1);
+    const changed = await getDb().update(projects)
+      .set({ data: JSON.stringify({ ...saved.data, researchJob: job }), updatedAt: stamp })
+      .where(and(eq(projects.id, projectId), eq(projects.owner, owner), eq(projects.updatedAt, saved.row.updatedAt)))
+      .returning({ id: projects.id });
+    if (changed.length) return job;
+  }
+  throw Error('Concurrent research status update. Refresh collection before resubmitting any paid work.');
+}
 async function persistJob(owner: string, projectId: string, jobId: string, update: Partial<ResearchJob>) {
-  const saved = await getCollection(owner, projectId);
-  if (!saved || saved.data.researchJob?.id !== jobId) return null;
-  const job = { ...saved.data.researchJob, ...update, updatedAt: Date.now() };
-  const data = { ...saved.data, researchJob: job };
-  await getDb().update(projects).set({ data: JSON.stringify(data), updatedAt: Date.now() })
-    .where(and(eq(projects.id, projectId), eq(projects.owner, owner)));
-  return job;
+  return mutateJob(owner, projectId, jobId, old => ({ ...old, ...update }));
+}
+async function updateWorker(owner: string, projectId: string, jobId: string, index: number,
+  changes: Partial<HybridWorker>) {
+  return mutateJob(owner, projectId, jobId, old => ({
+    ...old, workers: (old.workers || []).map(w => w.index === index ? { ...w, ...changes } : w),
+  }));
 }
 function normalizedProposals(value: unknown): Concept[] {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
@@ -212,9 +232,15 @@ export async function POST(req: Request) {
       '. No new OpenAI background job was submitted.', 422);
   }
   const now = Date.now();
+  const hybrid = Boolean((saved.data.fullAutomation as { enabled?: boolean } | undefined)?.enabled) &&
+    body.retryFailed !== true;
+  const partitions = hybrid ? splitResearchImages(selectedImages, 3) : [];
+  const workers: HybridWorker[] = partitions.map((part, index) => ({
+    index, images: part, status:'planned',
+  }));
   const job: ResearchJob = { id: crypto.randomUUID(), status: 'submitting', model, target, requested,
     createdAt: now, updatedAt: now, completedCount: saved.data.characters?.length || 0,
-    selectedImages, source };
+    selectedImages, source, ...(hybrid ? { workers, mergeStatus:'planned' as const } : {}) };
   // Claim the collection before the paid API call. Reject concurrent tabs using
   // the saved row version, so duplicate submissions cannot quietly incur charges.
   const updated = { ...saved.data, researchJob: job };
@@ -223,6 +249,62 @@ export async function POST(req: Request) {
     .where(and(eq(projects.id, projectId), eq(projects.owner, user.userId), eq(projects.updatedAt, saved.row.updatedAt)))
     .returning({ id: projects.id });
   if (!claim.length) return bad('Collection changed in another tab. Refresh and retry before paying for analysis.', 409);
+  if (hybrid) {
+    // Each worker has its own durable response ID and independent set of
+    // references. Calls start concurrently but are NEVER auto-resubmitted.
+    // A connection failure after acceptance remains 'uncertain' for manual
+    // investigation, not a blind retry that could double-charge.
+    const submissions = workers.map(async worker => {
+      try {
+        await updateWorker(user.userId, projectId, job.id, worker.index, { status:'submitting' });
+        const indices = worker.images.map(url => selectedImages.indexOf(url));
+        const subjectCount = Math.ceil(requested / workers.length);
+        const instruction = researchAnalysisInstruction(source, worker.images.length, subjectCount,
+          normalizeCreativeControls(saved.data.creativeControls)) +
+          '\\nHYBRID WORKER ' + (worker.index + 1) + '/' + workers.length +
+          ': analyze ONLY your supplied image group. Final cross-group Style DNA synthesis follows.';
+        const input = [{ role:'user', content:[
+          { type:'input_text', text:instruction },
+          ...indices.map(index => ({ type:'input_image', image_url:imageDataUrls[index] })),
+        ] }];
+        const ai = await openai(aiKey, 'responses', {
+          method:'POST', headers:{ 'Content-Type':'application/json' },
+          body:JSON.stringify({ model, input, background:true, store:true,
+            text:{ format:{ type:'json_object' } },
+            max_output_tokens:Math.min(13000,3000 + subjectCount*190) }),
+        });
+        if (!ai.ok) {
+          const error='Worker ' + (worker.index+1) + ' failed to start (HTTP ' + ai.status +
+            '): ' + (await ai.text()).slice(0,170);
+          await updateWorker(user.userId,projectId,job.id,worker.index,{status:'failed',error});
+          return;
+        }
+        const result=await ai.json() as ApiResponse;
+        if (!result.id || !/^resp_[\\w-]+$/.test(result.id))
+          throw Error('OpenAI accepted a worker but did not provide a tracking ID');
+        await updateWorker(user.userId,projectId,job.id,worker.index,{
+          status:result.status==='in_progress'?'in_progress':'queued',responseId:result.id,
+        });
+      } catch (error) {
+        await updateWorker(user.userId,projectId,job.id,worker.index,{
+          status:'uncertain',error:'Worker submission may have reached OpenAI: ' +
+            (error instanceof Error?error.message:String(error)).slice(0,210) +
+            '. Check OpenAI activity before any retry.',
+        }).catch(()=>{});
+      }
+    });
+    await Promise.all(submissions);
+    const latest=await getCollection(user.userId,projectId);
+    const updatedJob=latest?.data.researchJob;
+    if (!updatedJob) return bad('Research receipt missing after worker submission. Check OpenAI usage.',503);
+    if (updatedJob.workers?.some(w=>['failed','uncertain'].includes(w.status))) {
+      // Successful workers are still running; GET will collect their outputs
+      // before reporting the failure, so no paid work is lost or repeated.
+      return Response.json({job:safeJob(updatedJob)},{status:202});
+    }
+    await persistJob(user.userId,projectId,job.id,{status:'in_progress'});
+    return Response.json({job:safeJob({...updatedJob,status:'in_progress'})},{status:202});
+  }
   try {
     const instruction = researchAnalysisInstruction(source, selectedImages.length, requested,
       normalizeCreativeControls(saved.data.creativeControls));
