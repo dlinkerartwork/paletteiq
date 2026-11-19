@@ -795,6 +795,50 @@ export default function Home() {
     const timer = window.setInterval(() => void step(), 12000);
     return () => { stopped = true; window.clearInterval(timer); };
   }, [loadDone, project.id, project.fullAutomation?.enabled, project.fullAutomation?.stage]);
+  // Keep all OTHER active collections advancing while this window is open.
+  // The current collection has its own tab-following controller above. The
+  // desktop tray also runs this same syncAll endpoint when the window is
+  // hidden. The server leases each collection to prevent duplicate paid work.
+  useEffect(() => {
+    if (!loadDone) return;
+    let stopped=false, running=false;
+    const tickOtherCollections=async()=>{
+      if (stopped || running) return;
+      const view=latestWorkspace.current;
+      const otherActive=view.projects.filter(p=>p.id!==view.project.id &&
+        p.fullAutomation?.enabled &&
+        !['paused','completed'].includes(p.fullAutomation.stage));
+      if (!otherActive.length) return;
+      running=true;
+      try {
+        const response=await fetch('/api/full-automation',{
+          method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({action:'tick',syncAll:true}),
+        });
+        if (!response.ok || stopped) return;
+        const rows=await fetch('/api/studio',{cache:'no-store'});
+        if (!rows.ok || stopped) return;
+        const list=await rows.json() as Array<{id:string;data:Project}>;
+        const fresh=new Map(list.map(item=>[item.id,item.data]));
+        if (stopped) return;
+        setProjects(previous=>previous.map(old=>{
+          if (old.id===latestWorkspace.current.project.id || !old.fullAutomation?.enabled)
+            return old; // Never overwrite the active editor or unrelated drafts.
+          const stored=fresh.get(old.id);
+          if (!stored) return old;
+          if (savedProjectSnapshots.current.get(old.id)!==JSON.stringify(old))
+            return old; // Another collection has unsaved local changes.
+          savedProjectSnapshots.current.set(old.id,JSON.stringify(stored));
+          projectSnapshots.current.set(old.id,stored);
+          return stored;
+        }));
+      } catch { /* Transient offline state: resume the next poll. */ }
+      finally { running=false; }
+    };
+    void tickOtherCollections();
+    const interval=window.setInterval(()=>void tickOtherCollections(),15000);
+    return ()=>{stopped=true;window.clearInterval(interval);};
+  },[loadDone,activeStoreId]);
   // A browser snapshot can lag behind the server's durable Full Automation
   // state. Always reconcile it before allowing a new paid research submission.
   const refreshAutomationStatus = async (projectId: string): Promise<FullAutomation | null> => {
@@ -1067,7 +1111,7 @@ export default function Home() {
     const collectionDirty = savedProjectSnapshots.current.get(current.project.id) !== JSON.stringify(current.project);
     return !(thumbnailDirty || collectionDirty) || window.confirm('The current collection has unsaved changes. Switch collections? Your edits remain in this tab session; save before a browser reload.');
   };
-  const openCollection = (p: Project) => { if (p.id !== project.id && !canSwitchCollection()) return; setLibraryPage(1); setProject(p); setSourceUrl(p.url); setSelected([]); setMessage(''); setTab(nextIncomplete(p)); };
+  const openCollection = (p: Project) => { if (p.id !== project.id && !canSwitchCollection()) return; setLibraryPage(1); setProject(p); setSourceUrl(p.url); setSelected([]); setMessage(''); setTab(p.fullAutomation?.enabled ? (automationStageTab(p.fullAutomation.stage) || nextIncomplete(p)) : nextIncomplete(p)); };
   const openCollectionPrompts = (id: string) => { const target = projects.find(p => p.id === id); if (!target) { setMessage('Collection not found. Refresh collections and retry.'); return; } if (target.id !== project.id && !canSwitchCollection()) return; setLibraryPage(1); setProject(target); setSourceUrl(target.url); setSelected([]); setMessage('Generate the missing image prompts below, then save the collection.'); setTab(target.characters.length ? 'prompts' : 'characters'); };
   const createCollection = () => { if (!canSwitchCollection()) return; const p = { ...blank(), characterTarget: preferences.target, researchModel: preferences.analysisModel }; setLibraryPage(1); setProject(p); setSourceUrl(''); setSelected([]); setTab('analysis'); };
   const advance = async () => {
@@ -1132,7 +1176,7 @@ export default function Home() {
       </section>}
       {busy === 'analyze' && <div className="panel analysis-progress"><div className="production-progress"><span>Analyzing Etsy images and building {target} original subjects with OpenAI…</span><b>{analysisProgress.done}/{analysisProgress.total}</b></div><div className="progress"><i style={{ width: `${analysisProgress.total ? Math.min(100, 100 * analysisProgress.done / analysisProgress.total) : 0}%` }}/></div><p className="sub">Visual research runs first, then AI generates unique additions in small groups. Please keep this page open until the collection is saved.</p></div>}
       {stepIndex >= 0 && <div className="pipeline-nav"><button className="pipeline-back" onClick={() => navigateTab('collections')}>← All collections</button><div className="pipeline-track">{steps.map((s, i) => <button key={s.id} className={`pipeline-step ${i === stepIndex ? 'current' : ''}`} onClick={() => navigateTab(s.id)}><span>{i + 1}</span>{s.label}</button>)}</div></div>}
-      {tab === 'collections' && <><div className="panel collections-toolbar"><div className="collection-search"><Search size={17}/><input aria-label="Search collections" placeholder="Search name, theme, subtheme, or Etsy URL..." value={collectionQuery} onChange={e => setCollectionQuery(e.target.value)}/>{collectionQuery && <button onClick={() => setCollectionQuery('')} aria-label="Clear search"><X size={16}/></button>}</div><select className="collection-sort" aria-label="Sort collections" value={collectionSort} onChange={e => setCollectionSort(e.target.value as typeof collectionSort)}><option value="recent">Recently saved</option><option value="name">Name A–Z</option><option value="subjects">Most characters</option></select><button className="primary-btn" onClick={createCollection}><Plus size={16}/> New collection</button></div><p className="collections-count">Showing {foundCollections.length} of {projects.length} collections</p><div className="collections-main-grid">{foundCollections.map(p => { const done = p.characters.filter(c => c.status === 'done').length; const next = steps.find(s => s.id === nextIncomplete(p)); return <button className="panel collection-main-card" key={p.id} onClick={() => openCollection(p)}><span className="collection-main-theme">{p.theme || 'Theme not set'}</span><span className={p.lastDownloadedAt ? "collection-downloaded-badge" : "collection-download-untracked"} title={p.lastDownloadedAt ? `Last downloaded: ${new Date(p.lastDownloadedAt).toLocaleString()}` : "Download tracking was not available for earlier ZIP exports."}>{p.lastDownloadedAt ? <><Check size={13}/> Downloaded · {p.downloadCount ?? 1}×</> : <><Download size={13}/> No recorded downloads</>}</span><h2>{p.name}</h2><p>{p.subtheme || 'Original clipart collection'}</p><div className="collection-main-stats"><span>{p.characters.length} characters</span><span>{p.characters.filter(c => c.prompt).length} prompts</span><span>{done} images</span></div><div className="collection-download-history"><span><Download size={13}/> Last ZIP: {typeof p.lastDownloadImageCount === "number" ? p.lastDownloadImageCount + " images" : "not recorded"}</span><span>Unique downloaded: {Array.isArray(p.downloadedImageIds) ? p.downloadedImageIds.length + " images" : "not recorded"}</span><span>{p.lastDownloadedAt ? "Last: " + new Date(p.lastDownloadedAt).toLocaleString() : "Earlier ZIP downloads were not tracked"}</span><span className="collection-redownload-hint">ZIP downloads remain available</span></div><div className="collection-main-progress"><i style={{ width: `${p.characters.length ? done / p.characters.length * 100 : 0}%` }}/></div><div className="collection-main-next">Continue: {next?.label} <ArrowRight size={16}/></div></button>; })}</div>{!foundCollections.length && <div className="panel empty-state"><Layers3 size={30}/><strong>{projects.length ? 'No matching collections' : 'No collections saved yet'}</strong><p>{projects.length ? 'Try another search.' : 'Create your first collection to start the pipeline.'}</p><button className="primary-btn" onClick={createCollection}><Plus size={16}/> New collection</button></div>}</>}
+      {tab === 'collections' && <><div className="panel collections-toolbar"><div className="collection-search"><Search size={17}/><input aria-label="Search collections" placeholder="Search name, theme, subtheme, or Etsy URL..." value={collectionQuery} onChange={e => setCollectionQuery(e.target.value)}/>{collectionQuery && <button onClick={() => setCollectionQuery('')} aria-label="Clear search"><X size={16}/></button>}</div><select className="collection-sort" aria-label="Sort collections" value={collectionSort} onChange={e => setCollectionSort(e.target.value as typeof collectionSort)}><option value="recent">Recently saved</option><option value="name">Name A–Z</option><option value="subjects">Most characters</option></select><button className="primary-btn" onClick={createCollection}><Plus size={16}/> New collection</button></div><p className="collections-count">Showing {foundCollections.length} of {projects.length} collections · {projects.filter(p=>p.fullAutomation?.enabled && !['paused','completed'].includes(p.fullAutomation.stage)).length} Full Automation workflows running concurrently (up to 3 advanced per scheduler cycle)</p><div className="collections-main-grid">{foundCollections.map(p => { const done = p.characters.filter(c => c.status === 'done').length; const next = steps.find(s => s.id === nextIncomplete(p)); return <button className="panel collection-main-card" key={p.id} onClick={() => openCollection(p)}><span className="collection-main-theme">{p.theme || 'Theme not set'}</span><span className={p.lastDownloadedAt ? "collection-downloaded-badge" : "collection-download-untracked"} title={p.lastDownloadedAt ? `Last downloaded: ${new Date(p.lastDownloadedAt).toLocaleString()}` : "Download tracking was not available for earlier ZIP exports."}>{p.lastDownloadedAt ? <><Check size={13}/> Downloaded · {p.downloadCount ?? 1}×</> : <><Download size={13}/> No recorded downloads</>}</span><h2>{p.name}</h2><p>{p.subtheme || 'Original clipart collection'}</p>{p.fullAutomation?.enabled && <p className="sub" role="status">Full Automation: {p.fullAutomation.stage.replaceAll('_',' ')} · {p.characters.length}/{p.fullAutomation.target} characters · {p.characters.filter(c=>c.prompt).length} prompts · {p.characters.filter(c=>c.imageUrl).length} images</p>}<div className="collection-main-stats"><span>{p.characters.length} characters</span><span>{p.characters.filter(c => c.prompt).length} prompts</span><span>{done} images</span></div><div className="collection-download-history"><span><Download size={13}/> Last ZIP: {typeof p.lastDownloadImageCount === "number" ? p.lastDownloadImageCount + " images" : "not recorded"}</span><span>Unique downloaded: {Array.isArray(p.downloadedImageIds) ? p.downloadedImageIds.length + " images" : "not recorded"}</span><span>{p.lastDownloadedAt ? "Last: " + new Date(p.lastDownloadedAt).toLocaleString() : "Earlier ZIP downloads were not tracked"}</span><span className="collection-redownload-hint">ZIP downloads remain available</span></div><div className="collection-main-progress"><i style={{ width: `${p.characters.length ? done / p.characters.length * 100 : 0}%` }}/></div><div className="collection-main-next">Continue: {p.fullAutomation?.enabled && automationStageTab(p.fullAutomation.stage) ? steps.find(s=>s.id===automationStageTab(p.fullAutomation!.stage))?.label || next?.label : next?.label} <ArrowRight size={16}/></div></button>; })}</div>{!foundCollections.length && <div className="panel empty-state"><Layers3 size={30}/><strong>{projects.length ? 'No matching collections' : 'No collections saved yet'}</strong><p>{projects.length ? 'Try another search.' : 'Create your first collection to start the pipeline.'}</p><button className="primary-btn" onClick={createCollection}><Plus size={16}/> New collection</button></div>}</>}
       {tab === 'multi-production' && <MultiCollectionProduction onGeneratePrompts={openCollectionPrompts}/>}
       {tab === 'stores' && <StoreManagement/>}
       {tab === 'settings' && <StudioSettings key={activeStoreId} storeId={activeStoreId} preferences={preferences} onPreferences={updatePreferences} projects={[...projects.filter(p => p.id !== project.id), project]}/>}
