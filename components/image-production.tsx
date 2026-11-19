@@ -15,7 +15,7 @@ type Character = { id: string; name: string; prompt: string; status: string; ima
 type Project = { id: string; name: string; characters: Character[]; listing?: { title?: string }; upscaleBatch?: StoredUpscaleBatch; fullAutomation?: { enabled: boolean; stage: string } };
 type Job = { id: string; status: string; model: string; total: number; completed: number; failed: number; imported: number; createdAt: number; characterIds: string[]; assets: Array<{ id: string; status: string; imageUrl?: string; error?: string }>; warning?: string };
 type UpscaleUpdate = { upscaleJob?: Character['upscaleJob']; upscaledImageUrl?: string; upscaledAt?: number };
-type Props = { project: Project; model: string; quality: string; onModel: (value: string) => void; onQuality: (value: string) => void; onDownloaded: (receipt: { lastDownloadedAt: number; downloadCount: number; lastDownloadImageCount: number; downloadedImageIds: string[] }) => void; onAsset: (id: string, data: { imageUrl?: string; status: 'done' | 'error'; error?: string; similarityReview?: SimilarityReview }) => void; onPromptChange: (id: string, prompt: string) => void; onUpscaleChange: (id: string, data: UpscaleUpdate) => void; onUpscaleBatch: (batch: StoredUpscaleBatch) => void };
+type Props = { project: Project; model: string; batchPreferredModel: string; quality: string; onModel: (value: string) => void; onQuality: (value: string) => void; onDownloaded: (receipt: { lastDownloadedAt: number; downloadCount: number; lastDownloadImageCount: number; downloadedImageIds: string[] }) => void; onAsset: (id: string, data: { imageUrl?: string; status: 'done' | 'error'; error?: string; similarityReview?: SimilarityReview }) => void; onPromptChange: (id: string, prompt: string) => void; onUpscaleChange: (id: string, data: UpscaleUpdate) => void; onUpscaleBatch: (batch: StoredUpscaleBatch) => void };
 
 async function request<T = unknown>(url: string, options?: RequestInit): Promise<T> {
   const r = await fetch(url, options);
@@ -27,10 +27,12 @@ async function request<T = unknown>(url: string, options?: RequestInit): Promise
 // Keep the last known job progress visible immediately when switching tabs.
 const batchJobSnapshot = new Map<string, Job[]>();
 
-export default function ImageProduction({ project, model, quality, onModel, onQuality, onDownloaded, onAsset, onPromptChange, onUpscaleChange, onUpscaleBatch }: Props) {
+export default function ImageProduction({ project, model, batchPreferredModel, quality, onModel, onQuality, onDownloaded, onAsset, onPromptChange, onUpscaleChange, onUpscaleBatch }: Props) {
   const [mode, setMode] = useState<'single' | 'standard-bulk' | 'batch'>('batch');
   const automationActive = !!project.fullAutomation?.enabled && !['paused','completed'].includes(project.fullAutomation.stage);
-  const [batchModel, setBatchModel] = useState('gpt-image-2.5-flare');
+  const [batchModel, setBatchModel] = useState(batchPreferredModel);
+  // Match the saved Settings/Full Automation selection across tab remounts.
+  useEffect(() => { if (!working) setBatchModel(batchPreferredModel); }, [batchPreferredModel, working]);
   const [imageModels, setImageModels] = useState<Array<{ id: string; name: string; batchSupported: boolean }>>([]);
   const [imageModelError, setImageModelError] = useState('');
   useEffect(() => {
@@ -439,7 +441,7 @@ export default function ImageProduction({ project, model, quality, onModel, onQu
       {automationActive && <p className="sub">Full Automation owns image submission and similarity-regeneration Batches. Pause it in the Research & analysis workflow before running manual generation or prompt revisions.</p>}
       {creditAlert && <div className="notice production-notice" role="alert"><CircleAlert size={16}/><strong>{creditAlert}</strong><button type="button" onClick={() => setCreditAlert('')}>Dismiss</button></div>}
       <div className="production-controls">
-        <div><label className="input-label">{mode !== 'batch' ? 'IMAGE MODEL' : 'BATCH IMAGE MODEL'}</label>{mode !== 'batch' ? <select value={model} onChange={e => onModel(e.target.value)}>{!imageModels.some(m => m.id === model) && <option value={model}>{model} (saved model)</option>}{imageModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select> : <select value={batchModel} onChange={e => setBatchModel(e.target.value)}>{!imageModels.some(m => m.id === batchModel && m.batchSupported) && <option value={batchModel}>{batchModel} (saved batch model)</option>}{imageModels.filter(m => m.batchSupported).map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select>}{imageModelError && <p className="sub">{imageModelError}</p>}</div>
+        <div><label className="input-label">{mode !== 'batch' ? 'IMAGE MODEL' : 'BATCH IMAGE MODEL (SETTINGS)'}</label>{mode !== 'batch' ? <select value={model} onChange={e => onModel(e.target.value)}>{!imageModels.some(m => m.id === model) && <option value={model}>{model} (saved model)</option>}{imageModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select> : <select value={batchModel} onChange={e => setBatchModel(e.target.value)}>{!imageModels.some(m => m.id === batchModel && m.batchSupported) && <option value={batchModel}>{batchModel} (saved batch model)</option>}{imageModels.filter(m => m.batchSupported).map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select>}{imageModelError && <p className="sub">{imageModelError}</p>}</div>
         <div><label className="input-label">QUALITY</label><select value={quality} onChange={e => onQuality(e.target.value)}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></div>
         {mode === 'standard-bulk' && <div><label className="input-label">PARALLEL WORKERS</label><select value={bulkWorkers} onChange={e => setBulkWorkers(Number(e.target.value))}><option value={3}>3 workers</option><option value={4}>4 workers</option><option value={5}>5 workers</option></select></div>}
         {mode === 'single' && <div className="character-choice"><label className="input-label">CHOOSE NEVER-GENERATED CHARACTER</label><select value={chosenSingle?.id ?? ''} onChange={e => setSingleId(e.target.value)}><option value="" disabled>Select a character...</option>{eligible.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>}
