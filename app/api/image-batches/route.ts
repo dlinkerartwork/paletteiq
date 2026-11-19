@@ -181,7 +181,7 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
   // asset has a verdict; Full Automation must not treat unchecked as clear.
   if (bucket && isTerminal) {
     const reviewQueue = items.filter(needsBatchReview).slice(0, BATCH_REVIEW_LIMIT);
-    for (const item of reviewQueue) {
+    await Promise.all(reviewQueue.map(async item => {
       const extension = job.format === 'jpeg' ? 'jpg' : 'png';
       try {
         item.similarityReview = await reviewStoredBatchImage(
@@ -194,7 +194,7 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
           checkedAt: Date.now() };
       }
       changedIds.add(item.id);
-    }
+    }));
   }
   const newCompleted = items.filter(i => i.status === 'done').length;
   const newFailed = items.filter(i => i.status === 'error').length;
