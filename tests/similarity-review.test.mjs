@@ -22,7 +22,10 @@ test('single production persists similarity review after saving generated asset'
 });
 
 test('batch imports persist similarity checks alongside generated assets', () => {
-  assert.match(batch, /item\.similarityReview = await reviewImageSimilarity/);
+  const reviewQueue = readFileSync(new URL('../lib/image-review-queue.ts', import.meta.url), 'utf8');
+  assert.match(batch, /item\.similarityReview = await reviewStoredBatchImage/);
+  assert.match(reviewQueue, /return reviewImageSimilarity\(apiKey, btoa\(binary\), mime, references\)/);
+  assert.match(batch, /pendingBatchReviewCount\(items\) \? 'reviewing'/);
   assert.match(batch, /mergeNewBatchResults\(project\.characters, items, changedIds\)/);
   assert.match(recovery, /similarityReview: item\.similarityReview/);
 });
