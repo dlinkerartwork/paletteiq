@@ -20,6 +20,7 @@ import EtsyListingDraft, { type SavedSeoReview } from '@/components/etsy-listing
 import type { EtsyListingDraft as ListingData } from '@/lib/etsy-listing';
 import type { SimilarityReview } from '@/lib/similarity-review';
 import { readWorkspaceHistoryState, routeEquals, routeFromWorkspaceHash, workspaceHash, isStudioTabEnabled, workspaceShortcut, type WorkspaceRoute, WORKSPACE_TAB_IDS } from '@/lib/workspace-history';
+import { collectionHasUnsavedEdits } from '@/lib/collection-unsaved';
 import { auditCreativeConcepts, expressionDistribution, familyDistribution, normalizeCreativeAnalysis, normalizeCreativeControls, reverseEngineeringKeys, styleDNAKeys, characterDNAKeys, selectDiverseConcepts, type CreativeAnalysis, type CreativeControls } from '@/lib/creative-intelligence';
 
 type Character = { id: string; name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description: string; prompt: string; status: 'draft' | 'ready' | 'done' | 'error'; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: { id: string; submittedAt?: number; factor?: number }; error?: string; similarityReview?: SimilarityReview; origin: 'listing' | 'ai' | 'manual' };
@@ -313,7 +314,7 @@ export default function Home() {
       if (!routeEquals(next, previous)) {
         const thumbnailDirty = current.tab === 'thumbnails' && !!thumbnailSaveControlsRef.current?.hasUnsaved();
         const collectionDirty = next.projectId !== current.project.id &&
-          savedProjectSnapshots.current.get(current.project.id) !== JSON.stringify(current.project);
+          collectionHasUnsavedEdits(current.project, savedProjectSnapshots.current.get(current.project.id));
         if ((thumbnailDirty || collectionDirty) &&
             !window.confirm('You have unsaved changes. Leave this page? Your draft stays available in the current session, but a page reload could discard it.')) {
           window.history.go(historyIndex.current - entry.index);
@@ -354,7 +355,7 @@ export default function Home() {
     const guard = (event: BeforeUnloadEvent) => {
       if (allowExplicitReload.current) return;
       const current = latestWorkspace.current;
-      if (savedProjectSnapshots.current.get(current.project.id) !== JSON.stringify(current.project) ||
+      if (collectionHasUnsavedEdits(current.project, savedProjectSnapshots.current.get(current.project.id)) ||
           (current.tab === 'thumbnails' && !!thumbnailSaveControlsRef.current?.hasUnsaved())) {
         event.preventDefault();
         event.returnValue = '';
@@ -367,7 +368,7 @@ export default function Home() {
   const historyForward = () => { if (historyIndex.current < historyMax.current) window.history.forward(); };
   const historyRefresh = () => {
     const current = latestWorkspace.current;
-    const dirty = savedProjectSnapshots.current.get(current.project.id) !== JSON.stringify(current.project) ||
+    const dirty = collectionHasUnsavedEdits(current.project, savedProjectSnapshots.current.get(current.project.id)) ||
       (current.tab === 'thumbnails' && !!thumbnailSaveControlsRef.current?.hasUnsaved());
     if (dirty && !window.confirm('Refresh PaletteIQ? Unsaved changes in the current collection or designer will be lost.')) return;
     allowExplicitReload.current = true;
@@ -684,7 +685,7 @@ export default function Home() {
         if (result.project && result.job.status === 'completed') {
           const editor = latestWorkspace.current;
           if (editor.project.id === projectId &&
-              savedProjectSnapshots.current.get(projectId) === JSON.stringify(editor.project))
+              !collectionHasUnsavedEdits(editor.project, savedProjectSnapshots.current.get(projectId)))
             savedProjectSnapshots.current.set(projectId, JSON.stringify(result.project));
           setProjects(previous => [result.project!, ...previous.filter(p => p.id !== projectId)]);
           setProject(previous => previous.id === projectId ? result.project! : previous);
@@ -694,7 +695,7 @@ export default function Home() {
           setProject(previous => {
             if (previous.id !== projectId || previous.researchJob?.id !== jobId) return previous;
             const updated = { ...previous, researchJob: result.job };
-            if (savedProjectSnapshots.current.get(projectId) === JSON.stringify(previous))
+            if (!collectionHasUnsavedEdits(previous, savedProjectSnapshots.current.get(projectId)))
               savedProjectSnapshots.current.set(projectId, JSON.stringify(updated));
             return updated;
           });
@@ -772,7 +773,7 @@ export default function Home() {
         const newStage = updated.fullAutomation?.stage;
         const fromTab = automationStageTab(oldStage);
         const toTab = automationStageTab(newStage);
-        const clean = savedProjectSnapshots.current.get(id) === JSON.stringify(view.project);
+        const clean = !collectionHasUnsavedEdits(view.project, savedProjectSnapshots.current.get(id));
         if (clean) savedProjectSnapshots.current.set(id, JSON.stringify(updated));
         if (autoFollowRef.current && view.project.id === id && clean &&
             oldStage !== newStage && fromTab && toTab && fromTab !== toTab &&
@@ -826,7 +827,7 @@ export default function Home() {
             return old; // Never overwrite the active editor or unrelated drafts.
           const stored=fresh.get(old.id);
           if (!stored) return old;
-          if (savedProjectSnapshots.current.get(old.id)!==JSON.stringify(old))
+          if (collectionHasUnsavedEdits(old,savedProjectSnapshots.current.get(old.id)))
             return old; // Another collection has unsaved local changes.
           savedProjectSnapshots.current.set(old.id,JSON.stringify(stored));
           projectSnapshots.current.set(old.id,stored);
@@ -1108,7 +1109,7 @@ export default function Home() {
   const canSwitchCollection = () => {
     const current = latestWorkspace.current;
     const thumbnailDirty = current.tab === 'thumbnails' && !!thumbnailSaveControlsRef.current?.hasUnsaved();
-    const collectionDirty = savedProjectSnapshots.current.get(current.project.id) !== JSON.stringify(current.project);
+    const collectionDirty = collectionHasUnsavedEdits(current.project, savedProjectSnapshots.current.get(current.project.id));
     return !(thumbnailDirty || collectionDirty) || window.confirm('The current collection has unsaved changes. Switch collections? Your edits remain in this tab session; save before a browser reload.');
   };
   const openCollection = (p: Project) => { if (p.id !== project.id && !canSwitchCollection()) return; setLibraryPage(1); setProject(p); setSourceUrl(p.url); setSelected([]); setMessage(''); setTab(p.fullAutomation?.enabled ? (automationStageTab(p.fullAutomation.stage) || nextIncomplete(p)) : nextIncomplete(p)); };
