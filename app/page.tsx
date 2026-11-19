@@ -120,6 +120,7 @@ export default function Home() {
   const [target, setTarget] = useState(120);
   const [fullAutoRequested, setFullAutoRequested] = useState(false);
   const [canRestartMissingResearch, setCanRestartMissingResearch] = useState(false);
+  const [canRetryRejectedResearch, setCanRetryRejectedResearch] = useState(false);
   const [researchRecovery, setResearchRecovery] = useState<{state:string;message:string}|null>(null);
   useEffect(() => { setFullAutoRequested(Boolean(project.fullAutomation?.enabled)); }, [project.id, project.fullAutomation?.enabled]);
   const [model, setModel] = useState('gpt-image-1-mini');
@@ -686,10 +687,11 @@ export default function Home() {
   const refreshAutomationStatus = async (projectId: string): Promise<FullAutomation | null> => {
     const response = await fetch('/api/full-automation?projectId=' + encodeURIComponent(projectId),
       { cache: 'no-store' });
-    const state = await response.json() as { error?: string; flow?: FullAutomation | null; canRestartMissingResearch?: boolean; researchRecovery?: {state:string;message:string}|null };
+    const state = await response.json() as { error?: string; flow?: FullAutomation | null; canRestartMissingResearch?: boolean; canRetryRejectedResearch?: boolean; researchRecovery?: {state:string;message:string}|null };
     if (!response.ok) throw Error(state.error || 'Unable to check saved Full Automation status');
     const flow = state.flow ?? null;
     setCanRestartMissingResearch(Boolean(state.canRestartMissingResearch));
+    setCanRetryRejectedResearch(Boolean(state.canRetryRejectedResearch));
     setResearchRecovery(state.researchRecovery ?? null);
     setProject(prev => prev.id === projectId ? { ...prev, fullAutomation: flow ?? undefined } : prev);
     setProjects(prev => prev.map(item => item.id === projectId
@@ -703,10 +705,11 @@ export default function Home() {
       try {
         const response = await fetch('/api/full-automation?projectId=' + encodeURIComponent(project.id),
           { cache: 'no-store' });
-        const state = await response.json() as { flow?: FullAutomation | null; canRestartMissingResearch?: boolean; researchRecovery?: {state:string;message:string}|null };
+        const state = await response.json() as { flow?: FullAutomation | null; canRestartMissingResearch?: boolean; canRetryRejectedResearch?: boolean; researchRecovery?: {state:string;message:string}|null };
         if (!response.ok || cancelled) return;
         const flow = state.flow ?? null;
         setCanRestartMissingResearch(Boolean(state.canRestartMissingResearch));
+        setCanRetryRejectedResearch(Boolean(state.canRetryRejectedResearch));
         setResearchRecovery(state.researchRecovery ?? null);
         setProject(prev => prev.id === project.id ? { ...prev, fullAutomation: flow ?? undefined } : prev);
         setProjects(prev => prev.map(item => item.id === project.id
@@ -746,6 +749,41 @@ export default function Home() {
         (error instanceof Error ? error.message : String(error)) +
         '. Check saved research status and OpenAI usage before retrying.');
       try { await refreshAutomationStatus(project.id); } catch { /* Keep the error visible. */ }
+    } finally { setBusy(''); }
+  };
+  const retryRejectedResearch = async () => {
+    if (busy || !canRetryRejectedResearch || !project.fullAutomation) return;
+    setBusy('research-start');
+    setMessage('Preparing saved Etsy reference images for a new OpenAI background request…');
+    try {
+      // The server only accepts retries for a definite 400 URL-download
+      // rejection without any OpenAI response ID. This is a user action.
+      const response = await fetch('/api/research-jobs', { method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body:JSON.stringify({ projectId:project.id, url:project.url,
+          selectedImages:project.selectedImageUrls ?? project.images,
+          target:project.fullAutomation.target,
+          model:project.researchJob?.model || preferences.analysisModel,
+          retryFailed:true }) });
+      const data = await response.json() as {error?:string;job?:ResearchJobPreview};
+      if (!response.ok || !data.job) throw Error(data.error || 'Research retry not confirmed');
+      setProject(prev => prev.id === project.id ? {...prev,researchJob:data.job} : prev);
+      setProjects(prev => prev.map(x => x.id === project.id ? {...x,researchJob:data.job} : x));
+      // Research is now durably tracked; resume the existing workflow, not
+      // a second one. If this fails, the saved job can still be recovered.
+      const resume = await fetch('/api/full-automation', {method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action:'resume',projectId:project.id})});
+      const resumed = await resume.json() as {error?:string;flow?:FullAutomation};
+      if (!resume.ok || !resumed.flow) throw Error('Research job accepted, but automation could not resume: ' + (resumed.error || 'unknown error'));
+      setProject(prev => prev.id === project.id ? {...prev,fullAutomation:resumed.flow} : prev);
+      setProjects(prev => prev.map(x => x.id === project.id ? {...x,fullAutomation:resumed.flow} : x));
+      setCanRetryRejectedResearch(false);
+      setMessage('Research submitted with embedded Etsy image data. Full Automation resumed; do not submit the job again.');
+    } catch (error) {
+      setMessage('Research recovery: ' + (error instanceof Error ? error.message : String(error)) +
+        '. Check saved research and OpenAI usage before retrying.');
+      try { await refreshAutomationStatus(project.id); } catch { /* Keep failure visible. */ }
     } finally { setBusy(''); }
   };
   const changeAutomation = async (action: 'pause' | 'resume') => {
@@ -953,8 +991,9 @@ export default function Home() {
         {project.fullAutomation.stage === 'paused' && <p className="sub" role="status">Research recovery: {researchRecovery?.message || 'Checking the saved research job and source images…'}</p>}
         {project.fullAutomation.stage === 'paused' && project.researchJob?.error && <p className="sub" role="alert">Saved research job error: {project.researchJob.error}</p>}
         {project.fullAutomation.stage === 'paused' && canRestartMissingResearch && <div className="sub" role="status">No background research job is recorded for this workflow. Resuming alone would pause again. Start the missing research only after checking OpenAI activity for any untracked charge.</div>}
+        {project.fullAutomation.stage === 'paused' && canRetryRejectedResearch && <button type="button" className="outline-btn" disabled={!!busy} onClick={() => void retryRejectedResearch()}>Retry rejected image research (check OpenAI usage first)</button>}
         {project.fullAutomation.stage === 'paused' && canRestartMissingResearch && <button type="button" className="outline-btn" disabled={!!busy} onClick={() => void recoverMissingResearch()}>Start missing research (check OpenAI usage first)</button>}
-        {project.fullAutomation.stage === 'paused' && !canRestartMissingResearch && <button type="button" className="outline-btn" disabled={!!busy} onClick={() => void changeAutomation('resume')}>Resume Full Automation (review costs/jobs first)</button>}
+        {project.fullAutomation.stage === 'paused' && !canRestartMissingResearch && !canRetryRejectedResearch && <button type="button" className="outline-btn" disabled={!!busy} onClick={() => void changeAutomation('resume')}>Resume Full Automation (review costs/jobs first)</button>}
         {project.fullAutomation.stage !== 'paused' && project.fullAutomation.stage !== 'completed' && <button type="button" className="outline-btn" disabled={!!busy} onClick={() => void changeAutomation('pause')}>Pause automation</button>}
       </section>}
       {hasActiveResearch(project.researchJob) && <section className="panel analysis-progress" aria-live="polite">
