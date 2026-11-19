@@ -17,6 +17,7 @@ export type ProgressivePromptGroup = {
 export type PromptBatchJob = {
   id: string; status: string; batchId?: string; model: string;
   mode?: 'batch'|'progressive'; progressiveBatches?: ProgressivePromptGroup[];
+  progressiveJsonl?: string; // Immutable paid request inputs, never rebuilt from edited characters.
   createdAt: number; updatedAt: number; total: number; imported: number;
   failed: number; processedGroups: number; totalGroups: number;
   groups: PromptBatchGroup[]; items: PromptBatchItem[];
