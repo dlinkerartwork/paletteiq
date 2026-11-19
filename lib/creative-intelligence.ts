@@ -1,3 +1,4 @@
+import { isPrimaryCharacter, primaryCharacterTarget } from './primary-character-focus.ts';
 /**
  * Shared research-to-production vocabulary. Reference observations are evidence;
  * suggested subjects are new ideas, never claims about the source listing.
@@ -242,10 +243,13 @@ export function auditCreativeConcepts(items: DiverseConcept[], style?: Partial<S
 }
 
 export function selectDiverseConcepts<T extends DiverseConcept>(
-  proposals: T[], existing: Array<{ name: string; family?: string; expression?: string; silhouette?: string }>, target: number, limit: number, characterVariation = 4,
+  proposals: T[], existing: Array<{ name: string; family?: string; expression?: string; silhouette?: string }>, target: number, limit: number, characterVariation = 4, focusSubject: string | null = null,
 ): T[] {
   if (limit <= 0) return [];
   const current = familyDistribution(existing);
+  const primaryGoal = primaryCharacterTarget(target,focusSubject);
+  let supportCount = existing.filter(c=>!isPrimaryCharacter(c,focusSubject)).length;
+  const supportingMax = target-primaryGoal;
   const seen = new Set(existing.map(c => conceptSignature(c.name)));
   const emotions = expressionDistribution(existing);
   // A broad catalog should cover at least eight different subject families.
@@ -263,6 +267,10 @@ export function selectDiverseConcepts<T extends DiverseConcept>(
   };
   const seenSilhouettes = new Set(existing.map(silhouetteSignature).filter(Boolean));
   const ordered = [...proposals].sort((a, b) => {
+    // Main subjects are never penalized for sharing a family: the subject's
+    // actual pose, silhouette, expression and props provide variation.
+    if (focusSubject && isPrimaryCharacter(a,focusSubject)!==isPrimaryCharacter(b,focusSubject))
+      return isPrimaryCharacter(a,focusSubject)?-1:1;
     const familyGap = (current[conceptFamily(a.family, a.name)] || 0) - (current[conceptFamily(b.family, b.name)] || 0);
     return familyGap || (emotions[(a.expression || '').trim().toLowerCase() || 'unspecified'] || 0) -
       (emotions[(b.expression || '').trim().toLowerCase() || 'unspecified'] || 0);
@@ -273,9 +281,13 @@ export function selectDiverseConcepts<T extends DiverseConcept>(
     if (!signature || seen.has(signature)) continue;
     const family = conceptFamily(candidate.family, name);
     const silhouette = silhouetteSignature(candidate);
-    if ((current[family] || 0) >= perFamilyCap || (silhouette && seenSilhouettes.has(silhouette))) continue;
+    const primary = isPrimaryCharacter(candidate,focusSubject);
+    if (focusSubject && !primary && supportCount>=supportingMax) continue;
+    if ((!primary && (current[family] || 0) >= perFamilyCap) ||
+        (silhouette && seenSilhouettes.has(silhouette))) continue;
     accepted.push(candidate); seen.add(signature); if (silhouette) seenSilhouettes.add(silhouette);
     current[family] = (current[family] || 0) + 1;
+    if (focusSubject && !primary) supportCount++;
     const expression = clean(candidate.expression, 120).toLowerCase() || 'unspecified';
     emotions[expression] = (emotions[expression] || 0) + 1;
     if (accepted.length >= limit) break;
