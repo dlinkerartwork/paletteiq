@@ -181,7 +181,14 @@ export async function POST(req: Request) {
     tags: Array.isArray(listing.tags) ? listing.tags.filter(t => typeof t === 'string').slice(0, 40) : [],
     images: Array.isArray(listing.images) ? [...new Set(listing.images.map(im => String(im.url_fullxfull || im.url_570xN || '')).filter(validImage))] : [],
   };
-  const candidates = Array.isArray(body.selectedImages) ? body.selectedImages.filter((v): v is string => typeof v === 'string') : [];
+  // Failed research receipts retain the exact user-selected Etsy references.
+  // A stale browser collection may have lost its own reference selection;
+  // retrieve the original selection only for the explicitly authorized retry.
+  const supplied = Array.isArray(body.selectedImages)
+    ? body.selectedImages.filter((v): v is string => typeof v === 'string') : [];
+  const candidates = body.retryFailed === true && safeRejectedImageResearch(saved.data.researchJob) &&
+    saved.data.researchJob?.selectedImages?.length
+    ? saved.data.researchJob.selectedImages : supplied;
   const allowed = new Set(source.images);
   const selectedImages = [...new Set(candidates.filter(value => allowed.has(value)))].slice(0, 24);
   if (!selectedImages.length) return bad('Select at least one actual Etsy listing image');
