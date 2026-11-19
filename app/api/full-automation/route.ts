@@ -20,7 +20,7 @@ type Flow = { enabled: boolean; stage: Stage; target: number; startedAt: number;
   reviewQueue?: string[]; revisedIds?: string[]; regenerationBatchId?: string };
 type Subject = PromptProject['characters'][number] & { imageUrl?: string; origin?: string;
   similarityReview?: { status?: string; score?: number; reason?: string } };
-type Project = Omit<PromptProject, 'characters'> & { characters: Subject[]; fullAutomation?: Flow;
+type Project = Omit<PromptProject, 'characters'> & Pick<PromptProject, 'id' | 'name' | 'title' | 'theme' | 'subtheme' | 'microtheme' | 'style' | 'palette' | 'texture' | 'primaryKeyword' | 'keywords' | 'longTailKeywords' | 'notes' | 'emotionDirection' | 'ageDirection' | 'cutenessDirection' | 'creativeControls' | 'research' | 'promptJob'> & { characters: Subject[]; fullAutomation?: Flow;
   researchJob?: { status: string; error?: string }; listing?: { title?: string };
   url?: string; images?: string[]; selectedImageUrls?: string[] };
 type Prefs = { automationPromptModel?: string; automationImageModel?: string;
