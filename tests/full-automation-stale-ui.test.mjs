@@ -22,7 +22,14 @@ test('restarting analysis with existing flow is blocked BEFORE collection save o
   const save = analyze.indexOf("await api({ action: 'save'");
   const submit = analyze.indexOf("fetch('/api/research-jobs'");
   assert.ok(refresh !== -1 && guard > refresh && save > guard && submit > save);
-  assert.match(analyze, /Use Resume Full Automation above/);
+  assert.match(analyze, /Use its recovery controls above/);
+  // A newly created browser-only collection must be saved before its
+  // Full Automation state can be retrieved. Existing collections are still
+  // checked for paid work before the save operation.
+  assert.match(analyze, /fetch\('\/api\/studio\?projectId='/);
+  assert.match(analyze, /if \(savedRows\.some\(item => item\.id === project\.id\)\)/);
+  assert.ok(analyze.indexOf('const saved = await fetch') < refresh);
+  assert.ok(save > refresh);
 });
 
 test('failure path cannot pause a pre-existing paid workflow', () => {
