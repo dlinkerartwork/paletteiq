@@ -292,10 +292,22 @@ export async function POST(req: Request) {
     });
     try {
       const result = await generateSeoJson(user.userId, requestText, provider as 'openai' | 'gemini', model) as { prompts?: Array<{ id: string; prompt: string }> };
+      // A response can contain several good prompts alongside missing, short,
+      // duplicated or hallucinated IDs. Never discard the valid work because
+      // one item failed; the client saves these and offers retry for ONLY missing.
       const allowed = new Set(characters.map((c: { id: string }) => c.id));
-      const prompts = Array.isArray(result.prompts) ? result.prompts.filter(p => allowed.has(p.id) && typeof p.prompt === 'string' && p.prompt.trim().length > 60).map(p => ({ id: p.id, prompt: p.prompt.trim().slice(0, 8000) })) : [];
-      if (new Set(prompts.map((p: { id: string }) => p.id)).size !== characters.length || prompts.length !== characters.length) return fail('AI returned incomplete prompts. Please retry this group.', 502);
-      return Response.json({ prompts });
+      const accepted = new Map<string, string>();
+      if (Array.isArray(result.prompts)) for (const item of result.prompts) {
+        if (!item || typeof item.id !== 'string' || !allowed.has(item.id) ||
+            typeof item.prompt !== 'string' || item.prompt.trim().length <= 60 ||
+            accepted.has(item.id)) continue;
+        accepted.set(item.id, item.prompt.trim().slice(0, 8000));
+      }
+      const prompts = characters.filter(c => accepted.has(c.id)).map(c => ({
+        id: c.id, prompt: accepted.get(c.id)!,
+      }));
+      const missingIds = characters.filter(c => !accepted.has(c.id)).map(c => c.id);
+      return Response.json({ prompts, missingIds, requested: characters.length });
     } catch (error) { return fail(error instanceof Error ? error.message.slice(0, 260) : 'Invalid AI prompt response', 502); }
   }
   if (body.action === 'listing-draft') {
