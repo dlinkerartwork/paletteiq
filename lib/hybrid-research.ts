@@ -1,6 +1,8 @@
 // The research worker partition is deterministic and never creates extra
 // requests when the client polls. A single merge request consolidates the
 // worker output into one collection Style DNA and original character library.
+import { primaryCharacterSubject, primaryCharacterTarget } from './primary-character-focus.ts';
+
 export type HybridWorker = {
   index: number; images: string[]; status: 'planned'|'submitting'|'queued'|'in_progress'|'completed'|'failed'|'uncertain';
   responseId?: string; resultText?: string; error?: string; startedAt?: number;
@@ -13,6 +15,8 @@ export function splitResearchImages(images: string[], concurrency = 3): string[]
   return groups;
 }
 export function hybridMergeInstruction(source: {title:string;description:string;tags:string[]},workers: HybridWorker[],target:number): string {
+  const focal=primaryCharacterSubject(source.title);
+  const mainGoal=primaryCharacterTarget(target,focal);
   const results = workers.map(w=>({group:w.index+1,images:w.images.length,
     analysis:JSON.parse(w.resultText || '{}') as unknown}));
   return `SYNTHESIZE the following independent visual analyses into ONE cohesive original Etsy clipart collection.
@@ -21,6 +25,7 @@ age/emotion cues and commercial intent. Resolve conflicting evidence explicitly,
 observations or pretend objects from one reference group appear in another. Produce one strong
 STYLE DNA (art medium, shape language, palette, texture, lighting, rendering, composition) based on
 the dominant visual evidence, and diverse CHARACTER DNA with distinct silhouettes, families,
+MAIN SUBJECT QUOTA: ${focal ? `At least ${mainGoal} of the ${target} original concepts MUST be "${focal}" characters (family "${focal}"). At most ${target-mainGoal} supporting characters/props. For a fairy listing, different wing shapes, poses, costumes, expressions and silhouettes make original fairies, not a catalog dominated by flowers or mushrooms. Do not penalize heroes for sharing the same canonical family.` : 'No recurring hero was identified: preserve broad family diversity.'}
 poses and accessories. De-duplicate all suggested characters and return EXACTLY ${target} original
 character concepts consistent with the merged Style DNA; introduce cohesive novel concepts if
 workers proposed too few. Do not copy source arrangements. Every character needs name, family,
