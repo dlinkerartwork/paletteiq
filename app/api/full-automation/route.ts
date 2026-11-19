@@ -306,9 +306,9 @@ async function tick(req: Request, owner: string, id: string) {
       else {
         const config=await prefs(owner);
         const result=await apiPost(req,studioPost,{action:'listing-draft',project:p,
-          seoProvider:p.fullAutomation?.textModel?'openai':(config.seoProvider||'openai'),
+          seoProvider:config.seoProvider||'gemini',
           seoOpenaiModel:textModel(p,config.seoOpenaiModel||'gpt-4.1-mini'),
-          seoGeminiModel:config.seoGeminiModel||'gemini-2.5-pro',
+          seoGeminiModel:config.seoGeminiModel||'gemini-3.5-flash',
           analyzeWithAi:true});
         const draft=normalizeListing(result.draft);
         if (!draft.title) throw Error('AI returned an empty Etsy listing title');
