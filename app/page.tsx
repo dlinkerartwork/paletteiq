@@ -200,13 +200,31 @@ export default function Home() {
     setBusy('prompts'); setPromptProgress({ done: 0, total: chosen.length }); setMessage('');
     let completed = 0;
     try {
-      for (let i = 0; i < chosen.length; i += 10) {
-        const group = chosen.slice(i, i + 10);
-        const result = await api({ action: 'generate-prompts', theme: project.theme, subtheme: project.subtheme, style: project.style, palette: project.palette, texture: project.texture, characters: group });
-        const generated = new Map<string, string>((result.prompts as { id: string; prompt: string }[]).map(p => [p.id, p.prompt]));
-        if (generated.size !== group.length) throw new Error('OpenAI returned an incomplete group.');
-        setProject(prev => ({ ...prev, characters: prev.characters.map(c => generated.has(c.id) ? { ...c, prompt: generated.get(c.id)!, status: c.status === 'done' ? 'done' : 'ready' } : c) }));
-        completed += group.length; setPromptProgress({ done: completed, total: chosen.length });
+      // Keep at most three prompt groups in flight to reduce latency without
+      // sending all requests simultaneously (and hitting account rate limits).
+      const groups: Character[][] = [];
+      for (let i = 0; i < chosen.length; i += 10) groups.push(chosen.slice(i, i + 10));
+      const failures: string[] = [];
+      let nextGroup = 0;
+      const runWorker = async () => {
+        while (nextGroup < groups.length) {
+          const group = groups[nextGroup++];
+          try {
+            const result = await api({ action: 'generate-prompts', theme: project.theme, subtheme: project.subtheme, style: project.style, palette: project.palette, texture: project.texture, characters: group });
+            const generated = new Map<string, string>((result.prompts as { id: string; prompt: string }[]).map(p => [p.id, p.prompt]));
+            if (generated.size !== group.length || group.some(c => !generated.has(c.id))) throw new Error('OpenAI returned an incomplete group.');
+            setProject(prev => ({ ...prev, characters: prev.characters.map(c => generated.has(c.id) ? { ...c, prompt: generated.get(c.id)!, status: c.status === 'done' ? 'done' : 'ready' } : c) }));
+            completed += group.length;
+            setPromptProgress({ done: completed, total: chosen.length });
+          } catch (error) {
+            failures.push(error instanceof Error ? error.message : 'AI request failed');
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(3, groups.length) }, () => runWorker()));
+      if (failures.length) {
+        setMessage(`${completed}/${chosen.length} prompts generated; ${failures.length} group(s) failed. Save successful prompts and retry missing ones. First error: ${failures[0]}`);
+        return;
       }
       setMessage(`${completed} prompts generated with OpenAI. Review and save your collection.`);
     } catch (error) { setMessage(`${completed}/${chosen.length} prompts generated. ${error instanceof Error ? error.message : 'AI request failed'} You may retry the remaining characters.`); }
