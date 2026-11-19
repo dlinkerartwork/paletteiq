@@ -119,7 +119,7 @@ export default function Home() {
   const [message, setMessage] = useState('');
   const [target, setTarget] = useState(120);
   const [fullAutoRequested, setFullAutoRequested] = useState(false);
-  useEffect(() => { setFullAutoRequested(Boolean(project.fullAutomation?.enabled)); }, [project.id]);
+  useEffect(() => { setFullAutoRequested(Boolean(project.fullAutomation?.enabled)); }, [project.id, project.fullAutomation?.enabled]);
   const [model, setModel] = useState('gpt-image-1-mini');
   const [quality, setQuality] = useState('low');
   const [selected, setSelected] = useState<string[]>([]);
@@ -476,7 +476,17 @@ export default function Home() {
       // visual references and prepare the full 120-subject library remotely.
       // The browser is only a status viewer, never the job runner.
       setBusy('research-start'); setMessage('Saving the collection and submitting OpenAI background research…');
+      let startedNewAutomation = false;
       try {
+        if (fullAutoRequested) {
+          const previous = await refreshAutomationStatus(project.id);
+          if (previous?.enabled && previous.stage !== 'completed') {
+            setMessage(previous.stage === 'paused'
+              ? 'This collection has a paused Full Automation workflow. Use Resume Full Automation above; do not start another paid research job.'
+              : 'Full Automation is already running (' + previous.stage + '). The saved status is restored above; do not start another paid research job.');
+            return;
+          }
+        }
         await api({ action: 'save', id: project.id, name: project.name, data: project });
         let fullAutomation: FullAutomation | undefined = project.fullAutomation;
         if (fullAutoRequested) {
@@ -486,6 +496,7 @@ export default function Home() {
           const next = await res.json() as { error?: string; flow?: FullAutomation };
           if (!res.ok || !next.flow) throw Error(next.error || 'Unable to start Full Automation');
           fullAutomation = next.flow;
+          startedNewAutomation = true;
         }
         const started = await fetch('/api/research-jobs', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -502,10 +513,19 @@ export default function Home() {
           ? 'Full Automation started. PaletteIQ will expand missing characters, generate prompts and images, revise similarity-flagged prompts once, then create the Etsy listing draft. OpenAI jobs run remotely; next workflow stages resume when PaletteIQ runs (including Desktop tray).'
           : 'OpenAI background research accepted. You may close PaletteIQ or shut down this PC; OpenAI continues processing. Reopen PaletteIQ to import the completed characters automatically. For a target above 160, use AI Fill afterward.');
       } catch (error) {
-        if (fullAutoRequested) void fetch('/api/full-automation', { method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'pause', projectId: project.id }) }).catch(() => {});
-        setMessage('Background research not started: ' + (error instanceof Error ? error.message : String(error)) + '. Check the saved job before retrying to avoid duplicate API charges.');
+        // Never pause a pre-existing workflow merely because a stale tab
+        // attempted to start again. Pause only a workflow created by THIS call.
+        if (startedNewAutomation) {
+          try {
+            await fetch('/api/full-automation', { method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'pause', projectId: project.id }) });
+          } catch { /* Preserve the original submission error. */ }
+        }
+        try { await refreshAutomationStatus(project.id); }
+        catch { /* User can reopen the collection to recover saved status. */ }
+        setMessage('Background research not started: ' + (error instanceof Error ? error.message : String(error)) +
+          '. Check the restored Full Automation status above before retrying to avoid duplicate API charges.');
       } finally { setBusy(''); }
       return;
     }
@@ -659,6 +679,37 @@ export default function Home() {
     const timer = window.setInterval(() => void step(), 12000);
     return () => { stopped = true; window.clearInterval(timer); };
   }, [loadDone, project.id, project.fullAutomation?.enabled, project.fullAutomation?.stage]);
+  // A browser snapshot can lag behind the server's durable Full Automation
+  // state. Always reconcile it before allowing a new paid research submission.
+  const refreshAutomationStatus = async (projectId: string): Promise<FullAutomation | null> => {
+    const response = await fetch('/api/full-automation?projectId=' + encodeURIComponent(projectId),
+      { cache: 'no-store' });
+    const state = await response.json() as { error?: string; flow?: FullAutomation | null };
+    if (!response.ok) throw Error(state.error || 'Unable to check saved Full Automation status');
+    const flow = state.flow ?? null;
+    setProject(prev => prev.id === projectId ? { ...prev, fullAutomation: flow ?? undefined } : prev);
+    setProjects(prev => prev.map(item => item.id === projectId
+      ? { ...item, fullAutomation: flow ?? undefined } : item));
+    return flow;
+  };
+  useEffect(() => {
+    if (!loadDone || tab !== 'analysis') return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch('/api/full-automation?projectId=' + encodeURIComponent(project.id),
+          { cache: 'no-store' });
+        const state = await response.json() as { flow?: FullAutomation | null };
+        if (!response.ok || cancelled) return;
+        const flow = state.flow ?? null;
+        setProject(prev => prev.id === project.id ? { ...prev, fullAutomation: flow ?? undefined } : prev);
+        setProjects(prev => prev.map(item => item.id === project.id
+          ? { ...item, fullAutomation: flow ?? undefined } : item));
+      } catch { /* Keep the editor usable; start still checks server state. */ }
+    })();
+    return () => { cancelled = true; };
+  }, [loadDone, tab, project.id]);
+
   const changeAutomation = async (action: 'pause' | 'resume') => {
     setBusy('automation');
     try {
