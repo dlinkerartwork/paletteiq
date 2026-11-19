@@ -30,6 +30,9 @@ type Prefs = { automationPromptModel?: string; automationImageModel?: string;
   quality?: string; seoProvider?: string; seoOpenaiModel?: string; seoGeminiModel?: string };
 const idValid = (x: unknown): x is string => typeof x === 'string' && /^[\w-]{8,80}$/.test(x);
 const isActive = (f?: Flow) => !!f?.enabled && f.stage !== 'completed' && f.stage !== 'paused';
+const resumeStage = (f?: Flow): Stage =>
+  f?.resumeStage && f.resumeStage !== 'paused' && f.resumeStage !== 'completed'
+    ? f.resumeStage : 'research';
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 const busy = new Set<string>();
 async function load(owner: string, id: string) {
@@ -57,7 +60,7 @@ async function setStage(owner: string, id: string, phase: Stage, extras: Partial
 }
 function canRestartMissingResearch(p: Project) {
   return p.fullAutomation?.enabled && p.fullAutomation.stage === 'paused' &&
-    (p.fullAutomation.resumeStage || 'research') === 'research' &&
+    resumeStage(p.fullAutomation) === 'research' &&
     !p.researchJob && !p.characters.length &&
     !!p.url && !!(p.selectedImageUrls ?? p.images ?? []).length;
 }
@@ -72,7 +75,7 @@ function researchRecovery(p: Project) {
   const flow = p.fullAutomation;
   const job = p.researchJob;
   if (!flow?.enabled || flow.stage !== 'paused' ||
-      (flow.resumeStage || 'research') !== 'research') return null;
+      resumeStage(flow) !== 'research') return null;
   if (job) {
     if (canRetryRejectedResearch(p)) return { state:'rejected-image-url',
       message:'OpenAI rejected the image URL with HTTP 400 before creating a background job. PaletteIQ can retry once using downloaded image data. Check OpenAI usage first.' };
@@ -96,6 +99,8 @@ function researchRecovery(p: Project) {
 function progress(p: Project) {
   return { flow: p.fullAutomation || null,
     researchRecovery: researchRecovery(p),
+    researchJobStatus: p.researchJob?.status || 'not_started',
+    researchJobError: p.researchJob?.error || null,
     canRetryRejectedResearch: Boolean(canRetryRejectedResearch(p)),
     canRestartMissingResearch: Boolean(canRestartMissingResearch(p)), characterCount: p.characters.length,
     promptCount: p.characters.filter(c => !!c.prompt?.trim()).length,
@@ -409,9 +414,14 @@ export async function POST(req:Request) {
     return Response.json(progress(await save(user.userId,id,p=>({...p,fullAutomation:flow}))));
   }
   if (body.action==='pause') {
-    return Response.json(progress(await save(user.userId,id,p=>p.fullAutomation?({
-      ...p,fullAutomation:{...p.fullAutomation,stage:'paused',
-        resumeStage:p.fullAutomation.stage,lastError:'Paused by user',leaseUntil:0,updatedAt:Date.now()}}):p)));
+    if (!current.p.fullAutomation) return bad('No Full Automation workflow exists',409);
+    // Repeated Pause must not store "paused" as a resumable stage or erase
+    // the original reason why a failed paid job stopped.
+    if (current.p.fullAutomation.stage === 'paused')
+      return Response.json(progress(current.p));
+    return Response.json(progress(await save(user.userId,id,p=>({
+      ...p,fullAutomation:{...p.fullAutomation!,stage:'paused',
+        resumeStage:p.fullAutomation!.stage,lastError:'Paused by user',leaseUntil:0,updatedAt:Date.now()}}))));
   }
   if (body.action==='restart-missing-research') {
     // This cannot retry a submitted, failed or ambiguous paid research request:
@@ -429,7 +439,7 @@ export async function POST(req:Request) {
   if (body.action==='resume') {
     if (current.p.fullAutomation?.stage!=='paused') return bad('No paused automation to resume',409);
     return Response.json(progress(await save(user.userId,id,p=>({
-      ...p,fullAutomation:{...p.fullAutomation!,stage:p.fullAutomation?.resumeStage||'research',
+      ...p,fullAutomation:{...p.fullAutomation!,stage:resumeStage(p.fullAutomation),
         lastError:undefined,leaseUntil:0,updatedAt:Date.now()}}))));
   }
   if (body.action==='tick') return Response.json(await tick(req,user.userId,id));
