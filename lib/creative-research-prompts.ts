@@ -1,3 +1,4 @@
+import { primaryCharacterSubject, primaryCharacterTarget } from './primary-character-focus.ts';
 import { normalizeCreativeControls, type CreativeAnalysis, type CreativeControls } from './creative-intelligence.ts';
 
 type ListingResearchSource = { title: string; description: string; tags: string[] };
@@ -10,8 +11,11 @@ export function researchAnalysisInstruction(source: ListingResearchSource, selec
   const subjectCount = Math.max(1, Math.min(160, Math.floor(requestedSubjects)));
   const fullCatalog = subjectCount > 20;
   const creativeControls = normalizeCreativeControls(requestedControls);
+  const focal=primaryCharacterSubject(source.title);
+  const focalGoal=primaryCharacterTarget(subjectCount,focal);
   return `Analyze this Etsy clipart LISTING deeply as a commercial and visual research brief.
 REFERENCE INPUTS: ${selectedImageCount} user-selected images, plus the source listing title, description and tags below.
+MAIN CHARACTER PRIORITY: ${focal ? `The listing repeatedly names "${focal}". Make at least ${focalGoal} of the ${subjectCount} original concepts versions of that SAME main character (${Math.ceil(100*focalGoal/subjectCount)}% or more). The remainder may be supporting characters or props. For a fairy theme, make predominantly distinct fairies (different wings, hair, gestures, outfits, silhouettes and age-appropriate expressions), not mostly mushrooms, butterflies or flowers. Keep the canonical family/subject explicitly "${focal}" on every main concept. Distinct main characters may share the family label; do not confuse family diversity with identity diversity.` : 'No strong recurring hero was detected: preserve broad subject-family diversity.'}
 COLLECTION CREATIVE CONTROLS (scales 1–5, not facts about visible references):
 ${brief(creativeControls)}. Higher Style Consistency requires tighter shared style;
 higher Character Variation encourages more distinct categories/anatomy/silhouettes;
@@ -167,14 +171,20 @@ export function diversityExpansionInstruction(input: {
 }): string {
   const { count, target, title, analysis, existing, distribution, expressionCounts } = input;
   const creativeControls = normalizeCreativeControls(analysis.creativeControls);
+  const focal=primaryCharacterSubject(title);
+  const focalGoal=primaryCharacterTarget(target,focal);
+  const primaryCount=existing.filter(c=>focal && ((c.family||'')+' '+c.name).toLowerCase().includes(focal)).length;
+  const stillNeeded=Math.max(0,focalGoal-primaryCount);
   return `You are building a DISTINCT, ORIGINAL, commercially cohesive ${target}-element clipart product.
-Generate EXACTLY ${count} genuinely NEW subject concepts. Output JSON
+Generate EXACTLY ${count} genuinely NEW subject concepts.
+PRIMARY SUBJECT QUOTA: ${focal ? `The main Etsy character is "${focal}". At least ${focalGoal} of ${target} must be this main subject; existing main characters: ${primaryCount}. Remaining main characters needed: ${stillNeeded}. Generate ${Math.min(count,stillNeeded)} or more NEW, visually distinct ${focal} characters in this request. Keep family "${focal}" for them. Supporting props cannot exceed ${target-focalGoal} of the total. Different facial emotions, outfit motifs, wings, body language, silhouettes and poses create genuine fairy variants even within the same family.` : 'No dominant named main character; preserve broad subject-family diversity.'}
+Output JSON
 {"characters":[{"name":"specific visual subject","family":"CANONICAL category/species",
 "expression":"one specific age-appropriate facial expression or not applicable",
 "shape":"anatomy and distinct proportions","silhouette":"recognizable nonduplicate contour",
 "accessories":"distinct original accessory or none","colorPlan":"reference-consistent colors with varied roles",
 "description":"distinct original pose, form, accessories, facial/body language and composition"}]}.
-CRITICAL: MAXIMIZE VARIETY OF SUBJECT IDENTITIES/FAMILIES FIRST, and only then
+CRITICAL: When a main character is identified above, prioritize its QUOTA before diversity across supporting families. Within the main character, maximize genuinely distinct identities, anatomy, poses, expressions and accessories. Otherwise MAXIMIZE VARIETY OF SUBJECT IDENTITIES/FAMILIES FIRST, and only then
 pose/accessory variations. A cow in six poses is STILL six COWS; do not treat these as six
 different categories. Expand logically beyond what appears in reference images, provided
 the new species, objects, botanical elements or decorations fit the complete THEME,
