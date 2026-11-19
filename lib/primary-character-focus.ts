@@ -3,16 +3,16 @@
 // keep the existing diverse-family behavior, while "Fairy Clipart ..." focuses
 // on fairies instead of filling the bundle with decorative garden objects.
 const focalSubjects: Array<[RegExp,string]> = [
-  [/\\b(?:fairy|fairies)\\b/gi,'fairy'],
-  [/\\b(?:mermaid|mermaids)\\b/gi,'mermaid'],
-  [/\\b(?:princess|princesses)\\b/gi,'princess'],
-  [/\\b(?:unicorn|unicorns)\\b/gi,'unicorn'],
-  [/\\b(?:dragon|dragons)\\b/gi,'dragon'],
-  [/\\b(?:dinosaur|dinosaurs)\\b/gi,'dinosaur'],
-  [/\\b(?:gnome|gnomes)\\b/gi,'gnome'],
-  [/\\b(?:angel|angels)\\b/gi,'angel'],
-  [/\\b(?:ballerina|ballerinas)\\b/gi,'ballerina'],
-  [/\\b(?:teddy bear|teddy bears)\\b/gi,'teddy bear'],
+  [/\b(?:fairy|fairies)\b/gi,'fairy'],
+  [/\b(?:mermaid|mermaids)\b/gi,'mermaid'],
+  [/\b(?:princess|princesses)\b/gi,'princess'],
+  [/\b(?:unicorn|unicorns)\b/gi,'unicorn'],
+  [/\b(?:dragon|dragons)\b/gi,'dragon'],
+  [/\b(?:dinosaur|dinosaurs)\b/gi,'dinosaur'],
+  [/\b(?:gnome|gnomes)\b/gi,'gnome'],
+  [/\b(?:angel|angels)\b/gi,'angel'],
+  [/\b(?:ballerina|ballerinas)\b/gi,'ballerina'],
+  [/\b(?:teddy bear|teddy bears)\b/gi,'teddy bear'],
 ];
 export function primaryCharacterSubject(title: string): string | null {
   const normalized=title.toLowerCase();
@@ -33,8 +33,8 @@ export function isPrimaryCharacter(
 ): boolean {
   if (!subject) return false;
   const group=((value.family||'')+' '+value.name).toLowerCase();
-  if (subject==='fairy') return /\\b(?:fairy|fairies|faerie|faeries|fae)\\b/i.test(group);
-  if (subject==='princess') return /\\b(?:princess|princesses)\\b/i.test(group);
-  if (subject==='teddy bear') return /\\bteddy\\s*bear(?:s)?\\b/i.test(group);
-  return new RegExp('\\\\b'+subject+'s?\\\\b','i').test(group);
+  if (subject==='fairy') return /\b(?:fairy|fairies|faerie|faeries|fae)\b/i.test(group);
+  if (subject==='princess') return /\b(?:princess|princesses)\b/i.test(group);
+  if (subject==='teddy bear') return /\bteddy\s*bear(?:s)?\b/i.test(group);
+  return new RegExp('\\\b'+subject+'s?\\\b','i').test(group);
 }
