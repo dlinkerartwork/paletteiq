@@ -10,8 +10,13 @@ export type PromptBatchItem = {
   status: 'pending' | 'done' | 'error' | 'skipped'; error?: string;
 };
 export type PromptBatchGroup = { key: string; ids: string[] };
+export type ProgressivePromptGroup = {
+  key: string; status: 'planned'|'submitting'|'queued'|'in_progress'|'completed'|'failed'|'uncertain';
+  batchId?: string; startedAt?: number; error?: string;
+};
 export type PromptBatchJob = {
   id: string; status: string; batchId?: string; model: string;
+  mode?: 'batch'|'progressive'; progressiveBatches?: ProgressivePromptGroup[];
   createdAt: number; updatedAt: number; total: number; imported: number;
   failed: number; processedGroups: number; totalGroups: number;
   groups: PromptBatchGroup[]; items: PromptBatchItem[];
