@@ -135,7 +135,7 @@ async function finish(owner: string, projectId: string, job: ResearchJob, respon
       expression: c.expression, shape: c.shape, silhouette: c.silhouette, accessories: c.accessories, colorPlan: c.colorPlan, description: c.description || '', origin: 'ai',
       prompt: '', status: 'draft' })),
   ];
-  const updatedJob: ResearchJob = { ...job, status: 'completed', completedCount: characters.length, updatedAt: Date.now() };
+  const updatedJob: ResearchJob = { ...job, status: 'completed', ...(job.workers?.length ? { mergeStatus:'completed' as const } : {}), completedCount: characters.length, updatedAt: Date.now() };
   // Merge the current stored record, not the user's stale browser snapshot. This
   // keeps independently saved images/upscale records and manual character edits intact.
   const updated: Collection = {
@@ -169,7 +169,7 @@ async function finish(owner: string, projectId: string, job: ResearchJob, respon
 export async function POST(req: Request) {
   const user = await getChatGPTUser();
   if (!user) return bad('Sign in required', 401);
-  let body: { projectId?: string; url?: string; selectedImages?: unknown[]; target?: number; model?: string; retryFailed?: boolean };
+  let body: { projectId?: string; url?: string; selectedImages?: unknown[]; target?: number; model?: string; retryFailed?: boolean; hybridResearch?: boolean };
   try { body = await req.json(); } catch { return bad('Invalid JSON'); }
   const projectId = String(body.projectId || '');
   const saved = await getCollection(user.userId, projectId).catch(() => null);
@@ -233,7 +233,7 @@ export async function POST(req: Request) {
   }
   const now = Date.now();
   const hybrid = Boolean((saved.data.fullAutomation as { enabled?: boolean } | undefined)?.enabled) &&
-    body.retryFailed !== true;
+    body.retryFailed !== true && body.hybridResearch !== false;
   const partitions = hybrid ? splitResearchImages(selectedImages, 3) : [];
   const workers: HybridWorker[] = partitions.map((part, index) => ({
     index, images: part, status:'planned',
@@ -256,7 +256,7 @@ export async function POST(req: Request) {
     // investigation, not a blind retry that could double-charge.
     const submissions = workers.map(async worker => {
       try {
-        await updateWorker(user.userId, projectId, job.id, worker.index, { status:'submitting' });
+        await updateWorker(user.userId, projectId, job.id, worker.index, { status:'submitting', startedAt:Date.now() });
         const indices = worker.images.map(url => selectedImages.indexOf(url));
         const subjectCount = Math.ceil(requested / workers.length);
         const instruction = researchAnalysisInstruction(source, worker.images.length, subjectCount,
@@ -382,6 +382,18 @@ export async function GET(req: Request) {
       }));
     let latest=(await getCollection(user.userId,projectId))?.data.researchJob;
     if (!latest || latest.id!==job.id) return bad('Research job replaced while polling',409);
+    // If the server stopped mid-submission there might be a paid OpenAI
+    // request with no stored response ID. Mark it uncertain for inspection;
+    // NEVER automatically resubmit that worker.
+    for (const worker of latest.workers || []) {
+      if (['planned','submitting'].includes(worker.status) && !worker.responseId &&
+          Date.now()-(worker.startedAt || latest.createdAt)>120000) {
+        await updateWorker(user.userId,projectId,job.id,worker.index,{
+          status:'uncertain',error:'Worker submission interrupted before a tracking ID was saved. Check OpenAI Logs; no automatic retry.'});
+      }
+    }
+    latest=(await getCollection(user.userId,projectId))?.data.researchJob;
+    if (!latest) return bad('Research job missing during status recovery',409);
     const pending=(latest.workers||[]).some(w=>['planned','submitting','queued','in_progress'].includes(w.status));
     const rejected=(latest.workers||[]).filter(w=>['failed','uncertain'].includes(w.status));
     if (pending) return Response.json({job:safeJob(latest)});
