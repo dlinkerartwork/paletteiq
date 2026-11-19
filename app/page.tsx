@@ -620,6 +620,58 @@ export default function Home() {
     const interval = window.setInterval(() => void pollPrompts(), 10000);
     return () => { closed = true; window.clearInterval(interval); };
   }, [loadDone, project.id, project.promptJob?.id, project.promptJob?.status]);
+  // Persisted Full Automation controller: the worker advances one bounded
+  // stage at a time. OpenAI background jobs run remotely, and this controller
+  // resumes automatically on relaunch or while Electron is hidden in the tray.
+  useEffect(() => {
+    if (!loadDone || !project.fullAutomation?.enabled ||
+        ['completed','paused'].includes(project.fullAutomation.stage)) return;
+    const id = project.id;
+    let stopped = false, running = false;
+    const step = async () => {
+      if (stopped || running) return;
+      running = true;
+      try {
+        const response = await fetch('/api/full-automation', { method: 'POST',
+          headers: { 'Content-Type':'application/json' },
+          body: JSON.stringify({ action:'tick', projectId:id }) });
+        const status = await response.json() as { error?: string; flow?: FullAutomation };
+        if (!response.ok) throw Error(status.error || 'Automation status check failed');
+        if (stopped) return;
+        const row = await fetch('/api/studio?projectId=' + encodeURIComponent(id), { cache:'no-store' });
+        if (!row.ok) throw Error('Unable to load the saved automated collection');
+        const stored = await row.json() as Array<{ id:string; data:Project }>;
+        const updated = stored.find(entry => entry.id === id)?.data;
+        if (!updated || stopped) return;
+        setProjects(previous => [updated, ...previous.filter(p => p.id !== id)]);
+        setProject(previous => previous.id === id ? updated : previous);
+        if (updated.fullAutomation?.stage === 'paused')
+          setMessage('Full Automation paused: ' + (updated.fullAutomation.lastError || 'Manual review required') + '. Check Batch activity before resuming.');
+        else if (updated.fullAutomation?.stage === 'completed')
+          setMessage('Full Automation complete: images verified and Etsy Listing Draft saved. Review the listing before publishing.');
+      } catch (error) {
+        if (!stopped) setMessage('Full Automation status unavailable; saved progress remains intact: ' +
+          (error instanceof Error ? error.message : String(error)));
+      } finally { running = false; }
+    };
+    void step();
+    const timer = window.setInterval(() => void step(), 12000);
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [loadDone, project.id, project.fullAutomation?.enabled, project.fullAutomation?.stage]);
+  const changeAutomation = async (action: 'pause' | 'resume') => {
+    setBusy('automation');
+    try {
+      const response = await fetch('/api/full-automation', { method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({ action, projectId:project.id }) });
+      const result = await response.json() as { error?: string; flow?: FullAutomation };
+      if (!response.ok || !result.flow) throw Error(result.error || 'Full Automation could not change state');
+      setProject(prev => ({ ...prev, fullAutomation: result.flow }));
+      setProjects(prev => prev.map(p => p.id === project.id ? { ...p, fullAutomation: result.flow } : p));
+      setMessage(action === 'resume' ? 'Full Automation resumed. Previously accepted OpenAI batches will be checked before new submissions.' : 'Full Automation paused; existing OpenAI jobs continue remotely.');
+    } catch (e) { setMessage(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(''); }
+  };
   const expand = async () => {
     if (busy) return;
     if (project.characters.length >= target) { setMessage('Target already reached.'); return; }
