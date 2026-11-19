@@ -51,10 +51,14 @@ test('research prepares verified image bytes before creating paid job receipt', 
   assert.match(page, /retryFailed:true/);
 });
 
-test('failed-job references survive stale collection selection and are revalidated', () => {
+test('retry uses exactly the current user selection, not the old failed-job references', () => {
+  assert.match(research, /const candidates = body\.selectedImages as string\[\]/);
+  assert.match(research, /const selectedImages = \[\.\.\.new Set\(candidates\)\]/);
+  assert.match(research, /selectedImages\.length !== candidates\.length/);
+  assert.match(research, /selectedImages\.some\(value => !allowed\.has\(value\)\)/);
+  assert.doesNotMatch(research, /\? saved\.data\.researchJob\.selectedImages : supplied/);
+  assert.match(research, /researchAnalysisInstruction\(source, selectedImages\.length, requested/);
+  assert.match(page, /Retry Background Research with exactly /);
+  assert.match(page, /selectedImages,/);
   assert.match(automation, /p\.researchJob\?\.selectedImages\?\.length/);
-  assert.match(automation, /resumeStage\(p\.fullAutomation\) === 'research'/);
-  assert.match(research, /saved\.data\.researchJob\?\.selectedImages\?\.length/);
-  assert.match(research, /\? saved\.data\.researchJob\.selectedImages : supplied/);
-  assert.match(research, /candidates\.filter\(value => allowed\.has\(value\)\)/);
 });
