@@ -7,6 +7,7 @@ import { assertSameOrigin } from '@/lib/palette-accounts';
 import { runWithCloudAutomationUser } from '@/lib/cloud-automation-context';
 import { isActiveBatchStatus, retryableFailedImage, eligibleForBulk } from '@/lib/production-rules';
 import { selectDiverseConcepts, normalizeCreativeControls } from '@/lib/creative-intelligence';
+import { primaryCharacterSubject } from '@/lib/primary-character-focus';
 import { projectPromptContext, isActivePromptBatch, type PromptProject } from '@/lib/prompt-batch-jobs';
 import { normalizeListing } from '@/lib/etsy-listing';
 import { safeRejectedImageResearch } from '@/lib/research-image-input';
@@ -204,7 +205,8 @@ async function tick(req: Request, owner: string, id: string) {
           prompt:'',status:'draft',origin:'ai',
         }));
         const selected=selectDiverseConcepts(candidates,p.characters,f.target,n,
-          normalizeCreativeControls(p.creativeControls).characterVariation);
+          normalizeCreativeControls(p.creativeControls).characterVariation,
+          primaryCharacterSubject(p.title||p.name));
         const revised=await save(owner,id,latest=>{
           const seen=new Set(latest.characters.map(c=>c.name.trim().toLowerCase()));
           const unique=selected.filter(c=>{const name=c.name.trim().toLowerCase();if(!name||seen.has(name))return false;seen.add(name);return true;});
