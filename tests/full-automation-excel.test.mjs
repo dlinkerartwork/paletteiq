@@ -58,10 +58,10 @@ test('Settings default models and Full Automation phases are wired to authentica
   assert.match(page, /Full Automation/);
   assert.match(page, /Target characters to generate/);
   assert.match(page, /fetch\('\/api\/full-automation'/);
-  assert.match(flow, /stage:'revising'/);
+  assert.match(flow, /setStage\(owner,id,'revising'/);
   assert.match(flow, /stage:'completed'/);
   assert.match(flow, /regenerate:true/);
-  assert.match(flow, /reviewQueue:f/);
+  assert.match(flow, /characterIds:f\.reviewQueue/);
   assert.match(image, /replaceFromImageUrl/);
   assert.match(recovery, /item\?\.replaceFromImageUrl/);
   assert.match(installer, /\/api\/full-automation/);
