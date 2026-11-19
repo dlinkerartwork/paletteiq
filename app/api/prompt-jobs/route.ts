@@ -104,7 +104,8 @@ export async function POST(req: Request) {
     createdAt: now, updatedAt: now, total: selected.length,
     imported: 0, failed: 0, processedGroups: 0, totalGroups: generation.groups.length,
     groups: generation.groups, regenerate: body.regenerate === true,
-    ...(body.progressive===true ? {mode:'progressive' as const,progressiveBatches:generation.groups.map(g=>({key:g.key,status:'planned' as const}))} : {}),
+    ...(body.progressive===true ? {mode:'progressive' as const,progressiveJsonl:generation.jsonl,
+      progressiveBatches:generation.groups.map(g=>({key:g.key,status:'planned' as const}))} : {}),
     items: selected.map(c => ({ id: c!.id, originalFingerprint: promptFingerprint(c!.prompt || ''), status: 'pending' })),
   };
   // Claim the collection atomically before spending credits. Closing the
@@ -232,16 +233,11 @@ async function progressPromptBatches(owner:string,id:string,jobId:string,key:str
     if(!capacity) return job;
     const planned=groups.filter(g=>g.status==='planned').slice(0,capacity);
     if(!planned.length)return job;
-    // Recreate the original JSONL from immutable selected character IDs, not
-    // the currently edited UI. Do not generate new text content after edits.
-    let lines=jsonl?.trim().split('\n')||[];
-    if(!jsonl) {
-      const byId=new Map(stored!.data.characters.map(c=>[c.id,c]));
-      const selected=job.items.map(item=>byId.get(item.id)).filter(
-        (c):c is NonNullable<typeof c>=>!!c);
-      if(selected.length!==job.items.length) return job;
-      lines=buildPromptBatchInput(stored!.data,selected,job.model).jsonl.trim().split('\n');
-    }
+    // All delayed group requests reuse the exact JSONL approved when the user
+    // started the job. Never rebuild from a potentially edited collection.
+    const immutableInput=job.progressiveJsonl||jsonl;
+    if(!immutableInput) throw Error('Original progressive request data missing; no paid job submitted');
+    const lines=immutableInput.trim().split('\n');
     const groupLines=new Map(job.groups.map((group,index)=>[group.key,lines[index]]));
     await Promise.all(planned.map(g=>groupLines.get(g.key)?
       submitProgressiveGroup(owner,id,jobId,key,g.key,groupLines.get(g.key)!):Promise.resolve()));
