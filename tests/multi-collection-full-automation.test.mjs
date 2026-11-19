@@ -7,7 +7,8 @@ const monitor=readFileSync(new URL('../desktop/background-batch-monitor.cjs',imp
 
 test('Full Automation schedules three independent collections in parallel',()=>{
   assert.match(flow,/const MULTI_COLLECTION_TICK_LIMIT = 3/);
-  assert.match(flow,/const selected=active\.slice\(0,MULTI_COLLECTION_TICK_LIMIT\)/);
+  assert.match(flow,/const available=active\.filter\(item=>!item\.flow\?\.leaseUntil/);
+  assert.match(flow,/const selected=available\.slice\(0,MULTI_COLLECTION_TICK_LIMIT\)/);
   assert.match(flow,/const results=await Promise\.all\(selected\.map\(async item=>/);
   assert.match(flow,/projectId:item\.id,\.\.\.await tick\(req,user\.userId,item\.id\)/);
   assert.match(flow,/return Response\.json\(\{active:active\.length,processed:selected\.length,results\}\)/);
