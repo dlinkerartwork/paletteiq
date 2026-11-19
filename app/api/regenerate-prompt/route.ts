@@ -12,7 +12,7 @@ type ReviewChar = { id: string; name: string; family?: string; expression?: stri
   description?: string; prompt: string; imageUrl?: string;
   similarityReview?: { status?: string; score?: number; reason?: string } };
 type AutomatedProject = PromptProject & {
-  fullAutomation?: { enabled: boolean; stage: string; reviewQueue?: string[]; revisedIds?: string[]; updatedAt: number };
+  fullAutomation?: { enabled: boolean; stage: string; textModel?: string; reviewQueue?: string[]; revisedIds?: string[]; updatedAt: number };
 };
 const bad = (error: string, code = 400) => Response.json({ error }, { status: code });
 export async function POST(req: Request) {
@@ -46,8 +46,9 @@ export async function POST(req: Request) {
   const settings = await db.select({ preferences: studioSettings.preferences }).from(studioSettings).where(eq(studioSettings.owner, user.userId)).limit(1);
   let preferences: { automationPromptModel?: string } = {};
   try { preferences = settings[0]?.preferences ? JSON.parse(settings[0].preferences) : {}; } catch { /* defaults */ }
-  const model = /^gpt-[a-z0-9.-]{1,80}$/.test(preferences.automationPromptModel || '')
-    ? preferences.automationPromptModel! : 'gpt-4.1-mini';
+  const preferredModel = project.fullAutomation?.textModel || preferences.automationPromptModel || '';
+  const model = /^gpt-[a-z0-9.-]{1,80}$/.test(preferredModel)
+    ? preferredModel : 'gpt-4.1-mini';
   const context = projectPromptContext(project);
   const input = targets.map(c => ({
     id: c!.id, name: c!.name, family: c!.family, expression: c!.expression,
