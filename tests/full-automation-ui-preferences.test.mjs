@@ -46,7 +46,7 @@ test('character target stays at collection or active workflow count after settin
 
 test('Auto-follow navigates only on a safe server-confirmed stage transition', () => {
   assert.match(page, /automationStageTab = \(stage\?: FullAutomation\['stage'\]\)/);
-  assert.match(page, /stage === 'expanding'\) return 'characters'/);
+  assert.match(page, /stage === 'expanding'\) return 'analysis'/);
   assert.match(page, /stage === 'prompts'\) return 'prompts'/);
   assert.match(page, /stage === 'listing' \|\| stage === 'completed'/);
   assert.match(page, /oldStage !== newStage && fromTab && toTab && fromTab !== toTab/);
