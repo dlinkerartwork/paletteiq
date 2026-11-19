@@ -505,7 +505,7 @@ export default function Home() {
         if (fullAutoRequested) void fetch('/api/full-automation', { method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'pause', projectId: project.id }) }).catch(() => {});
-        setMessage('Background research not started:  + (error instanceof Error ? error.message : String(error)) + '. Check the saved job before retrying to avoid duplicate API charges.');
+        setMessage('Background research not started: ' + (error instanceof Error ? error.message : String(error)) + '. Check the saved job before retrying to avoid duplicate API charges.');
       } finally { setBusy(''); }
       return;
     }
