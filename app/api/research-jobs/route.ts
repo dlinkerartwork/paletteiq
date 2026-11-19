@@ -346,6 +346,99 @@ export async function GET(req: Request) {
   if (!job) return Response.json({ job: null });
   if (job.status === 'completed') return Response.json({ job: safeJob(job), project: saved.data });
   if (job.status === 'failed') return Response.json({ job: safeJob(job) });
+  if (job.workers?.length && !job.responseId) {
+    const key = await userCredential(user.userId,'openai') ||
+      sharedProviderSecret(user.userId,'OPENAI_API_KEY');
+    if (!key) return bad('OpenAI API key is needed to retrieve the research workers.',503);
+    // Poll the already-submitted IDs; never create new worker requests here.
+    await Promise.all(job.workers.filter(w=>['queued','in_progress'].includes(w.status) && w.responseId)
+      .map(async worker => {
+        const ai=await openai(key,'responses/'+encodeURIComponent(worker.responseId!));
+        if (!ai.ok) return; // transient polling failures are retried next time
+        const response=await ai.json() as ApiResponse;
+        if (response.status==='completed') {
+          const raw=extractText(response);
+          try {
+            const parsed=JSON.parse(raw) as {theme?:string;characters?:unknown[]};
+            if (!parsed.theme || !Array.isArray(parsed.characters) || !parsed.characters.length)
+              throw Error('Worker omitted theme or characters');
+            await updateWorker(user.userId,projectId,job.id,worker.index,{
+              status:'completed',resultText:raw.slice(0,160000),
+            });
+          } catch (error) {
+            await updateWorker(user.userId,projectId,job.id,worker.index,{
+              status:'failed',error:'Invalid research worker output: ' +
+                (error instanceof Error?error.message:String(error)).slice(0,150),
+            });
+          }
+        } else if (['failed','incomplete','cancelled'].includes(String(response.status))) {
+          await updateWorker(user.userId,projectId,job.id,worker.index,{
+            status:'failed',error:(response.error?.message||response.incomplete_details?.reason||
+              'Background worker failed').slice(0,240),
+          });
+        } else if (response.status==='in_progress' && worker.status==='queued') {
+          await updateWorker(user.userId,projectId,job.id,worker.index,{status:'in_progress'});
+        }
+      }));
+    let latest=(await getCollection(user.userId,projectId))?.data.researchJob;
+    if (!latest || latest.id!==job.id) return bad('Research job replaced while polling',409);
+    const pending=(latest.workers||[]).some(w=>['planned','submitting','queued','in_progress'].includes(w.status));
+    const rejected=(latest.workers||[]).filter(w=>['failed','uncertain'].includes(w.status));
+    if (pending) return Response.json({job:safeJob(latest)});
+    if (rejected.length) {
+      const failure=await persistJob(user.userId,projectId,job.id,{
+        status:'failed',error:rejected.map(w=>'Worker '+(w.index+1)+': '+(w.error||w.status)).join(' | ').slice(0,480),
+      });
+      return Response.json({job:safeJob(failure||latest)});
+    }
+    if (latest.mergeStatus==='planned') {
+      // Claim the ONE paid synthesis request atomically, even if both the
+      // desktop monitor and the browser poll simultaneously.
+      let claimed=false;
+      const mergeJob=await mutateJob(user.userId,projectId,job.id,old=>{
+        claimed=old.mergeStatus==='planned' && !old.responseId;
+        return claimed?{...old,mergeStatus:'submitting'}:old;
+      });
+      if (claimed && mergeJob) {
+        try {
+          const instruction=hybridMergeInstruction(latest.source,latest.workers||[],latest.requested);
+          const ai=await openai(key,'responses',{
+            method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({model:latest.model,
+              input:[{role:'user',content:[{type:'input_text',text:instruction}]}],
+              background:true,store:true,text:{format:{type:'json_object'}},
+              max_output_tokens:Math.min(30000,3200+latest.requested*190)}),
+          });
+          if (!ai.ok) {
+            const err='Style DNA merge failed (HTTP '+ai.status+'): '+(await ai.text()).slice(0,210);
+            const failed=await persistJob(user.userId,projectId,job.id,{
+              status:'failed',mergeStatus:'failed',error:err});
+            return Response.json({job:safeJob(failed||mergeJob)});
+          }
+          const response=await ai.json() as ApiResponse;
+          if (!response.id||!/^resp_[\\w-]+$/.test(response.id))
+            throw Error('Merge response accepted without a resumable tracking ID');
+          const updated=await persistJob(user.userId,projectId,job.id,{
+            responseId:response.id,mergeStatus:response.status==='in_progress'?'in_progress':'queued',
+            status:'in_progress'});
+          return Response.json({job:safeJob(updated||mergeJob)});
+        } catch (error) {
+          const failed=await persistJob(user.userId,projectId,job.id,{
+            status:'failed',mergeStatus:'uncertain',
+            error:'Style DNA merge may have been submitted. Check OpenAI activity; do not retry automatically. '+
+              (error instanceof Error?error.message:String(error)).slice(0,220)});
+          return Response.json({job:safeJob(failed||mergeJob)});
+        }
+      }
+    }
+    if (latest.mergeStatus==='submitting' && Date.now()-latest.updatedAt>120000) {
+      const failed=await persistJob(user.userId,projectId,job.id,{status:'failed',
+        mergeStatus:'uncertain',error:'Style DNA synthesis was interrupted before tracking the request. Check OpenAI activity before retrying.'});
+      return Response.json({job:safeJob(failed||latest)});
+    }
+    latest=(await getCollection(user.userId,projectId))?.data.researchJob;
+    return Response.json({job:latest?safeJob(latest):null});
+  }
   if (!job.responseId) {
     if (job.status === 'submitting' && Date.now() - job.createdAt > 120_000) {
       const failed = await persistJob(user.userId, projectId, job.id, { status: 'failed',
