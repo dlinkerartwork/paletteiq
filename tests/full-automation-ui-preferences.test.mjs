@@ -28,7 +28,7 @@ test('chosen GPT model remains bound to text stages, image Batch stays image-cap
   assert.match(flow, /model:textModel\(p\)/);
   assert.match(flow, /const model=textModel\(p,config\.automationPromptModel/);
   assert.match(flow, /seoOpenaiModel:textModel\(p,config\.seoOpenaiModel/);
-  assert.match(flow, /model:imageModel\(config\)/);
+  assert.match(flow, /model:imageModel\(p,config\)/);
   assert.match(studio, /model: expansionModel, input/);
   assert.match(rewrite, /project\.fullAutomation\?\.textModel \|\| preferences\.automationPromptModel/);
 });
