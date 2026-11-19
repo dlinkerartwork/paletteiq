@@ -74,6 +74,18 @@ export async function POST(req: Request) {
   if (!/^gpt-[a-z0-9.-]{1,80}$/.test(model)) return fail('Select a valid OpenAI GPT text model');
   const saved = await ownedProject(user.userId, projectId);
   if (!saved) return fail('Save the collection before starting background prompts.', 404);
+  // A Full Automation text model is chosen in Research & Analysis and stored
+  // with the collection. Do not allow another tab/client to override it for
+  // a paid Prompt Batch once the workflow is active.
+  const automation = (saved.data as typeof saved.data & {
+    fullAutomation?: { enabled?: boolean; stage?: string; textModel?: string };
+    researchModel?: string;
+  }).fullAutomation;
+  if (automation?.enabled && automation.stage !== 'completed') {
+    const selected = automation.textModel || (saved.data as typeof saved.data & { researchModel?: string }).researchModel;
+    if (selected && model !== selected)
+      return fail('Full Automation Prompt model must match the model selected in Research & Analysis: ' + selected, 409);
+  }
   if (isActivePromptBatch(saved.data.promptJob))
     return Response.json({ error: 'This collection already has an active prompt batch. Resume it rather than submitting a duplicate.', job: safeJob(saved.data.promptJob!) }, { status: 409 });
   const byId = new Map(saved.data.characters.map(c => [c.id, c]));
