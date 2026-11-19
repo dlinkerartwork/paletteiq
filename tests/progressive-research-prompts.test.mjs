@@ -52,3 +52,14 @@ test('Prompt generation remains grouped by ten characters, retaining original Ba
   assert.match(route,/if \(job\.mode==='progressive'\)/);
   assert.match(route,/let remoteBatchId: string \| null = null;/);
 });
+
+test('no duplicate paid prompt Batches after ambiguous receipts, and stale Save preserves incremental results',()=>{
+  assert.match(automation,/Prompt Batch needs review before any paid retry/);
+  assert.match(automation,/Prompt Batch completed with /);
+  assert.match(route,/const running=groups\.some\(g=>\['submitting','queued','in_progress'\]/);
+  assert.match(route,/Never send planned groups once any receipt is uncertain/);
+  const save=readFileSync(new URL('../app/api/studio/route.ts',import.meta.url),'utf8');
+  assert.match(save,/const jobStillRunning = !\['completed','completed_with_errors','failed','cancelled','expired'\]/);
+  assert.match(save,/if \(!browserSawCompletion \|\| jobStillRunning\)/);
+  assert.match(save,/incoming\.promptJob = serverPromptJob/);
+});
