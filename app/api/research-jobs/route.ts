@@ -181,17 +181,22 @@ export async function POST(req: Request) {
     tags: Array.isArray(listing.tags) ? listing.tags.filter(t => typeof t === 'string').slice(0, 40) : [],
     images: Array.isArray(listing.images) ? [...new Set(listing.images.map(im => String(im.url_fullxfull || im.url_570xN || '')).filter(validImage))] : [],
   };
-  // Failed research receipts retain the exact user-selected Etsy references.
-  // A stale browser collection may have lost its own reference selection;
-  // retrieve the original selection only for the explicitly authorized retry.
-  const supplied = Array.isArray(body.selectedImages)
-    ? body.selectedImages.filter((v): v is string => typeof v === 'string') : [];
-  const candidates = body.retryFailed === true && safeRejectedImageResearch(saved.data.researchJob) &&
-    saved.data.researchJob?.selectedImages?.length
-    ? saved.data.researchJob.selectedImages : supplied;
+  // Always honor the user's CURRENT explicit selection on retry.
+  // The previous failed job's images are an audit record, never a default:
+  // silently replacing a new 8-image selection with 19 old images is costly.
+  if (!Array.isArray(body.selectedImages) || !body.selectedImages.length ||
+      body.selectedImages.length > 24 ||
+      body.selectedImages.some(value => typeof value !== 'string')) {
+    return bad('Select 1–24 Etsy images for this research request. The previous job selection will not be reused.', 400);
+  }
+  const candidates = body.selectedImages as string[];
   const allowed = new Set(source.images);
-  const selectedImages = [...new Set(candidates.filter(value => allowed.has(value)))].slice(0, 24);
-  if (!selectedImages.length) return bad('Select at least one actual Etsy listing image');
+  const selectedImages = [...new Set(candidates)];
+  // Do not silently drop missing/expired references or change the number of
+  // images sent to OpenAI after the user confirms it in the browser.
+  if (selectedImages.length !== candidates.length || selectedImages.some(value => !allowed.has(value))) {
+    return bad('Image selection changed or contains duplicates. Re-load the Etsy images, select the desired references, and try again.', 409);
+  }
   // OpenAI cannot consistently fetch remote Etsy CDN URLs itself.
   // Use smaller legitimate Etsy thumbnails where the listing API supplies them.
   // Download and validate ALL references before claiming a paid response.
