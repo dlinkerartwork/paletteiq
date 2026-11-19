@@ -3,7 +3,7 @@ import { reviewImageSimilarity } from '@/lib/similarity-review';
 
 /** Import and review are separate bounded stages. The image must already exist. */
 export const BATCH_IMPORT_LIMIT = 12;
-export const BATCH_REVIEW_LIMIT = 2;
+export const BATCH_REVIEW_LIMIT = 4;
 
 export type ReviewableBatchItem = {
   id: string; status: string; imageUrl?: string; similarityReview?: SimilarityReview;
