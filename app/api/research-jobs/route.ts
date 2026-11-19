@@ -9,6 +9,7 @@ import { mergeSourceEmotionProfile, normalizeCreativeAnalysis, normalizeCreative
 import { researchAnalysisInstruction } from '@/lib/creative-research-prompts';
 import { fetchResearchImageDataUrls, safeRejectedImageResearch } from '@/lib/research-image-input';
 import { splitResearchImages, hybridMergeInstruction, type HybridWorker } from '@/lib/hybrid-research';
+import { primaryCharacterSubject } from '@/lib/primary-character-focus';
 
 type Concept = { name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description?: string };
 type StoredCharacter = { id: string; name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description?: string; status?: string; prompt?: string; origin?: string; imageUrl?: string };
@@ -128,7 +129,8 @@ async function finish(owner: string, projectId: string, job: ResearchJob, respon
   const uniquePrevious = [...new Map(previous.filter(c => c.name).map(c => [c.name.trim().toLowerCase(), c])).values()];
   const needed = Math.max(0, job.target - uniquePrevious.length);
   const selected = selectDiverseConcepts(candidates, uniquePrevious, job.target, needed,
-    normalizeCreativeControls(saved.data.creativeControls).characterVariation);
+    normalizeCreativeControls(saved.data.creativeControls).characterVariation,
+    primaryCharacterSubject(source.title));
   const characters: StoredCharacter[] = [
     ...uniquePrevious,
     ...selected.map(c => ({ id: crypto.randomUUID(), name: c.name, family: c.family,
