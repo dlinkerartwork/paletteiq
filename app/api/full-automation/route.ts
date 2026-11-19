@@ -415,7 +415,10 @@ export async function POST(req:Request) {
       .orderBy(asc(projects.updatedAt)).limit(TICK_SCAN_LIMIT);
     const active=rows.map(x=>({id:x.id,flow:(JSON.parse(x.data) as Project).fullAutomation}))
       .filter(x=>isActive(x.flow));
-    const selected=active.slice(0,MULTI_COLLECTION_TICK_LIMIT);
+    // A collection with a live lease is already running elsewhere. Skip it
+    // rather than letting three long requests block all other collections.
+    const available=active.filter(item=>!item.flow?.leaseUntil || item.flow.leaseUntil<=Date.now());
+    const selected=available.slice(0,MULTI_COLLECTION_TICK_LIMIT);
     const results=await Promise.all(selected.map(async item=>{
       try { return {projectId:item.id,...await tick(req,user.userId,item.id)}; }
       catch(error){return {projectId:item.id,error:error instanceof Error?error.message.slice(0,240):'Workflow tick failed'};}
