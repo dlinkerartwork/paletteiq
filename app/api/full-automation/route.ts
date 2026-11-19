@@ -54,8 +54,15 @@ async function setStage(owner: string, id: string, phase: Stage, extras: Partial
     ...p.fullAutomation!, ...extras, stage: phase, leaseUntil: 0, updatedAt: Date.now(),
   } }));
 }
+function canRestartMissingResearch(p: Project) {
+  return p.fullAutomation?.enabled && p.fullAutomation.stage === 'paused' &&
+    (p.fullAutomation.resumeStage || 'research') === 'research' &&
+    !p.researchJob && !p.characters.length &&
+    !!p.url && !!(p.selectedImageUrls ?? p.images ?? []).length;
+}
 function progress(p: Project) {
-  return { flow: p.fullAutomation || null, characterCount: p.characters.length,
+  return { flow: p.fullAutomation || null,
+    canRestartMissingResearch: Boolean(canRestartMissingResearch(p)), characterCount: p.characters.length,
     promptCount: p.characters.filter(c => !!c.prompt?.trim()).length,
     imageCount: p.characters.filter(c => !!c.imageUrl).length,
     flaggedCount: p.characters.filter(c => c.similarityReview?.status === 'needs_review').length,
@@ -370,6 +377,19 @@ export async function POST(req:Request) {
     return Response.json(progress(await save(user.userId,id,p=>p.fullAutomation?({
       ...p,fullAutomation:{...p.fullAutomation,stage:'paused',
         resumeStage:p.fullAutomation.stage,lastError:'Paused by user',leaseUntil:0,updatedAt:Date.now()}}):p)));
+  }
+  if (body.action==='restart-missing-research') {
+    // This cannot retry a submitted, failed or ambiguous paid research request:
+    // only a collection with NO research job receipt can use this path.
+    if (!canRestartMissingResearch(current.p))
+      return bad('Research recovery is not safe: a saved job or incompatible workflow already exists. Inspect the research job before retrying.',409);
+    const now=Date.now();
+    const next=await save(user.userId,id,p=>{
+      if (!canRestartMissingResearch(p)) throw Error('Research recovery state changed; reload before retrying.');
+      return { ...p,fullAutomation:{...p.fullAutomation!,
+        stage:'research',startedAt:now,updatedAt:now,leaseUntil:0,lastError:undefined} };
+    });
+    return Response.json(progress(next));
   }
   if (body.action==='resume') {
     if (current.p.fullAutomation?.stage!=='paused') return bad('No paused automation to resume',409);
