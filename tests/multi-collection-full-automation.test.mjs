@@ -28,7 +28,7 @@ test('visible and hidden Desktop controllers tick multiple collections',()=>{
   assert.match(page,/action:'tick',syncAll:true/);
   assert.match(page,/!\['paused','completed'\]\.includes\(p\.fullAutomation\.stage\)/);
   assert.match(page,/old\.id===latestWorkspace\.current\.project\.id/);
-  assert.match(page,/savedProjectSnapshots\.current\.get\(old\.id\)!==JSON\.stringify\(old\)/);
+  assert.match(page,/collectionHasUnsavedEdits\(old,savedProjectSnapshots\.current\.get\(old\.id\)\)/);
   assert.match(monitor,/action: 'tick', syncAll: true/);
   assert.match(page,/Full Automation workflows running concurrently/);
   assert.match(page,/Full Automation: \{p\.fullAutomation\.stage\.replaceAll/);
