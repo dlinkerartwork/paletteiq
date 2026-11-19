@@ -468,17 +468,38 @@ Collection: ${JSON.stringify(brief).slice(0, 14000)}. Etsy API SEO reference (ke
     const imageUrl = `/api/images/${character.id}?format=${extension}&v=${Date.now()}`;
     // A deterministic per-character object key allows recovery if DB persistence fails.
     await bucket.put(`generated/${user.userId}/${character.id}.${extension}`, Uint8Array.from(atob(b64), c => c.charCodeAt(0)), { httpMetadata: { contentType: format === 'jpeg' ? 'image/jpeg' : 'image/png' } });
-    character.imageUrl = imageUrl; character.status = 'done'; character.error = '';
-    // Image persistence must not depend on optional similarity review availability.
+    // Compare after saving the paid image. A visual-review outage must not
+    // prevent safe recovery of the generated asset.
+    let similarityReview: SimilarityReview | undefined;
     try {
-      character.similarityReview = await reviewImageSimilarity(aiKey, b64, format === 'jpeg' ? 'image/jpeg' : 'image/png', project.selectedImageUrls ?? project.images ?? []);
-    } catch { character.similarityReview = undefined; }
+      similarityReview = await reviewImageSimilarity(aiKey, b64, format === 'jpeg' ? 'image/jpeg' : 'image/png', project.selectedImageUrls ?? project.images ?? []);
+    } catch { similarityReview = undefined; }
+    // Concurrent Standard workers must update only their own character.
+    // CAS retries preserve images saved by other workers and the latest edits.
+    let persisted = false;
     try {
-      await db.update(projects).set({ data: JSON.stringify(project), updatedAt: Date.now() }).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId)));
-    } catch {
-      return fail('Image stored safely, but collection update failed. Use Recover images in Image Production; do not regenerate yet.', 503);
-    }
-    return Response.json({ imageUrl, similarityReview: character.similarityReview, persisted: true });
+      for (let attempt = 0; attempt < 12; attempt++) {
+        const rows = await db.select().from(projects).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId))).limit(1);
+        const latest = rows[0];
+        if (!latest) break;
+        const next = JSON.parse(latest.data) as typeof project;
+        const current = next.characters?.find(c => c.id === character.id);
+        if (!current) break;
+        // If another request changed this character, never overwrite it.
+        if (current.imageUrl && current.imageUrl !== character.imageUrl) break;
+        current.imageUrl = imageUrl;
+        current.status = 'done';
+        current.error = '';
+        current.similarityReview = similarityReview;
+        const changed = await db.update(projects).set({
+          data: JSON.stringify(next), updatedAt: Math.max(Date.now(), latest.updatedAt + 1),
+        }).where(and(eq(projects.id, body.projectId), eq(projects.owner, user.userId),
+          eq(projects.updatedAt, latest.updatedAt))).returning({ id: projects.id });
+        if (changed.length) { persisted = true; break; }
+      }
+    } catch { /* Asset stays recoverable even when DB persistence fails. */ }
+    if (!persisted) return fail('Image stored, but concurrent collection update could not be confirmed. Recover images before retrying to avoid duplicate charges.', 503);
+    return Response.json({ imageUrl, similarityReview, persisted: true });
     } finally { release(); }
   }
   if (body.action === 'recover-images') {
