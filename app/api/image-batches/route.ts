@@ -17,7 +17,7 @@ import { pendingImageBatchNotification, queueFinishedImageBatchEmail, type Email
 
 const MODELS = ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
 const syncingJobIds = new Set<string>();
-type BatchItem = EmailBatchItem & { imageUrl?: string; error?: string; similarityReview?: SimilarityReview };
+type BatchItem = EmailBatchItem & { imageUrl?: string; error?: string; similarityReview?: SimilarityReview; replaceFromImageUrl?: string };
 type OpenAIBatch = { id: string; status: string; output_file_id?: string | null; error_file_id?: string | null; request_counts?: { total: number; completed: number; failed: number } };
 const fail = (message: string, code = 400) => Response.json({ error: message }, { status: code });
 const openai = async (key: string, path: string, init: RequestInit = {}) => {
@@ -46,10 +46,15 @@ export async function POST(req: Request) {
   const db = getDb();
   const saved = await db.select().from(projects).where(and(eq(projects.id, data.projectId), eq(projects.owner, user.userId))).limit(1);
   if (!saved.length) return fail('Save the collection before submitting a batch.', 404);
-  const project = JSON.parse(saved[0].data) as { characters?: Array<{ id: string; prompt: string; status?: string; imageUrl?: string }> };
+  const project = JSON.parse(saved[0].data) as { characters?: Array<{ id: string; prompt: string; status?: string; imageUrl?: string; similarityReview?: SimilarityReview }> };
   const selected = data.characterIds.map(id => project.characters?.find(c => c.id === id));
-  if (data.regenerate && data.characterIds.length > 1 && selected.some(c => !c || !retryableFailedImage(c))) return fail('Bulk retry accepts only failed characters without saved images.');
-  if (selected.some(c => !c?.prompt || (!data.regenerate && !eligibleForBulk(c)))) return fail('Bulk Batch accepts only never-generated prompts. Use explicit Retry Failed for unsuccessful images.');
+  const retryAllowed = (c: NonNullable<typeof selected[number]>) =>
+    retryableFailedImage(c) || (c.similarityReview?.status === 'needs_review' && !!c.imageUrl) ||
+    (data.characterIds!.length === 1 && !!c.imageUrl);
+  if (data.regenerate && selected.some(c => !c || !retryAllowed(c)))
+    return fail('Regeneration accepts review-flagged images, failed images, or one explicitly selected existing image.');
+  if (selected.some(c => !c?.prompt || (!data.regenerate && !eligibleForBulk(c))))
+    return fail('Batch accepts only never-generated prompts unless regeneration is explicitly requested.');
   const previous = await db.select().from(imageBatches).where(and(eq(imageBatches.owner, user.userId), eq(imageBatches.projectId, data.projectId)));
   const activeIds = new Set(previous.filter(b => isActiveBatchStatus(b.status)).flatMap(b => (JSON.parse(b.items) as BatchItem[]).filter(i => i.status === 'pending').map(i => i.id)));
   if (data.characterIds.some(id => activeIds.has(id))) return fail('Some characters already have a pending Batch job.');
@@ -72,7 +77,7 @@ export async function POST(req: Request) {
     const job = await (await openai(key, 'batches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input_file_id: uploaded.id, endpoint: '/v1/images/generations', completion_window: '24h', metadata: { application: 'paletteiq', project: data.projectId } }) })).json() as OpenAIBatch;
     createdBatchId = job.id;
     const now = Date.now();
-    const record = { id: crypto.randomUUID(), owner: user.userId, projectId: data.projectId, openaiBatchId: job.id, model: data.model!, format, status: job.status, total: selected.length, completed: 0, failed: 0, items: JSON.stringify(data.characterIds.map((id, index) => ({ id, status: 'pending', ...(index === 0 ? { notifyEmail: true, notificationRecipient: user.email, notificationStoreName: user.displayName, notificationCollectionName: saved[0].name } : {}) }))), outputFileId: null, errorFileId: null, createdAt: now, updatedAt: now };
+    const record = { id: crypto.randomUUID(), owner: user.userId, projectId: data.projectId, openaiBatchId: job.id, model: data.model!, format, status: job.status, total: selected.length, completed: 0, failed: 0, items: JSON.stringify(data.characterIds.map((id, index) => ({ id, status: 'pending', ...(data.regenerate && selected[index]?.imageUrl ? { replaceFromImageUrl: selected[index]!.imageUrl } : {}), ...(index === 0 ? { notifyEmail: true, notificationRecipient: user.email, notificationStoreName: user.displayName, notificationCollectionName: saved[0].name } : {}) }))), outputFileId: null, errorFileId: null, createdAt: now, updatedAt: now };
     await db.insert(imageBatches).values(record);
     createdBatchId = null;
     // SMTP delivery is handled by PaletteIQ Desktop's local native service
