@@ -759,15 +759,22 @@ export default function Home() {
   };
   const retryRejectedResearch = async () => {
     if (busy || !canRetryRejectedResearch || !project.fullAutomation) return;
+    const selectedImages = project.selectedImageUrls ?? project.images;
+    if (!selectedImages?.length) {
+      setMessage('Select the Etsy reference images you want to analyze before retrying.');
+      return;
+    }
+    if (!window.confirm('Retry Background Research with exactly ' + selectedImages.length +
+      ' selected Etsy images? This sends a NEW potentially billable OpenAI request. Check existing OpenAI activity before continuing.')) return;
     setBusy('research-start');
-    setMessage('Preparing saved Etsy reference images for a new OpenAI background request…');
+    setMessage('Preparing ' + selectedImages.length + ' selected Etsy reference images for a new OpenAI background request…');
     try {
       // The server only accepts retries for a definite 400 URL-download
       // rejection without any OpenAI response ID. This is a user action.
       const response = await fetch('/api/research-jobs', { method:'POST',
         headers:{ 'Content-Type':'application/json' },
         body:JSON.stringify({ projectId:project.id, url:project.url,
-          selectedImages:project.selectedImageUrls ?? project.images,
+          selectedImages,
           target:project.fullAutomation.target,
           model:project.researchJob?.model || preferences.analysisModel,
           retryFailed:true }) });
