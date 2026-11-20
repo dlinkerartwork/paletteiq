@@ -310,7 +310,7 @@ export async function GET(req: Request) {
   // Poll multiple Batch receipts instead of blocking all imports behind
   // the first still-validating or in-progress Batch. Serialize imports so
   // different jobs cannot overwrite each other's collection updates.
-  const freshById = new Map<string,ReturnType<typeof safeJob>>();
+  const freshById = new Map<string,ReturnType<typeof safeJob> & {warning?:string}>();
   if(sync && key){
     const pendingRows=rows.filter(row=>isActiveBatchStatus(row.status))
       .slice(0,IMAGE_BATCH_SYNC_PER_COLLECTION);
