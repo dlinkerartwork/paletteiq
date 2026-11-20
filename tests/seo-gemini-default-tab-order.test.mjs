@@ -28,7 +28,8 @@ test('new SEO defaults select Gemini 3.5 Flash in UI and server',()=>{
 test('saved SEO provider/model override the new defaults; automation does not force OpenAI',()=>{
   assert.match(route,/\.\.\.defaultPrefs, \.\.\.\(row \? JSON\.parse\(row\.preferences\) : \{\}\)/);
   assert.match(page,/\.\.\.defaultPrefs, \.\.\.data\.preferences/);
-  assert.match(automation,/seoProvider:config\.seoProvider\|\|'gemini'/);
+  assert.match(automation,/seoProvider:'gemini'/);
+  assert.match(automation,/if\(config\.seoProvider==='openai'\)/);
   assert.match(automation,/seoGeminiModel:config\.seoGeminiModel\|\|'gemini-3\.5-flash'/);
   assert.doesNotMatch(automation,/seoProvider:p\.fullAutomation\?\.textModel\?'openai'/);
 });
