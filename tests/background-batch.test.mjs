@@ -31,10 +31,17 @@ test('finished image batches send through Desktop native SMTP without GPU depend
 });
 
 test('OpenAI completed triggers local SMTP before PNG import without GPU registration', () => {
-  const completion = route.indexOf("batch.status === 'completed'");
-  const earlyEmail = route.indexOf('queueFinishedImageBatchEmail(\n        job, owner');
-  const outputGuard = route.indexOf('if (awaitBatchOutputFiles(batch))');
-  assert.ok(completion >= 0 && earlyEmail > completion);
+  const syncJobStart = route.indexOf('async function syncJob(');
+  assert.ok(syncJobStart >= 0, 'Image Batch sync function must exist');
+  const syncJob = route.slice(syncJobStart);
+  // Verify the completion path rather than depending on exact whitespace
+  // and indentation of queueFinishedImageBatchEmail's arguments.
+  const completion = syncJob.search(/if\s*\(\s*batch\.status\s*===\s*['"]completed['"]/);
+  const earlyEmail = syncJob.search(/await\s+queueFinishedImageBatchEmail\s*\(\s*job\s*,\s*owner\b/);
+  const outputGuard = syncJob.search(/if\s*\(\s*awaitBatchOutputFiles\s*\(\s*batch\s*\)\s*\)/);
+  assert.ok(completion >= 0, 'OpenAI completion must be checked before sending email');
+  assert.ok(earlyEmail > completion, 'SMTP notification must be queued after verified completion');
+  assert.match(syncJob.slice(completion, earlyEmail), /pendingImageBatchNotification\s*\(\s*job\s*,\s*Date\.now\(\)\s*,\s*true\s*\)/);
   assert.ok(outputGuard > earlyEmail, 'email must be sent before PNG import');
   assert.doesNotMatch(route, /\/v1\/notifications\/image-batches/);
   assert.doesNotMatch(route, /gpuFetch/);
