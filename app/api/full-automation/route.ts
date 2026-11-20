@@ -772,7 +772,13 @@ async function tickCloudCollections(req: Request) {
   const db = getDb();
   const candidates = await db.select().from(projects).where(sql`
     json_extract(${projects.data}, '$.fullAutomation.enabled') = 1
-    AND json_extract(${projects.data}, '$.fullAutomation.stage') NOT IN ('completed','paused')
+    AND (
+      json_extract(${projects.data}, '$.fullAutomation.stage') NOT IN ('completed','paused')
+      OR (json_extract(${projects.data}, '$.fullAutomation.stage') = 'paused'
+        AND json_extract(${projects.data}, '$.fullAutomation.resumeStage') = 'images'
+        AND json_extract(${projects.data}, '$.fullAutomation.lastError')
+          LIKE '% image(s) have unverified similarity checks. Review required.')
+    )
   `).orderBy(asc(projects.updatedAt)).limit(MULTI_COLLECTION_TICK_LIMIT);
   const results: Array<{ projectId: string; waiting?: boolean; error?: string; stage?: string }> = [];
   for (const row of candidates) {
@@ -841,7 +847,13 @@ export async function POST(req:Request) {
       leaseUntil: sql<number>`CAST(COALESCE(json_extract(${projects.data}, '$.fullAutomation.leaseUntil'), 0) AS INTEGER)`,
     }).from(projects).where(and(eq(projects.owner,user.userId), sql`
       json_extract(${projects.data}, '$.fullAutomation.enabled') = 1
-      AND json_extract(${projects.data}, '$.fullAutomation.stage') NOT IN ('completed','paused')
+      AND (
+      json_extract(${projects.data}, '$.fullAutomation.stage') NOT IN ('completed','paused')
+      OR (json_extract(${projects.data}, '$.fullAutomation.stage') = 'paused'
+        AND json_extract(${projects.data}, '$.fullAutomation.resumeStage') = 'images'
+        AND json_extract(${projects.data}, '$.fullAutomation.lastError')
+          LIKE '% image(s) have unverified similarity checks. Review required.')
+    )
     `)).orderBy(asc(projects.updatedAt)).limit(TICK_SCAN_LIMIT);
     const available=active.filter(item=>!item.leaseUntil || item.leaseUntil<=Date.now());
     const selected=available.slice(0,MULTI_COLLECTION_TICK_LIMIT);
