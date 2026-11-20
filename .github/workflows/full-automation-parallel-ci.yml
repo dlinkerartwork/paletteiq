@@ -1,0 +1,33 @@
+name: Full Automation parallel pipeline validation
+
+on:
+  pull_request:
+    paths:
+      - 'app/api/full-automation/route.ts'
+      - 'app/api/prompt-jobs/route.ts'
+      - 'app/page.tsx'
+      - 'lib/automation-parallel.ts'
+      - 'tests/full-automation-*.test.mjs'
+      - 'tests/progressive-research-prompts.test.mjs'
+      - '.github/workflows/full-automation-parallel-ci.yml'
+  push:
+    branches:
+      - feature/full-automation-bounded-pipeline
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install locked dependencies
+        run: |
+          npm install -g pnpm@11.25.0
+          pnpm install --frozen-lockfile
+      - name: TypeScript validation
+        run: npm run typecheck
+      - name: Production regression tests
+        run: npm run test:production

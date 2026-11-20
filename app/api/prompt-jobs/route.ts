@@ -165,7 +165,7 @@ export async function POST(req: Request) {
   }
 }
 
-const PROGRESSIVE_ACTIVE_LIMIT=3;
+const PROGRESSIVE_ACTIVE_LIMIT=4;
 const progressiveLocks=new Set<string>();
 async function updateProgressiveJob(owner:string, projectId:string, jobId:string,
   transform:(job:PromptBatchJob)=>PromptBatchJob):Promise<PromptBatchJob|null> {

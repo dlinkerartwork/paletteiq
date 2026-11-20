@@ -16,8 +16,8 @@ test('Research returns completed worker preview without treating candidates as s
   assert.match(page,/These are candidate ideas, not saved final characters/);
 });
 
-test('Progressive prompt mode uses immutable JSONL, at most three concurrent paid Batches',()=>{
-  assert.match(route,/const PROGRESSIVE_ACTIVE_LIMIT=3/);
+test('Progressive prompt mode uses immutable JSONL, at most four concurrent paid Responses',()=>{
+  assert.match(route,/const PROGRESSIVE_ACTIVE_LIMIT=4/);
   assert.match(route,/progressiveJsonl:generation\.jsonl/);
   assert.match(route,/const immutableInput=job\.progressiveJsonl\|\|jsonl/);
   assert.match(route,/const capacity=Math\.max\(0,PROGRESSIVE_ACTIVE_LIMIT-active\)/);
@@ -38,7 +38,7 @@ test('Progressive prompts are imported one group at a time and shown immediately
   assert.match(page,/if \(result\.project\) \{/);
   assert.match(page,/Completed groups are imported and rendered without waiting for the other groups/);
   assert.match(page,/Standard Parallel Responses/);
-  assert.match(page,/AI Prompts: standard OpenAI Responses API, 3 parallel groups of 10/);
+  assert.match(page,/AI Prompts: standard OpenAI Responses API, 4 parallel groups of 10/);
 });
 
 test('Prompt generation remains grouped by ten characters, retaining original Batch mode',()=>{

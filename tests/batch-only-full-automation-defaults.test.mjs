@@ -47,10 +47,10 @@ test('Batch response parser selects exact custom ID and validates JSON',()=>{
 test('AI Fill and similarity rewrites use standard Responses; older Batch IDs stay recoverable',()=>{
   assert.match(automation,/expansionBatch\?:/);
   assert.match(automation,/revisionBatch\?:/);
-  assert.match(automation,/submitStandardTextResponse\(secret,textModel\(p\)/);
+  assert.match(automation,/submitStandardTextResponse\(secret,textModel\(fresh\)/);
   assert.match(automation,/getStandardTextResponseResult\(secret,receipt.responseId\)/);
   assert.match(automation,/getResearchBatchResult\(secret,receipt.batchId!/);
-  assert.match(automation,/if\(!receipt.batchId&&!receipt.responseId\)/);
+  assert.match(automation,/if\(!receipt.responseId&&!receipt.batchId\)/);
   assert.doesNotMatch(automation,/apiPost\(req,studioPost,\{\s*action:'expand'/);
   assert.doesNotMatch(automation,/apiPost\(req,rewritePost,/);
 });

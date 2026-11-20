@@ -51,5 +51,5 @@ test('research import and automation expansion apply focal selection',()=>{
   const research=readFileSync(new URL('../app/api/research-jobs/route.ts',import.meta.url),'utf8');
   const flow=readFileSync(new URL('../app/api/full-automation/route.ts',import.meta.url),'utf8');
   assert.match(research,/primaryCharacterSubject\(source\.title\)/);
-  assert.match(flow,/primaryCharacterSubject\(p\.title\|\|p\.name\)/);
+  assert.match(flow,/primaryCharacterSubject\(latest\.title\|\|latest\.name\)/);
 });
