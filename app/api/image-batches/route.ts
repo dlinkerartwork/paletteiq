@@ -312,7 +312,11 @@ export async function GET(req: Request) {
   // different jobs cannot overwrite each other's collection updates.
   const freshById = new Map<string,ReturnType<typeof safeJob> & {warning?:string}>();
   if(sync && key){
+    // Least recently checked Batch goes first, so 10/25-image groups each
+    // receive independent polling turns instead of the newest four batches
+    // monopolizing polling until they finish.
     const pendingRows=rows.filter(row=>isActiveBatchStatus(row.status))
+      .sort((a,b)=>a.updatedAt-b.updatedAt)
       .slice(0,IMAGE_BATCH_SYNC_PER_COLLECTION);
     for(const row of pendingRows){
       try { freshById.set(row.id,safeJob(await syncJob(row,key,user.userId,user.email,user.displayName))); }
