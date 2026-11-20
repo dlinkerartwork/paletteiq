@@ -633,31 +633,67 @@ async function tick(req: Request, owner: string, id: string) {
     } else if (f.stage === 'regenerating') {
       if (!(f.reviewQueue||[]).length) await setStage(owner,id,'listing');
       else {
-        // A single review regeneration Batch has a hard upper bound. Never
-        // silently split or repeatedly charge for a larger flagged queue.
         if ((f.reviewQueue||[]).length > 20)
-          throw Error('More than 20 images were flagged. One final regeneration Batch is limited to 20; review the flagged queue before proceeding.');
+          throw Error('More than 20 images were flagged. One review regeneration Batch is limited to 20.');
         const records=await jobs(owner,id);
-        const active=records.find(row=>isActiveBatchStatus(row.status)&&
-          (JSON.parse(row.items) as Array<{id:string}>).some(item=>(f.reviewQueue||[]).includes(item.id)));
-        if (active) await setStage(owner,id,'verifying',{regenerationBatchId:active.id});
-        else if (f.regenerationBatchId) await setStage(owner,id,'verifying');
-        else {
+        const regenerationRecords=records.filter(row=>{
+          let items:Array<{id:string;replaceFromImageUrl?:string}>=[];
+          try { items=JSON.parse(row.items) as typeof items; } catch { return false; }
+          return (f.reviewQueue||[]).every(charId=>items.some(item=>
+            item.id===charId && !!item.replaceFromImageUrl));
+        }).sort((a,b)=>b.createdAt-a.createdAt);
+        // A network interruption after image POST but before the automation
+        // stores regenerationBatchId must recover the already reserved Batch.
+        // Never submit again based only on a missing Flow receipt.
+        const existing=records.find(row=>row.id===f.regenerationBatchId) ||
+          regenerationRecords[0];
+        if(existing){
+          if(['submitting','uncertain'].includes(existing.status) ||
+              existing.openaiBatchId.startsWith('pending:'))
+            throw Error('Similarity regeneration submission is uncertain. Inspect the saved Batch receipt; no duplicate paid images were submitted.');
+          await setStage(owner,id,'verifying',{regenerationBatchId:existing.id});
+        }else{
           const config=await prefs(owner);
           const result=await apiPost(req,imagePost,{projectId:id,characterIds:f.reviewQueue,
             model:imageModel(p,config),quality:f.imageQuality || quality(config),regenerate:true});
           const batch=result.job as {id?:string}|undefined;
-          await setStage(owner,id,'verifying',{regenerationBatchId:batch?.id});
+          if(!batch?.id)throw Error('Similarity regeneration Batch accepted without saved local ID. Inspect Batch activity.');
+          await setStage(owner,id,'verifying',{regenerationBatchId:batch.id});
         }
       }
     } else if (f.stage === 'verifying') {
-      const records=await jobs(owner,id), batch=records.find(x=>x.id===f.regenerationBatchId);
-      if (!batch) throw Error('Regeneration tracking missing. Check OpenAI Batch activity.');
-      if (isActiveBatchStatus(batch.status)) await apiGet(req,imageGet,id,true);
-      else {
-        const stillFlagged=(f.reviewQueue||[]).filter(x=>p.characters.find(c=>c.id===x)?.similarityReview?.status!=='clear');
-        if (stillFlagged.length) throw Error(stillFlagged.length+' regenerated image(s) are still too similar or unverified. No more automatic reruns.');
-        await setStage(owner,id,'listing');
+      const records=await jobs(owner,id);
+      const batch=records.find(x=>x.id===f.regenerationBatchId);
+      if (!batch) throw Error('Regeneration tracking missing. Check saved Image Batch activity.');
+      if(['submitting','uncertain'].includes(batch.status)||
+          batch.openaiBatchId.startsWith('pending:'))
+        throw Error('Regeneration Batch receipt uncertain. Verify OpenAI activity before any new request.');
+      if(isActiveBatchStatus(batch.status)) {
+        await apiGet(req,imageGet,id,true); // Only status and import; no paid POST.
+      }else{
+        const items=JSON.parse(batch.items) as Array<{id:string;status:string}>;
+        if(batch.status!=='completed')
+          throw Error('Regeneration Batch ended '+batch.status+'. Original images remain saved; inspect Batch activity.');
+        const pending=(f.reviewQueue||[]).filter(id=>items.find(item=>item.id===id)?.status!=='done');
+        if(pending.length)
+          throw Error(pending.length+' replacement image(s) were not imported. Inspect saved Batch result before retrying.');
+        const current=(await load(owner,id))?.p;
+        if(!current)throw Error('Collection missing during replacement verification');
+        const unimported=(f.reviewQueue||[]).filter(charId=>
+          !current.characters.some(c=>c.id===charId &&
+            c.imageUrl?.includes('batch='+batch.id)));
+        if(unimported.length)
+          throw Error(unimported.length+' replacement image(s) were not committed to Collection. Original Batch preserved.');
+        await recheckUnverifiedSimilarity(owner,id);
+        const checked=(await load(owner,id))?.p;
+        if(!checked)throw Error('Collection missing during replacement similarity recheck');
+        if(!unverifiedImages(checked.characters).length){
+          const stillFlagged=(f.reviewQueue||[]).filter(charId=>
+            checked.characters.find(c=>c.id===charId)?.similarityReview?.status!=='clear');
+          if(stillFlagged.length)
+            throw Error(stillFlagged.length+' replacement image(s) are still too similar. One automatic regeneration was already attempted; inspect manually.');
+          await setStage(owner,id,'listing');
+        }
       }
     } else if (f.stage === 'listing') {
       if (p.characters.some(c=>!c.imageUrl)) throw Error('Cannot draft listing while image files are missing.');
