@@ -19,7 +19,7 @@ test('active Full Automation prompt model is displayed and cannot be changed', (
   assert.ok(page.includes("project.fullAutomation.promptModel || project.fullAutomation.textModel"));
   assert.match(page, /value=\{lockedPromptModel \|\| promptModel\}/);
   assert.match(page, /disabled=\{!!busy \|\| hasActivePromptJob\(project\.promptJob\) \|\| !!lockedPromptModel\}/);
-  assert.match(page, /Submitted Prompt Batch model: \{project\.promptJob\.model\}/);
+  assert.match(page, /Prompt generation model: \{project\.promptJob\.model\}/);
   assert.match(page, /if \(busy \|\| hasActivePromptJob\(project\.promptJob\) \|\| lockedPromptModel\) return/);
 });
 
