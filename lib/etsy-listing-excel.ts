@@ -9,8 +9,9 @@ function escapeXml(s: string): string {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 }
-function cell(col: string, row: number, value: string): string {
-  return '<c r="' + col + row + '" t="inlineStr"><is><t xml:space="preserve">' +
+function cell(col: string, row: number, value: string, style = 0): string {
+  return '<c r="' + col + row + '"' + (style ? ' s="' + style + '"' : '') +
+    ' t="inlineStr"><is><t xml:space="preserve">' +
     escapeXml(value) + '</t></is></c>';
 }
 const fields: Record<string, string> = {
@@ -36,20 +37,45 @@ function contentTypes(): string {
     '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
     '</Types>';
 }
+/** Excel's A..Z, AA.. column naming for all selected SEO fields. */
+function columnName(zeroBased: number): string {
+  let n = zeroBased + 1, name = '';
+  do { n--; name = String.fromCharCode(65 + n % 26) + name; n = Math.floor(n / 26); }
+  while (n > 0);
+  return name;
+}
+const columnWidths: Record<string, number> = {
+  title: 56, description: 68, tags: 32, imageAltTexts: 54,
+  primaryKeyword: 30, secondaryKeywords: 38, longTailKeywords: 42,
+  categorySuggestion: 32, attributes: 38, materials: 30,
+  photoPlan: 40, priceSuggestion: 28, sku: 24,
+  digitalFiles: 40, licenseNotes: 42,
+};
 function sheetXml(draft: EtsyListingDraft, selection: unknown): string {
-  const rows: string[] = [];
   const entries = selectedSeoExportFields(selection);
-  rows.push('<row r="1">' + cell('A', 1, 'ETSY LISTING FIELD') + cell('B', 1, 'VALUE') + '</row>');
-  entries.forEach((key, i) => {
-    const index = i + 2;
-    rows.push('<row r="' + index + '">' + cell('A', index, fields[key]) +
-      cell('B', index, stringify(draft[key])) + '</row>');
-  });
+  const lastColumn = columnName(Math.max(0, entries.length - 1));
+  // One listing = one data row. Headers span the first row horizontally
+  // so the workbook can be used alongside other spreadsheet listings.
+  const header = entries.length
+    ? entries.map((key, index) => cell(columnName(index), 1, fields[key], 1)).join('')
+    : cell('A', 1, 'No fields selected', 1);
+  const values = entries.length
+    ? entries.map((key, index) => cell(columnName(index), 2, stringify(draft[key]), 2)).join('')
+    : cell('A', 2, '', 2);
+  const cols = entries.length
+    ? entries.map((key, index) => '<col min="' + (index + 1) + '" max="' + (index + 1) +
+      '" width="' + (columnWidths[key] || 28) + '" customWidth="1"/>').join('')
+    : '<col min="1" max="1" width="30" customWidth="1"/>';
   return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
-    '<dimension ref="A1:B' + (entries.length + 1) + '"/>' +
-    '<cols><col min="1" max="1" width="30" customWidth="1"/><col min="2" max="2" width="90" customWidth="1"/></cols>' +
-    '<sheetData>' + rows.join('') + '</sheetData></worksheet>';
+    '<dimension ref="A1:' + lastColumn + '2"/>' +
+    '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' +
+    '<sheetFormatPr defaultRowHeight="16"/>' +
+    '<cols>' + cols + '</cols>' +
+    '<sheetData><row r="1" ht="28" customHeight="1">' + header + '</row>' +
+    '<row r="2" ht="156" customHeight="1">' + values + '</row></sheetData>' +
+    (entries.length ? '<autoFilter ref="A1:' + lastColumn + '2"/>' : '') +
+    '</worksheet>';
 }
 const manifest: Record<string, string> = {
   '_rels/.rels': '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
@@ -67,10 +93,17 @@ const manifest: Record<string, string> = {
     '</Relationships>',
   'xl/styles.xml': '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
-    '<fonts count="1"><font><sz val="11"/><name val="Aptos"/></font></fonts>' +
-    '<fills count="1"><fill><patternFill patternType="none"/></fill></fills>' +
-    '<borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
-    '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>',
+    '<fonts count="2"><font><sz val="11"/><name val="Aptos"/></font>' +
+    '<font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Aptos"/></font></fonts>' +
+    '<fills count="3"><fill><patternFill patternType="none"/></fill>' +
+    '<fill><patternFill patternType="gray125"/></fill>' +
+    '<fill><patternFill patternType="solid"><fgColor rgb="FF24476D"/><bgColor indexed="64"/></patternFill></fill></fills>' +
+    '<borders count="1"><border/></borders>' +
+    '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+    '<cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+    '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFill="1" applyFont="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>' +
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>' +
+    '</cellXfs></styleSheet>',
 };
 
 // ZIP stored method with CRC32 and little-endian local/central directory records.
