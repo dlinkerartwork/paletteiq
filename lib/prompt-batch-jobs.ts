@@ -12,11 +12,12 @@ export type PromptBatchItem = {
 export type PromptBatchGroup = { key: string; ids: string[] };
 export type ProgressivePromptGroup = {
   key: string; status: 'planned'|'submitting'|'queued'|'in_progress'|'completed'|'failed'|'uncertain';
+  responseId?: string; // Standard Responses API; historical Batch IDs remain readable.
   batchId?: string; startedAt?: number; error?: string;
 };
 export type PromptBatchJob = {
   id: string; status: string; batchId?: string; model: string;
-  mode?: 'batch'|'progressive'; progressiveBatches?: ProgressivePromptGroup[];
+  mode?: 'batch'|'progressive'|'standard'; progressiveBatches?: ProgressivePromptGroup[];
   progressiveJsonl?: string; // Immutable paid request inputs, never rebuilt from edited characters.
   createdAt: number; updatedAt: number; total: number; imported: number;
   failed: number; processedGroups: number; totalGroups: number;
