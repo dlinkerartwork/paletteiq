@@ -31,6 +31,7 @@ export default function ImageProduction({ project, model, batchPreferredModel, q
   const [mode, setMode] = useState<'single' | 'standard-bulk' | 'batch'>('batch');
   const automationActive = !!project.fullAutomation?.enabled && !['paused','completed'].includes(project.fullAutomation.stage);
   const [batchModel, setBatchModel] = useState(batchPreferredModel);
+  const [batchGroupSize, setBatchGroupSize] = useState<10|25|50>(10);
   const [imageModels, setImageModels] = useState<Array<{ id: string; name: string; batchSupported: boolean }>>([]);
   const [imageModelError, setImageModelError] = useState('');
   useEffect(() => {
@@ -312,25 +313,61 @@ export default function ImageProduction({ project, model, batchPreferredModel, q
   };
 
   const submitBatch = async (ids = selectedBatchIds, regenerate = false) => {
-    if (!jobsLoaded || !ids.length || ids.some(id => pending.has(id))) return;
+    if (!jobsLoaded || working || !ids.length || ids.some(id => pending.has(id))) return;
     if (soundEnabled) primeProductionAudio();
-    setWorking(true); setMessage('Submitting batches of up to 50 images to OpenAI. Keep the application open until every batch is accepted...');
+    setWorking(true);
+    setMessage('Submitting independent Image Batches (up to 3 uploads at once). Each completed Batch is imported without waiting for the others...');
     let submitted = 0;
+    const errors:string[]=[];
     try {
+      // Save the edited collection exactly once before any paid request.
       await request('/api/studio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'save', id: project.id, name: project.name, data: project }) });
-      for (let offset = 0; offset < ids.length; offset += 50) {
-        const chunk = ids.slice(offset, offset + 50);
-        const data = await request<{ job: Job }>('/api/image-batches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId: project.id, characterIds: chunk, model: batchModel, quality, regenerate }) });
-        setJobs(list => [data.job, ...list]);
-        submitted += chunk.length;
-        setMessage(`Submitted ${submitted}/${ids.length} images to OpenAI. Do not shut down until all batches are accepted.`);
+      const chunks:Array<string[]>=[];
+      for(let offset=0;offset<ids.length;offset+=batchGroupSize)
+        chunks.push(ids.slice(offset,offset+batchGroupSize));
+      // Bounded upload concurrency: all independent Batches can reach OpenAI
+      // without waiting for any OTHER Batch to finish processing. Individual
+      // submissions are never automatically retried after ambiguous errors.
+      let nextChunk=0;
+      const workers=Array.from({length:Math.min(3,chunks.length)},async()=>{
+        while(nextChunk<chunks.length){
+          const index=nextChunk++;
+          const chunk=chunks[index];
+          try{
+            const data=await request<{job:Job}>('/api/image-batches',{
+              method:'POST',headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({projectId:project.id,characterIds:chunk,
+                model:batchModel,quality,regenerate}),
+            });
+            submitted+=chunk.length;
+            setJobs(previous=>[data.job,...previous.filter(j=>j.id!==data.job.id)]);
+            setMessage('OpenAI accepted '+submitted+'/'+ids.length+
+              ' images across '+(index+1)+' submitted groups. Waiting Batches remain independent.');
+          }catch(error){
+            errors.push('Group '+(index+1)+' ('+chunk.length+' images): '+
+              (error instanceof Error?error.message:String(error)));
+            reportCredit(error);
+          }
+        }
+      });
+      await Promise.all(workers);
+      if(!errors.length){
+        setSelectedIds([]);
+        setMessage('All '+submitted+' image requests submitted in '+
+          chunks.length+' independent OpenAI Batches. Each completed group is imported immediately when its output file becomes available; OpenAI controls validating/in_progress status.');
+      }else{
+        setMessage(submitted+'/'+ids.length+' image requests confirmed accepted. '+
+          errors.length+' groups have uncertain/failed submissions: '+
+          errors.join(' | ').slice(0,600)+
+          '. Check OpenAI Batch activity before any manual resubmission to avoid duplicate charges.');
       }
-      setSelectedIds([]);
-      setMessage(`All ${submitted} images submitted across ${Math.ceil(ids.length / 50)} OpenAI batches. Safe to shut down; reopen paletteIQ later to import results.`);
-    } catch (e) {
-      setMessage(`Submitted ${submitted}/${ids.length} images before an error: ${e instanceof Error ? e.message : String(e)}. Check Batch activity before retrying to prevent duplicate charges.`);
-      reportCredit(e);
-    } finally { setWorking(false); }
+      void refreshNow.current();
+    }catch(error){
+      setMessage('Could not prepare Image Batch submission: '+
+        (error instanceof Error?error.message:String(error))+
+        '. Check existing Batch jobs before trying again.');
+      reportCredit(error);
+    }finally{setWorking(false);}
   };
 
   const runCloudUpscale = async () => {
@@ -443,13 +480,14 @@ export default function ImageProduction({ project, model, batchPreferredModel, q
       <div className="production-controls">
         <div><label className="input-label">{mode !== 'batch' ? 'IMAGE MODEL' : 'BATCH IMAGE MODEL (SETTINGS)'}</label>{mode !== 'batch' ? <select value={model} onChange={e => onModel(e.target.value)}>{!imageModels.some(m => m.id === model) && <option value={model}>{model} (saved model)</option>}{imageModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select> : <select value={batchModel} onChange={e => setBatchModel(e.target.value)}>{!imageModels.some(m => m.id === batchModel && m.batchSupported) && <option value={batchModel}>{batchModel} (saved batch model)</option>}{imageModels.filter(m => m.batchSupported).map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select>}{imageModelError && <p className="sub">{imageModelError}</p>}</div>
         <div><label className="input-label">QUALITY</label><select value={quality} onChange={e => onQuality(e.target.value)}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></div>
+        {mode === 'batch' && <div><label className="input-label">IMAGES PER BATCH</label><select value={batchGroupSize} disabled={working} onChange={e=>setBatchGroupSize(Number(e.target.value) as 10|25|50)}><option value={10}>10 — earliest group imports</option><option value={25}>25 — balanced</option><option value={50}>50 — fewer Batch jobs</option></select><p className="sub">All groups submit without waiting for earlier groups to finish. OpenAI controls validation and output availability. Existing Batch jobs are unchanged.</p></div>}
         {mode === 'standard-bulk' && <div><label className="input-label">PARALLEL WORKERS</label><select value={bulkWorkers} onChange={e => setBulkWorkers(Number(e.target.value))}><option value={3}>3 workers</option><option value={4}>4 workers</option><option value={5}>5 workers</option></select></div>}
         {mode === 'single' && <div className="character-choice"><label className="input-label">CHOOSE NEVER-GENERATED CHARACTER</label><select value={chosenSingle?.id ?? ''} onChange={e => setSingleId(e.target.value)}><option value="" disabled>Select a character...</option>{eligible.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>}
         <button className="primary-btn" disabled={automationActive || working || downloading || !jobsLoaded || (mode === 'single' ? !chosenSingle : !selectedBatchIds.length)} onClick={() => mode === 'single' ? void generateSingle() : mode === 'standard-bulk' ? void generateStandardBulk() : void submitBatch()}>{working ? <LoaderCircle size={17} className="spin"/> : <Sparkles size={17}/>} {mode === 'single' ? 'Generate single image' : mode === 'standard-bulk' ? `Generate ${selectedBatchIds.length} images in Standard Bulk` : `Submit ${selectedBatchIds.length} new prompts to Batch`}</button>
       </div>
       {mode === 'batch' && <p className="sub">On PaletteIQ Desktop, OpenAI Batch completion emails are sent directly via the built-in SMTP settings (installer .env defaults or store override). Close to tray keeps monitoring while Windows is signed in. No GPU server, LAN, public HTTPS or OpenAI webhook is required; PNG import may still be pending.</p>}
       {mode === 'standard-bulk' && <p className="sub">Standard Bulk uses live requests and requires this app to stay open. Select image cards to limit the job; otherwise all eligible prompts are used. Failed or uncertain requests are not retried automatically.</p>}
-      {mode === 'batch' && <div className="batch-selector"><div className="batch-selector-head"><div><b>New prompt submission</b><small>{eligible.length} never-generated prompts available. Selected cards limit submission to eligible prompts; otherwise all eligible prompts are submitted (automatically split into groups of 50).</small></div><button onClick={() => setSelectedIds([])}>Clear selection</button></div><p className="batch-hint"><Clock3 size={15}/> Previously generated items are never included in bulk submission. Use per-card Regenerate for an explicit rerun. Batch jobs continue after closing the browser.</p></div>}
+      {mode === 'batch' && <div className="batch-selector"><div className="batch-selector-head"><div><b>New prompt submission</b><small>{eligible.length} never-generated prompts available. Selected cards limit submission to eligible prompts; otherwise all eligible prompts are submitted (groups of {" + batchGroupSize + "} images, up to 3 simultaneous uploads).</small></div><button onClick={() => setSelectedIds([])}>Clear selection</button></div><p className="batch-hint"><Clock3 size={15}/> Previously generated items are never included in bulk submission. Use per-card Regenerate for an explicit rerun. Batch jobs continue after closing the browser.</p></div>}
       {message && <div className="notice production-notice"><CircleAlert size={16}/>{message}</div>}
       <div className="production-progress"><div><span>Collection images produced</span><b>{completedTotal} / {project.characters.length}</b></div><div className="progress"><i style={{ width: `${project.characters.length ? completedTotal / project.characters.length * 100 : 0}%` }}/></div></div>
       {mode !== 'batch' && working && <div className="single-loading"><LoaderCircle className="spin" size={16}/> {mode === 'single' ? 'Single image' : 'Standard Bulk'} in progress · {singleProgress.done}/{singleProgress.total} completed</div>}
