@@ -400,7 +400,15 @@ Collection: ${JSON.stringify(brief).slice(0, 14000)}. Etsy API SEO reference (ke
         alt = normalizeSeoAlt(revised?.imageAltText);
       }
       if (!hasTargetSeoAltLength(alt)) return fail('SEO alt text is still shorter than 460 characters or exceeds 500 characters after retries. Please regenerate.', 502);
-      const draft = normalizeListing({ ...candidate, imageAltTexts: [alt] });
+      // Default SEO follows Etsy API for these three fields. AI may generate
+      // supporting SEO, image alt text and metadata, but cannot silently
+      // rewrite Etsy title/description/tags when enhancement is disabled.
+      const faithfulSeo = enhanceWithAi ? {} : {
+        title:reference.title.trim().slice(0,ETSY_TITLE_MAX),
+        description:reference.description.trim(),
+        tags:reference.tags.filter(t=>typeof t==='string').slice(0,13),
+      };
+      const draft = normalizeListing({ ...candidate, ...faithfulSeo, imageAltTexts: [alt] });
       // Save the completed draft to the originating collection, not whichever
       // collection the user happens to be viewing when the request finishes.
       const db = getDb();
