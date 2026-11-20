@@ -444,15 +444,30 @@ export default function Home() {
         const fresh = recovered.filter((value): value is Project => Boolean(value));
         if (!fresh.length) return;
         const byId = new Map(fresh.map(item => [item.id, item]));
-        setProjects(prev => prev.map(item => byId.get(item.id) ?? item));
-        setProject(prev => {
-          const current = byId.get(prev.id);
-          if (!current) return prev;
-          const recoveredAssets = new Map(current.characters.map(char => [char.id, char]));
-          return { ...prev, characters: prev.characters.map(char => {
-            const stored = recoveredAssets.get(char.id);
-            return stored?.imageUrl && (char.imageUrl !== stored.imageUrl || JSON.stringify(char.similarityReview) !== JSON.stringify(stored.similarityReview)) ? { ...char, imageUrl: stored.imageUrl, status: stored.status, error: stored.error, similarityReview: stored.similarityReview } : char;
-          }) };
+        // The Batch importer owns only persisted artwork results, not user
+        // edits to the creative brief, mood direction, descriptions or prompts.
+        // Reconcile image fields without replacing any unsaved local work.
+        const mergeImportedAssets = (local:Project,remote:Project):Project => {
+          const remoteImages=new Map(remote.characters.map(char=>[char.id,char]));
+          return {...local,characters:local.characters.map(char=>{
+            const saved=remoteImages.get(char.id);
+            return saved?.imageUrl && (char.imageUrl!==saved.imageUrl ||
+              JSON.stringify(char.similarityReview)!==JSON.stringify(saved.similarityReview))
+              ? {...char,imageUrl:saved.imageUrl,status:saved.status,error:saved.error,
+                  similarityReview:saved.similarityReview}:char;
+          })};
+        };
+        setProjects(prev=>prev.map(item=>{
+          const stored=byId.get(item.id);
+          if(!stored)return item;
+          if(collectionHasUnsavedEdits(item,savedProjectSnapshots.current.get(item.id)))
+            return mergeImportedAssets(item,stored);
+          savedProjectSnapshots.current.set(item.id,JSON.stringify(stored));
+          return stored;
+        }));
+        setProject(prev=>{
+          const stored=byId.get(prev.id);
+          return stored?mergeImportedAssets(prev,stored):prev;
         });
       } catch { /* Offline is expected; try again on the next interval. */ }
       finally { polling = false; }
