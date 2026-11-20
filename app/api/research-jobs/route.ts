@@ -10,13 +10,14 @@ import { researchAnalysisInstruction } from '@/lib/creative-research-prompts';
 import { fetchResearchImageDataUrls, safeRejectedImageResearch } from '@/lib/research-image-input';
 import { splitResearchImages, hybridMergeInstruction, type HybridWorker } from '@/lib/hybrid-research';
 import { primaryCharacterSubject } from '@/lib/primary-character-focus';
+import { researchBatchJsonl, batchResearchResult, type BatchReceipt } from '@/lib/openai-batch-research';
 
 type Concept = { name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description?: string };
 type StoredCharacter = { id: string; name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description?: string; status?: string; prompt?: string; origin?: string; imageUrl?: string };
 type Source = { title: string; description: string; tags: string[]; images: string[] };
 type ResearchJob = {
   id: string; status: 'submitting' | 'queued' | 'in_progress' | 'completed' | 'failed';
-  model: string; responseId?: string; createdAt: number; updatedAt: number;
+  model: string; transport?: 'batch'; responseId?: string; mergeBatchId?: string; createdAt: number; updatedAt: number;
   target: number; requested: number; completedCount: number;
   selectedImages: string[]; source: Source; error?: string;
   workers?: HybridWorker[]; mergeStatus?: 'planned'|'submitting'|'queued'|'in_progress'|'completed'|'failed'|'uncertain';
@@ -56,6 +57,7 @@ const safeJob = (job: ResearchJob) => ({
   updatedAt: job.updatedAt, error: job.error,
   workersCompleted: job.workers?.filter(w => w.status === 'completed').length,
   workersTotal: job.workers?.length, mergeStatus: job.mergeStatus,
+  transport:job.transport||'background',
   workerPreviews:job.workers?.map(workerPreview),
 });
 const active = (job?: ResearchJob) => job && ['submitting', 'queued', 'in_progress'].includes(job.status);
@@ -189,6 +191,149 @@ async function finish(owner: string, projectId: string, job: ResearchJob, respon
   return Response.json({ job: safeJob(updatedJob), project: updated });
 }
 
+// New jobs use actual OpenAI Batch pricing, not Background Responses.
+async function submitResearchBatch(key:string,customId:string,model:string,
+  input:unknown,maxTokens:number):Promise<string>{
+  const form=new FormData();
+  form.set('purpose','batch');
+  form.set('file',new Blob([researchBatchJsonl(customId,model,input,maxTokens)],
+    {type:'application/jsonl'}),'paletteiq-research-'+customId+'.jsonl');
+  const upload=await openai(key,'files',{method:'POST',body:form});
+  if(!upload.ok)throw Error('OpenAI file upload HTTP '+upload.status);
+  const file=await upload.json() as {id?:string};
+  if(!file.id)throw Error('OpenAI Batch input file ID missing');
+  const request=await openai(key,'batches',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({input_file_id:file.id,endpoint:'/v1/responses',
+      completion_window:'24h',
+      metadata:{app:'paletteiq',action:'research',group:customId}}),
+  });
+  if(!request.ok)throw Error('OpenAI Batch creation HTTP '+request.status+': '+
+    (await request.text()).slice(0,150));
+  const batch=await request.json() as BatchReceipt;
+  if(!batch.id||!/^batch_[\w-]+$/.test(batch.id))
+    throw Error('OpenAI Batch accepted but no valid tracking ID was returned');
+  return batch.id;
+}
+async function getResearchBatchResult(key:string,batchId:string,requestKey:string):
+  Promise<{status:string;text?:string;error?:string}>{
+  const poll=await openai(key,'batches/'+encodeURIComponent(batchId));
+  if(!poll.ok)throw Error('OpenAI Research Batch status HTTP '+poll.status);
+  const batch=await poll.json() as BatchReceipt;
+  if(!['completed','failed','cancelled','expired'].includes(batch.status))
+    return {status:batch.status};
+  if(batch.status==='completed' && !batch.output_file_id && !batch.error_file_id)
+    return {status:'in_progress'}; // Output file often appears after completion.
+  const outputs:string[]=[];
+  for(const id of [batch.output_file_id,batch.error_file_id].filter((x):x is string=>!!x)){
+    const fetched=await openai(key,'files/'+encodeURIComponent(id)+'/content');
+    if(!fetched.ok)throw Error('Research Batch output HTTP '+fetched.status);
+    const raw=await fetched.text();
+    if(raw.length>3_000_000)throw Error('Research Batch result is too large');
+    outputs.push(raw);
+  }
+  const parsed=batchResearchResult(outputs.join('\n'),requestKey);
+  if(parsed?.error)return {status:'failed',error:parsed.error};
+  if(parsed?.text)return {status:'completed',text:parsed.text};
+  return {status:'failed',error:'No valid research result in Batch output (status '+batch.status+')'};
+}
+async function pollResearchBatch(owner:string,id:string,job:ResearchJob):Promise<Response>{
+  const key=await userCredential(owner,'openai')||sharedProviderSecret(owner,'OPENAI_API_KEY');
+  if(!key)return bad('OpenAI key needed to retrieve Research Batch',503);
+  // One Batch per worker. Read already submitted IDs, never recreate requests.
+  await Promise.all((job.workers||[]).filter(w=>w.batchId &&
+      ['queued','in_progress'].includes(w.status)).map(async worker=>{
+    try{
+      const output=await getResearchBatchResult(key,worker.batchId!,
+        'research-worker-'+worker.index);
+      if(output.status==='completed' && output.text){
+        await updateWorker(owner,id,job.id,worker.index,{
+          status:'completed',resultText:output.text.slice(0,160000)});
+      }else if(output.status==='failed'){
+        await updateWorker(owner,id,job.id,worker.index,{
+          status:'failed',error:output.error||'OpenAI Batch worker failed'});
+      }else if(output.status==='in_progress'){
+        await updateWorker(owner,id,job.id,worker.index,{status:'in_progress'});
+      }
+    }catch{/* Network errors are transient; preserve the remote Batch ID. */}
+  }));
+  let latest=(await getCollection(owner,id))?.data.researchJob;
+  if(!latest||latest.id!==job.id)return bad('Research Batch was replaced',409);
+  for(const w of latest.workers||[]){
+    if(['planned','submitting'].includes(w.status)&&!w.batchId &&
+        Date.now()-(w.startedAt||latest.createdAt)>120000){
+      await updateWorker(owner,id,job.id,w.index,{status:'uncertain',
+        error:'No saved Batch ID; inspect OpenAI Batch activity before retrying'});
+    }
+  }
+  latest=(await getCollection(owner,id))?.data.researchJob;
+  if(!latest)return bad('Research Batch missing',409);
+  const pending=(latest.workers||[]).some(w=>
+    ['planned','submitting','queued','in_progress'].includes(w.status));
+  if(pending)return Response.json({job:safeJob(latest)});
+  const problematic=(latest.workers||[]).filter(w=>
+    ['failed','uncertain'].includes(w.status));
+  if(problematic.length){
+    const stopped=await persistJob(owner,id,job.id,{status:'failed',
+      error:'Research Batch worker failed/uncertain. Inspect OpenAI before retrying. '+
+        problematic.map(w=>w.error||w.status).join(' ').slice(0,240)});
+    return Response.json({job:safeJob(stopped||latest)});
+  }
+  // Single-Batch research can be imported as soon as its one worker completes.
+  if(!latest.mergeStatus){
+    const text=latest.workers?.[0]?.resultText||'';
+    return finish(owner,id,latest,{output:[{content:[{text}]}]});
+  }
+  if(latest.mergeStatus==='planned'){
+    let claimed=false;
+    const pendingMerge=await mutateJob(owner,id,job.id,old=>{
+      claimed=old.mergeStatus==='planned'&&!old.mergeBatchId;
+      return claimed?{...old,mergeStatus:'submitting'}:old;
+    });
+    if(claimed && pendingMerge){
+      try{
+        const instruction=hybridMergeInstruction(latest.source,latest.workers||[],latest.requested);
+        const batchId=await submitResearchBatch(key,'research-merge',latest.model,
+          [{role:'user',content:[{type:'input_text',text:instruction}]}],
+          Math.min(30000,3200+latest.requested*190));
+        const saved=await persistJob(owner,id,job.id,{
+          mergeBatchId:batchId,mergeStatus:'queued',status:'in_progress'});
+        return Response.json({job:safeJob(saved||pendingMerge)});
+      }catch(error){
+        const uncertain=await persistJob(owner,id,job.id,{
+          status:'failed',mergeStatus:'uncertain',
+          error:'Style DNA Batch submission may have reached OpenAI. Review usage before any retry. '+
+            (error instanceof Error?error.message:String(error)).slice(0,160)});
+        return Response.json({job:safeJob(uncertain||pendingMerge)});
+      }
+    }
+  }
+  latest=(await getCollection(owner,id))?.data.researchJob;
+  if(!latest)return bad('Research merge tracking unavailable',409);
+  if(latest.mergeStatus==='submitting'&&!latest.mergeBatchId &&
+    Date.now()-latest.updatedAt>120000){
+    const stopped=await persistJob(owner,id,job.id,{status:'failed',
+      mergeStatus:'uncertain',error:'Merge Batch receipt missing. Inspect OpenAI activity'});
+    return Response.json({job:safeJob(stopped||latest)});
+  }
+  if(latest.mergeBatchId && ['queued','in_progress'].includes(latest.mergeStatus||'')){
+    try{
+      const out=await getResearchBatchResult(key,latest.mergeBatchId,'research-merge');
+      if(out.status==='completed'&&out.text){
+        return finish(owner,id,latest,{output:[{content:[{text:out.text}]}]});
+      }
+      if(out.status==='failed'){
+        const failed=await persistJob(owner,id,job.id,{status:'failed',
+          mergeStatus:'failed',error:out.error||'Style DNA Batch failed'});
+        return Response.json({job:safeJob(failed||latest)});
+      }
+      if(out.status==='in_progress'&&latest.mergeStatus==='queued')
+        latest=await persistJob(owner,id,job.id,{mergeStatus:'in_progress'})||latest;
+    }catch{/* Keep the remote receipt for another harmless status poll. */}
+  }
+  return Response.json({job:safeJob(latest)});
+}
+
 export async function POST(req: Request) {
   const user = await getChatGPTUser();
   if (!user) return bad('Sign in required', 401);
@@ -257,13 +402,14 @@ export async function POST(req: Request) {
   const now = Date.now();
   const hybrid = Boolean((saved.data.fullAutomation as { enabled?: boolean } | undefined)?.enabled) &&
     body.retryFailed !== true && body.hybridResearch !== false;
-  const partitions = hybrid ? splitResearchImages(selectedImages, 3) : [];
+  const partitions = splitResearchImages(selectedImages, hybrid ? 3 : 1);
   const workers: HybridWorker[] = partitions.map((part, index) => ({
     index, images: part, status:'planned',
   }));
   const job: ResearchJob = { id: crypto.randomUUID(), status: 'submitting', model, target, requested,
     createdAt: now, updatedAt: now, completedCount: saved.data.characters?.length || 0,
-    selectedImages, source, ...(hybrid ? { workers, mergeStatus:'planned' as const } : {}) };
+    selectedImages, source, transport:'batch', workers,
+    ...(hybrid ? { mergeStatus:'planned' as const } : {}) };
   // Claim the collection before the paid API call. Reject concurrent tabs using
   // the saved row version, so duplicate submissions cannot quietly incur charges.
   const updated = { ...saved.data, researchJob: job };
@@ -272,6 +418,45 @@ export async function POST(req: Request) {
     .where(and(eq(projects.id, projectId), eq(projects.owner, user.userId), eq(projects.updatedAt, saved.row.updatedAt)))
     .returning({ id: projects.id });
   if (!claim.length) return bad('Collection changed in another tab. Refresh and retry before paying for analysis.', 409);
+  // Every NEW OpenAI Research job uses the Batch endpoint; legacy
+  // background response IDs below remain readable for previously paid jobs.
+  // Worker batches use independent receipts so previews appear as each finishes.
+  if(job.transport==='batch'){
+    const submissions=workers.map(async worker=>{
+      try{
+        await updateWorker(user.userId,projectId,job.id,worker.index,{
+          status:'submitting',startedAt:Date.now(),
+        });
+        const indices=worker.images.map(url=>selectedImages.indexOf(url));
+        const count=Math.ceil(requested/workers.length);
+        const instruction=researchAnalysisInstruction(source,worker.images.length,count,
+          normalizeCreativeControls(saved.data.creativeControls))+
+          '\nRESEARCH WORKER '+(worker.index+1)+'/'+workers.length+
+          ': analyze only supplied reference images; never infer other image contents.';
+        const input=[{role:'user',content:[
+          {type:'input_text',text:instruction},
+          ...indices.map(index=>({type:'input_image',image_url:imageDataUrls[index]})),
+        ]}];
+        const batchId=await submitResearchBatch(aiKey,
+          'research-worker-'+worker.index,model,input,
+          Math.min(13000,3000+count*190));
+        await updateWorker(user.userId,projectId,job.id,worker.index,
+          {batchId,status:'queued'});
+      }catch(error){
+        // A timeout after provider acceptance is ambiguous. Never submit
+        // another paid Batch for the same worker automatically.
+        await updateWorker(user.userId,projectId,job.id,worker.index,{
+          status:'uncertain',error:'Research Batch submission needs inspection: '+
+          (error instanceof Error?error.message:String(error)).slice(0,195),
+        }).catch(()=>{});
+      }
+    });
+    await Promise.all(submissions);
+    const latest=(await getCollection(user.userId,projectId))?.data.researchJob;
+    if(!latest)return bad('Research Batch receipts not saved. Inspect OpenAI usage',503);
+    const updated=await persistJob(user.userId,projectId,job.id,{status:'in_progress'});
+    return Response.json({job:safeJob(updated||latest)},{status:202});
+  }
   if (hybrid) {
     // Each worker has its own durable response ID and independent set of
     // references. Calls start concurrently but are NEVER auto-resubmitted.
@@ -369,6 +554,7 @@ export async function GET(req: Request) {
   if (!job) return Response.json({ job: null });
   if (job.status === 'completed') return Response.json({ job: safeJob(job), project: saved.data });
   if (job.status === 'failed') return Response.json({ job: safeJob(job) });
+  if(job.transport==='batch') return pollResearchBatch(user.userId,projectId,job);
   if (job.workers?.length && !job.responseId) {
     const key = await userCredential(user.userId,'openai') ||
       sharedProviderSecret(user.userId,'OPENAI_API_KEY');
