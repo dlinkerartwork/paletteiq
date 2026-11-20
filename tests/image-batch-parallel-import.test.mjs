@@ -21,6 +21,7 @@ test('per-collection polling imports independent Batch result files instead of o
   assert.match(imageRoute,/const syncingProjectIds = new Set<string>\(\)/);
   assert.match(imageRoute,/if \(syncingJobIds\.has\(job\.id\) \|\| syncingProjectIds\.has\(job\.projectId\)\) return job/);
   assert.match(imageRoute,/const pendingRows=rows\.filter\(row=>isActiveBatchStatus\(row\.status\)\)/);
+  assert.match(imageRoute,/\.sort\(\(a,b\)=>a\.updatedAt-b\.updatedAt\)/);
   assert.match(imageRoute,/for\(const row of pendingRows\)\{/);
   assert.doesNotMatch(imageRoute,/const syncTarget = rows\.find\(row => isActiveBatchStatus/);
   assert.match(imageRoute,/return Response\.json\(\{jobs:rows\.map\(row=>freshById\.get\(row\.id\)\|\|safeJob\(row\)\)\}\)/);
