@@ -309,7 +309,7 @@ async function tick(req: Request, owner: string, id: string) {
           seoProvider:config.seoProvider||'gemini',
           seoOpenaiModel:textModel(p,config.seoOpenaiModel||'gpt-4.1-mini'),
           seoGeminiModel:config.seoGeminiModel||'gemini-3.5-flash',
-          analyzeWithAi:true});
+          analyzeWithAi:false});
         const draft=normalizeListing(result.draft);
         if (!draft.title) throw Error('AI returned an empty Etsy listing title');
         await save(owner,id,latest=>({...latest,
