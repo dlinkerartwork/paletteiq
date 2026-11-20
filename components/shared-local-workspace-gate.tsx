@@ -59,6 +59,21 @@ export default function SharedLocalWorkspaceGate({children}:{children:React.Reac
     return()=>{alive=false;controller.abort();window.clearTimeout(timeout);};
   },[attempt]);
 
+  // A browser opened before Windows finishes logging in will reconnect
+  // automatically as soon as its one shared backend becomes available.
+  useEffect(()=>{
+    if(mode!=='missing' || !preferred)return;
+    const retry=()=>{setMode('checking');setAttempt(n=>n+1);};
+    const timer=window.setInterval(retry,15_000);
+    window.addEventListener('online',retry);
+    window.addEventListener('focus',retry);
+    return()=>{
+      window.clearInterval(timer);
+      window.removeEventListener('online',retry);
+      window.removeEventListener('focus',retry);
+    };
+  },[mode,preferred]);
+
   const switchToShared=()=>{
     remember(true);
     setPreferred(true);
