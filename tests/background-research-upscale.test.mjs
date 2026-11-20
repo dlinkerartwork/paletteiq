@@ -64,7 +64,7 @@ test('browser resumes a saved job and never blocks waiting for all generations',
   assert.match(ui, /await api\(\{ action: 'save', id: project\.id/);
   assert.match(ui, /fetch\('\/api\/research-jobs', \{/);
   assert.match(ui, /fetch\('\/api\/research-jobs\?projectId=' \+/);
-  assert.match(ui, /window\.setInterval\(\(\) => void pollResearch\(\), 8000\)/);
+  assert.match(ui, /window\.setInterval\(\(\) => void pollResearch\(\), 6000\)/);
   assert.match(ui, /hasActiveResearch\(project\.researchJob\)/);
   assert.match(ui, /Reopen PaletteIQ to import the completed characters automatically/);
 });
