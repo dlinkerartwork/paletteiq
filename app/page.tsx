@@ -28,7 +28,7 @@ type ResearchJobPreview = { transport?: 'batch'|'background'; workerPreviews?: A
 const hasActiveResearch = (job?: ResearchJobPreview) => !!job && ['submitting','queued','in_progress'].includes(job.status);
 type PromptJobPreview = { mode?: 'batch'|'progressive'|'standard'; groupStates?: Array<{key:string;status:string;error?:string}>; id: string; status: string; total: number; imported: number; failed: number; processedGroups: number; totalGroups: number; model: string; createdAt: number; updatedAt: number; error?: string };
 const hasActivePromptJob = (job?: PromptJobPreview) => !!job && !['completed','completed_with_errors','failed','cancelled','expired'].includes(job.status);
-type FullAutomation = { enabled: boolean; textModel?: string; promptModel?: string; batchImageModel?: string; imageQuality?: string; stage: 'research' | 'expanding' | 'prompts' | 'images' | 'revising' | 'regenerating' | 'verifying' | 'listing' | 'completed' | 'paused'; target: number; updatedAt: number; lastError?: string; reviewQueue?: string[]; revisedIds?: string[] };
+type FullAutomation = { enabled: boolean; textModel?: string; promptModel?: string; batchImageModel?: string; imageQuality?: string; stage: 'research' | 'expanding' | 'prompts' | 'images' | 'reviewing' | 'revising' | 'regenerating' | 'verifying' | 'listing' | 'completed' | 'paused'; target: number; updatedAt: number; lastError?: string; reviewQueue?: string[]; revisedIds?: string[]; regenerationBatchId?: string; similarityRetries?: Record<string,number> };
 type Project = { fullAutomation?: FullAutomation; characterTarget?: number; researchModel?: string; hybridResearch?: boolean; progressivePrompts?: boolean; id: string; name: string; url: string; upscaleBatch?: StoredUpscaleBatch; researchJob?: ResearchJobPreview; promptJob?: PromptJobPreview; theme: string; subtheme: string; microtheme?: string; primaryKeyword?: string; longTailKeywords?: string[]; research?: CreativeAnalysis; creativeControls?: CreativeControls; sourceDescription?: string; sourceTags?: string[]; emotionDirection?: string; ageDirection?: string; cutenessDirection?: string; style: string; palette: string; texture: string; keywords: string[]; characters: Character[]; title: string; images: string[]; selectedImageUrls?: string[]; notes: string; listing?: ListingData; seoReview?: SavedSeoReview; thumbnails?: ThumbnailDesign[]; listingImages?: ListingImageRecord[]; listingStudioSettings?: ListingStudioConfig; lastDownloadedAt?: number; downloadCount?: number; lastDownloadImageCount?: number; downloadedImageIds?: string[] };
 const etsyListingId = (value: string) => { try { const url = new URL(value.trim()); return ['etsy.com', 'www.etsy.com'].includes(url.hostname) ? url.pathname.match(/^\/listing\/(\d+)/)?.[1] || null : null; } catch { return null; } };
 const uid = () => crypto.randomUUID();
@@ -70,7 +70,7 @@ const automationStageTab = (stage?: FullAutomation['stage']): string | null => {
   // directly to AI Prompts once the entire target has been saved.
   if (stage === 'expanding') return 'analysis';
   if (stage === 'prompts') return 'prompts';
-  if (['images','revising','regenerating','verifying'].includes(stage)) return 'production';
+  if (['images','reviewing','revising','regenerating','verifying'].includes(stage)) return 'production';
   if (stage === 'listing' || stage === 'completed') return 'listing';
   return null;
 };
@@ -856,7 +856,10 @@ export default function Home() {
   // resumes automatically on relaunch or while Electron is hidden in the tray.
   useEffect(() => {
     if (!loadDone || !project.fullAutomation?.enabled ||
-        ['completed','paused'].includes(project.fullAutomation.stage)) return;
+        project.fullAutomation.stage==='completed' ||
+        (project.fullAutomation.stage==='paused' &&
+          !/^\d+ image\(s\) have unverified similarity checks\. Review required\.$/
+            .test(project.fullAutomation.lastError||''))) return;
     const id = project.id;
     let stopped = false, running = false;
     const step = async () => {
@@ -930,7 +933,8 @@ export default function Home() {
       const view=latestWorkspace.current;
       const otherActive=view.projects.filter(p=>p.id!==view.project.id &&
         p.fullAutomation?.enabled &&
-        !['paused','completed'].includes(p.fullAutomation.stage));
+        (!['paused','completed'].includes(p.fullAutomation.stage) ||
+          (p.fullAutomation.stage==='paused' && /^\d+ image\(s\) have unverified similarity checks\. Review required\.$/.test(p.fullAutomation.lastError||''))));
       if (!otherActive.length) return;
       running=true;
       try {
@@ -1317,6 +1321,25 @@ export default function Home() {
       {project.fullAutomation?.enabled && <section className="panel analysis-progress" aria-live="polite">
         <div className="production-progress"><span><Sparkles size={16}/> Full Automation · {project.fullAutomation.stage.replaceAll('_',' ')}</span><b>{project.characters.filter(c=>c.imageUrl).length} images / {project.fullAutomation.target} target</b></div>
         <p className="sub">Characters {project.characters.length}/{project.fullAutomation.target} · Prompts {project.characters.filter(c=>c.prompt.trim()).length}/{project.fullAutomation.target} · Similarity-flagged {project.characters.filter(c=>c.similarityReview?.status==='needs_review').length}. Text model: {project.fullAutomation.textModel || project.researchJob?.model || project.researchModel || preferences.analysisModel} · Batch image model: {project.fullAutomation.batchImageModel || preferences.automationImageModel} · Quality: {project.fullAutomation.imageQuality || preferences.quality}. Workflow transitions need PaletteIQ running or hidden in system tray.</p>
+        {project.fullAutomation.stage==='reviewing' ||
+          ['revising','regenerating','verifying','listing','completed'].includes(project.fullAutomation.stage) ||
+          (project.fullAutomation.stage==='paused' && (project.fullAutomation.reviewQueue?.length||0)>0)
+          ? <div className="panel" aria-label="Automatic similarity workflow progress">
+            <div className="production-progress"><span>{project.fullAutomation.stage==='reviewing' && <LoaderCircle size={15} className="spin"/>} Similarity verification / retry</span>
+              <b>{project.characters.filter(c=>c.imageUrl && ['clear','needs_review'].includes(c.similarityReview?.status||'')).length}/{project.characters.filter(c=>!!c.imageUrl).length} checked
+                · {project.characters.filter(c=>c.imageUrl && !['clear','needs_review'].includes(c.similarityReview?.status||'')).length} unavailable</b></div>
+            <div className="progress"><i style={{width:`${project.characters.filter(c=>c.imageUrl).length?100*project.characters.filter(c=>c.imageUrl && ['clear','needs_review'].includes(c.similarityReview?.status||'')).length/project.characters.filter(c=>!!c.imageUrl).length:0}%`}}/></div>
+            {project.fullAutomation.stage==='reviewing' && <p className="sub">Retrying unavailable comparisons using the saved PNGs. Failed comparisons are never treated as clear. Attempts are limited to 3 per image version.</p>}
+            {(project.fullAutomation.reviewQueue?.length||0)>0 && <>
+              <div className="production-progress"><span>{project.fullAutomation.stage==='revising' && <LoaderCircle size={15} className="spin"/>} Generate revised similarity-safe prompts</span>
+                <b>{project.fullAutomation.revisedIds?.length||0}/{project.fullAutomation.reviewQueue?.length||0} prompts</b></div>
+              <div className="progress"><i style={{width:`${100*(project.fullAutomation.revisedIds?.length||0)/(project.fullAutomation.reviewQueue?.length||1)}%`}}/></div>
+              <div className="production-progress"><span>{['regenerating','verifying'].includes(project.fullAutomation.stage) && <LoaderCircle size={15} className="spin"/>} Regenerate flagged images</span>
+                <b>{(project.fullAutomation.reviewQueue||[]).filter(id=>project.characters.some(c=>c.id===id && !!project.fullAutomation?.regenerationBatchId && c.imageUrl?.includes('batch='+project.fullAutomation.regenerationBatchId))).length}/{project.fullAutomation.reviewQueue?.length||0} images</b></div>
+              <div className="progress"><i style={{width:`${100*(project.fullAutomation.reviewQueue||[]).filter(id=>project.characters.some(c=>c.id===id && !!project.fullAutomation?.regenerationBatchId && c.imageUrl?.includes('batch='+project.fullAutomation.regenerationBatchId))).length/(project.fullAutomation.reviewQueue?.length||1)}%`}}/></div>
+              {project.fullAutomation.stage==='verifying' && <p className="sub">Checking the newly generated images before completing the listing.</p>}
+            </>}
+          </div> : null}
         {project.fullAutomation.lastError && <p className="sub" role="alert">{project.fullAutomation.lastError}</p>}
         {project.fullAutomation.stage === 'paused' && <p className="sub" role="status">Saved research status: {savedResearchStatus}. {researchRecovery?.message || 'Refresh status to inspect the saved stage and job.'}</p>}
         {project.fullAutomation.stage === 'paused' && savedResearchError && <p className="sub" role="alert">Last research error: {savedResearchError}</p>}
