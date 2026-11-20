@@ -413,8 +413,13 @@ async function tick(req: Request, owner: string, id: string) {
       if (p.listing?.title) await setStage(owner,id,'completed');
       else {
         const config=await prefs(owner);
+        // Full Automation is Batch-only for OpenAI. SEO drafting is a Gemini
+        // request, so an explicitly saved OpenAI SEO preference must not
+        // secretly trigger a direct non-Batch OpenAI request.
+        if(config.seoProvider==='openai')
+          throw Error('Full Automation Batch-only policy: select Gemini as SEO provider in Settings before continuing. No OpenAI SEO request was submitted.');
         const result=await apiPost(req,studioPost,{action:'listing-draft',project:p,
-          seoProvider:config.seoProvider||'gemini',
+          seoProvider:'gemini',
           seoOpenaiModel:textModel(p,config.seoOpenaiModel||'gpt-4.1-mini'),
           seoGeminiModel:config.seoGeminiModel||'gemini-3.5-flash',
           analyzeWithAi:false});
