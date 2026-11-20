@@ -16,7 +16,7 @@ test('Research returns completed worker preview without treating candidates as s
   assert.match(page,/These are candidate ideas, not saved final characters/);
 });
 
-test('Progressive prompt mode uses immutable JSONL, at most three concurrent paid Batches',()=>{
+test('Progressive prompt mode uses immutable JSONL, at most four concurrent paid Responses',()=>{
   assert.match(route,/const PROGRESSIVE_ACTIVE_LIMIT=4/);
   assert.match(route,/progressiveJsonl:generation\.jsonl/);
   assert.match(route,/const immutableInput=job\.progressiveJsonl\|\|jsonl/);
