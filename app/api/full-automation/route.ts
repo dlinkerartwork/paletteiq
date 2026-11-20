@@ -561,7 +561,7 @@ export async function POST(req:Request) {
     const now=Date.now();
     const savedPromptModel=String(config.automationPromptModel||'gpt-6-luna');
     if(!/^gpt-[a-z0-9.-]{1,80}$/.test(savedPromptModel))return bad('Invalid saved AI Prompt Batch model',422);
-    const flow:Flow={enabled:true,stage:'research',target,textModel:requestedModel,promptModel:savedPromptModel,batchImageModel:selectedBatchImageModel,imageQuality:'low',startedAt:now,updatedAt:now,
+    const flow:Flow={enabled:true,stage:'research',target,textModel:requestedModel,promptModel:savedPromptModel,batchImageModel:selectedBatchImageModel,imageQuality:quality(config),startedAt:now,updatedAt:now,
       expandAttempts:0,promptAttempts:0,imageAttempts:0};
     return Response.json(progress(await save(user.userId,id,p=>({...p,characterTarget:target,researchModel:requestedModel,fullAutomation:flow}))));
   }
