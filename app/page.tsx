@@ -181,6 +181,16 @@ export default function Home() {
   const lastCreditNotice = useRef('');
   const [sourceUrl, setSourceUrl] = useState('');
   const [duplicateListing, setDuplicateListing] = useState<{ url: string; collections: string[] } | null>(null);
+  const [referencePreviewIndex, setReferencePreviewIndex] = useState<number | null>(null);
+  useEffect(() => {
+    if (referencePreviewIndex === null) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setReferencePreviewIndex(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [referencePreviewIndex]);
+  useEffect(() => { setReferencePreviewIndex(null); }, [project.id]);
   const [preferences, setPreferences] = useState<StudioPreferences>(defaultPrefs);
   // The collection's entered target takes precedence over Settings defaults
   // and is restored in every workflow tab and after relaunch.
@@ -567,6 +577,7 @@ export default function Home() {
     try {
       const result = await api({ action: 'listing-images', url: sourceUrl.trim() });
       const images: string[] = result.source.images;
+      setReferencePreviewIndex(null);
       setProject(prev => ({ ...prev, url: sourceUrl.trim(), title: result.source.title || '', sourceDescription: result.source.description || '', sourceTags: result.source.tags || [], images, selectedImageUrls: images }));
       setTab('analysis');
       setMessage(`${images.length} listing images loaded. Choose your references, then click Analyze selected images.`);
@@ -722,6 +733,10 @@ export default function Home() {
             projectSnapshots.current.set(projectId, result.project);
             setProjects(previous => [result.project!, ...previous.filter(p => p.id !== projectId)]);
             setProject(previous => previous.id === projectId ? result.project! : previous);
+            // Navigation is optional and must never start another paid request.
+            if (autoFollowRef.current && editor.project.id === projectId &&
+                editor.tab === 'analysis' && !result.project.fullAutomation?.enabled &&
+                !thumbnailSaveControlsRef.current?.hasUnsaved()) setTab('characters');
           }
           setAnalysisProgress({ done: result.job.completedCount, total: result.job.target });
           setMessage('Background research and Style DNA merge completed: ' + result.job.completedCount + '/' + result.job.target + ' subjects saved. Full Automation will open AI Prompts after any missing subjects are filled.');
@@ -740,7 +755,7 @@ export default function Home() {
       } finally { polling = false; }
     };
     void pollResearch();
-    const interval = window.setInterval(() => void pollResearch(), 8000);
+    const interval = window.setInterval(() => void pollResearch(), 6000);
     return () => { closed = true; window.clearInterval(interval); };
   }, [loadDone, project.id, project.researchJob?.id, project.researchJob?.status]);
   useEffect(() => {
@@ -767,6 +782,12 @@ export default function Home() {
             projectSnapshots.current.set(projectId, result.project);
             setProjects(previous => [result.project!, ...previous.filter(p => p.id !== projectId)]);
             setProject(previous => previous.id === projectId ? result.project! : previous);
+            if (autoFollowRef.current && editor.project.id === projectId &&
+                editor.tab === 'prompts' && !result.project.fullAutomation?.enabled &&
+                result.job.status === 'completed' &&
+                result.project.characters.length > 0 &&
+                result.project.characters.every(char => !!char.prompt.trim()) &&
+                !thumbnailSaveControlsRef.current?.hasUnsaved()) setTab('production');
           }
           if (!hasActivePromptJob(result.job)) setMessage(result.job.status === 'completed'
             ? 'OpenAI prompt jobs finished. ' + result.job.imported + ' prompts saved.'
@@ -1242,7 +1263,6 @@ export default function Home() {
       {project.fullAutomation?.enabled && <section className="panel analysis-progress" aria-live="polite">
         <div className="production-progress"><span><Sparkles size={16}/> Full Automation · {project.fullAutomation.stage.replaceAll('_',' ')}</span><b>{project.characters.filter(c=>c.imageUrl).length} images / {project.fullAutomation.target} target</b></div>
         <p className="sub">Characters {project.characters.length}/{project.fullAutomation.target} · Prompts {project.characters.filter(c=>c.prompt.trim()).length}/{project.fullAutomation.target} · Similarity-flagged {project.characters.filter(c=>c.similarityReview?.status==='needs_review').length}. Text model: {project.fullAutomation.textModel || project.researchJob?.model || project.researchModel || preferences.analysisModel} · Batch image model: {project.fullAutomation.batchImageModel || preferences.automationImageModel} · Quality: {project.fullAutomation.imageQuality || preferences.quality}. Workflow transitions need PaletteIQ running or hidden in system tray.</p>
-        <label className="sub" style={{display:'flex',alignItems:'center',gap:8}}><input type="checkbox" checked={autoFollowAutomation} onChange={e=>updateAutoFollowAutomation(e.target.checked)}/> Auto-follow Full Automation (switch tabs when stages complete)</label>
         {project.fullAutomation.lastError && <p className="sub" role="alert">{project.fullAutomation.lastError}</p>}
         {project.fullAutomation.stage === 'paused' && <p className="sub" role="status">Saved research status: {savedResearchStatus}. {researchRecovery?.message || 'Refresh status to inspect the saved stage and job.'}</p>}
         {project.fullAutomation.stage === 'paused' && savedResearchError && <p className="sub" role="alert">Last research error: {savedResearchError}</p>}
@@ -1264,7 +1284,7 @@ export default function Home() {
           <b>{project.researchJob?.completedCount || 0} saved / {project.researchJob?.target} target</b></div>
         {!!project.researchJob?.workerPreviews?.length && <div className="panel" style={{marginTop:12}}><h3>Live Research previews (provisional)</h3><p className="sub">Each completed worker appears immediately. These are candidate ideas, not saved final characters; Merge &amp; Style DNA will reconcile and deduplicate them.</p>{project.researchJob.workerPreviews.map(w=><details key={w.index} open={w.status==='completed'}><summary>Reference group {w.index+1} · {w.imageCount} images · {w.status} · {w.concepts.length} candidate concepts</summary>{w.theme && <p className="sub">Theme: {w.theme} · Style: {w.style}</p>}{w.error && <p className="sub" role="alert">{w.error}</p>}{w.concepts.length>0 && <div className="sub">{w.concepts.map((c,i)=><p key={i}><b>{c.name}</b> {c.family?'('+c.family+')':''} — {c.description}</p>)}</div>}</details>)}</div>}
         {project.researchJob?.workersTotal && <p className="sub">Hybrid Parallel Research: {project.researchJob.workersCompleted || 0}/{project.researchJob.workersTotal} reference groups analyzed · Merge &amp; Style DNA: {project.researchJob.mergeStatus || 'pending'}. After the target characters are saved, Auto-follow opens AI Prompts directly.</p>}
-        <p className="sub">New Research jobs use OpenAI Batch API (asynchronous, completion window up to 24 hours). The Batch continues remotely while the PC is closed. PaletteIQ imports completed results when the app resumes. Character counts become available after Merge &amp; Style DNA.</p>
+        <p className="sub">Research groups run in parallel through independent standard OpenAI background Responses. Group 2 may finish before 1 or 3; each result is shown when ready. After all groups finish, Style DNA merge saves the Character Library. Reopen PaletteIQ to import results after closing the app.</p>
         {project.researchJob && project.researchJob.target > project.researchJob.requested && <p className="sub">The first remote stage is capped at {project.researchJob.requested} subjects. Use AI Fill for the rest after it completes.</p>}
       </section>}
       {busy === 'analyze' && <div className="panel analysis-progress"><div className="production-progress"><span>Analyzing Etsy images and building {target} original subjects with OpenAI…</span><b>{analysisProgress.done}/{analysisProgress.total}</b></div><div className="progress"><i style={{ width: `${analysisProgress.total ? Math.min(100, 100 * analysisProgress.done / analysisProgress.total) : 0}%` }}/></div><p className="sub">Visual research runs first, then AI generates unique additions in small groups. Please keep this page open until the collection is saved.</p></div>}
@@ -1279,11 +1299,28 @@ export default function Home() {
       {tab === 'analysis' && <div className="analysis-grid"><div className="panel"><div className="panel-heading"><div className="heading-icon violet"><Search size={20}/></div><div><h2>Source listing</h2><p>Analyze a listing with connected data sources.</p></div></div><label className="input-label">ETSY PRODUCT LINK</label><div className="field-inline"><input value={sourceUrl} onChange={e => setSourceUrl(e.target.value)} placeholder="Paste Etsy listing URL"/><button className="primary-btn" disabled={!!busy || !sourceUrl} onClick={() => void loadListingImages()}>{busy === 'images' ? 'Loading…' : 'Load images'}</button></div><div className="settings-fields" style={{ marginTop: 14 }}>
          <div><label className="input-label" htmlFor="analysis-character-target">TARGET CHARACTERS TO GENERATE</label><input id="analysis-character-target" aria-label="Target characters to generate" type="number" min={1} max={fullAutoRequested ? 200 : 1000} value={target} disabled={!!busy || (project.fullAutomation?.enabled && project.fullAutomation.stage !== 'completed')} onChange={e => setCollectionTarget(Number(e.target.value))}/><p className="sub">If AI returns fewer unique characters, Full Automation asks AI to expand the original character library to the target.</p></div>
          <div><label className="input-label">AUTOMATION</label><label style={{ display:'flex',alignItems:'center',gap:9,fontWeight:600 }}><input type="checkbox" checked={fullAutoRequested} disabled={!!busy || (project.fullAutomation?.enabled && project.fullAutomation.stage !== 'completed' && project.fullAutomation.stage !== 'paused')} onChange={e => { setFullAutoRequested(e.target.checked); if (e.target.checked && target>200) setTarget(200); }}/> Full Automation</label><p className="sub">Analyze → fill character target → generate prompts → OpenAI image Batches → review similarity → rewrite flagged prompts → one regeneration Batch → Etsy Listing Draft. OpenAI API charges apply. Jobs resume when PaletteIQ is running, including Desktop tray.</p></div>
+        <div className="research-auto-follow"><label><input type="checkbox" checked={autoFollowAutomation} onChange={e=>updateAutoFollowAutomation(e.target.checked)}/> Auto Follow — switch tabs when the current stage finishes</label><p className="sub">Works for manual Research and AI Prompts. Switches tabs only; never automatically starts a paid request.</p></div>
         {fullAutoRequested && <p className="sub">AI Prompts: standard OpenAI Responses API, 3 parallel groups of 10. Existing Batch jobs will still be recovered.</p>}
         {fullAutoRequested && <p className="sub">Research &amp; Analysis uses up to 3 parallel standard OpenAI Responses workers, then one Style DNA merge request. Each response ID is saved for recovery.</p>}
         <div><label className="input-label" htmlFor="source-analysis-provider">IMAGE ANALYSIS PROVIDER</label><select id="source-analysis-provider" value={fullAutoRequested ? 'openai' : analysisProvider} disabled={!!busy || fullAutoRequested} onChange={e => { const provider = e.target.value as 'openai' | 'gemini'; setAnalysisProvider(provider); setVisualModel(provider === 'gemini' ? (analysisModels.gemini[0]?.id || 'gemini-3.5-flash') : preferences.analysisModel); }}><option value="openai">OpenAI</option><option value="gemini">Google Gemini</option></select></div>
         <div><label className="input-label" htmlFor="source-analysis-model">VISION MODEL</label><select id="source-analysis-model" value={visualModel} disabled={!!busy || hasActiveResearch(project.researchJob) || (project.fullAutomation?.enabled && project.fullAutomation.stage !== 'completed')} onChange={e => { setVisualModel(e.target.value); if (fullAutoRequested || analysisProvider === 'openai') update({ researchModel:e.target.value }); }}>{!analysisModels[fullAutoRequested ? 'openai' : analysisProvider].some(m => m.id === visualModel) && <option value={visualModel}>{visualModel} (Settings/default)</option>}{analysisModels[fullAutoRequested ? 'openai' : analysisProvider].map(m => <option key={m.id} value={m.id}>{m.name} ({m.id})</option>)}</select></div>
-      </div><p className="sub">OpenAI analysis can continue remotely after the PC is shut down. Gemini analysis still requires keeping the request/client online.</p>{project.title && project.url === sourceUrl.trim() && <div className="source-card"><strong>{project.title}</strong>{(project.sourceTags || []).length > 0 && <p className="sub">Source tags: {project.sourceTags?.join(' · ')}</p>}{project.sourceDescription && <details><summary>Source description</summary><p className="sub">{project.sourceDescription}</p></details>}{project.url && <a href={project.url} target="_blank" rel="noopener noreferrer">View source <ExternalLink size={13}/></a>}{project.images.length > 0 && <><div className="reference-toolbar"><strong>{(project.selectedImageUrls ?? project.images).length} / {project.images.length} selected</strong><button className="outline-btn" type="button" onClick={() => update({ selectedImageUrls: [...project.images] })}>Select all</button><button className="outline-btn" type="button" onClick={() => update({ selectedImageUrls: [] })}>Clear</button></div><div className="source-images">{project.images.map((src,i) => <label className={`reference-tile ${(project.selectedImageUrls ?? project.images).includes(src) ? 'is-selected' : ''}`} key={src}><input type="checkbox" checked={(project.selectedImageUrls ?? project.images).includes(src)} onChange={e => update({ selectedImageUrls: e.target.checked ? [...(project.selectedImageUrls ?? project.images), src] : (project.selectedImageUrls ?? project.images).filter(x => x !== src) })}/><Image unoptimized width={640} height={640} src={src} alt={`Etsy listing reference ${i + 1}`}/><span>Image {i + 1}</span></label>)}</div><button className="primary-btn wide" disabled={!!busy || hasActiveResearch(project.researchJob) || !(project.selectedImageUrls ?? project.images).length} onClick={runAnalyze}>{hasActiveResearch(project.researchJob) ? 'Background analysis running…' : busy === 'analyze' || busy === 'research-start' ? 'Starting analysis…' : `Analyze ${(project.selectedImageUrls ?? project.images).length} selected images with ${fullAutoRequested ? visualModel : analysisProvider === 'gemini' ? 'Gemini' : visualModel}`}</button></>}</div>}</div><div className="panel"><h2>Creative intelligence</h2><p className="sub">Review and edit AI findings before production.</p>{[['General theme','theme'],['Sub-theme','subtheme'],['Micro-theme / niche','microtheme'],['Primary keyword','primaryKeyword'],['Visual style','style'],['Color direction','palette'],['Texture','texture']].map(([label,key]) => <div key={key}><label className="input-label">{label.toUpperCase()}</label><input value={String(project[key as keyof Project] ?? '')} onChange={e => update({ [key]: e.target.value })}/></div>)}<label className="input-label">SEO KEYWORDS <span>comma-separated</span></label><textarea rows={3} value={project.keywords.join(', ')} onChange={e => update({ keywords: e.target.value.split(',').map(x => x.trim()).filter(Boolean) })}/><div><label className="input-label">EXPRESSION / MOOD DIRECTION</label>
+      </div><p className="sub">OpenAI analysis can continue remotely after the PC is shut down. Gemini analysis still requires keeping the request/client online.</p>{project.title && project.url === sourceUrl.trim() && <div className="source-card"><strong>{project.title}</strong>{(project.sourceTags || []).length > 0 && <p className="sub">Source tags: {project.sourceTags?.join(' · ')}</p>}{project.sourceDescription && <details><summary>Source description</summary><p className="sub">{project.sourceDescription}</p></details>}{project.url && <a href={project.url} target="_blank" rel="noopener noreferrer">View source <ExternalLink size={13}/></a>}{project.images.length > 0 && <><div className="reference-toolbar"><strong>{(project.selectedImageUrls ?? project.images).length} / {project.images.length} selected</strong><button className="outline-btn" type="button" onClick={() => update({ selectedImageUrls: [...project.images] })}>Select all</button><button className="outline-btn" type="button" onClick={() => update({ selectedImageUrls: [] })}>Clear</button></div><div className="source-images">{project.images.map((src,i) => {
+            const chosen = (project.selectedImageUrls ?? project.images).includes(src);
+            return <div className={`reference-tile ${chosen ? 'is-selected' : ''}`} key={src}>
+              <button type="button" className="reference-preview-trigger" aria-label={`Preview reference image ${i+1}`} onClick={()=>setReferencePreviewIndex(i)}>
+                <Image unoptimized width={640} height={640} src={src} alt={`Etsy listing reference ${i+1}`}/>
+                <span className="reference-zoom-hint">Preview</span>
+              </button>
+              <label className="reference-select-toggle">
+                <input type="checkbox" aria-label={`Select reference image ${i+1}`} checked={chosen}
+                  onChange={e=>update({ selectedImageUrls: e.target.checked
+                    ? [...(project.selectedImageUrls ?? project.images), src]
+                    : (project.selectedImageUrls ?? project.images).filter(x=>x!==src) })}/>
+                <span>{chosen ? 'Selected' : 'Select'}</span>
+              </label>
+              <span className="reference-image-number">Image {i+1}</span>
+            </div>;
+          })}</div><button className="primary-btn wide" disabled={!!busy || hasActiveResearch(project.researchJob) || !(project.selectedImageUrls ?? project.images).length} onClick={runAnalyze}>{hasActiveResearch(project.researchJob) ? 'Background analysis running…' : busy === 'analyze' || busy === 'research-start' ? 'Starting analysis…' : `Analyze ${(project.selectedImageUrls ?? project.images).length} selected images with ${fullAutoRequested ? visualModel : analysisProvider === 'gemini' ? 'Gemini' : visualModel}`}</button></>}</div>}</div><div className="panel"><h2>Creative intelligence</h2><p className="sub">Review and edit AI findings before production.</p>{[['General theme','theme'],['Sub-theme','subtheme'],['Micro-theme / niche','microtheme'],['Primary keyword','primaryKeyword'],['Visual style','style'],['Color direction','palette'],['Texture','texture']].map(([label,key]) => <div key={key}><label className="input-label">{label.toUpperCase()}</label><input value={String(project[key as keyof Project] ?? '')} onChange={e => update({ [key]: e.target.value })}/></div>)}<label className="input-label">SEO KEYWORDS <span>comma-separated</span></label><textarea rows={3} value={project.keywords.join(', ')} onChange={e => update({ keywords: e.target.value.split(',').map(x => x.trim()).filter(Boolean) })}/><div><label className="input-label">EXPRESSION / MOOD DIRECTION</label>
         <div className="panel" style={{padding:12,marginBottom:10}}>
           <b>Reference Mood Analysis</b>
           <p className="sub">Visible reference faces: <strong>{referenceMood || 'Not verified from faces'}</strong> · Confidence: {moodConfidence}</p>
@@ -1371,6 +1408,24 @@ export default function Home() {
       {isStudioTabEnabled('listing-images') && tab === 'listing-images' && <EtsyListingImageStudio key={project.id} projectId={project.id} name={project.name} theme={project.theme} subtheme={project.subtheme} style={project.style} palette={project.palette} texture={project.texture} seoTitle={project.listing?.title} primaryKeyword={project.listing?.primaryKeyword} defaultImageModel={preferences.model} defaultImageQuality={preferences.quality} characters={project.characters} onSaved={listingImages => update({ listingImages })}/>}
       {tab === 'listing' && <EtsyListingDraft project={project} seoProvider={preferences.seoProvider ?? 'gemini'} seoGeminiModel={preferences.seoGeminiModel ?? 'gemini-3.5-flash'} seoOpenaiModel={preferences.seoOpenaiModel ?? 'gpt-6.1-terra'} seoDraftFields={preferences.seoDraftFields ?? defaultSeoDraftFields} seoTitleMaxLength={preferences.seoTitleMaxLength ?? 120} seoAltTextCount={preferences.seoAltTextCount ?? 10} onDownloaded={(receipt) => { setProject(prev => ({ ...prev, ...receipt })); setProjects(prev => prev.map(item => item.id === project.id ? { ...item, ...receipt } : item)); }} onChange={listing => update({ listing })} onSave={async () => { await api({ action: 'save', id: project.id, name: project.name, data: project }); setProjects(prev => [project, ...prev.filter(p => p.id !== project.id)]); }} onSeoReview={async seoReview => { const updated = { ...project, seoReview }; await api({ action: 'save', id: updated.id, name: updated.name, data: updated }); setProject(updated); setProjects(prev => [updated, ...prev.filter(p => p.id !== updated.id)]); }}/>}
       {stepIndex >= 0 && <div className="panel pipeline-footer"><button className="outline-btn" onClick={() => navigateTab(stepIndex ? steps[stepIndex - 1].id : 'collections')}>{stepIndex ? `← ${steps[stepIndex - 1].label}` : '← Collections'}</button><span>Step {stepIndex + 1} of {steps.length}</span><button className="primary-btn" disabled={!!busy} onClick={advance}>{busy === 'save' ? 'Saving…' : stepIndex < steps.length - 1 ? `Save & next: ${steps[stepIndex + 1].label}` : 'Save & back to collections'} <ArrowRight size={16}/></button></div>}
+      {referencePreviewIndex !== null && project.images[referencePreviewIndex] && <div className="reference-preview-overlay" role="presentation" onClick={()=>setReferencePreviewIndex(null)}>
+        <div className="reference-preview-dialog" role="dialog" aria-modal="true" aria-label={`Reference image ${referencePreviewIndex+1} preview`} onClick={event=>event.stopPropagation()}>
+          <div className="reference-preview-head">
+            <strong>Reference image {referencePreviewIndex+1} / {project.images.length}</strong>
+            <button type="button" className="reference-preview-close" aria-label="Close reference preview" onClick={()=>setReferencePreviewIndex(null)}><X size={20}/></button>
+          </div>
+          <div className="reference-preview-image"><Image unoptimized width={1200} height={1200} src={project.images[referencePreviewIndex]} alt={`Large preview of Etsy reference image ${referencePreviewIndex+1}`}/></div>
+          <div className="reference-preview-actions">
+            <label><input type="checkbox" checked={(project.selectedImageUrls ?? project.images).includes(project.images[referencePreviewIndex])}
+              onChange={event=>{ const src=project.images[referencePreviewIndex]; update({ selectedImageUrls:event.target.checked
+                ? [...(project.selectedImageUrls ?? project.images),src]
+                : (project.selectedImageUrls ?? project.images).filter(url=>url!==src) }); }}/>
+              Selected for analysis</label>
+            <button type="button" className="outline-btn" disabled={referencePreviewIndex===0} onClick={()=>setReferencePreviewIndex(i=>i===null?null:Math.max(0,i-1))}>Previous</button>
+            <button type="button" className="outline-btn" disabled={referencePreviewIndex===project.images.length-1} onClick={()=>setReferencePreviewIndex(i=>i===null?null:Math.min(project.images.length-1,i+1))}>Next</button>
+          </div>
+        </div>
+      </div>}
       <footer>paletteIQ · Independent clipart research and creation studio. Not affiliated with Etsy. Source listings are inspiration for original designs.</footer></div></main>
   </div>;
 }
