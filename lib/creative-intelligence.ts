@@ -43,6 +43,7 @@ export function normalizeCreativeControls(input: unknown): CreativeControls {
 }
 export type EmotionProfile = {
   titleCues: string[]; tagCues: string[]; observedExpressions: string[];
+  referenceMood: string; moodEvidence: string; moodConfidence: string;
   dominantMood: string; ageCues: string[]; styleCues: string[]; expressionStyle: string;
   recommendedExpressions: string[]; guidance: string;
 };
@@ -143,21 +144,54 @@ function normalizeEmotionProfile(value: unknown): EmotionProfile {
   const raw: Record<string, unknown> = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
   return { titleCues: strings(raw.titleCues, 30), tagCues: strings(raw.tagCues, 30),
     observedExpressions: strings(raw.observedExpressions, 50),
+    referenceMood: clean(raw.referenceMood, 200), moodEvidence: clean(raw.moodEvidence, 650),
+    moodConfidence: clean(raw.moodConfidence, 32),
     dominantMood: clean(raw.dominantMood, 200), ageCues: strings(raw.ageCues, 30), styleCues: strings(raw.styleCues, 30),
     expressionStyle: clean(raw.expressionStyle, 350),
     recommendedExpressions: strings(raw.recommendedExpressions, 30), guidance: clean(raw.guidance, 1200) };
 }
-/** Title intent has precedence for the requested mood; image evidence stays separate. */
+// Mood must be grounded in facial evidence from the selected references,
+// never inferred from pastel color, watercolor texture or "cute" alone.
+export function referenceMoodFromExpressions(
+  expressions: string[],
+): {mood:string;confidence:string;evidence:string} {
+  const observed=expressions.map(x=>x.trim()).filter(Boolean).slice(0,80);
+  const weights=[
+    {mood:'joyful, cheerful and playful',words:/\\b(smiling|smile|grinning|grin|joyful|happy|cheerful|excited|delighted|laughing|playful|giggl|sparkling eyes|bright eyes|uplifted mouth|upturned mouth)\\b/i},
+    {mood:'sad and tender',words:/\\b(sad|crying|cry|teary|tearful|frowning|frown|sorrow|downturned mouth|downcast)\\b/i},
+    {mood:'sleepy and peaceful',words:/\\b(sleepy|sleeping|dreamy|drowsy|yawning|peaceful|serene|relaxed|closed sleeping eyes)\\b/i},
+    {mood:'grumpy and angry',words:/\\b(angry|grumpy|furrowed|scowling|irritated|pouting|scowl)\\b/i},
+  ];
+  const scored=weights.map(item=>({...item,count:observed.filter(v=>item.words.test(v)).length}))
+    .sort((a,b)=>b.count-a.count);
+  const top=scored[0];
+  if(!top?.count)return {mood:'',confidence:'unverified',evidence:'No clearly visible facial mood identified in the selected reference images.'};
+  const runnerUp=scored[1]?.count||0;
+  const confidence=top.count>=3 && top.count>=runnerUp*2?'high':top.count>=2?'medium':'low';
+  const matched=observed.filter(v=>top.words.test(v)).slice(0,5);
+  return {mood:top.mood,confidence,evidence:matched.join('; ').slice(0,600)};
+}
+/** Title intent has precedence for the requested mood; observed image evidence stays separate. */
 export function mergeSourceEmotionProfile(analysis: CreativeAnalysis, title: string, tags: string[]): CreativeAnalysis {
   const titleCues = extractEmotionCues(title);
   const tagCues = extractEmotionCues(tags.join(' '));
   const explicitMood = titleCues.filter(x => moodCues.has(x));
   const tagMood = tagCues.filter(x => moodCues.has(x));
+  const evidence=[
+    ...analysis.emotionProfile.observedExpressions,
+    ...analysis.imageObservations.flatMap(o=>o.expressions||[]),
+  ];
+  const inferred=referenceMoodFromExpressions(evidence);
+  const visualMood=analysis.emotionProfile.referenceMood || inferred.mood;
   const dominantMood = explicitMood.length ? explicitMood.join(' / ') :
-    analysis.emotionProfile.dominantMood || (tagMood.length ? tagMood.join(' / ') : analysis.mood);
+    (visualMood || (tagMood.length ? tagMood.join(' / ') :
+      analysis.emotionProfile.dominantMood || analysis.mood));
   const ageCues = [...new Set<string>([...titleCues.filter(x => x === 'baby'), ...tagCues.filter(x => x === 'baby'), ...analysis.emotionProfile.ageCues])];
   const styleCues = [...new Set<string>([...titleCues.filter(x => x === 'cute'), ...tagCues.filter(x => x === 'cute'), ...analysis.emotionProfile.styleCues])];
   return { ...analysis, emotionProfile: { ...analysis.emotionProfile, titleCues, tagCues,
+    referenceMood:visualMood,
+    moodEvidence:analysis.emotionProfile.moodEvidence||inferred.evidence,
+    moodConfidence:analysis.emotionProfile.moodConfidence||inferred.confidence,
     dominantMood, ageCues, styleCues } };
 }
 export function expressionDistribution(items: Array<{ expression?: string }>): Record<string, number> {
