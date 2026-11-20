@@ -11,7 +11,11 @@ import { primaryCharacterSubject } from '@/lib/primary-character-focus';
 import { projectPromptContext, isActivePromptBatch, type PromptProject } from '@/lib/prompt-batch-jobs';
 import { normalizeListing } from '@/lib/etsy-listing';
 import { safeRejectedImageResearch } from '@/lib/research-image-input';
-import { GET as researchGet } from '@/app/api/research-jobs/route';
+import { GET as researchGet, submitResearchBatch, getResearchBatchResult } from '@/app/api/research-jobs/route';
+import { diversityExpansionInstruction } from '@/lib/creative-research-prompts';
+import { familyDistribution, expressionDistribution } from '@/lib/creative-intelligence';
+import { userCredential } from '@/lib/credentials';
+import { sharedProviderSecret } from '@/lib/store-secrets';
 import { GET as promptGet, POST as promptPost } from '@/app/api/prompt-jobs/route';
 import { GET as imageGet, POST as imagePost } from '@/app/api/image-batches/route';
 import { POST as studioPost } from '@/app/api/studio/route';
@@ -22,6 +26,7 @@ type Stage = 'research'|'expanding'|'prompts'|'images'|'revising'|'regenerating'
 type Flow = { enabled: boolean; stage: Stage; target: number; textModel?: string; promptModel?: string; batchImageModel?: string; imageQuality?: string; startedAt: number; updatedAt: number;
   resumeStage?: Stage; lastError?: string; leaseUntil?: number; expandAttempts?: number;
   promptAttempts?: number; imageAttempts?: number; revisionAttempts?: number;
+  expansionBatch?: { batchId?: string; status:'submitting'|'queued'|'in_progress'; startedAt:number; count:number };
   reviewQueue?: string[]; revisedIds?: string[]; regenerationBatchId?: string };
 type Subject = PromptProject['characters'][number] & { imageUrl?: string; origin?: string;
   similarityReview?: { status?: string; score?: number; reason?: string } };
@@ -187,33 +192,71 @@ async function tick(req: Request, owner: string, id: string) {
       }
     } else if (f.stage === 'expanding') {
       if (p.characters.length >= f.target) await setStage(owner,id,'prompts');
-      else if ((f.expandAttempts || 0) >= Math.min(60,Math.ceil(f.target/10)+8))
-        throw Error('Character expansion did not reach the target: ' + p.characters.length + '/' + f.target);
-      else {
-        const n=Math.min(15,f.target-p.characters.length);
-        const out=await apiPost(req,studioPost,{
-          action:'expand',count:n,target:f.target,title:p.title||p.name,
-          analysis:projectPromptContext(p),images:p.selectedImageUrls||p.images,
-          model:textModel(p),
-          existing:p.characters.map(c=>({name:c.name,family:c.family,expression:c.expression})),
-        });
-        const proposals=(Array.isArray(out.characters)?out.characters:[]) as Array<Record<string,string>>;
-        const candidates=proposals.map(c=>({
-          id:crypto.randomUUID(),name:String(c.name||''),family:c.family||'',
-          expression:c.expression||'',shape:c.shape||'',silhouette:c.silhouette||'',
-          accessories:c.accessories||'',colorPlan:c.colorPlan||'',description:c.description||'',
-          prompt:'',status:'draft',origin:'ai',
+      else if ((f.expandAttempts||0) >= Math.min(60,Math.ceil(f.target/10)+8))
+        throw Error('Character expansion did not reach the target: '+p.characters.length+'/'+f.target);
+      else if(f.expansionBatch){
+        const receipt=f.expansionBatch;
+        if(!receipt.batchId){
+          // Submission may have been accepted by OpenAI but response was lost.
+          // A fresh request is NEVER submitted for the same expansion.
+          throw Error('AI Fill Batch ID missing after submission. Inspect OpenAI Batch activity; do not resubmit automatically.');
+        }
+        const secret=await userCredential(owner,'openai')||sharedProviderSecret(owner,'OPENAI_API_KEY');
+        if(!secret)throw Error('OpenAI API key required for AI Fill Batch recovery');
+        const output=await getResearchBatchResult(secret,receipt.batchId,'character-expansion');
+        if(output.status==='failed')throw Error('AI Fill Batch failed: '+(output.error||'remote error'));
+        if(output.status==='completed' && output.text){
+          const parsed=JSON.parse(output.text) as {characters?:Array<Record<string,string>>};
+          const proposals=Array.isArray(parsed.characters)?parsed.characters:[];
+          const candidates=proposals.map(c=>({
+            id:crypto.randomUUID(),name:String(c.name||''),family:c.family||'',
+            expression:c.expression||'',shape:c.shape||'',silhouette:c.silhouette||'',
+            accessories:c.accessories||'',colorPlan:c.colorPlan||'',description:c.description||'',
+            prompt:'',status:'draft',origin:'ai',
+          }));
+          const selected=selectDiverseConcepts(candidates,p.characters,f.target,
+            receipt.count,normalizeCreativeControls(p.creativeControls).characterVariation,
+            primaryCharacterSubject(p.title||p.name));
+          const revised=await save(owner,id,latest=>{
+            if(latest.fullAutomation?.expansionBatch?.batchId!==receipt.batchId)return latest;
+            const seen=new Set(latest.characters.map(c=>c.name.trim().toLowerCase()));
+            const unique=selected.filter(c=>{const name=c.name.trim().toLowerCase();
+              if(!name||seen.has(name))return false;seen.add(name);return true;});
+            return {...latest,characters:[...latest.characters,...unique],
+              fullAutomation:{...latest.fullAutomation!,expansionBatch:undefined,
+                expandAttempts:(latest.fullAutomation?.expandAttempts||0)+1,updatedAt:Date.now()}};
+          });
+          if(revised.characters.length>=f.target)await setStage(owner,id,'prompts');
+        }else if(output.status==='in_progress'&&receipt.status==='queued'){
+          await save(owner,id,latest=>({...latest,fullAutomation:{
+            ...latest.fullAutomation!,expansionBatch:{...receipt,status:'in_progress'}}}));
+        }
+      } else {
+        const count=Math.min(15,f.target-p.characters.length);
+        const existing=p.characters.map(c=>({
+          name:c.name,family:c.family,expression:c.expression,
         }));
-        const selected=selectDiverseConcepts(candidates,p.characters,f.target,n,
-          normalizeCreativeControls(p.creativeControls).characterVariation,
-          primaryCharacterSubject(p.title||p.name));
-        const revised=await save(owner,id,latest=>{
-          const seen=new Set(latest.characters.map(c=>c.name.trim().toLowerCase()));
-          const unique=selected.filter(c=>{const name=c.name.trim().toLowerCase();if(!name||seen.has(name))return false;seen.add(name);return true;});
-          return {...latest,characters:[...latest.characters,...unique],
-            fullAutomation:{...latest.fullAutomation!,expandAttempts:(latest.fullAutomation?.expandAttempts||0)+1,updatedAt:Date.now()}};
+        const context=projectPromptContext(p);
+        const instruction=diversityExpansionInstruction({
+          count,target:f.target,title:p.title||p.name,analysis:context,existing,
+          distribution:familyDistribution(existing),expressionCounts:expressionDistribution(existing),
         });
-        if (revised.characters.length>=f.target) await setStage(owner,id,'prompts');
+        const secret=await userCredential(owner,'openai')||sharedProviderSecret(owner,'OPENAI_API_KEY');
+        if(!secret)throw Error('OpenAI API key required for AI Fill Batch');
+        const claim={status:'submitting' as const,startedAt:Date.now(),count};
+        // Persist the claim BEFORE making a paid Batch request.
+        await save(owner,id,latest=>({...latest,fullAutomation:{
+          ...latest.fullAutomation!,expansionBatch:claim}}));
+        try{
+          const batchId=await submitResearchBatch(secret,'character-expansion',textModel(p),
+            [{role:'user',content:[{type:'input_text',text:instruction}]}],
+            Math.min(13000,3000+count*190));
+          await save(owner,id,latest=>({...latest,fullAutomation:{
+            ...latest.fullAutomation!,expansionBatch:{...claim,status:'queued',batchId}}}));
+        }catch(error){
+          throw Error('AI Fill Batch submission needs inspection before retrying. '+
+            (error instanceof Error?error.message:String(error)));
+        }
       }
     } else if (f.stage === 'prompts') {
       const missing=p.characters.filter(c=>!c.prompt?.trim());
