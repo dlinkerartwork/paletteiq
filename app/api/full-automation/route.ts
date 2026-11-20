@@ -174,6 +174,66 @@ const textModel = (p: Project, fallback = 'gpt-6.1-terra') => {
 const quality = (prefs: Prefs) =>
   ['low','medium','high'].includes(prefs.quality || '') ? prefs.quality! : 'low';
 
+/**
+ * Maintain at most four active image Batches, with disjoint character IDs.
+ * Can run while the last prompt groups are still being imported.
+ * Every image POST makes its own reservation BEFORE the paid OpenAI call.
+ */
+async function scheduleReadyImageWave(
+  req:Request, owner:string, id:string, partialPrompts:boolean,
+) {
+  const previous=await jobs(owner,id);
+  if(previous.some(row=>['submitting','uncertain'].includes(row.status) ||
+      row.openaiBatchId.startsWith('pending:')))
+    throw Error('Image Batch submission needs review: an earlier request has an uncertain OpenAI receipt. Verify activity before any paid retry.');
+  // Synchronize prior receipts before deciding which characters still need
+  // output. The sync route imports paid outputs using optimistic concurrency.
+  if(previous.some(row=>isActiveBatchStatus(row.status) ||
+      (row.status==='completed' && (JSON.parse(row.items) as Array<{status:string}>)
+        .some(item=>item.status==='pending'))))
+    await apiGet(req,imageGet,id,true);
+  const [snapshot,records]=await Promise.all([load(owner,id),jobs(owner,id)]);
+  if(!snapshot)throw Error('Collection missing while scheduling image batches');
+  const p=snapshot.p, f=p.fullAutomation!;
+  if(records.some(row=>['submitting','uncertain'].includes(row.status) ||
+      row.openaiBatchId.startsWith('pending:')))
+    throw Error('Uncertain saved Image Batch receipt: inspect OpenAI before creating new paid batches.');
+  const occupied=records.filter(row=>isActiveBatchStatus(row.status)).length;
+  const capacity=availableImageSlots(occupied);
+  const reserved=pendingImageIds(records);
+  const missing=p.characters.filter(c=>!c.imageUrl&&!!c.prompt?.trim()&&!reserved.has(c.id));
+  const fresh=missing.filter(c=>eligibleForBulk(c));
+  const retry=missing.filter(c=>retryableFailedImage(c));
+  const selected=fresh.length?fresh:retry;
+  const usable=partialPrompts?fresh:selected;
+  // During Prompt generation, wait for a complete 20-image chunk. Avoid
+  // paying for excessive small Batches while other prompt groups are pending.
+  if(partialPrompts && usable.length<20)return {occupied,submitted:0};
+  if(!capacity || !usable.length)return {occupied,submitted:0};
+  const chunks:Array<Subject[]>=[];
+  for(let i=0;i<usable.length&&chunks.length<capacity;i+=20)
+    chunks.push(usable.slice(i,i+20));
+  if((f.imageAttempts||0)+chunks.length>Math.ceil(f.target/20)+AUTOMATION_LIMITS.imageBatches)
+    throw Error('Too many Image Batch attempts; inspect existing jobs before further charges.');
+  // Slot budget is persisted first, then each Image Batch API handler makes a
+  // durable per-character reservation before it reaches the OpenAI endpoint.
+  await save(owner,id,latest=>({...latest,fullAutomation:{
+    ...latest.fullAutomation!,imageAttempts:(latest.fullAutomation?.imageAttempts||0)+chunks.length,
+    updatedAt:Date.now()}}));
+  const config=await prefs(owner);
+  const results=await Promise.allSettled(chunks.map(chunk=>apiPost(req,imagePost,{
+    projectId:id,characterIds:chunk.map(c=>c.id),
+    model:imageModel(p,config),quality:f.imageQuality||quality(config),
+    regenerate:!fresh.length,
+  })));
+  const rejected=results.filter((result):result is PromiseRejectedResult=>result.status==='rejected');
+  if(rejected.length)
+    throw Error('Image Batch submission uncertain for '+rejected.length+
+      ' group(s). Check OpenAI Batch activity before any further paid submissions. '+
+      rejected.map(result=>String(result.reason)).join(' | ').slice(0,250));
+  return {occupied,submitted:chunks.length};
+}
+
 async function tick(req: Request, owner: string, id: string) {
   const key = owner + ':' + id;
   if (busy.has(key)) return { waiting: true };
@@ -361,55 +421,30 @@ async function tick(req: Request, owner: string, id: string) {
         await apiPost(req,promptPost,{projectId:id,characterIds:missing.slice(0,200).map(c=>c.id),model,regenerate:false,progressive:p.progressivePrompts===true});
       } else throw Error('Incomplete prompts after three attempts. Review missing prompts before resuming.');
     } else if (f.stage === 'images') {
+      // Refresh and refill free image slots every cycle, instead of waiting
+      // for an entire three-Batch wave to finish before starting more work.
+      await scheduleReadyImageWave(req,owner,id,false);
+      const current=(await load(owner,id))?.p;
+      if(!current)throw Error('Collection missing while reviewing image progress');
       const records=await jobs(owner,id);
-      // Reserved image submissions have not been reconciled with OpenAI.
-      // A crash between remote acceptance and receipt persistence must NEVER
-      // make a new automatic billable submission for those same characters.
-      if (records.some(row=>['submitting','uncertain'].includes(row.status) ||
-          row.openaiBatchId.startsWith('pending:')))
-        throw Error('Image Batch submission needs review: an earlier request has an uncertain OpenAI receipt. Verify activity before any paid retry.');
-      if (records.some(row=>isActiveBatchStatus(row.status))) await apiGet(req,imageGet,id,true);
-      else {
-        const missing=p.characters.filter(c=>!c.imageUrl&&!!c.prompt?.trim());
-        if (p.characters.some(c=>!c.prompt?.trim())) await setStage(owner,id,'prompts');
-        else if (missing.length) {
-          const fresh=missing.filter(c=>eligibleForBulk(c));
-          const retry=missing.filter(c=>retryableFailedImage(c));
-          const selected=fresh.length?fresh:retry;
-          if(!selected.length)throw Error('Cannot safely retry unimported images. Check Batch activity.');
-          // One scheduling wave submits up to three independent batches
-          // concurrently, each with at most 20 image requests. Once all
-          // accepted jobs finish importing and reviewing, the next wave starts.
-          const chunks:Array<Subject[]>=[];
-          for(let i=0;i<selected.length&&chunks.length<3;i+=20)
-            chunks.push(selected.slice(i,i+20));
-          if((f.imageAttempts||0)+chunks.length>Math.ceil(f.target/20)+3)
-            throw Error('Too many image Batch attempts; inspect existing jobs before further charges.');
-          await save(owner,id,latest=>({...latest,fullAutomation:{
-            ...latest.fullAutomation!,
-            imageAttempts:(latest.fullAutomation?.imageAttempts||0)+chunks.length,
-            updatedAt:Date.now()}}));
-          const config=await prefs(owner);
-          // POST validates overlapping pending IDs server-side. Failed or
-          // ambiguous submissions are never re-attempted in this tick.
-          const results=await Promise.allSettled(chunks.map(chunk=>apiPost(req,imagePost,{
-            projectId:id,characterIds:chunk.map(c=>c.id),
-            model:imageModel(p,config),quality:f.imageQuality||quality(config),
-            regenerate:!fresh.length,
-          })));
-          const rejected=results.filter((result):result is PromiseRejectedResult=>result.status==='rejected');
-          if(rejected.length)throw Error('Image Batch submission uncertain for '+rejected.length+
-            ' group(s). Check OpenAI Batch activity before any further paid submissions. '+
-            rejected.map(result=>String(result.reason)).join(' | ').slice(0,250));
-
-        } else {
-          const unverified=p.characters.filter(c=>c.imageUrl &&
-            c.similarityReview?.status!=='clear' && c.similarityReview?.status!=='needs_review');
-          if (unverified.length) throw Error(unverified.length+' image(s) have unverified similarity checks. Review required.');
-          const flagged=p.characters.filter(c=>c.imageUrl&&c.similarityReview?.status==='needs_review').map(c=>c.id);
-          if (flagged.length) await setStage(owner,id,'revising',{reviewQueue:flagged,revisedIds:[],revisionAttempts:0});
-          else await setStage(owner,id,'listing');
-        }
+      const reserved=pendingImageIds(records);
+      const inFlight=records.some(row=>isActiveBatchStatus(row.status) ||
+        row.status==='submitting'||row.status==='uncertain'||row.openaiBatchId.startsWith('pending:'));
+      if(current.characters.some(c=>!c.prompt?.trim())) {
+        await setStage(owner,id,'prompts');
+      } else if(!inFlight && !reserved.size) {
+        const missing=current.characters.filter(c=>!c.imageUrl);
+        if(missing.length)
+          throw Error('Missing '+missing.length+' images after Batch import. Review the original paid receipts before retrying.');
+        const unverified=current.characters.filter(c=>c.imageUrl &&
+          c.similarityReview?.status!=='clear' && c.similarityReview?.status!=='needs_review');
+        if(unverified.length)
+          throw Error(unverified.length+' image(s) have unverified similarity checks. Review required.');
+        const flagged=current.characters.filter(c=>c.imageUrl&&
+          c.similarityReview?.status==='needs_review').map(c=>c.id);
+        if(flagged.length) await setStage(owner,id,'revising',{
+          reviewQueue:flagged,revisedIds:[],revisionAttempts:0});
+        else await setStage(owner,id,'listing');
       }
     } else if (f.stage === 'revising') {
       const pending=(f.reviewQueue||[]).filter(x=>!(f.revisedIds||[]).includes(x));
