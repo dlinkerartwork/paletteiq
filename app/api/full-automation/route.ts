@@ -12,7 +12,7 @@ import { projectPromptContext, isActivePromptBatch, type PromptProject } from '@
 import { normalizeListing } from '@/lib/etsy-listing';
 import { safeRejectedImageResearch } from '@/lib/research-image-input';
 import { GET as researchGet, submitResearchBatch, getResearchBatchResult } from '@/app/api/research-jobs/route';
-import { diversityExpansionInstruction } from '@/lib/creative-research-prompts';
+import { diversityExpansionInstruction, productionPromptInstruction } from '@/lib/creative-research-prompts';
 import { familyDistribution, expressionDistribution } from '@/lib/creative-intelligence';
 import { userCredential } from '@/lib/credentials';
 import { sharedProviderSecret } from '@/lib/store-secrets';
@@ -27,6 +27,8 @@ type Flow = { enabled: boolean; stage: Stage; target: number; textModel?: string
   resumeStage?: Stage; lastError?: string; leaseUntil?: number; expandAttempts?: number;
   promptAttempts?: number; imageAttempts?: number; revisionAttempts?: number;
   expansionBatch?: { batchId?: string; status:'submitting'|'queued'|'in_progress'; startedAt:number; count:number };
+  revisionBatch?: { batchId?: string; status:'submitting'|'queued'|'in_progress'; startedAt:number;
+    items:Array<{id:string;originalPrompt:string;imageUrl:string}> };
   reviewQueue?: string[]; revisedIds?: string[]; regenerationBatchId?: string };
 type Subject = PromptProject['characters'][number] & { imageUrl?: string; origin?: string;
   similarityReview?: { status?: string; score?: number; reason?: string } };
@@ -306,13 +308,76 @@ async function tick(req: Request, owner: string, id: string) {
       }
     } else if (f.stage === 'revising') {
       const pending=(f.reviewQueue||[]).filter(x=>!(f.revisedIds||[]).includes(x));
-      if (!pending.length) await setStage(owner,id,'regenerating');
-      else if ((f.revisionAttempts||0)>=Math.max(5,(f.reviewQueue||[]).length)*3)
-        throw Error('Could not rewrite all flagged prompts; manual review required.');
-      else {
+      if(!pending.length && !f.revisionBatch)await setStage(owner,id,'regenerating');
+      else if((f.revisionAttempts||0)>=Math.max(5,(f.reviewQueue||[]).length)*3)
+        throw Error('Could not revise flagged prompts; manual inspection required');
+      else if(f.revisionBatch){
+        const receipt=f.revisionBatch;
+        if(!receipt.batchId)throw Error('Similarity rewrite Batch receipt missing; check OpenAI before any retry');
+        const secret=await userCredential(owner,'openai')||sharedProviderSecret(owner,'OPENAI_API_KEY');
+        if(!secret)throw Error('OpenAI key needed to recover prompt revision Batch');
+        const out=await getResearchBatchResult(secret,receipt.batchId,'similarity-revision');
+        if(out.status==='failed')throw Error('Similarity revision Batch failed: '+out.error);
+        if(out.status==='completed'&&out.text){
+          const decoded=JSON.parse(out.text) as {prompts?:Array<{id?:string;prompt?:string}>};
+          const received=new Map((Array.isArray(decoded.prompts)?decoded.prompts:[])
+            .filter(c=>typeof c.id==='string'&&typeof c.prompt==='string'&&c.prompt.trim().length>100)
+            .map(c=>[c.id!,c.prompt!.trim().slice(0,8000)]));
+          const revised=await save(owner,id,latest=>{
+            if(latest.fullAutomation?.revisionBatch?.batchId!==receipt.batchId)return latest;
+            const approved=new Map(receipt.items.filter(item=>{
+              const current=latest.characters.find(c=>c.id===item.id);
+              return received.has(item.id)&&current?.prompt===item.originalPrompt &&
+                current?.imageUrl===item.imageUrl &&
+                current?.similarityReview?.status==='needs_review';
+            }).map(item=>[item.id,received.get(item.id)!]));
+            return {...latest,characters:latest.characters.map(c=>
+              approved.has(c.id)?{...c,prompt:approved.get(c.id)!}:c),
+              fullAutomation:{...latest.fullAutomation!,revisionBatch:undefined,
+                revisedIds:[...new Set([...(latest.fullAutomation?.revisedIds||[]),...approved.keys()])],
+                revisionAttempts:(latest.fullAutomation?.revisionAttempts||0)+1,
+                updatedAt:Date.now()}};
+          });
+          if(revised.fullAutomation?.revisedIds?.length===(f.reviewQueue||[]).length)
+            await setStage(owner,id,'regenerating');
+          else if(!revised.fullAutomation?.revisedIds?.length)
+            throw Error('Batch revision returned no validated changed prompts; review before new paid submission');
+        }else if(out.status==='in_progress'&&receipt.status==='queued'){
+          await save(owner,id,latest=>({...latest,fullAutomation:{...latest.fullAutomation!,
+            revisionBatch:{...receipt,status:'in_progress'}}}));
+        }
+      }else{
+        const targets=pending.slice(0,3).map(id=>p.characters.find(c=>c.id===id))
+          .filter((c):c is Subject=>!!c);
+        if(!targets.length)throw Error('Similarity revision targets missing');
+        const items=targets.map(c=>({id:c.id,originalPrompt:c.prompt||'',
+          imageUrl:c.imageUrl||''}));
+        const instruction=productionPromptInstruction({
+          title:p.title||p.name,analysis:projectPromptContext(p),
+          characters:targets.map(c=>({...c,previousPrompt:c.prompt})),
+        })+'\nIMPORTANT: Previously generated images were flagged for similarity. '+
+          'For every character ID, create a substantially ORIGINAL prompt: change pose, '+
+          'camera angle, characteristic accessories, silhouette, composition and detail. '+
+          'Preserve the intended subject, color palette and Style DNA. '+
+          'Return valid JSON as {"prompts":[{"id":"...","prompt":"..."}]} only. '+
+          'Untrusted review observations: '+JSON.stringify(targets.map(c=>({
+            id:c.id,reason:c.similarityReview?.reason||'',score:c.similarityReview?.score||0,
+          }))).slice(0,6500);
+        const secret=await userCredential(owner,'openai')||sharedProviderSecret(owner,'OPENAI_API_KEY');
+        if(!secret)throw Error('OpenAI key required for Batch revisions');
+        const claim={status:'submitting' as const,startedAt:Date.now(),items};
         await save(owner,id,latest=>({...latest,fullAutomation:{
-          ...latest.fullAutomation!,revisionAttempts:(latest.fullAutomation?.revisionAttempts||0)+1,updatedAt:Date.now()}}));
-        await apiPost(req,rewritePost,{projectId:id,characterIds:pending.slice(0,3),automation:true});
+          ...latest.fullAutomation!,revisionBatch:claim}}));
+        try{
+          const batchId=await submitResearchBatch(secret,'similarity-revision',
+            p.fullAutomation?.promptModel||'gpt-6-luna',
+            [{role:'user',content:[{type:'input_text',text:instruction}]}],5500);
+          await save(owner,id,latest=>({...latest,fullAutomation:{
+            ...latest.fullAutomation!,revisionBatch:{...claim,batchId,status:'queued'}}}));
+        }catch(error){
+          throw Error('Similarity rewrite Batch submission may have reached OpenAI. '+
+            (error instanceof Error?error.message:String(error)));
+        }
       }
     } else if (f.stage === 'regenerating') {
       if (!(f.reviewQueue||[]).length) await setStage(owner,id,'listing');
