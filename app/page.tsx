@@ -458,7 +458,7 @@ export default function Home() {
       finally { polling = false; }
     };
     void resumeBatches();
-    const timer = window.setInterval(() => void resumeBatches(), 45000);
+    const timer = window.setInterval(() => void resumeBatches(), 12000);
     return () => { stopped = true; window.clearInterval(timer); };
   }, [loadDone, tab]);
   useEffect(() => { window.scrollTo({ top: 0, left: 0, behavior: 'instant' }); const main = document.querySelector('.main'); if (main && main.scrollTop) main.scrollTop = 0; document.title = `${['overview','collections','multi-production','stores','settings'].includes(tab) ? tab[0].toUpperCase() + tab.slice(1) : `${project.name} · ${steps.find(s => s.id === tab)?.label || tab}`} | PaletteIQ`; }, [tab, project.id, project.name]);
