@@ -240,7 +240,7 @@ export default function ImageProduction({ project, model, batchPreferredModel, q
     // Read locally persisted batch status first. OpenAI polling/import must not
     // delay rendering progress after returning to this tab.
     void (async () => { await refresh(false, false); if (!closed) await refresh(false, true); })();
-    const interval = setInterval(() => void refresh(false, true), 15000);
+    const interval = setInterval(() => void refresh(false, true), 8000);
     return () => { closed = true; clearInterval(interval); refreshNow.current = async () => {}; };
   }, [project.id, reportCredit]);
 
