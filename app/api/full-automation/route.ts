@@ -276,7 +276,7 @@ async function tick(req: Request, owner: string, id: string) {
         await save(owner,id,latest=>({...latest,fullAutomation:{
           ...latest.fullAutomation!,promptAttempts:(latest.fullAutomation?.promptAttempts||0)+1,updatedAt:Date.now()}}));
         const config=await prefs(owner);
-        const model=p.fullAutomation?.promptModel || config.automationPromptModel || 'gpt-6-luna';
+        const model=p.fullAutomation?.promptModel || p.fullAutomation?.textModel || config.automationPromptModel || 'gpt-6-luna';
         await apiPost(req,promptPost,{projectId:id,characterIds:missing.slice(0,200).map(c=>c.id),model,regenerate:false,progressive:p.progressivePrompts===true});
       } else throw Error('Incomplete prompts after three attempts. Review missing prompts before resuming.');
     } else if (f.stage === 'images') {
