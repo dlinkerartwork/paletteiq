@@ -1,0 +1,348 @@
+// Etsy Clipart Listing Studio v1.1: fixed square images. This is distinct
+// from legacy 3000 × 2250 exports and must never silently mix with them.
+export const LISTING_WIDTH = 1024;
+export const LISTING_HEIGHT = 1024;
+/** Richer art-first Main Cover, capped by the number of distinct actual assets. */
+export const DEFAULT_MAIN_COVER_CLIPART_COUNT = 12;
+
+export const LISTING_IMAGE_SPECS = [
+  { number: 1, key: 'Main_Cover', title: 'Main Cover', headline: 'The Clipart Collection', purpose: 'Hero cover with standout original artwork', kind: 'gallery' },
+  { number: 2, key: 'Bundle_Overview', title: 'Bundle Overview', headline: 'Explore the Bundle', purpose: 'Show the collection at a glance without implying every asset is visible', kind: 'all' },
+  { number: 3, key: 'Complete_Collection', title: 'Complete Collection', headline: 'The Complete Collection', purpose: 'Show every original collection clipart exactly once as a complete visual catalog', kind: 'all-grouped' },
+  { number: 4, key: 'Best_Elements', title: 'Best Elements', headline: 'Our Favorite Details', purpose: 'Larger illustrations showcasing the highlights', kind: 'gallery' },
+  { number: 5, key: 'Collection_Categories', title: 'Collection Categories', headline: 'Meet the Collection', purpose: 'Browse distinct, verified artwork groups', kind: 'categories' },
+  { number: 6, key: 'File_Features', title: 'File Features', headline: 'Made for Your Projects', purpose: 'Show only verified digital-product facts', kind: 'detail' },
+  { number: 7, key: 'Artwork_Close_Up', title: 'Artwork Close-Up', headline: 'Hand-Painted Details', purpose: 'Inspect original image quality and detail', kind: 'detail' },
+  { number: 8, key: 'Sticker_Sheet_Mockup', title: 'Sticker Sheet Mockup', headline: 'Create Lovely Stickers', purpose: 'Original PNG art on a blank sticker sheet', kind: 'mockup' },
+  { number: 9, key: 'Apparel_Mockup', title: 'Apparel Mockup', headline: 'Personalize Your Style', purpose: 'Original PNG art printed on blank apparel', kind: 'mockup' },
+  { number: 10, key: 'Accessories_Mockup', title: 'Accessories Mockup', headline: 'Everyday Accessories', purpose: 'Original PNG art on a canvas tote', kind: 'mockup' },
+  { number: 11, key: 'Packaging_Labels_Mockup', title: 'Packaging & Labels Mockup', headline: 'Beautiful Packaging', purpose: 'Original PNG art on an empty label', kind: 'mockup' },
+  { number: 12, key: 'Creative_Projects_Mockup', title: 'Creative Projects Mockup', headline: 'Creative Project Ideas', purpose: 'Original PNG art in a blank scrapbook layout', kind: 'mockup' },
+  { number: 13, key: 'Whats_Included', title: "What's Included", headline: "What's Included", purpose: 'Accurately summarize available collection files', kind: 'information' },
+  { number: 14, key: 'How_To_Download_And_Use', title: 'How to Download & Use', headline: 'Digital Download Guide', purpose: 'Explain how customers receive digital products', kind: 'information' },
+  { number: 15, key: 'Final_Showcase', title: 'Final Bundle Showcase', headline: 'Create Something Wonderful', purpose: 'Premium closing gallery of original clipart', kind: 'gallery' },
+] as const;
+
+export type ListingImageNumber = number;
+export type ListingImageStatus = 'draft' | 'approved' | 'needs_revision';
+export type ListingAsset = { id: string; name: string; imageUrl?: string; category?: string; subtheme?: string; group?: string };
+export type ListingPlacement = { assetId: string; x: number; y: number; width: number; height: number; rotation?: number };
+/** Main Cover defaults to AI-led free composition; other stages remain structured. */
+export type ListingCompositionMode = 'free' | 'structured' | 'ai-first';
+export function defaultListingCompositionMode(number: number): ListingCompositionMode {
+  return number === 1 ? 'free' : 'structured';
+}
+/** Images may bleed beyond the canvas; final JPG crops the overflow at export.
+ * Other listing pages (especially product mockups) keep their safe-area bounds.
+ */
+export function listingAllowsBleed(number: number): boolean {
+  // Mockups require accurate artwork on the physical product surface.
+  // Every other listing design can use clipped, editorial collage composition.
+  return number < 8 || number > 12;
+}
+export function validListingPlacement(p: ListingPlacement, number: number): boolean {
+  if (!p || typeof p.assetId !== 'string' ||
+      ![p.x,p.y,p.width,p.height,p.rotation ?? 0].every(n => typeof n === 'number' && Number.isFinite(n)) ||
+      p.width < 1 || p.height < 1 || Math.abs(p.rotation ?? 0) > 180) return false;
+  if (listingAllowsBleed(number)) return p.x >= -100 && p.y >= -100 &&
+    p.x < 100 && p.y < 100 && p.width <= 200 && p.height <= 200 &&
+    p.x + p.width > 0 && p.y + p.height > 0;
+  return p.x >= 0 && p.y >= 0 && p.x <= 100 && p.y <= 100 &&
+    p.width <= 100 && p.height <= 100 && p.x + p.width <= 100 && p.y + p.height <= 100;
+}
+
+export type ListingFinalReview = {
+  score: number; titleReadability: number; artworkProminence: number;
+  visualBalance: number; styleHarmony: number; strengths: string[];
+  improvements: string[]; analyzedImageUrl: string; analyzedAt: number;
+};
+export type ListingImageRecord = {
+  number: number; status: ListingImageStatus; backgroundUrl?: string; conceptUrl?: string; renderedImageUrl?: string;
+  placements?: ListingPlacement[]; aiGeneratedFullCover?: boolean; selectedSourceIds?: string[]; catalogAssetIds?: string[]; catalogExpectedCount?: number; creativeBrief?: string; notes?: string; reviewWarning?: string;
+  title?: string; subtitle?: string; badge?: string; // Exact user-approved AI lettering per image.
+  finalReview?: ListingFinalReview; // Vision critique of FINAL composited JPG, not background alone.
+  width?: number; height?: number; // Missing size = legacy 4:3, pending square re-render.
+  updatedAt: number;
+};
+export type ListingImageKind = typeof LISTING_IMAGE_SPECS[number]['kind'];
+export type ListingImageText = { title: string; subtitle: string; badge: string };
+/** SEO fields are defaults only. Existing per-image edits override them. */
+export function listingImageTextDefaults(
+  listing: { title?: string; primaryKeyword?: string } | undefined, fallback: string
+): ListingImageText {
+  return {
+    title: (listing?.title || '').trim() || fallback.trim() || 'Original Clipart Collection',
+    subtitle: (listing?.primaryKeyword || '').trim(),
+    badge: ''
+  };
+}
+
+/**
+ * Project Instructions v1.1: the MAIN COVER sells the product; supporting
+ * pages should not repeat a long SEO title or primary keyword on every image.
+ * The user can override Title, Subtitle and Badge independently for each page.
+ */
+export function listingImageTextDefaultsForStep(
+  number: number,
+  listing: {title?:string;primaryKeyword?:string}|undefined,
+  fallback: string
+): ListingImageText {
+  if (number === 1) return listingImageTextDefaults(listing,fallback);
+  const spec=LISTING_IMAGE_SPECS[number-1];
+  if (!spec) throw Error('Invalid listing image number');
+  return {title:spec.headline,subtitle:'',badge:''};
+}
+
+
+/**
+ * 03 Complete Collection MUST NOT use an AI-generated partial sample.
+ * The catalog is built exclusively from the full current original inventory.
+ * Geometry uses % units to stay compatible with existing canvas helpers.
+ */
+export function planCompleteCollectionCatalog(source: ListingAsset[]): {
+  placements: ListingPlacement[]; columns: number; rows: number;
+} {
+  const assets = [...originalAssets(source)].sort((a,b)=>
+    listingCategory(a).localeCompare(listingCategory(b)) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+  if (!assets.length) return {placements:[],columns:0,rows:0};
+  const count=assets.length;
+  // 120 originals => 12 columns × 10 rows. Aim for proportional square
+  // cells in the content area. Every original gets its own cell and ID.
+  const columns=Math.max(1,Math.min(count,Math.round(Math.sqrt(count * 92 / 81))));
+  const rows=Math.ceil(count/columns);
+  const x0=3.5, y0=12.5, contentW=93, contentH=81;
+  const cellW=contentW/columns, cellH=contentH/rows;
+  const inset=Math.min(0.35,cellW*0.07,cellH*0.07);
+  const placements=assets.map((asset,i)=>({
+    assetId:asset.id,
+    x:x0+(i%columns)*cellW+inset,
+    y:y0+Math.floor(i/columns)*cellH+inset,
+    width:cellW-2*inset,
+    height:cellH-2*inset,
+    rotation:0
+  }));
+  return {placements,columns,rows};
+}
+
+/** Trusted server check: 03 is approved only if every CURRENT source ID is
+ * represented in the saved ORIGINAL-PNG catalog and not AI-generated.
+ */
+export function completeCatalogMatchesInventory(
+  record: ListingImageRecord | undefined,
+  source: ListingAsset[]
+): boolean {
+  const inventory=originalAssets(source);
+  if(!record || record.number!==3 || record.aiGeneratedFullCover ||
+     !record.renderedImageUrl || record.width!==LISTING_WIDTH ||
+     record.height!==LISTING_HEIGHT || !Array.isArray(record.catalogAssetIds) ||
+     !Array.isArray(record.placements) || !inventory.length ||
+     record.catalogExpectedCount!==inventory.length ||
+     record.catalogAssetIds.length!==inventory.length ||
+     record.placements.length!==inventory.length) return false;
+  const required=new Set(inventory.map(a=>a.id));
+  const catalog=new Set(record.catalogAssetIds);
+  const placed=new Set(record.placements.map(p=>p.assetId));
+  if(catalog.size!==required.size || placed.size!==required.size) return false;
+  return [...required].every(id=>catalog.has(id) && placed.has(id)) &&
+    record.placements.every(p=>validListingPlacement(p,3));
+}
+
+/** Old 4:3 approved JPGs remain stored but cannot count toward square exports. */
+export function isSquareListingApproved(record?: ListingImageRecord): boolean {
+  return Boolean(record && record.status === 'approved' && record.renderedImageUrl &&
+    record.width === LISTING_WIDTH && record.height === LISTING_HEIGHT &&
+    (record.number !== 3 || (!record.aiGeneratedFullCover &&
+      Array.isArray(record.catalogAssetIds) && record.catalogAssetIds.length > 0 &&
+      record.catalogExpectedCount === record.catalogAssetIds.length &&
+      record.placements?.length === record.catalogExpectedCount)));
+}
+
+
+export function originalAssets(assets: ListingAsset[]): ListingAsset[] {
+  const urls = new Set<string>();
+  return assets.filter(asset => {
+    if (!asset.id || !asset.imageUrl || urls.has(asset.imageUrl)) return false;
+    urls.add(asset.imageUrl);
+    return true;
+  });
+}
+export function listingTitle(number: number, name: string): string {
+  if (number === 1) return name.trim().replace(/\s+/g, ' ').slice(0, 75) || 'Original Clipart Collection';
+  return LISTING_IMAGE_SPECS[number - 1]?.headline || 'Original Clipart Collection';
+}
+export function listingFilename(number: number): string {
+  const spec = LISTING_IMAGE_SPECS[number - 1];
+  if (!spec) throw new Error('Invalid listing image number');
+  return String(number).padStart(2, '0') + '_' + spec.key + '.jpg';
+}
+export function listingCategory(asset: ListingAsset): string {
+  return (asset.category || asset.group || asset.subtheme || '').trim().slice(0, 50);
+}
+/**
+ * A reproducible, varied selection for the cover, best details and finale.
+ * Spread across the collection and saved category groups; don't just display
+ * the first 10 entries (which may be near-duplicates of a single subtheme).
+ * Genuine visual attractiveness is assessed by the user's per-image review.
+ */
+export function curatedListingHighlights(source: ListingAsset[], limit = 10): ListingAsset[] {
+  const available = originalAssets(source);
+  const take = Math.min(Math.max(0, Math.floor(limit)), available.length);
+  if (take === 0) return [];
+  const result: ListingAsset[] = [];
+  const used = new Set<string>();
+  const add = (item: ListingAsset | undefined) => {
+    if (item && result.length < take && !used.has(item.id)) {
+      used.add(item.id);
+      result.push(item);
+    }
+  };
+  const grouped = new Map<string, ListingAsset[]>();
+  for (const item of available) {
+    const category = listingCategory(item);
+    if (category) grouped.set(category, [...(grouped.get(category) || []), item]);
+  }
+  for (const group of grouped.values()) add(group[Math.floor(group.length / 2)]);
+  for (let i = 0; i < take; i++) add(available[Math.min(available.length-1, Math.floor((i+0.5)*available.length/take))]);
+  for (const item of available) add(item);
+  return result;
+}
+export type ListingPlanOptions = { count?: number; assetIds?: string[] };
+export function planListingPlacements(number: number, source: ListingAsset[], options?: ListingPlanOptions): ListingPlacement[] {
+  const available = originalAssets(source);
+  if (!available.length) return [];
+  const spec = LISTING_IMAGE_SPECS[number - 1];
+  if (!spec) return [];
+  let selected: ListingAsset[] = [];
+  if (spec.kind === 'all' || spec.kind === 'all-grouped') {
+    selected = spec.kind === 'all-grouped'
+      ? [...available].sort((a, b) => listingCategory(a).localeCompare(listingCategory(b)))
+      : available;
+  } else if (spec.kind === 'categories') {
+    const groups = new Map<string, ListingAsset[]>();
+    for (const asset of available) {
+      const category = listingCategory(asset) || 'Collection';
+      groups.set(category, [...(groups.get(category) || []), asset]);
+    }
+    const distinct = [...groups.values()];
+    if (distinct.length > 1) {
+      const chosen: ListingAsset[] = [];
+      for (const group of distinct.slice(0, 6)) chosen.push(...group.slice(0, 3));
+      selected = chosen;
+    } else selected = available.slice(0, 18);
+  } else if (number === 1) selected = curatedListingHighlights(available, DEFAULT_MAIN_COVER_CLIPART_COUNT);
+  else if (number === 4) selected = curatedListingHighlights(available, 8);
+  else if (number === 6) selected = available.slice(0, 2);
+  else if (number === 7) selected = available.slice(0, 3);
+  else if (number === 8) selected = available.slice(0, 9);
+  else if (number >= 9 && number <= 11) selected = available.slice(0, 1);
+  else if (number === 12) selected = available.slice(0, 3);
+  else if (number === 13) selected = available.slice(0, 5);
+  else if (number === 14) selected = available.slice(0, 2);
+  else selected = number === 15 ? curatedListingHighlights(available, 9) : available.slice(0, 9);
+
+  // Overrides are per-image and fully controlled by the user, not a hidden
+  // 7/8/9-item limit. Explicit order is preserved without duplicated asset IDs.
+  const overrideCount = Number.isInteger(options?.count) ? Math.min(available.length, Math.max(1, options!.count!)) : null;
+  if (options?.assetIds) {
+    const byId = new Map(available.map(a => [a.id, a]));
+    const used = new Set<string>();
+    selected = options.assetIds.map(id => byId.get(id)).filter((a): a is ListingAsset => {
+      if (!a || used.has(a.id)) return false;
+      used.add(a.id); return true;
+    });
+    if (overrideCount !== null) selected = selected.slice(0, overrideCount);
+    if (!selected.length) selected = curatedListingHighlights(available, 1);
+  } else if (overrideCount !== null) {
+    selected = curatedListingHighlights(available, overrideCount);
+  }
+
+  const box = (asset: ListingAsset, x: number, y: number, width: number, height: number): ListingPlacement =>
+    ({ assetId: asset.id, x, y, width, height, rotation: 0 });
+  if (number === 9 || number === 10 || number === 11) {
+    const target = number === 9 ? [40, 46, 20, 25] : number === 10 ? [40, 47, 20, 24] : [41, 49, 18, 22];
+    return selected.map(a => box(a, target[0], target[1], target[2], target[3]));
+  }
+  if (number === 8 || number === 12) {
+    const originX = 37;
+    const originY = number === 8 ? 40 : 44;
+    const cols = number === 8 ? 3 : 3;
+    const width = number === 8 ? 9 : 10;
+    const height = number === 8 ? 12 : 19;
+    return selected.map((a, i) => box(a, originX + (i % cols) * (width + 1.5), originY + Math.floor(i / cols) * (height + 1.5), width, height));
+  }
+  if (number === 3) {
+    return planCompleteCollectionCatalog(available).placements;
+  }
+  if (spec.kind === 'all-grouped') {
+    // Visually separate the complete collection into four curated groups,
+    // instead of duplicating the uniform all-assets grid of image 02.
+    const sections = Math.min(4, Math.max(1, Math.ceil(selected.length / 12)));
+    const perSection = Math.ceil(selected.length / sections);
+    return selected.map((asset, index) => {
+      const group = Math.min(sections - 1, Math.floor(index / perSection));
+      const local = index - group * perSection;
+      const size = Math.min(perSection, selected.length - group * perSection);
+      const cols = Math.max(1, Math.ceil(Math.sqrt(size * 42 / 28)));
+      const rows = Math.ceil(size / cols);
+      const x0 = group % 2 === 0 ? 5 : 53;
+      const y0 = group < 2 ? 31 : 65;
+      const cellW = 42 / cols, cellH = 27 / rows;
+      return box(asset, x0 + local % cols * cellW + 0.3,
+        y0 + Math.floor(local / cols) * cellH + 0.2, cellW - 0.6, cellH - 0.4);
+    });
+  }
+  if (spec.kind === 'all') {
+    const cols = selected.length > 70 ? 10 : selected.length > 40 ? 8 : selected.length > 20 ? 6 : 5;
+    const rows = Math.ceil(selected.length / cols);
+    const cellW = 90 / cols;
+    const cellH = 70 / rows;
+    return selected.map((a, i) => box(a, 5 + (i % cols) * cellW + 0.5, 24 + Math.floor(i / cols) * cellH + 0.3, cellW - 1, cellH - 0.7));
+  }
+  if (number === 1) {
+    // Art-first cover: 2 large heroes, 4 medium supporting illustrations,
+    // and up to 8 small accents. Avoid a uniform grid or repeated positions.
+    // The central lettering remains visually subordinate to the original art.
+    const coverSlots: Array<[number, number, number, number]> = [
+      [2, 24, 27, 31], [71, 24, 27, 31],  // hero
+      [4, 57, 20, 25], [76, 57, 20, 25],  // medium
+      [25, 78, 18, 20], [57, 78, 18, 20],
+      [8, 7, 12, 15], [30, 6, 12, 15],   // accents
+      [58, 6, 12, 15], [80, 8, 12, 15],
+      [38, 58, 12, 15], [51, 63, 12, 14],
+      [20, 45, 11, 13], [69, 45, 11, 13]
+    ];
+    if (selected.length <= coverSlots.length)
+      return selected.map((asset, index) => box(asset, ...coverSlots[index]));
+    // For intentionally larger user-selected collages, continue varying
+    // scale around the perimeter without recycling identical seven slots.
+    const sideCount = Math.ceil(selected.length * 0.36);
+    const bottomCount = selected.length - sideCount * 2;
+    return selected.map((asset, index) => {
+      if (index < sideCount * 2) {
+        const onLeft = index < sideCount;
+        const i = onLeft ? index : index - sideCount;
+        const cell = 77 / sideCount;
+        const scale = [1.15, 0.8, 1, 0.67][i % 4];
+        const width = Math.min(25, 19 * scale);
+        const height = Math.max(4, Math.min(cell * 0.94, cell * scale));
+        return box(asset, onLeft ? 1 : 99 - width, 7 + i * cell, width, height);
+      }
+      const j = index - sideCount * 2;
+      const cell = 64 / Math.max(1, bottomCount);
+      const scale = [1.1, 0.76, 0.95, 0.63][j % 4];
+      const width = Math.max(2, Math.min(cell * 0.9, 21 * scale));
+      return box(asset, 18 + j * cell, 79, width, 18 * scale);
+    });
+  }
+  if (number === 15) {
+    const slots = [[3, 28, 26, 34], [71, 29, 26, 34], [29, 37, 20, 29], [51, 37, 20, 29], [4, 64, 22, 27], [73, 64, 23, 27], [27, 69, 17, 23], [56, 69, 17, 23], [14, 50, 19, 28], [66, 50, 19, 28]];
+    if (selected.length <= slots.length)
+      return selected.map((a, i) => box(a, ...slots[i] as [number, number, number, number]));
+    // User-selected larger finale becomes a clean multi-row gallery.
+  }
+  const count = selected.length;
+  const cols = count > 12 ? 6 : count > 6 ? 4 : count > 3 ? 3 : count;
+  const rows = Math.ceil(count / cols);
+  const cellW = 86 / cols, cellH = 63 / rows;
+  return selected.map((a, i) => box(a, 7 + (i % cols) * cellW + 0.8, 29 + Math.floor(i / cols) * cellH + 0.5, cellW - 1.6, cellH - 1));
+}

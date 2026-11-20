@@ -1,12 +1,14 @@
-const { app, BrowserWindow, dialog, shell, safeStorage, Menu } = require('electron');
+const { app, BrowserWindow, dialog, shell, safeStorage, Menu, Tray } = require('electron');
 const { spawn } = require('node:child_process');
-const { mkdirSync, existsSync, readFileSync, writeFileSync, unlinkSync, copyFileSync } = require('node:fs');
+const { mkdirSync, existsSync, readFileSync, writeFileSync, unlinkSync, copyFileSync, appendFileSync, statSync, renameSync } = require('node:fs');
 const { randomBytes } = require('node:crypto');
 const path = require('node:path');
 const { loadOrCreateKey } = require('./key-vault.cjs');
 const { startNativeStorage } = require('./native-storage.cjs');
 const { backupWorkspace, restoreWorkspaceSeparate, validateWorkspace } = require('./workspace-backup.cjs');
 const { windowsDeviceCode, readValidLicense } = require('./license.cjs');
+const { pollHiddenImageBatches } = require('./background-batch-monitor.cjs');
+const { loadDesktopSmtpDefaults } = require('./smtp-config.cjs');
 
 const ROOT = app.isPackaged ? path.join(process.resourcesPath, 'paletteiq-runtime') : path.resolve(__dirname, '..');
 const SERVER_PORT = 18763;
@@ -16,6 +18,13 @@ let server = null;
 let nativeStorage = null;
 let closing = false;
 let activeDirectory = null;
+let mainWindow = null;
+let tray = null;
+let backgroundMonitorTimer = null;
+let backendHealthTimer = null;
+let trayInfoDisplayed = false;
+const BACKGROUND_POLL_MS = 20_000;
+
 
 function workspaceRoot() {
   const directory = path.join(app.getPath('userData'), 'paletteiq-data');
@@ -30,8 +39,64 @@ function dataDirectory() {
   const name = JSON.parse(readFileSync(pointer, 'utf8')).name;
   if (typeof name !== 'string' || !/^restored-[0-9]+-[0-9a-f]{8}$/.test(name)) throw new Error('Invalid active workspace selector');
   const directory = path.join(root, 'restored-workspaces', name);
-  validateWorkspace(directory, { requireNoCredentials: false });
+  try {
+    // Users can delete an old restored workspace while the selector still
+    // points to it. Never fail with an opaque SQLite/manifest error at startup.
+    if (!existsSync(directory)) throw new Error('The restored workspace folder no longer exists.');
+    validateWorkspace(directory, { requireNoCredentials: false });
+  } catch (cause) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    const choice = dialog.showMessageBoxSync({
+      type: 'warning',
+      title: 'Restored workspace unavailable',
+      message: 'PaletteIQ cannot open the selected restored workspace.',
+      detail: `Workspace: ${name}\nReason: ${reason}\n\nYou can open the original workspace without deleting its database or images. The old workspace selector will be preserved as a backup.`,
+      buttons: ['Open original workspace', 'Exit'],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    });
+    if (choice !== 0) throw new Error('The selected restored workspace is unavailable. The original workspace was not changed.');
+    // Keep a recoverable record of the previous selection. Never delete user
+    // data or recreate an empty folder under the missing restored workspace.
+    renameSync(pointer, path.join(root, `active-workspace.missing-${Date.now()}.json`));
+    return root;
+  }
   return directory;
+}
+
+const MAX_DIAGNOSTIC_LOG_BYTES = 2 * 1024 * 1024;
+function sanitizeDiagnostic(value) {
+  return String(value)
+    .replace(/piq_[A-Za-z0-9_=-]{12,}/g, '[REDACTED_CLIENT_KEY]')
+    .replace(/sk-[A-Za-z0-9_-]{12,}/g, '[REDACTED_API_KEY]')
+    .replace(/(Bearer\s+)[^\s"'<>]+/gi, '$1[REDACTED]')
+    .replace(/(X-API-Key\s*[:=]\s*)[^\s,"'}]+/gi, '$1[REDACTED]')
+    .replace(/(STUDIO_CREDENTIAL_ENCRYPTION_KEY|PALETTEIQ_NATIVE_BRIDGE_TOKEN|PALETTEIQ_UPSCALE_SERVER_KEY|PALETTEIQ_SMTP_PASSWORD|api[_-]?key|password|authorization|access[_-]?token)(\s*[=:]\s*)[^\s,"'}]+/gi, '$1$2[REDACTED]');
+}
+function diagnosticLogger(directory) {
+  const folder = path.join(directory, 'logs');
+  mkdirSync(folder, { recursive: true });
+  const filename = path.join(folder, 'desktop-backend.log');
+  const rotate = () => {
+    for (let i = 2; i >= 1; i--) {
+      const source = i === 1 ? filename : path.join(folder, `desktop-backend.${i - 1}.log`);
+      const target = path.join(folder, `desktop-backend.${i}.log`);
+      if (existsSync(source)) { if (existsSync(target)) unlinkSync(target); renameSync(source, target); }
+    }
+  };
+  if (existsSync(filename) && statSync(filename).size >= MAX_DIAGNOSTIC_LOG_BYTES) rotate();
+  const write = (kind, chunk) => {
+    for (const raw of String(chunk).split(/\r?\n/)) {
+      if (!raw.trim()) continue;
+      const line = `[${new Date().toISOString()}] [${kind}] ${sanitizeDiagnostic(raw).slice(0, 2000)}\n`;
+      try {
+        if (existsSync(filename) && statSync(filename).size + Buffer.byteLength(line) > MAX_DIAGNOSTIC_LOG_BYTES) rotate();
+        appendFileSync(filename, line, { encoding: 'utf8', mode: 0o600 });
+      } catch { /* Logging must never stop the application. */ }
+    }
+  };
+  return { folder, write };
 }
 
 function ensureCredentials(directory) {
@@ -47,7 +112,10 @@ function runtimeConfig(directory, secret, nativeBridge) {
   config.vars = { ...(config.vars || {}), PALETTEIQ_DESKTOP: '1', PALETTEIQ_LOCAL_NO_AUTH: '1', PALETTEIQ_NATIVE_BRIDGE_URL: `http://127.0.0.1:${nativeBridge.port}` };
   const configPath = path.join(directory, 'wrangler.json');
   writeFileSync(configPath, JSON.stringify(config, null, 2));
-  writeFileSync(path.join(directory, '.dev.vars'), `STUDIO_CREDENTIAL_ENCRYPTION_KEY=${secret}\nPALETTEIQ_NATIVE_BRIDGE_TOKEN=${nativeBridge.token}\n`, { mode: 0o600 });
+  const remoteUrl = process.env.PALETTEIQ_UPSCALE_SERVER_URL || '';
+  const remoteKey = process.env.PALETTEIQ_UPSCALE_SERVER_KEY || '';
+  if (/[\r\n]/.test(remoteUrl + remoteKey)) throw new Error('Invalid Remote GPU configuration');
+  writeFileSync(path.join(directory, '.dev.vars'), `STUDIO_CREDENTIAL_ENCRYPTION_KEY=${secret}\nPALETTEIQ_NATIVE_BRIDGE_TOKEN=${nativeBridge.token}\nPALETTEIQ_UPSCALE_SERVER_URL=${remoteUrl}\nPALETTEIQ_UPSCALE_SERVER_KEY=${remoteKey}\n`, { mode: 0o600 });
   return configPath;
 }
 
@@ -110,6 +178,19 @@ async function migrateLegacyDatabase(directory, secret, configPath, storage) {
   writeFileSync(doneMarker, 'ok\n');
 }
 
+function stopOwnedBackend(child) {
+  if (!child || !child.pid) return;
+  // Wrangler launches workerd as a child process. Killing only node.exe can
+  // leave detached worker processes occupying RAM after Electron quits.
+  if (process.platform === 'win32') {
+    const killer = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'],
+      { windowsHide: true, stdio: 'ignore' });
+    killer.on('error', () => { try { child.kill(); } catch { /* Already gone. */ } });
+  } else {
+    try { child.kill(); } catch { /* Already gone. */ }
+  }
+}
+
 async function waitForLocalServer(timeoutMs = 30_000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs && server && !closing) {
@@ -134,7 +215,7 @@ function configureWorkspaceMenu(directory) {
       const choice = await dialog.showOpenDialog({ properties: ['openFile'], filters: [{ name: 'PaletteIQ ZIP', extensions: ['zip'] }] });
       if (choice.canceled || !choice.filePaths[0]) return;
       const restored = await restoreWorkspaceSeparate({ source: choice.filePaths[0], workspaceRoot: workspaceRoot() });
-      await dialog.showMessageBox({ type: 'info', message: 'Backup restored separately. Active workspace was not changed.', detail: `Restored to: ${restored}\nUse Workspace → Switch workspace to open the restored copy.` });
+      await dialog.showMessageBox({ type: 'info', message: 'Backup restored separately. Active workspace was not changed.', detail: `Restored to: ${restored}\nLegacy encrypted API keys are excluded from the restored workspace. Re-enter any API credentials in Settings after switching.\nTo import collections and PNG files into a chosen store instead, use Settings → Backup & Restore → Desktop Workspace ZIP.` });
     } catch (e) { await error(e); } } },
     { label: 'Switch to restored workspace…', click: async () => { try {
       const root = path.join(workspaceRoot(), 'restored-workspaces');
@@ -150,6 +231,7 @@ function configureWorkspaceMenu(directory) {
       writeFileSync(path.join(workspaceRoot(), 'active-workspace.json'), JSON.stringify({ name }));
       app.relaunch(); app.quit();
     } catch (e) { await error(e); } } },
+    { label: 'Open Logs Folder', click: () => { const folder = path.join(directory, 'logs'); mkdirSync(folder, { recursive: true }); void shell.openPath(folder); } },
     { label: 'Switch to original workspace…', enabled: selectedName !== 'paletteiq-data', click: async () => { try {
       const confirmation = await dialog.showMessageBox({ type: 'question', buttons: ['Cancel', 'Switch and restart'], defaultId: 0, cancelId: 0, message: 'Return to your original workspace? The restored workspace will remain saved.' });
       if (confirmation.response !== 1) return;
@@ -160,8 +242,16 @@ function configureWorkspaceMenu(directory) {
   ] }]));
 }
 
+function isUnlicensedEdition() {
+  if (!app.isPackaged) return false;
+  // Only the installer edition metadata controls activation. Environment
+  // variables and user settings must never disable licensing.
+  const metadata = JSON.parse(readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf8'));
+  return metadata.paletteiqEdition === 'unlicensed';
+}
+
 async function requireActivation() {
-  if (!app.isPackaged) return; // Developer preview remains available for development.
+  if (!app.isPackaged || isUnlicensedEdition()) return; // Developer preview and explicit unlicensed edition.
   const publicKeyFile = path.join(ROOT, 'license-public.pem');
   if (!existsSync(publicKeyFile)) throw new Error('Desktop license verification key is missing from the installer.');
   const publicKey = readFileSync(publicKeyFile, 'utf8');
@@ -192,33 +282,183 @@ async function requireActivation() {
   }
 }
 
+function showPaletteIQ() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+async function configureBackgroundTray(window, diagnostics) {
+  try {
+    // Use the installed executable's Windows icon. Unlike a generated path,
+    // this also works from app.asar without shipping additional icon files.
+    const icon = await app.getFileIcon(process.execPath, { size: 'small' });
+    if (icon.isEmpty()) throw new Error('No usable Windows tray icon');
+    tray = new Tray(icon);
+    tray.setToolTip('PaletteIQ Desktop — monitoring OpenAI image batches in the background');
+    tray.setContextMenu(Menu.buildFromTemplate([
+      { label: 'Open PaletteIQ', click: showPaletteIQ },
+      { label: 'Batch completion emails continue while signed in', enabled: false },
+      { type: 'separator' },
+      { label: 'Quit completely (stop background monitoring)', click: () => app.quit() },
+    ]));
+    tray.on('double-click', showPaletteIQ);
+  } catch (error) {
+    // Do not hide the window if there is no system-tray icon to restore it.
+    tray = null;
+    diagnostics.write('tray', 'Cannot enable Close to Tray: ' +
+      (error instanceof Error ? error.message : String(error)));
+    return;
+  }
+  window.on('close', event => {
+    if (closing || !tray) return;
+    event.preventDefault();
+    window.hide();
+    // Background polling runs as long as this Electron process remains alive.
+    // Existing React pollers also continue because throttling is disabled.
+    void pollHiddenImageBatches(window, diagnostics.write);
+    if (!trayInfoDisplayed) {
+      trayInfoDisplayed = true;
+      try {
+        tray.displayBalloon({
+          title: 'PaletteIQ is still running',
+          content: 'OpenAI Batch monitoring and email notifications continue in the Windows system tray. Use Quit completely to stop.',
+          iconType: 'info',
+          noSound: true,
+        });
+      } catch { /* Windows notification preferences may suppress balloons. */ }
+    }
+  });
+  backgroundMonitorTimer = setInterval(() => {
+    void pollHiddenImageBatches(window, diagnostics.write);
+  }, BACKGROUND_POLL_MS);
+}
+
+const singleInstanceLock = app.requestSingleInstanceLock();
+if (!singleInstanceLock) app.quit();
+app.on('second-instance', showPaletteIQ);
+
 async function launch() {
   await requireActivation();
   const directory = dataDirectory();
   activeDirectory = directory;
   const secret = ensureCredentials(directory);
   const nativeBridge = { token: randomBytes(32).toString('hex') };
-  nativeStorage = await startNativeStorage({ directory, migrationsDir: path.join(ROOT, 'drizzle'), token: nativeBridge.token });
+  nativeStorage = await startNativeStorage({
+    directory, migrationsDir: path.join(ROOT, 'drizzle'), token: nativeBridge.token,
+    smtpDefaults: loadDesktopSmtpDefaults(ROOT, app.isPackaged), smtpEncryptionKey: secret,
+    chooseWorkspaceZip: async () => {
+      // Only Electron's native file picker can authorize a local ZIP path.
+      // The renderer/Worker never supplies filesystem paths to the native bridge.
+      const result = await dialog.showOpenDialog({
+        title: 'Select an old PaletteIQ workspace backup',
+        properties: ['openFile'],
+        filters: [{ name: 'PaletteIQ workspace ZIP', extensions: ['zip'] }],
+      });
+      return result.canceled ? null : result.filePaths[0] || null;
+    },
+  });
   const configPath = runtimeConfig(directory, secret, { ...nativeBridge, port: nativeStorage.port });
   await migrateLegacyDatabase(directory, secret, configPath, { ...nativeStorage, token: nativeBridge.token });
-  server = launchWrangler(['dev', '--local', '--config', configPath, '--persist-to', path.join(directory, 'state'), '--ip', '127.0.0.1', '--port', String(SERVER_PORT)], directory, secret, { stdio: 'inherit' });
-  server.on('exit', () => { server = null; if (!closing) app.quit(); });
+  const diagnostics = diagnosticLogger(directory);
+  diagnostics.write('desktop', 'PaletteIQ backend starting.');
+  let backendInitialized = false;
+  let recovering = false;
+  let recoveryCount = 0;
+  let recoveryWindowStarted = Date.now();
+  let healthFailures = 0;
+  const maxRecoveries = 2;
+  const backendArgs = ['dev', '--local', '--config', configPath, '--persist-to',
+    path.join(directory, 'state'), '--ip', '127.0.0.1', '--port', String(SERVER_PORT)];
+  const startBackend = () => {
+    const child = launchWrangler(backendArgs, directory, secret, { stdio: 'pipe' });
+    server = child;
+    child.stdout?.on('data', chunk => diagnostics.write('stdout', chunk));
+    child.stderr?.on('data', chunk => diagnostics.write('stderr', chunk));
+    child.on('error', error => diagnostics.write('process', error.message));
+    child.on('exit', (code, signal) => {
+      diagnostics.write('process', 'Backend exited: PID ' + child.pid +
+        ', code=' + code + ', signal=' + signal);
+      if (server === child) server = null;
+      if (!closing && backendInitialized && !recovering) void recoverBackend('Wrangler exited');
+    });
+    return child;
+  };
+  const recoverBackend = async reason => {
+    if (closing || recovering) return;
+    if (Date.now() - recoveryWindowStarted > 30 * 60 * 1000) {
+      recoveryWindowStarted = Date.now(); recoveryCount = 0;
+    }
+    if (recoveryCount >= maxRecoveries) return;
+    recovering = true;
+    recoveryCount++;
+    diagnostics.write('desktop', 'Recovering local backend (' + recoveryCount +
+      '/' + maxRecoveries + '): ' + reason);
+    try {
+      const old = server;
+      // Stop only the process tree spawned by this Electron instance.
+      if (old) { server = null; stopOwnedBackend(old); }
+      await new Promise(resolve => setTimeout(resolve, 1200));
+      if (closing) return;
+      startBackend();
+      await waitForLocalServer(45_000);
+      healthFailures = 0;
+      diagnostics.write('desktop', 'Backend recovery succeeded; saved OpenAI receipts remain intact.');
+      // React's fetch monitors recover themselves. Do not reload an editor
+      // that may contain unsaved user changes.
+      if (mainWindow && !mainWindow.isDestroyed() &&
+          mainWindow.webContents.getURL().startsWith('chrome-error://'))
+        await mainWindow.loadURL(SERVER_URL);
+    } catch (error) {
+      diagnostics.write('desktop', 'Backend recovery failed: ' +
+        (error instanceof Error ? error.message : String(error)));
+    } finally {
+      recovering = false;
+      if (!closing && (!server || healthFailures >= 3) && recoveryCount < maxRecoveries)
+        setTimeout(() => { void recoverBackend('Retry after failed recovery'); }, 2500);
+    }
+  };
+  startBackend();
   await waitForLocalServer();
+  backendInitialized = true;
+  backendHealthTimer = setInterval(() => {
+    if (closing || recovering) return;
+    void (async () => {
+      try {
+        const response = await fetch(SERVER_URL,
+          { signal: AbortSignal.timeout(3000) });
+        if (response.status < 500) { healthFailures = 0; return; }
+      } catch { /* Health check failed. */ }
+      healthFailures++;
+      if (healthFailures >= 3)
+        void recoverBackend('Three consecutive HTTP health failures');
+      else if (healthFailures === 3)
+        diagnostics.write('desktop', 'Backend unavailable after recovery budget; inspect desktop-backend.log.');
+    })();
+  }, 15000);
   configureWorkspaceMenu(directory);
-  const window = new BrowserWindow({ width: 1440, height: 940, minWidth: 1050, minHeight: 680, title: 'PaletteIQ Desktop', webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true } });
+  const window = new BrowserWindow({ width: 1440, height: 940, minWidth: 1050, minHeight: 680, title: 'PaletteIQ Desktop', webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, backgroundThrottling: false } });
+  mainWindow = window;
+  window.on('closed', () => { if (mainWindow === window) mainWindow = null; });
   window.webContents.setWindowOpenHandler(({ url }) => { if (url.startsWith('https://')) void shell.openExternal(url); return { action: 'deny' }; });
   window.webContents.on('will-navigate', (event, url) => { if (!url.startsWith(`${SERVER_URL}/`) && url !== SERVER_URL) event.preventDefault(); });
   await window.loadURL(SERVER_URL);
+  await configureBackgroundTray(window, diagnostics);
 }
 
-app.whenReady().then(() => launch().catch(async error => { await dialog.showMessageBox({ type: 'error', title: 'PaletteIQ Desktop', message: error.message || String(error) }); app.quit(); }));
-app.on('window-all-closed', () => app.quit());
+if (singleInstanceLock) app.whenReady().then(() => launch().catch(async error => { await dialog.showMessageBox({ type: 'error', title: 'PaletteIQ Desktop', message: error.message || String(error) }); app.quit(); }));
+app.on('window-all-closed', () => { if (!tray || closing) app.quit(); });
 app.on('before-quit', () => {
   closing = true;
-  if (server && !server.killed) server.kill();
+  if (backgroundMonitorTimer) { clearInterval(backgroundMonitorTimer); backgroundMonitorTimer = null; }
+  if (backendHealthTimer) { clearInterval(backendHealthTimer); backendHealthTimer = null; }
+  if (tray) { tray.destroy(); tray = null; }
+  if (server && !server.killed) stopOwnedBackend(server);
   if (nativeStorage) { nativeStorage.server.close(); nativeStorage.database.close(); }
   // .dev.vars is needed by the local Worker only while the app runs.
   if (activeDirectory) {
     try { unlinkSync(path.join(activeDirectory, '.dev.vars')); } catch (error) { if (error.code !== 'ENOENT') console.error('Could not remove temporary credential environment', error); }
   }
 });
+

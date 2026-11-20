@@ -39,7 +39,7 @@ export function nativeAssetBucket(): R2Bucket | null {
   const config = bridgeConfig();
   if (!config) return null;
   const endpoint = (key: string) => {
-    if (!/^generated\/[\w-]{1,120}\/[0-9a-f-]{36}\.(?:jpg|png)$/.test(key)) throw new Error('Invalid image key');
+    if (!/^generated\/[\w-]{1,120}\/(?:batches\/[0-9a-f-]{36}\/)?[0-9a-f-]{36}\.(?:jpg|png)$/.test(key)) throw new Error('Invalid image key');
     return `/assets/${key}`;
   };
   return {
@@ -54,12 +54,64 @@ export function nativeAssetBucket(): R2Bucket | null {
     },
     async get(key: string) {
       const result = await fetch(`${config.url}${endpoint(key)}`, { headers: { Authorization: `Bearer ${config.token}` } });
-      if (result.ok) return { key, body: result.body };
+      if (result.ok) return { key, body: result.body, arrayBuffer: () => result.arrayBuffer() };
       const legacy = await env.BUCKET?.get(key);
       if (!legacy) return null;
       const data = await legacy.arrayBuffer();
       await bridgeRequest(config, endpoint(key), { method: 'PUT', body: data });
-      return { key, body: new Response(data).body };
+      return { key, body: new Response(data).body, arrayBuffer: async () => data };
     },
   } as unknown as R2Bucket;
+}
+
+/** Server-only Desktop ZIP workflow. The browser never receives bridge credentials
+ * or chooses filesystem paths; Electron's OS dialog handles that separately. */
+export function hasNativeWorkspaceImport(): boolean {
+  return bridgeConfig() !== null;
+}
+export async function runNativeWorkspaceImport(body: {
+  action: 'select' | 'preview' | 'apply' | 'cancel';
+  accountId: string; selectionId?: string; storeId?: string;
+  mode?: 'skip' | 'replace' | 'keep-both';
+  allowMissing?: boolean; importPreferences?: boolean;
+}): Promise<{ status: number; body: Record<string, unknown> }> {
+  const config = bridgeConfig();
+  if (!config) throw new Error('Native Desktop workspace import is unavailable');
+  const response = await fetch(config.url + '/workspace-store-import', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + config.token, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return { status: response.status, body: await response.json() as Record<string, unknown> };
+}
+
+
+/** Desktop-only SMTP bridge: never sends mail to GPU Server or exposes the
+ * installed SMTP App Password to the browser. */
+export type DesktopSmtpInfo = {
+  available: boolean; configured: boolean; source: string;
+  hasOverride: boolean; bundledConfigured: boolean; passwordConfigured: boolean;
+  host: string; port: number; username: string; sender: string;
+};
+export async function nativeSmtpOperation(
+  owner: string,
+  operation: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const bridge = bridgeConfig();
+  if (!bridge) throw new Error('SMTP email notifications require PaletteIQ Desktop (not the web browser).');
+  // Authenticated PaletteIQ store owners are scoped identifiers returned by
+  // scopeForStore(accountId, storeId), NOT bare store UUIDs.
+  if (typeof owner !== 'string' || !/^user_[0-9a-f]{32}_store_[0-9a-f]{32}$/i.test(owner))
+    throw new Error('Invalid active PaletteIQ store owner for SMTP');
+  const response = await bridgeRequest(bridge, '/smtp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...operation, owner }),
+    signal: AbortSignal.timeout(24_000),
+  });
+  return await response.json() as Record<string, unknown>;
+}
+
+export function supportsNativeSmtp(): boolean {
+  return bridgeConfig() !== null;
 }

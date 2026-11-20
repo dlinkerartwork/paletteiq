@@ -39,11 +39,11 @@ test('ZIP output has valid CRC32 and central directory for multiple files', asyn
 });
 
 test('SEO editorial audit highlights missing fields without pretending to be Etsy search data', async () => {
-  const { auditSeo } = await load('../lib/seo-intelligence.ts');
+  const { auditSeo } = await import('../lib/seo-intelligence.ts');
   const empty = { title: '', description: '', tags: [], primaryKeyword: '', categorySuggestion: '', attributes: { style: '', primaryColor: '' }, digitalFiles: [], licenseNotes: '', photoPlan: [] };
   const start = auditSeo(empty);
   assert.equal(start.score, 0);
   assert.equal(start.checks.find(c => c.id === 'tags-count').passed, false);
-  const improved = auditSeo({ ...empty, title: 'Watercolor Wildflower Clipart Bundle', primaryKeyword: 'watercolor wildflower', description: 'Watercolor wildflower clipart artwork for creative projects. Includes a curated collection of botanical subjects. Please confirm file formats and use rights.', tags: Array.from({ length: 13 }, (_, i) => `flower ${i + 1}`), categorySuggestion: 'Digital clipart', attributes: { style: 'watercolor', primaryColor: 'pink' }, digitalFiles: ['confirm-pack.zip'], licenseNotes: 'Confirm license', photoPlan: ['Cover preview'] });
+  const improved = auditSeo({ ...empty, title: 'Watercolor Wildflower Clipart Bundle, Pink Floral Botanical Illustrations, Digital Art for Invitations, Scrapbooking, Cards and Crafts', primaryKeyword: 'watercolor wildflower', description: 'Watercolor wildflower clipart artwork for creative projects. Includes a curated collection of botanical subjects. Please confirm file formats and use rights.', tags: Array.from({ length: 13 }, (_, i) => `flower ${i + 1}`), categorySuggestion: 'Digital clipart', attributes: { style: 'watercolor', primaryColor: 'pink' }, digitalFiles: ['confirm-pack.zip'], licenseNotes: 'Confirm license', photoPlan: ['Cover preview'] });
   assert.equal(improved.score, 100);
 });

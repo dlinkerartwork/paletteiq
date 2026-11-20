@@ -12,7 +12,9 @@ export async function reviewImageSimilarity(apiKey: string, generatedBase64: str
     let worstScore = -1;
     let flagged = false;
     let reason = '';
-    for (let offset = 0; offset < urls.length; offset += 5) {
+    // Limit concurrent visual comparisons to two requests per image. This reduces
+    // latency for multiple reference groups while limiting per-image API bursts.
+    const compareGroup = async (offset: number) => {
       const group = urls.slice(offset, offset + 5);
       const input = [{ role: 'user', content: [
         { type: 'input_text', text: 'Compare IMAGE 1 (newly generated clipart) to each following SOURCE REFERENCE image. Judge visual duplication of concrete artistic expression, not the generic subject or shared watercolor style. Flag near-identical composition, pose, silhouette, arrangement of petals/features/props, distinctive details, and overall visual structure. Do not penalize merely using the same type of flower or animal. Return ONLY JSON {"similarityScore":0-100,"tooSimilar":boolean,"reason":"concise specific explanation"}. Score above 75 means potentially near-duplicate artistic expression. If uncertain, mark tooSimilar true for manual review. IMAGE 1 is generated; remaining images are references.' },
@@ -25,9 +27,19 @@ export async function reviewImageSimilarity(apiKey: string, generatedBase64: str
       const raw = result.output?.flatMap(item => item.content || []).map(item => item.text || '').join('') || '{}';
       const parsed = JSON.parse(raw) as { similarityScore?: number; tooSimilar?: boolean; reason?: string };
       if (typeof parsed.similarityScore !== 'number' || !Number.isFinite(parsed.similarityScore) || typeof parsed.tooSimilar !== 'boolean') throw new Error('Incomplete visual comparison');
-      const score = Math.max(0, Math.min(100, Math.round(parsed.similarityScore)));
-      if (score > worstScore || (parsed.tooSimilar && !flagged)) { worstScore = score; reason = String(parsed.reason || 'AI visual comparison complete.').slice(0, 500); }
-      flagged ||= parsed.tooSimilar || score >= 75;
+      return { similarityScore: parsed.similarityScore as number,
+        tooSimilar: parsed.tooSimilar as boolean, reason: parsed.reason };
+    };
+    for (let offset = 0; offset < urls.length; offset += 10) {
+      const offsets = [offset, offset + 5].filter(index => index < urls.length);
+      // Promise.all rejects if a comparison fails; the outer catch must leave
+      // the result unverified rather than incorrectly clearing a similarity flag.
+      const results = await Promise.all(offsets.map(compareGroup));
+      for (const parsed of results) {
+        const score = Math.max(0, Math.min(100, Math.round(parsed.similarityScore)));
+        if (score > worstScore || (parsed.tooSimilar && !flagged)) { worstScore = score; reason = String(parsed.reason || 'AI visual comparison complete.').slice(0, 500); }
+        flagged ||= parsed.tooSimilar || score >= 75;
+      }
     }
     return { status: flagged ? 'needs_review' : 'clear', score: worstScore, reason, checkedAt };
   } catch (error) { return { status: 'unverified', reason: `Similarity review unavailable: ${error instanceof Error ? error.message : 'unknown error'}`, checkedAt }; }

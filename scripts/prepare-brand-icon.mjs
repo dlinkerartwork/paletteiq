@@ -1,0 +1,27 @@
+import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+
+const root = process.cwd();
+const svg = readFileSync(path.join(root, 'public', 'paletteiq-icon.svg'), 'utf8');
+const source = svg.match(/href="data:image\/png;base64,([A-Za-z0-9+/=]+)"/);
+if (!source) throw new Error('PaletteIQ brand icon PNG is missing from public/paletteiq-icon.svg');
+const png = Buffer.from(source[1], 'base64');
+if (png.length < 32 || png.subarray(1, 4).toString('ascii') !== 'PNG') throw new Error('Invalid PaletteIQ icon PNG');
+const width = png.readUInt32BE(16);
+const height = png.readUInt32BE(20);
+if (width !== 256 || height !== 256) throw new Error('Installer icon source must be 256x256 PNG');
+const ico = Buffer.alloc(22 + png.length);
+ico.writeUInt16LE(0, 0);
+ico.writeUInt16LE(1, 2);
+ico.writeUInt16LE(1, 4);
+ico.writeUInt8(0, 6);
+ico.writeUInt8(0, 7);
+ico.writeUInt16LE(1, 10);
+ico.writeUInt16LE(32, 12);
+ico.writeUInt32LE(png.length, 14);
+ico.writeUInt32LE(22, 18);
+png.copy(ico, 22);
+const destination = path.join(root, 'desktop', 'build-resources', 'icon.ico');
+mkdirSync(path.dirname(destination), { recursive: true });
+writeFileSync(destination, ico);
+console.log('Prepared Windows PaletteIQ icon:', destination);

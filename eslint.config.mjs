@@ -7,12 +7,22 @@ const eslintConfig = defineConfig([
   ...nextTs,
   globalIgnores([
     "dist/**",
+    "release/**",
+    ".next/**",
+    "node_modules/**",
     ".vinext/**",
     ".wrangler/**",
     ".sites-runtime/**",
     "outputs/**",
     "work/**",
   ]),
+  {
+    files: ["**/*.cjs"],
+    rules: {
+      // Electron entrypoints and packaging hooks are intentionally CommonJS.
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
   {
     files: ["components/ui/**/*.{ts,tsx}", "hooks/use-mobile.ts"],
     rules: {

@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { AccountWorkspaceGate } from '@/components/account-workspace';
 
 export const metadata: Metadata = {
   title: "Clipart Intelligence Studio | paletteIQ",
   description: "Analyze clipart market signals and create original character collections, prompts, and image assets.",
   icons: {
-    icon: "/favicon.svg",
+    icon: "/paletteiq-icon.svg",
     shortcut: "/favicon.svg",
   },
 };
@@ -17,7 +18,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="antialiased">{children}</body>
+      <body className="antialiased"><AccountWorkspaceGate>{children}</AccountWorkspaceGate></body>
     </html>
   );
 }
