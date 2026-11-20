@@ -64,7 +64,7 @@ test('Excel headers occupy one horizontal row and listing values align directly 
   const styles = entries.get('xl/styles.xml');
   assert.match(sheet, /<dimension ref="A1:F2"\/>/);
   const header = sheet.match(/<row r="1"[^>]*>(.*?)<\/row>/)?.[1];
-  const values = sheet.match(/<row r="2"[^>]*>(.*?)<\/row>/)?.[1];
+  const values = sheet.match(/<row r="2"[^>]*>([\s\S]*?)<\/row>/)?.[1];
   assert.ok(header && values, 'One header row and one data row are required');
   for (const [column, label] of [
     ['A','Title'],['B','Description'],['C','Tags'],['D','Image ALT Text'],
