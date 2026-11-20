@@ -79,13 +79,14 @@ export async function POST(req: Request) {
   // with the collection. Do not allow another tab/client to override it for
   // a paid Prompt Batch once the workflow is active.
   const automation = (saved.data as typeof saved.data & {
-    fullAutomation?: { enabled?: boolean; stage?: string; textModel?: string };
+    fullAutomation?: { enabled?: boolean; stage?: string; textModel?: string; promptModel?: string };
     researchModel?: string;
   }).fullAutomation;
   if (automation?.enabled && automation.stage !== 'completed') {
-    const selected = automation.textModel || (saved.data as typeof saved.data & { researchModel?: string }).researchModel;
+    const selected = automation.promptModel || automation.textModel ||
+      (saved.data as typeof saved.data & { researchModel?: string }).researchModel;
     if (selected && model !== selected)
-      return fail('Full Automation Prompt model must match the model selected in Research & Analysis: ' + selected, 409);
+      return fail('Full Automation Prompt model must match the frozen AI Prompts model: ' + selected, 409);
   }
   if (isActivePromptBatch(saved.data.promptJob))
     return Response.json({ error: 'This collection already has an active prompt batch. Resume it rather than submitting a duplicate.', job: safeJob(saved.data.promptJob!) }, { status: 409 });
