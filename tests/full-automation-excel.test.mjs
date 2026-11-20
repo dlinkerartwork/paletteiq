@@ -56,7 +56,7 @@ test('Excel headers occupy one horizontal row and listing values align directly 
     title: 'Ocean & Shells', description: 'Pastel <blue> beach\nSummer clipart',
     tags: ['beach decor', 'ocean nursery'],
     imageAltTexts: ['Hammock by the sea'], primaryKeyword: 'summer beach art',
-    attributes: { palette: 'Muted coral' },
+    attributes: { style: 'Soft watercolor' },
   });
   const selected = ['title', 'description', 'tags', 'imageAltTexts', 'primaryKeyword', 'attributes'];
   const entries = zipEntries(createEtsyListingExcel(listing, selected));
@@ -78,7 +78,7 @@ test('Excel headers occupy one horizontal row and listing values align directly 
   assert.match(values,/Ocean &amp; Shells/);
   assert.match(values,/Pastel &lt;blue&gt;/);
   assert.match(values,/beach decor\nocean nursery/);
-  assert.match(values,/palette: Muted coral/);
+  assert.match(values,/style: Soft watercolor/);
   assert.doesNotMatch(sheet,/ETSY LISTING FIELD|<dimension ref="A1:B7"/);
   assert.match(sheet,/<pane ySplit="1" topLeftCell="A2"/);
   assert.match(sheet,/<autoFilter ref="A1:F2"\/>/);
