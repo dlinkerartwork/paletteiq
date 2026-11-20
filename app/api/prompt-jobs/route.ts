@@ -207,7 +207,7 @@ async function submitProgressiveGroup(owner:string,id:string,jobId:string,key:st
         method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({...request.body,background:true,store:true}),
       })).json() as {id?:string;status?:string};
-      if(!remote.id||!/^resp_[\\w-]+$/.test(remote.id))
+      if(!remote.id||!/^resp_[\w-]+$/.test(remote.id))
         throw Error('Standard prompt response accepted without a tracking ID');
       await progressiveGroupUpdate(owner,id,jobId,groupKey,{
         responseId:remote.id,status:remote.status==='in_progress'?'in_progress':'queued'});
@@ -215,7 +215,7 @@ async function submitProgressiveGroup(owner:string,id:string,jobId:string,key:st
       // Preserve original Batch behavior for jobs created before the migration.
       const form=new FormData();
       form.set('purpose','batch');
-      form.set('file',new Blob([line+'\\n'],{type:'application/jsonl'}),'paletteiq-progressive-'+groupKey+'.jsonl');
+      form.set('file',new Blob([line+'\n'],{type:'application/jsonl'}),'paletteiq-progressive-'+groupKey+'.jsonl');
       const upload=await (await openai(key,'files',{method:'POST',body:form})).json() as {id?:string};
       if(!upload.id) throw Error('No OpenAI input file ID');
       const remote=await (await openai(key,'batches',{
@@ -308,7 +308,7 @@ async function synchronizeProgressive(owner:string,id:string,job:PromptBatchJob)
               }catch{errors.set(group.key,'Invalid JSON from standard Responses API');}
               return {prompts,errors};
             })()
-          : parsePromptBatchOutput(parts.join('\\n'),groupSpec);
+          : parsePromptBatchOutput(parts.join('\n'),groupSpec);
         for(let attempt=0;attempt<6;attempt++){
           const current=await ownedProject(owner,id);
           if(!current||current.data.promptJob?.id!==job.id)return;
