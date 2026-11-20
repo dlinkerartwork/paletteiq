@@ -65,6 +65,18 @@ test('review stage persists retry BEFORE potential paid visual comparison and up
   assert.match(flow,/const results=await Promise.allSettled\(targets.map/);
 });
 
+test('offline connection is probed with a free GET before claiming a billable similarity retry',()=>{
+  const begin=flow.indexOf('async function recheckUnverifiedSimilarity(');
+  const code=flow.slice(begin,flow.indexOf('async function tick(',begin));
+  const probe=code.indexOf("await fetch('https://api.openai.com/v1/models'");
+  const claim=code.indexOf('similarityRetries:retries,similarityNextAt:nextAt');
+  const paid=code.indexOf('reviewStoredBatchImage(bucket,key,mime,secret,references)');
+  assert.ok(probe>=0 && claim>probe && paid>claim);
+  assert.match(code,/new TransientStatusError\('OpenAI connection offline/);
+  assert.match(code,/connectivity.status===429 \|\| connectivity.status>=500/);
+  assert.doesNotMatch(code.slice(0,probe),/reviewStoredBatchImage\(/);
+});
+
 test('initial images transition to recheck stage, then flagged items to revised prompts',()=>{
   const start=flow.indexOf("} else if (f.stage === 'images')");
   const review=flow.indexOf("} else if (f.stage === 'reviewing')",start);
