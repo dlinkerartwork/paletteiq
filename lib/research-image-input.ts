@@ -33,9 +33,13 @@ export async function fetchResearchImageDataUrls(
   if (!urls.length || urls.length > 24 || urls.some(url => !isEtsyImageUrl(url))) {
     throw Error('Select 1–24 genuine HTTPS Etsy image references');
   }
+  // Download at most three references at once. The earlier sequential loop
+  // delayed *all* paid Research workers before any of them could start.
+  // Preserve the original reference order and enforce the same shared budget.
   let totalBytes = 0;
-  const output: string[] = [];
-  for (let index = 0; index < urls.length; index++) {
+  let nextIndex = 0;
+  const output: string[] = new Array(urls.length);
+  async function prepareOne(index: number): Promise<void> {
     const response = await fetcher(urls[index], {
       redirect: 'manual',
       signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS),
@@ -51,7 +55,7 @@ export async function fetchResearchImageDataUrls(
       throw Error('Etsy reference image ' + (index + 1) + ' has unsupported content type');
     }
     const advertised = Number(response.headers.get('content-length') || 0);
-    if (advertised > MAX_IMAGE_BYTES || (advertised && totalBytes + advertised > MAX_TOTAL_BYTES)) {
+    if (advertised > MAX_IMAGE_BYTES) {
       await response.body.cancel().catch(() => {});
       throw Error('Etsy reference image ' + (index + 1) + ' exceeds the bounded image input budget');
     }
@@ -63,29 +67,34 @@ export async function fetchResearchImageDataUrls(
         const { value, done } = await reader.read();
         if (done) break;
         imageBytes += value.byteLength;
-        if (imageBytes > MAX_IMAGE_BYTES || totalBytes + imageBytes > MAX_TOTAL_BYTES) {
+        // JavaScript executes each increment synchronously. All parallel
+        // downloads therefore share one strict total memory/transfer budget.
+        totalBytes += value.byteLength;
+        if (imageBytes > MAX_IMAGE_BYTES || totalBytes > MAX_TOTAL_BYTES) {
           throw Error('Etsy reference image ' + (index + 1) + ' exceeds the bounded image input budget');
         }
         chunks.push(value);
       }
     } finally { await reader.cancel().catch(() => {}); }
     if (!imageBytes) throw Error('Etsy reference image ' + (index + 1) + ' is empty');
-    // Avoid spreading giant arrays into String.fromCharCode.
     const fragments: string[] = [];
     for (const chunk of chunks) {
-      for (let offset = 0; offset < chunk.length; offset += 8192) {
+      for (let offset = 0; offset < chunk.length; offset += 8192)
         fragments.push(String.fromCharCode(...chunk.subarray(offset, offset + 8192)));
-      }
     }
     const binary = fragments.join('');
-    // Basic magic-byte verification, not just the untrusted HTTP header.
     const valid = mime === 'image/jpeg' ? binary.startsWith('\xff\xd8\xff')
       : mime === 'image/png' ? binary.startsWith('\x89PNG\r\n\x1a\n')
       : mime === 'image/webp' ? binary.startsWith('RIFF') && binary.slice(8, 12) === 'WEBP'
       : binary.startsWith('GIF87a') || binary.startsWith('GIF89a');
     if (!valid) throw Error('Etsy reference image ' + (index + 1) + ' is not a valid ' + mime + ' image');
-    totalBytes += imageBytes;
-    output.push('data:' + mime + ';base64,' + btoa(binary));
+    output[index] = 'data:' + mime + ';base64,' + btoa(binary);
   }
+  await Promise.all(Array.from({ length: Math.min(3, urls.length) }, async () => {
+    while (nextIndex < urls.length) {
+      const index = nextIndex++;
+      await prepareOne(index);
+    }
+  }));
   return output;
 }
