@@ -41,11 +41,12 @@ export function planExpansionSlots(
 }
 
 export type ImageBatchSlot = { status: string; items: string };
-const terminal = new Set(['completed','completed_with_errors','failed','cancelled','expired']);
+// A remote "completed" status is NOT proof that its PNGs were imported.
+// Preserve all pending IDs even when the provider has finished the Batch.
+// A failed/cancelled reservation also requires explicit reconciliation.
 export function pendingImageIds(records: ReadonlyArray<ImageBatchSlot>): Set<string> {
   const ids = new Set<string>();
   for (const record of records) {
-    if (terminal.has(record.status)) continue;
     let items: unknown;
     try { items = JSON.parse(record.items); }
     catch { throw Error('Unreadable saved image Batch reservation; inspect before submitting anything new.'); }
