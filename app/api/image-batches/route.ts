@@ -43,7 +43,7 @@ export async function POST(req: Request) {
   const user = await getChatGPTUser();
   if (!user) return fail('Sign in required', 401);
   const data = await req.json() as { projectId?: string; characterIds?: string[]; model?: string; quality?: string; regenerate?: boolean };
-  if (!data.projectId || !Array.isArray(data.characterIds) || !data.characterIds.length || data.characterIds.length > 120 || !['low','medium','high'].includes(data.quality || '')) return fail('Select 1–120 characters, a Batch model, and quality.');
+  if (!data.projectId || !Array.isArray(data.characterIds) || !data.characterIds.length || data.characterIds.length > 20 || !['low','medium','high'].includes(data.quality || '')) return fail('Select 1–20 characters per Image Batch, a Batch model, and quality.');
   if (!isImageBatchModel(data.model)) return fail(imageBatchModelError(data.model), 422);
   if (new Set(data.characterIds).size !== data.characterIds.length) return fail('Duplicate characters are not allowed.');
   const release = acquireProductionLocks(user.userId, data.projectId, data.characterIds);
