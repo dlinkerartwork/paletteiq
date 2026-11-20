@@ -11,6 +11,7 @@ import { fetchResearchImageDataUrls, safeRejectedImageResearch } from '@/lib/res
 import { splitResearchImages, hybridMergeInstruction, type HybridWorker } from '@/lib/hybrid-research';
 import { primaryCharacterSubject } from '@/lib/primary-character-focus';
 import { researchBatchJsonl, batchResearchResult, type BatchReceipt } from '@/lib/openai-batch-research';
+import { parseResearchWorkerOutput } from '@/lib/research-worker-output';
 
 type Concept = { name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description?: string };
 type StoredCharacter = { id: string; name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description?: string; status?: string; prompt?: string; origin?: string; imageUrl?: string };
@@ -28,7 +29,7 @@ type Collection = {
   characters: StoredCharacter[]; researchJob?: ResearchJob;
   [key: string]: unknown;
 };
-type ApiResponse = { id?: string; status?: string; output?: Array<{ content?: Array<{ text?: string }> }>; error?: { message?: string }; incomplete_details?: { reason?: string } };
+type ApiResponse = { id?: string; status?: string; output_text?: string; output?: Array<{ content?: Array<{ text?: string }> }>; error?: { message?: string }; incomplete_details?: { reason?: string } };
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 
 const workerPreview = (worker: HybridWorker) => {
@@ -49,7 +50,7 @@ const workerPreview = (worker: HybridWorker) => {
   return {index:worker.index,status:worker.status,imageCount:worker.images.length,
     theme:typeof parsed.theme==='string'?parsed.theme.slice(0,120):'',
     style:typeof parsed.style==='string'?parsed.style.slice(0,160):'',
-    concepts,error:worker.error?.slice(0,180)};
+    concepts,error:worker.error?.slice(0,180),warning:worker.warning?.slice(0,240)};
 };
 const safeJob = (job: ResearchJob) => ({
   id: job.id, status: job.status, target: job.target, requested: job.requested,
@@ -66,7 +67,8 @@ const openai = (key: string, path: string, init?: RequestInit) => fetch('https:/
   headers: { Authorization: 'Bearer ' + key, ...(init?.headers || {}) },
 });
 const extractText = (response: ApiResponse) =>
-  response.output?.flatMap(item => item.content ?? []).map(item => item.text || '').join('') || '';
+  response.output?.flatMap(item => item.content ?? []).map(item => item.text || '').join('') ||
+  (typeof response.output_text === 'string' ? response.output_text : '');
 const listingId = (value: string) => {
   try {
     const url = new URL(value);
@@ -136,9 +138,14 @@ async function finish(owner: string, projectId: string, job: ResearchJob, respon
   if (!saved || saved.data.researchJob?.id !== job.id) return bad('Research run was superseded or deleted', 409);
   if (saved.data.researchJob.status === 'completed') return Response.json({ job: safeJob(saved.data.researchJob), project: saved.data });
   let parsed: unknown;
-  try { parsed = JSON.parse(extractText(response)); }
-  catch {
-    const failed = await persistJob(owner, projectId, job.id, { status: 'failed', error: 'Background research returned invalid JSON. Review API output and retry explicitly.' });
+  try {
+    // Reuse the same normalization for the final Style DNA synthesis.
+    // A completed merge may also wrap its research JSON one level deep.
+    parsed = JSON.parse(parseResearchWorkerOutput(extractText(response),job.source.title).resultText);
+  } catch (error) {
+    const failed = await persistJob(owner, projectId, job.id, { status: 'failed',
+      error: 'Background research output cannot be imported from the saved response: ' +
+        (error instanceof Error ? error.message : String(error)).slice(0,250) });
     return Response.json({ job: failed && safeJob(failed) });
   }
   const source = job.source;
@@ -367,11 +374,73 @@ async function pollResearchBatch(owner:string,id:string,job:ResearchJob):Promise
 export async function POST(req: Request) {
   const user = await getChatGPTUser();
   if (!user) return bad('Sign in required', 401);
-  let body: { projectId?: string; url?: string; selectedImages?: unknown[]; target?: number; model?: string; retryFailed?: boolean; hybridResearch?: boolean };
+  let body: { action?: string; jobId?: string; projectId?: string; url?: string; selectedImages?: unknown[]; target?: number; model?: string; retryFailed?: boolean; hybridResearch?: boolean };
   try { body = await req.json(); } catch { return bad('Invalid JSON'); }
   const projectId = String(body.projectId || '');
   const saved = await getCollection(user.userId, projectId).catch(() => null);
   if (!saved) return bad('Save your collection first, then start background research.', 404);
+  if (body.action === 'recover-existing') {
+    const job=saved.data.researchJob;
+    if (!job || job.id !== body.jobId || job.status !== 'failed' ||
+        job.transport !== 'standard' || job.mergeStatus !== 'planned' ||
+        job.responseId || job.mergeBatchId || !job.workers?.length) {
+      return bad('No eligible failed Research group is available for saved-response recovery.',409);
+    }
+    // Never recover an ambiguous submission, retry OpenAI generation, or
+    // reset a merge receipt. Only reread the already-paid response IDs.
+    const failed=job.workers.filter(w=>w.status==='failed');
+    if (!failed.length ||
+        failed.some(w=>!w.responseId ||
+          !w.error?.startsWith('Invalid research worker output:')) ||
+        job.workers.some(w=>!['completed','failed'].includes(w.status))) {
+      return bad('Research has an uncertain or unrelated failure. Review saved OpenAI activity; no new work was submitted.',409);
+    }
+    const key=await userCredential(user.userId,'openai') ||
+      sharedProviderSecret(user.userId,'OPENAI_API_KEY');
+    if (!key) return bad('OpenAI key required to retrieve the original Research responses.',503);
+    let recovered: Array<{index:number;resultText:string;warning?:string}>;
+    try {
+      recovered=await Promise.all(failed.map(async worker=>{
+        const response=await openai(key,'responses/'+encodeURIComponent(worker.responseId!));
+        if (!response.ok) throw Error('Cannot retrieve saved Worker '+(worker.index+1)+
+          ' (HTTP '+response.status+')');
+        const data=await response.json() as ApiResponse;
+        if (data.status!=='completed')
+          throw Error('Saved Worker '+(worker.index+1)+' is '+(data.status||'unavailable')+
+            ', not completed');
+        const parsed=parseResearchWorkerOutput(extractText(data),job.source.title);
+        return {index:worker.index,resultText:parsed.resultText,warning:parsed.warning};
+      }));
+    } catch(error) {
+      return bad('Saved-response recovery could not validate Group 1 or another failed group: '+
+        (error instanceof Error?error.message:String(error)).slice(0,380)+
+        '. No new paid worker was submitted; completed groups remain saved.',422);
+    }
+    for(const worker of recovered){
+      await updateWorker(user.userId,projectId,job.id,worker.index,{
+        status:'completed',resultText:worker.resultText,warning:worker.warning,error:undefined,
+      });
+    }
+    const latest=(await getCollection(user.userId,projectId))?.data.researchJob;
+    if(!latest || latest.id!==job.id ||
+       !latest.workers?.every(w=>w.status==='completed' && w.resultText))
+      return bad('Recovered groups have been saved, but Research status needs review. No new paid worker was submitted.',409);
+    const hasConcepts=latest.workers.some(w=>{
+      try {
+        const parsed=JSON.parse(w.resultText || '{}') as {characters?:unknown[]};
+        return Array.isArray(parsed.characters) && parsed.characters.length>0;
+      } catch { return false; }
+    });
+    if(!hasConcepts)
+      return bad('No group returned character concepts. Saved visual evidence is retained; inspect it before paying for synthesis.',422);
+    const resumed=await persistJob(user.userId,projectId,job.id,{
+      status:'in_progress',error:undefined,
+    });
+    return Response.json({
+      job:safeJob(resumed||latest),recovered:recovered.length,
+      message:'Existing OpenAI worker responses recovered. The previously planned Style DNA merge may now proceed; no new worker was submitted.',
+    });
+  }
   if (active(saved.data.researchJob)) return Response.json({ job: safeJob(saved.data.researchJob!) }, { status: 409 });
   // A rejected 400 download failure contains no OpenAI background response ID.
   // All other existing jobs require manual investigation, not resubmission.
@@ -633,16 +702,17 @@ export async function GET(req: Request) {
         if (response.status==='completed') {
           const raw=extractText(response);
           try {
-            const parsed=JSON.parse(raw) as {theme?:string;characters?:unknown[]};
-            if (!parsed.theme || !Array.isArray(parsed.characters) || !parsed.characters.length)
-              throw Error('Worker omitted theme or characters');
+            const parsed=parseResearchWorkerOutput(raw, job.source.title);
             await updateWorker(user.userId,projectId,job.id,worker.index,{
-              status:'completed',resultText:raw.slice(0,160000),
+              status:'completed',resultText:parsed.resultText,
+              warning:parsed.warning,error:undefined,
             });
           } catch (error) {
+            // The completed response ID remains saved. Do not submit another
+            // paid worker just because its output schema differs.
             await updateWorker(user.userId,projectId,job.id,worker.index,{
               status:'failed',error:'Invalid research worker output: ' +
-                (error instanceof Error?error.message:String(error)).slice(0,150),
+                (error instanceof Error?error.message:String(error)).slice(0,210),
             });
           }
         } else if (['failed','incomplete','cancelled'].includes(String(response.status))) {
@@ -678,6 +748,21 @@ export async function GET(req: Request) {
       return Response.json({job:safeJob(failure||latest)});
     }
     if (latest.mergeStatus==='planned') {
+      // Never pay for Style DNA synthesis when every worker returned visual
+      // notes but no actual character concepts.
+      const hasConcepts=(latest.workers||[]).some(worker=>{
+        try {
+          const parsed=JSON.parse(worker.resultText||'{}') as {characters?:unknown[]};
+          return Array.isArray(parsed.characters) && parsed.characters.length>0;
+        } catch { return false; }
+      });
+      if (!hasConcepts) {
+        const incomplete=await persistJob(user.userId,projectId,job.id,{
+          status:'failed',
+          error:'Research groups contained no usable character concepts. Existing response IDs remain saved; inspect outputs before a paid synthesis retry.',
+        });
+        return Response.json({job:safeJob(incomplete||latest)});
+      }
       // Claim the ONE paid synthesis request atomically, even if both the
       // desktop monitor and the browser poll simultaneously.
       let claimed=false;

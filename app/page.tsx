@@ -24,7 +24,7 @@ import { collectionHasUnsavedEdits } from '@/lib/collection-unsaved';
 import { auditCreativeConcepts, expressionDistribution, familyDistribution, normalizeCreativeAnalysis, normalizeCreativeControls, referenceMoodFromExpressions, reverseEngineeringKeys, styleDNAKeys, characterDNAKeys, selectDiverseConcepts, type CreativeAnalysis, type CreativeControls } from '@/lib/creative-intelligence';
 
 type Character = { id: string; name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description: string; prompt: string; status: 'draft' | 'ready' | 'done' | 'error'; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: { id: string; submittedAt?: number; factor?: number }; error?: string; similarityReview?: SimilarityReview; origin: 'listing' | 'ai' | 'manual' };
-type ResearchJobPreview = { transport?: 'batch'|'background'; workerPreviews?: Array<{index:number;status:string;imageCount:number;theme:string;style:string;concepts:Array<{name:string;family:string;description:string}>;error?:string}>; workersCompleted?: number; workersTotal?: number; mergeStatus?: string; id: string; status: 'submitting' | 'queued' | 'in_progress' | 'completed' | 'failed'; target: number; requested: number; completedCount: number; model: string; createdAt: number; updatedAt: number; error?: string };
+type ResearchJobPreview = { transport?: 'batch'|'background'; workerPreviews?: Array<{index:number;status:string;imageCount:number;theme:string;style:string;concepts:Array<{name:string;family:string;description:string}>;error?:string;warning?:string}>; workersCompleted?: number; workersTotal?: number; mergeStatus?: string; id: string; status: 'submitting' | 'queued' | 'in_progress' | 'completed' | 'failed'; target: number; requested: number; completedCount: number; model: string; createdAt: number; updatedAt: number; error?: string };
 const hasActiveResearch = (job?: ResearchJobPreview) => !!job && ['submitting','queued','in_progress'].includes(job.status);
 type PromptJobPreview = { mode?: 'batch'|'progressive'|'standard'; groupStates?: Array<{key:string;status:string;error?:string}>; id: string; status: string; total: number; imported: number; failed: number; processedGroups: number; totalGroups: number; model: string; createdAt: number; updatedAt: number; error?: string };
 const hasActivePromptJob = (job?: PromptJobPreview) => !!job && !['completed','completed_with_errors','failed','cancelled','expired'].includes(job.status);
@@ -710,10 +710,45 @@ export default function Home() {
       setMessage(`Analysis/expansion stopped at ${working.characters.length}/${target}: ${e instanceof Error ? e.message : 'Request failed'}. ${savedPartial ? 'Partial results saved; use AI fill to continue.' : 'Check your API settings and save the collection before leaving.'}`);
     } finally { setBusy(''); }
   };
+  const recoverFailedResearch = async () => {
+    const job = project.researchJob;
+    if (!job || job.status !== 'failed' ||
+        !job.error?.includes('Invalid research worker output')) return;
+    if (!window.confirm(
+      'Recover already-paid Research group outputs from their saved OpenAI response IDs? ' +
+      'No new Research worker will be submitted. If recovery succeeds, the original planned ' +
+      'Style DNA merge may send ONE new paid synthesis request. Continue?'
+    )) return;
+    const projectId = project.id;
+    setBusy('research-recover');
+    try {
+      const response = await fetch('/api/research-jobs', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action:'recover-existing',projectId,jobId:job.id}),
+      });
+      const result = await response.json() as {job?:ResearchJobPreview;error?:string;message?:string};
+      if (!response.ok || !result.job) throw Error(result.error || 'Could not recover saved Research group');
+      const editor = latestWorkspace.current;
+      const clean = editor.project.id === projectId &&
+        !collectionHasUnsavedEdits(editor.project,savedProjectSnapshots.current.get(projectId));
+      if (clean) {
+        savedProjectSnapshots.current.set(projectId,JSON.stringify({...editor.project,researchJob:result.job}));
+      }
+      setProject(prev=>prev.id===projectId ? {...prev,researchJob:result.job} : prev);
+      setProjects(prev=>prev.map(item=>item.id===projectId ? {...item,researchJob:result.job} : item));
+      setMessage((result.message || 'Existing Research group responses recovered.') +
+        ' If Full Automation is paused, review its status before resuming it.');
+    } catch(error) {
+      setMessage('Research recovery stopped: ' +
+        (error instanceof Error ? error.message : String(error)) +
+        '. Existing OpenAI responses are preserved. Do not resubmit Research blindly.');
+    } finally { setBusy(''); }
+  };
   // Keep the UI interactive; poll only the remote response status, then import
   // the server-owned collection once. Works after refresh/relaunch as well.
   useEffect(() => {
-    if (!loadDone || !hasActiveResearch(project.researchJob)) return;
+    if (!loadDone || (!hasActiveResearch(project.researchJob) &&
+        project.researchJob?.status !== 'failed')) return;
     const projectId = project.id, jobId = project.researchJob!.id;
     let closed = false, polling = false;
     const pollResearch = async () => {
@@ -755,6 +790,9 @@ export default function Home() {
       } finally { polling = false; }
     };
     void pollResearch();
+    // One read-only refresh for a previously failed job exposes safe group
+    // previews after relaunch. Do not poll failed jobs repeatedly.
+    if (project.researchJob?.status === 'failed') return () => { closed = true; };
     const interval = window.setInterval(() => void pollResearch(), 6000);
     return () => { closed = true; window.clearInterval(interval); };
   }, [loadDone, project.id, project.researchJob?.id, project.researchJob?.status]);
@@ -1283,10 +1321,23 @@ export default function Home() {
         {project.fullAutomation.stage === 'paused' && !canRestartMissingResearch && !canRetryRejectedResearch && <button type="button" className="outline-btn" disabled={!!busy} onClick={() => void changeAutomation('resume')}>Resume Full Automation (review costs/jobs first)</button>}
         {project.fullAutomation.stage !== 'paused' && project.fullAutomation.stage !== 'completed' && <button type="button" className="outline-btn" disabled={!!busy} onClick={() => void changeAutomation('pause')}>Pause automation</button>}
       </section>}
+      {project.researchJob?.status==='failed' &&
+        project.researchJob.error?.includes('Invalid research worker output') &&
+        <section className="panel analysis-progress" aria-live="polite">
+          <div className="production-progress"><span>Research group output needs recovery</span><b>{project.researchJob.workersCompleted || 0} / {project.researchJob.workersTotal || 0} completed</b></div>
+          <p className="sub" role="alert">{project.researchJob.error}</p>
+          <p className="sub">This can reread the saved OpenAI response IDs without resubmitting Research workers. If the output is usable, the previously planned Style DNA merge may send one new paid synthesis request. If it is unusable, the saved results remain available for inspection.</p>
+          {project.researchJob.workerPreviews?.map(worker=>
+            <p className="sub" key={worker.index}>Group {worker.index+1}: {worker.status}{worker.warning?' — '+worker.warning:''}{worker.error?' — '+worker.error:''}</p>)}
+          <button type="button" className="outline-btn" disabled={!!busy}
+            onClick={()=>void recoverFailedResearch()}>
+            {busy==='research-recover'?'Checking saved responses…':'Recover Existing Research Responses'}
+          </button>
+        </section>}
       {hasActiveResearch(project.researchJob) && <section className="panel analysis-progress" aria-live="polite">
         <div className="production-progress"><span><LoaderCircle size={16} className="spin"/> OpenAI research: {project.researchJob?.status === 'submitting' ? 'submitting' : project.researchJob?.status === 'queued' ? 'queued' : 'processing'} (remote)</span>
           <b>{project.researchJob?.completedCount || 0} saved / {project.researchJob?.target} target</b></div>
-        {!!project.researchJob?.workerPreviews?.length && <div className="panel" style={{marginTop:12}}><h3>Live Research previews (provisional)</h3><p className="sub">Each completed worker appears immediately. These are candidate ideas, not saved final characters; Merge &amp; Style DNA will reconcile and deduplicate them.</p>{project.researchJob.workerPreviews.map(w=><details key={w.index} open={w.status==='completed'}><summary>Reference group {w.index+1} · {w.imageCount} images · {w.status} · {w.concepts.length} candidate concepts</summary>{w.theme && <p className="sub">Theme: {w.theme} · Style: {w.style}</p>}{w.error && <p className="sub" role="alert">{w.error}</p>}{w.concepts.length>0 && <div className="sub">{w.concepts.map((c,i)=><p key={i}><b>{c.name}</b> {c.family?'('+c.family+')':''} — {c.description}</p>)}</div>}</details>)}</div>}
+        {!!project.researchJob?.workerPreviews?.length && <div className="panel" style={{marginTop:12}}><h3>Live Research previews (provisional)</h3><p className="sub">Each completed worker appears immediately. These are candidate ideas, not saved final characters; Merge &amp; Style DNA will reconcile and deduplicate them.</p>{project.researchJob.workerPreviews.map(w=><details key={w.index} open={w.status==='completed'}><summary>Reference group {w.index+1} · {w.imageCount} images · {w.status} · {w.concepts.length} candidate concepts</summary>{w.theme && <p className="sub">Theme: {w.theme} · Style: {w.style}</p>}{w.error && <p className="sub" role="alert">{w.error}</p>}{w.warning && <p className="sub" role="status">Note: {w.warning}</p>}{w.concepts.length>0 && <div className="sub">{w.concepts.map((c,i)=><p key={i}><b>{c.name}</b> {c.family?'('+c.family+')':''} — {c.description}</p>)}</div>}</details>)}</div>}
         {project.researchJob?.workersTotal && <p className="sub">Hybrid Parallel Research: {project.researchJob.workersCompleted || 0}/{project.researchJob.workersTotal} reference groups analyzed · Merge &amp; Style DNA: {project.researchJob.mergeStatus || 'pending'}. After the target characters are saved, Auto-follow opens AI Prompts directly.</p>}
         <p className="sub">Research groups run in parallel through independent standard OpenAI background Responses. Group 2 may finish before 1 or 3; each result is shown when ready. After all groups finish, Style DNA merge saves the Character Library. Reopen PaletteIQ to import results after closing the app.</p>
         {project.researchJob && project.researchJob.target > project.researchJob.requested && <p className="sub">The first remote stage is capped at {project.researchJob.requested} subjects. Use AI Fill for the rest after it completes.</p>}
