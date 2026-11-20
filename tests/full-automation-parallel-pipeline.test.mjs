@@ -63,9 +63,15 @@ test('new paid expansion slots are checkpointed before concurrent remote POSTs',
 });
 
 test('prompt groups can feed image batches while other groups remain active',()=>{
-  const overlap=flow.indexOf('if(missing.length)\n        await scheduleReadyImageWave(req,owner,id,true)');
-  const stage=flow.indexOf("} else if (f.stage === 'images')");
-  assert.ok(overlap>0 && stage>overlap);
+  const promptStage=flow.indexOf("} else if (f.stage === 'prompts')");
+  const imageStage=flow.indexOf("} else if (f.stage === 'images')",promptStage);
+  assert.ok(promptStage>=0 && imageStage>promptStage, 'Prompt stage must precede Image stage');
+  const promptCode=flow.slice(promptStage,imageStage);
+  const overlapPattern=/if\s*\(missing\.length\)\s*await\s+scheduleReadyImageWave\(req,owner,id,true\);/;
+  assert.match(promptCode,overlapPattern);
+  // Windows Git checkouts may use CRLF instead of LF. Assert that the same
+  // pipeline test works on both platforms, regardless of newline style.
+  assert.match(promptCode.replace(/\r?\n/g,'\r\n'),overlapPattern);
   assert.match(flow,/partialPrompts && usable\.length<20/);
   assert.match(flow,/pendingImageIds\(records\)/);
   assert.match(flow,/Promise\.allSettled\(chunks\.map\(chunk=>apiPost/);
