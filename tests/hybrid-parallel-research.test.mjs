@@ -45,13 +45,12 @@ test('Auto-follow skips Character Library after merge and prompt generation rema
   assert.match(prompts,/custom_id: key, method: 'POST', url: '\/v1\/responses'/);
 });
 
-test('Hybrid mode can be disabled to use the original single request and warns before new charges',()=>{
-  assert.match(page,/hybridResearch\?: boolean/);
-  assert.match(page,/Hybrid Parallel Research \(3 workers \+ Style DNA merge\)/);
-  assert.match(page,/hybridResearch: fullAutoRequested && project\.hybridResearch !== false/);
-  assert.match(page,/up to 3 paid OpenAI Batch jobs, followed by 1 paid Style DNA Batch merge/);
-  assert.match(research,/body\.retryFailed !== true && body\.hybridResearch !== false/);
+test('Multi-reference Research defaults to parallel standard Responses and preserves paid IDs',()=>{
+  assert.match(page,/Research &amp; Analysis uses up to 3 parallel standard OpenAI Responses workers/);
+  assert.match(page,/hybridResearch: chosenImages.length > 1/);
+  assert.match(research,/const hybrid = selectedImages.length > 1 && body.retryFailed !== true/);
   assert.match(research,/Worker submission interrupted before a tracking ID was saved/);
+  assert.match(research,/transport:'standard', workers/);
 });
 
 test('hybrid receipts accept real OpenAI response IDs and no response is silently re-sent',()=>{
