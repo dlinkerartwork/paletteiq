@@ -50,6 +50,52 @@ test('Etsy Listing Draft exports actual OOXML XLSX with escaped Excel cells', ()
   assert.match(xml, /Soft &lt;watercolor&gt;/);
 });
 
+
+test('Excel headers occupy one horizontal row and listing values align directly underneath', () => {
+  const listing = normalizeListing({
+    title: 'Ocean & Shells', description: 'Pastel <blue> beach\nSummer clipart',
+    tags: ['beach decor', 'ocean nursery'],
+    imageAltTexts: ['Hammock by the sea'], primaryKeyword: 'summer beach art',
+    attributes: { style: 'Soft watercolor' },
+  });
+  const selected = ['title', 'description', 'tags', 'imageAltTexts', 'primaryKeyword', 'attributes'];
+  const entries = zipEntries(createEtsyListingExcel(listing, selected));
+  const sheet = entries.get('xl/worksheets/sheet1.xml');
+  const styles = entries.get('xl/styles.xml');
+  assert.match(sheet, /<dimension ref="A1:F2"\/>/);
+  const header = sheet.match(/<row r="1"[^>]*>(.*?)<\/row>/)?.[1];
+  const values = sheet.match(/<row r="2"[^>]*>([\s\S]*?)<\/row>/)?.[1];
+  assert.ok(header && values, 'One header row and one data row are required');
+  for (const [column, label] of [
+    ['A','Title'],['B','Description'],['C','Tags'],['D','Image ALT Text'],
+    ['E','Primary keyword'],['F','Attributes'],
+  ]) {
+    assert.ok(header.includes(`<c r="${column}1" s="1" t="inlineStr"><is><t xml:space="preserve">${label}</t></is></c>`),
+      label + ' must be a horizontal header');
+    assert.ok(values.includes(`<c r="${column}2" s="2" t="inlineStr">`),
+      label + ' value must be directly below its header');
+  }
+  assert.match(values,/Ocean &amp; Shells/);
+  assert.match(values,/Pastel &lt;blue&gt;/);
+  assert.match(values,/beach decor\nocean nursery/);
+  assert.match(values,/style: Soft watercolor/);
+  assert.doesNotMatch(sheet,/ETSY LISTING FIELD|<dimension ref="A1:B7"/);
+  assert.match(sheet,/<pane ySplit="1" topLeftCell="A2"/);
+  assert.match(sheet,/<autoFilter ref="A1:F2"\/>/);
+  assert.match(styles,/<cellXfs count="3">/);
+});
+
+test('Excel defaults to four horizontal SEO fields and handles an empty selection', () => {
+  const listing = normalizeListing({ title: 'Default export' });
+  const standard = zipEntries(createEtsyListingExcel(listing)).get('xl/worksheets/sheet1.xml');
+  assert.match(standard,/<dimension ref="A1:D2"\/>/);
+  assert.match(standard,/<c r="D1" s="1" t="inlineStr">/);
+  assert.match(standard,/<c r="D2" s="2" t="inlineStr">/);
+  const empty = zipEntries(createEtsyListingExcel(listing, [])).get('xl/worksheets/sheet1.xml');
+  assert.match(empty,/<dimension ref="A1:A2"\/>/);
+  assert.match(empty,/No fields selected/);
+});
+
 test('Settings default models and Full Automation phases are wired to authenticated server endpoints', () => {
   const page = load('app/page.tsx'), flow = load('app/api/full-automation/route.ts');
   const image = load('app/api/image-batches/route.ts'), recovery = load('lib/batch-recovery.ts');
