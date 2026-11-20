@@ -53,7 +53,7 @@ test('Etsy Listing Draft exports actual OOXML XLSX with escaped Excel cells', ()
 
 test('Excel headers occupy one horizontal row and listing values align directly underneath', () => {
   const listing = normalizeListing({
-    title: 'Ocean & Shells', description: 'Pastel <blue> beach\\nSummer clipart',
+    title: 'Ocean & Shells', description: 'Pastel <blue> beach\nSummer clipart',
     tags: ['beach decor', 'ocean nursery'],
     imageAltTexts: ['Hammock by the sea'], primaryKeyword: 'summer beach art',
     attributes: { palette: 'Muted coral' },
@@ -62,9 +62,9 @@ test('Excel headers occupy one horizontal row and listing values align directly 
   const entries = zipEntries(createEtsyListingExcel(listing, selected));
   const sheet = entries.get('xl/worksheets/sheet1.xml');
   const styles = entries.get('xl/styles.xml');
-  assert.match(sheet, /<dimension ref="A1:F2"\\/>/);
-  const header = sheet.match(/<row r="1"[^>]*>(.*?)<\\/row>/)?.[1];
-  const values = sheet.match(/<row r="2"[^>]*>(.*?)<\\/row>/)?.[1];
+  assert.match(sheet, /<dimension ref="A1:F2"\/>/);
+  const header = sheet.match(/<row r="1"[^>]*>(.*?)<\/row>/)?.[1];
+  const values = sheet.match(/<row r="2"[^>]*>(.*?)<\/row>/)?.[1];
   assert.ok(header && values, 'One header row and one data row are required');
   for (const [column, label] of [
     ['A','Title'],['B','Description'],['C','Tags'],['D','Image ALT Text'],
@@ -77,22 +77,22 @@ test('Excel headers occupy one horizontal row and listing values align directly 
   }
   assert.match(values,/Ocean &amp; Shells/);
   assert.match(values,/Pastel &lt;blue&gt;/);
-  assert.match(values,/beach decor\\nocean nursery/);
+  assert.match(values,/beach decor\nocean nursery/);
   assert.match(values,/palette: Muted coral/);
   assert.doesNotMatch(sheet,/ETSY LISTING FIELD|<dimension ref="A1:B7"/);
   assert.match(sheet,/<pane ySplit="1" topLeftCell="A2"/);
-  assert.match(sheet,/<autoFilter ref="A1:F2"\\/>/);
+  assert.match(sheet,/<autoFilter ref="A1:F2"\/>/);
   assert.match(styles,/<cellXfs count="3">/);
 });
 
 test('Excel defaults to four horizontal SEO fields and handles an empty selection', () => {
   const listing = normalizeListing({ title: 'Default export' });
   const standard = zipEntries(createEtsyListingExcel(listing)).get('xl/worksheets/sheet1.xml');
-  assert.match(standard,/<dimension ref="A1:D2"\\/>/);
+  assert.match(standard,/<dimension ref="A1:D2"\/>/);
   assert.match(standard,/<c r="D1" s="1" t="inlineStr">/);
   assert.match(standard,/<c r="D2" s="2" t="inlineStr">/);
   const empty = zipEntries(createEtsyListingExcel(listing, [])).get('xl/worksheets/sheet1.xml');
-  assert.match(empty,/<dimension ref="A1:A2"\\/>/);
+  assert.match(empty,/<dimension ref="A1:A2"\/>/);
   assert.match(empty,/No fields selected/);
 });
 
