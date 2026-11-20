@@ -25,7 +25,7 @@ test('Full Automation uses a user-chosen model initialized from saved Settings',
 });
 
 test('chosen GPT model remains bound to text stages, image Batch stays image-capable', () => {
-  assert.ok(flow.includes("submitStandardTextResponse(secret,textModel(p)"));
+  assert.ok(flow.includes("submitStandardTextResponse(secret,textModel(fresh)"));
   assert.ok(flow.includes("const model=p.fullAutomation?.promptModel || p.fullAutomation?.textModel || config.automationPromptModel"));
   assert.match(flow, /seoOpenaiModel:textModel\(p,config\.seoOpenaiModel/);
   assert.match(flow, /model:imageModel\(p,config\)/);
