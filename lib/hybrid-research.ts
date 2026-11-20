@@ -5,7 +5,7 @@ import { primaryCharacterSubject, primaryCharacterTarget } from './primary-chara
 
 export type HybridWorker = {
   index: number; images: string[]; status: 'planned'|'submitting'|'queued'|'in_progress'|'completed'|'failed'|'uncertain';
-  responseId?: string; resultText?: string; error?: string; startedAt?: number;
+  responseId?: string; batchId?: string; resultText?: string; error?: string; startedAt?: number;
 };
 export function splitResearchImages(images: string[], concurrency = 3): string[][] {
   if (!images.length) return [];
