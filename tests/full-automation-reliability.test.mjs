@@ -16,8 +16,10 @@ test('100/100 prompts advance before terminal errors block paid retries',()=>{
   assert.match(source,/if \(p\.promptJob && isActivePromptBatch\(p\.promptJob\)\) await apiGet/);
 });
 test('AI Fill validates exact response receipt on import',()=>{
-  assert.match(flow,/const activeReceipt = latest\.fullAutomation\?\.expansionBatch/);
-  assert.match(flow,/activeReceipt\.responseId !== receipt\.responseId/);
+  assert.match(flow,/const present=receipt\.id==='legacy'/);
+  assert.match(flow,/present\.responseId!==receipt\.responseId/);
+  assert.match(flow,/planExpansionSlots\(flow\.target,fresh\.characters\.length,active/);
+  assert.match(flow,/expansionBatches:\[\.\.\.\(latest\.fullAutomation\?\.expansionBatches\|\|\[\]\),\.\.\.claims\]/);
 });
 test('image batch reserves character IDs before OpenAI POST',()=>{
   const reservation=image.indexOf('await db.insert(imageBatches).values(record)');
