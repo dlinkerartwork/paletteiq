@@ -430,8 +430,7 @@ export async function POST(req: Request) {
       '. No new OpenAI background job was submitted.', 422);
   }
   const now = Date.now();
-  const hybrid = Boolean((saved.data.fullAutomation as { enabled?: boolean } | undefined)?.enabled) &&
-    body.retryFailed !== true && body.hybridResearch !== false;
+  const hybrid = selectedImages.length > 1 && body.retryFailed !== true;
   const partitions = splitResearchImages(selectedImages, hybrid ? 3 : 1);
   const workers: HybridWorker[] = partitions.map((part, index) => ({
     index, images: part, status:'planned',
