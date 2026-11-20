@@ -26,7 +26,7 @@ test('source collection art dominates thumbnail: prompt uses scaled compact arti
 });
 
 test('Studio image model and quality default to SAVED Settings, not static hardcoded choices',()=>{
-  assert.match(settings,/model: 'gpt-image-1-mini', quality: 'low'/);
+  assert.match(settings,/model: 'gpt-image-2.5-flare', quality: 'low'/);
   assert.match(page,/defaultImageModel=\{preferences\.model\} defaultImageQuality=\{preferences\.quality\}/);
   assert.match(ui,/defaultImageModel\?: string/);
   assert.match(ui,/defaultImageQuality\?: string/);
