@@ -1,0 +1,43 @@
+name: Windows No-License Test Installer
+
+# Never package an installer as a side effect of commits or pull requests.
+# Run this workflow only after an explicit user request.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package-windows:
+    name: Package PaletteIQ no-license x64
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          architecture: 'x64'
+      - name: Install pinned project dependencies
+        run: npm.cmd run install:ci
+      - name: Typecheck
+        run: npm.cmd run typecheck
+      - name: Verify production tests
+        run: npm.cmd run test:production
+      - name: Download and verify Microsoft VC++ prerequisite
+        shell: powershell
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\prepare-windows-prerequisites.ps1
+      - name: Build no-license Windows installer with bundled Node runtime
+        shell: powershell
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm.cmd run desktop:package:win:no-license
+      - name: Upload installer for testing on another Windows laptop
+        uses: actions/upload-artifact@v4
+        with:
+          name: PaletteIQ-Windows-NoLicense-Test-Installer
+          path: release/PaletteIQ-NoLicense-Setup-*.exe
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

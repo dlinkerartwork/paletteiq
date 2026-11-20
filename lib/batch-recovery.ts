@@ -6,6 +6,7 @@ export type RecoverableImage = {
   imageUrl?: string;
   error?: string;
   similarityReview?: SimilarityReview;
+  replaceFromImageUrl?: string;
 };
 export type RecoverableBatchItem = RecoverableImage & { status: 'pending' | 'done' | 'error' };
 
@@ -21,7 +22,7 @@ export function mergeNewBatchResults<T extends RecoverableImage>(
     if (!changedIds.has(character.id)) return character;
     const item = byId.get(character.id);
     // Recovery must not roll back a newer result saved while a Batch was pending.
-    if (character.imageUrl && character.imageUrl !== item?.imageUrl) return character;
+    if (character.imageUrl && character.imageUrl !== item?.imageUrl && character.imageUrl !== item?.replaceFromImageUrl) return character;
     if (item?.status === 'done') return {
       ...character,
       imageUrl: item.imageUrl,
@@ -29,7 +30,7 @@ export function mergeNewBatchResults<T extends RecoverableImage>(
       error: '',
       similarityReview: item.similarityReview,
     } as T;
-    if (item?.status === 'error') return {
+    if (item?.status === 'error') return character.imageUrl ? character : {
       ...character,
       status: 'error',
       error: item.error,

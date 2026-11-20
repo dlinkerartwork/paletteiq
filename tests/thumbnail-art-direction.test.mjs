@@ -28,7 +28,9 @@ test('One-click batch uses AI layout positions and background with AI lettering 
   assert.match(designer,/fetch\('\/api\/thumbnail-art-direction'/);
   assert.match(designer,/placeOriginalsOverBackground\(/);
   assert.match(designer,/layout: initialElements\.map/);
-  assert.match(generator, /TYPOGRAPHY ONLY: Render these exact strings/);
+  assert.match(generator, /PREMIUM CUSTOM ARTISTIC LETTERING/);
+  assert.match(generator, /EXACT MAIN TITLE:/);
+  assert.match(generator, /NO BADGE: do not invent a badge/);
   assert.match(generator, /THIS IS NOT AN ILLUSTRATION JOB/);
   assert.match(generator, /placed later from exact stored PNGs/);
 });
@@ -72,7 +74,8 @@ test('Every collection thumbnail offers safe deletion and a background retry', (
   assert.match(designer, /const deleteThumbnail = \(thumbnailId: string\)/);
   assert.match(designer, /Original clipart assets will not be deleted/);
   assert.match(designer, /onClick=\{\(\) => deleteThumbnail\(item\.id\)\}/);
-  assert.match(designer, /onClick=\{\(\) => void retryBackground\(item\)\}/);
+  assert.match(designer, /item\.packSlideKey === 'custom-canvas' \? \(setActiveId\(item\.id\)/);
+  assert.match(designer, /: void retryBackground\(item\)/);
   assert.match(designer, /backgroundRetryId === item\.id/);
 });
 
@@ -115,17 +118,19 @@ test('Image generator receives ONLY abstract graphics and lettering instructions
   assert.match(generator, /Do not visualize the collection, its subject, its category/);
   assert.doesNotMatch(generator, /Collection visual context:|Authorized ORIGINAL assets:|Collection theme:/);
   assert.match(generator, /Do not draw a visual depiction of the title words/);
-  assert.match(generator, /Reserved areas where original PNG assets will later be composited/);
+  assert.match(generator, /Visible areas where original PNG assets will later be composited/);
+  assert.match(generator, /JSON\.stringify\(visibleLayout\)/);
 });
 
-test('Single thumbnail is the default and respects selected slide key and one-image request count', () => {
+test('Single-thumbnail legacy implementation is retained but the visible editor generates from manual canvas', () => {
   assert.match(designer, /useState<'single' \| PackPreset>\('single'\)/);
   assert.match(designer, /useState\('hero'\)/);
   assert.match(designer, /generationScope === 'single' \? all\.filter\(slide => slide\.key === singleSlideKey\)\.slice\(0, 1\) : all/);
   assert.match(designer, /const created: ThumbnailDesign\[\] = slides\.map/);
   assert.match(designer, /for \(let i = 0; i < created\.length; i\+\+\)/);
-  assert.match(designer, /generationScope === 'single' \? 'Generate 1 Thumbnail'/);
-  assert.match(designer, /aria-label="Single thumbnail type"/);
+  assert.doesNotMatch(designer, /aria-label="Single thumbnail type"/);
+  assert.match(designer, /Generate AI Background & Typography from Canvas/);
+  assert.match(designer, /const generateCanvasArtwork = async/);
   assert.match(designer, /generationScope === 'single' && singleSlideKey\.startsWith\('category-'\)/);
 });
 
@@ -137,7 +142,7 @@ test('Reference styles influence only abstract graphic and lettering prompts, no
   assert.match(generator, /referenceGuide \|\| abstractStyles\[coverStyle\]/);
   assert.match(designer, /referenceDesign = \{ graphicMotif: body\.layout\?\.graphicMotif/);
   assert.match(designer, /referenceDesign: target\.referenceDesign/);
-  assert.match(designer, /aria-label="Etsy custom cover headline"/);
+  assert.match(designer, /aria-label="Canvas main title"/);
 });
 test('Background-first Vision cannot collapse a multi-asset cover to one original clipart', () => {
   assert.match(designer, /const expectedMin = Math\.min\(imageElements\.length/);
@@ -165,8 +170,11 @@ test('Hero cover prompt includes the requested cream medallion, blush ring and e
 
 test('Manual approval also runs background-first Vision before applying original layers', () => {
   const part = designer.slice(designer.indexOf('const approveReviewedBackground'),designer.indexOf('const onReferenceUpload'));
-  assert.match(part, /await placeOriginalsOverBackground/);
-  assert.ok(part.indexOf('await placeOriginalsOverBackground') < part.indexOf('backgroundImageUrl: d.rejectedBackgroundUrl'));
+  assert.match(part, /if \(target\.packSlideKey === 'custom-canvas'\)/);
+  assert.match(part, /hand-arranged slots with AI Vision coordinates/);
+  const legacy = part.slice(part.indexOf("setMessage('AI Vision analyzing approved background"));
+  assert.match(legacy, /await placeOriginalsOverBackground/);
+  assert.ok(legacy.indexOf('await placeOriginalsOverBackground') < legacy.indexOf('backgroundImageUrl: d.rejectedBackgroundUrl'));
 });
 
 test('Saved thumbnail can be re-laid out by Vision without paying for a second image', () => {

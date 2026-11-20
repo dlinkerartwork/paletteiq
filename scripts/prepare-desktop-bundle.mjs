@@ -1,6 +1,9 @@
 import { cpSync, existsSync, mkdirSync, copyFileSync, rmSync, statSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const { formatDesktopSmtpForBundle } = require('../desktop/smtp-config.cjs');
 
 const root = process.cwd();
 if (process.platform !== 'win32') throw new Error('Windows desktop installers must be built on Windows x64.');
@@ -11,10 +14,28 @@ if (!sourceNode.toLowerCase().endsWith('node.exe') || !existsSync(sourceNode)) t
 // Both editions include the Microsoft runtime needed by native Windows tools.
 const vcRedist = path.join(root, 'desktop', 'prerequisites', 'vc_redist.x64.exe');
 if (!existsSync(vcRedist)) throw new Error('Run scripts/prepare-windows-prerequisites.ps1 before packaging.');
-const verifiedPrerequisite = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-  "$s = Get-AuthenticodeSignature -LiteralPath $env:PALETTEIQ_BUILD_VC_REDIST; if ($s.Status -ne 'Valid' -or $s.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') { exit 1 }"
-], { env: { ...process.env, PALETTEIQ_BUILD_VC_REDIST: vcRedist }, windowsHide: true, encoding: 'utf8' });
-if (verifiedPrerequisite.error || verifiedPrerequisite.status !== 0) throw new Error('Bundled Visual C++ installer must have a valid Microsoft signature.');
+const verifiedPrerequisite = spawnSync('powershell.exe', [
+  '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
+  path.join(root, 'scripts', 'verify-windows-prerequisite.ps1')
+], {
+  env: {
+    ...process.env,
+    // GitHub Actions invokes npm from pwsh. Its PSModulePath can hide
+    // Windows PowerShell 5.1's bundled Microsoft.PowerShell.Security module.
+    // Prepend the Windows module directory so Authenticode validation still runs.
+    PSModulePath: [
+      path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'Modules'),
+      process.env.PSModulePath || ''
+    ].filter(Boolean).join(path.delimiter),
+    PALETTEIQ_BUILD_VC_REDIST: vcRedist
+  },
+  windowsHide: true, encoding: 'utf8'
+});
+if (verifiedPrerequisite.error || verifiedPrerequisite.status !== 0) {
+  const details = (verifiedPrerequisite.stderr || verifiedPrerequisite.stdout || verifiedPrerequisite.error?.message || '')
+    .replace(/[\r\n]+/g, ' ').slice(0, 400);
+  throw new Error('Bundled Visual C++ installer failed Microsoft signature verification. ' + details);
+}
 
 const unlicensedEdition = process.argv.includes('--no-license');
 const publicKey = path.join(root, 'license-issuer', 'public.pem');
@@ -30,6 +51,17 @@ if (!unlicensedEdition) copyFileSync(publicKey, path.join(stage, 'license-public
 cpSync(path.join(root, 'dist', 'server'), path.join(stage, 'dist', 'server'), { recursive: true });
 cpSync(path.join(root, 'dist', 'client'), path.join(stage, 'dist', 'client'), { recursive: true });
 cpSync(path.join(root, 'drizzle'), path.join(stage, 'drizzle'), { recursive: true });
+// SMTP defaults can be supplied once by the installer builder's local .env.
+// Copy ONLY allowlisted SMTP fields; NEVER stage the entire private .env.
+const smtpEnvSource = path.join(root, '.env');
+if (existsSync(smtpEnvSource)) {
+  const smtpSubset = formatDesktopSmtpForBundle(readFileSync(smtpEnvSource, 'utf8'));
+  if (smtpSubset) {
+    writeFileSync(path.join(stage, 'desktop-smtp.env'), smtpSubset, { mode: 0o600 });
+    console.warn('WARNING: Installer includes a shared SMTP App Password that can be extracted by recipients. Use a dedicated restricted sender, not your primary account.');
+    console.log('Desktop SMTP defaults bundled from .env (SMTP fields only).');
+  }
+}
 
 // pnpm uses a virtual .pnpm store and symlinks. Copying its root packages
 // breaks transitive resolution (e.g. Wrangler needs esbuild). Create a fully

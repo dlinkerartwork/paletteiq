@@ -1,3 +1,5 @@
+import { clampEtsyTitle, removeClipartQuantity, ETSY_TITLE_MAX } from './seo-title-policy.ts';
+
 export type EtsyListingDraft = {
   title: string;
   description: string;
@@ -25,7 +27,7 @@ export function normalizeListing(value: unknown): EtsyListingDraft {
   const unique = new Set<string>();
   const tags = strings(v.tags, 40).map(t => t.replace(/[^\p{L}\p{N} '\-]/gu, '').replace(/^[ '\-]+/, '').slice(0, 20).trim()).filter(t => { const key = t.toLowerCase(); if (!t || unique.has(key)) return false; unique.add(key); return true; }).slice(0, 13);
   return {
-    title: str(v.title, 140), description: str(v.description, 12000), tags,
+    title: clampEtsyTitle(str(v.title, ETSY_TITLE_MAX)), description: str(v.description, 12000), tags,
     primaryKeyword: str(v.primaryKeyword), secondaryKeywords: strings(v.secondaryKeywords, 30), longTailKeywords: strings(v.longTailKeywords, 30),
     categorySuggestion: str(v.categorySuggestion),
     attributes: { occasion: str(a.occasion), recipient: str(a.recipient), primaryColor: str(a.primaryColor), secondaryColor: str(a.secondaryColor), style: str(a.style) },
@@ -61,11 +63,9 @@ export function ensurePrimaryKeywordOpening(draft: EtsyListingDraft): EtsyListin
 
 /** Apply saved Etsy SEO output limits after normalizing either AI provider's JSON. */
 export function applySeoLimits(draft: EtsyListingDraft, maxTitleCharacters: number, altTextCount: number): EtsyListingDraft {
-  const titleLimit = Math.min(140, Math.max(1, Math.trunc(maxTitleCharacters) || 120));
+  const titleLimit = ETSY_TITLE_MAX; // Fixed title maximum, including legacy Settings values.
   const count = Math.min(20, Math.max(1, Math.trunc(altTextCount) || 10));
-  const title = draft.title.length > titleLimit
-    ? draft.title.slice(0, titleLimit).replace(/\s+\S*$/, '').trim() || draft.title.slice(0, titleLimit)
-    : draft.title;
+  const title = clampEtsyTitle(draft.title);
   return { ...draft, title, imageAltTexts: draft.imageAltTexts.slice(0, count).map(text => text.slice(0, 500).trim()) };
 }
 
@@ -84,7 +84,7 @@ export function adaptReferenceSeoToCollection(title: string, description: string
     // Product unit before the quantity: "clipart bundle of 100", "images: 100".
     .replace(/\b(clip\s?arts?|images?|pngs?|illustrations?|graphics?|designs?|elements?|files?)\s*(?:bundle|set|pack)?\s*(?:of|:|–|-)\s*\d{1,6}\+?/gi, (_match, unit: string) => `${unit}: ${count}`)
     .replace(/\b(?:set|pack|bundle|collection)\s+of\s+\d{1,6}\+?\s+(?=clip\s?arts?|images?|pngs?|illustrations?|graphics?|designs?|elements?|files?)/gi, `set of ${count} `);
-  return { title: stripLinks(updateQuantities(title)), description: stripLinks(updateQuantities(description)) };
+  return { title: removeClipartQuantity(stripLinks(title)), description: stripLinks(updateQuantities(description)) };
 }
 
 /** Saved fields control exports only. The editor always retains every SEO field. */

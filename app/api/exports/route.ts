@@ -1,3 +1,4 @@
+import { headRecoverableAsset, getRecoverableAsset } from '@/lib/recovered-assets';
 import { env } from 'cloudflare:workers';
 import { and, eq } from 'drizzle-orm';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
@@ -44,8 +45,8 @@ export async function POST(request: Request) {
     const batchId = path.searchParams.get('batch');
     if (batchId && !/^[0-9a-f-]{36}$/.test(batchId)) return Response.json({ error: 'Invalid Batch image reference' }, { status: 400 });
     const key = batchId ? batchAssetKey(user.userId, match[1], extension, batchId) : `generated/${user.userId}/${match[1]}.${extension}`;
-    if (!await bucket.head(key)) return Response.json({ error: `Image file missing for ${character.name}` }, { status: 409 });
-    entries.push({ name: `images/${imageFileName(character.name, index, extension)}`, stream: async () => (await bucket.get(key))?.body || null });
+    if (!await headRecoverableAsset(bucket, key)) return Response.json({ error: `Image file missing for ${character.name}` }, { status: 409 });
+    entries.push({ name: `images/${imageFileName(character.name, index, extension)}`, stream: async () => (await getRecoverableAsset(bucket, key))?.body || null });
   }
   // Include thumbnails in image-only and listing-package exports, using the latest upscale first.
   // Manual layer-based designs remain editable and are also exported as JSON.
@@ -67,8 +68,8 @@ export async function POST(request: Request) {
         return Response.json({ error: 'Invalid saved thumbnail reference for ' + thumbnail.name }, { status: 400 });
       }
       const key = 'generated/' + user.userId + '/' + id + '.' + format;
-      if (!await bucket.head(key)) return Response.json({ error: 'Thumbnail image missing: ' + thumbnail.name }, { status: 409 });
-      entries.push({ name: fileNameBase + '.' + format, stream: async () => (await bucket.get(key))?.body || null });
+      if (!await headRecoverableAsset(bucket, key)) return Response.json({ error: 'Thumbnail image missing: ' + thumbnail.name }, { status: 409 });
+      entries.push({ name: fileNameBase + '.' + format, stream: async () => (await getRecoverableAsset(bucket, key))?.body || null });
       includedImage = true;
     }
     if (!includedImage) return Response.json({ error: 'Thumbnail "' + thumbnail.name + '" is not rendered yet. Open Thumbnail Designer and click Save designs, then retry the ZIP.' }, { status: 409 });

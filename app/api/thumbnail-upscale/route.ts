@@ -1,3 +1,5 @@
+import { getRecoverableAsset } from '@/lib/recovered-assets';
+import { sharedProviderSecret } from '@/lib/store-secrets';
 import { env } from 'cloudflare:workers';
 import { and, eq } from 'drizzle-orm';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
@@ -29,7 +31,7 @@ async function remoteConfig(owner: string) {
   const customUrl = preferences.upscaleServerUrl || '';
   const url = customUrl || variables().PALETTEIQ_UPSCALE_SERVER_URL?.trim();
   if (customUrl && !normalizeUpscaleServerUrl(customUrl)) throw Error('Invalid saved GPU Server URL. Update it in Settings.');
-  const key = rows[0]?.upscaleCredential ? await decryptCredential(rows[0].upscaleCredential, owner) : variables().PALETTEIQ_UPSCALE_SERVER_KEY?.trim();
+  const key = rows[0]?.upscaleCredential ? await decryptCredential(rows[0].upscaleCredential, owner) : sharedProviderSecret(owner, 'PALETTEIQ_UPSCALE_SERVER_KEY');
   if (!url || !key || key.length < 32) throw Error('Remote Upscale is not configured on the PaletteIQ backend.');
   const parsed = new URL(url);
   if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== '/' && parsed.pathname !== '') throw Error('Invalid Remote Upscale server URL');
@@ -87,7 +89,7 @@ export async function POST(req: Request) {
     if (!thumb) return bad('Thumbnail not found', 404);
     if (thumb.upscaleJob) return Response.json({ id: thumb.upscaleJob.id, status: 'queued', alreadyQueued: true });
     if ((body.previousUpscaledUrl ?? null) !== (thumb.upscaledImageUrl ?? null)) return bad('Thumbnail changed; refresh before upscaling again', 409);
-    const source = await storage()?.get(thumbnailSourceKey(user.userId, body.projectId, body.sourceUrl));
+    const source = await getRecoverableAsset(storage(), thumbnailSourceKey(user.userId, body.projectId, body.sourceUrl));
     if (!source) return bad('Temporary source PNG not found', 404);
     const bytes = new Uint8Array(await source.arrayBuffer());
     if (bytes.length > 30 * 1024 * 1024) return bad('Thumbnail PNG exceeds 30 MB', 413);
@@ -138,7 +140,7 @@ export async function GET(req: Request) {
     const bytes = new Uint8Array(await res.arrayBuffer());
     if (bytes.byteLength > 100 * 1024 * 1024) return bad('Upscaled image exceeds 100 MB', 413);
     const output = jpegDimensions(bytes);
-    const original = await storage()?.get(thumbnailSourceKey(user.userId, projectId, task.sourceUrl));
+    const original = await getRecoverableAsset(storage(), thumbnailSourceKey(user.userId, projectId, task.sourceUrl));
     if (!original) return bad('Original temporary PNG unavailable for QC', 404);
     const source = dimension(new Uint8Array(await original.arrayBuffer()));
     if (output.width !== source.width * task.factor || output.height !== source.height * task.factor) return bad('GPU result dimensions do not match requested scale', 422);

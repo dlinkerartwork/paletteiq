@@ -11,7 +11,7 @@ const mocks = {
   'drizzle-orm': `export const and = (...args) => args; export const eq = (...args) => args;`,
   '@/app/chatgpt-auth': `export const getChatGPTUser = async () => ({ userId: 'owner' });`,
   '@/db': `export const getDb = () => globalThis.__upscaleTest.db;`,
-  '@/db/schema': `export const projects = 'projects'; export const studioSettings = 'settings';`,
+  '@/db/schema': `export const projects = 'projects'; export const studioSettings = 'settings'; export const paletteStores = { id:'id', accountId:'accountId', legacyAssetOwner:'legacyAssetOwner' };`,
   '@/lib/native-bridge': `export const nativeAssetBucket = () => globalThis.__upscaleTest.bucket;`,
   '@/lib/credentials': `export const decryptCredential = async value => value;`,
 };

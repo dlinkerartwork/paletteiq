@@ -19,10 +19,10 @@ PowerShell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup-local.ps1
 npm run dev
 ```
 
-4. Open **http://localhost:5173/**. No sign-in is required for local development.
+4. Open **http://localhost:5173/**. Register your PaletteIQ email/password account (at least 12 password characters); the first Etsy store is created automatically.
 5. In **Settings**, save your Etsy API key (`keystring:shared_secret`) and OpenAI API key. API keys are encrypted in the local database and never committed or included in JSON backups.
 
-The setup script installs exact dependencies with pnpm on Windows (no Bash/WSL required), creates a random local encryption key and enables login-free development in `.dev.vars`, builds the app, and runs local database migrations. It does **not** delete an existing `.dev.vars` or local database. Internet access is required for the initial dependency download. The hosted Site continues to require ChatGPT sign-in.
+The setup script installs exact dependencies with pnpm on Windows (no Bash/WSL required), creates a random local encryption key, builds the app, and runs local database migrations. Email/password login is required. The legacy local-development environment flag is no longer an authentication bypass. It does **not** delete an existing `.dev.vars` or local database. Internet access is required for the initial dependency download. The hosted Site continues to require ChatGPT sign-in.
 
 ## Later sessions
 
@@ -30,7 +30,7 @@ The setup script installs exact dependencies with pnpm on Windows (no Bash/WSL r
 npm run dev
 ```
 
-Open `http://localhost:5173` in your browser. When you pull an update that adds database tables, run `PowerShell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup-local.ps1 -SkipInstall` again. The script tracks applied migrations locally and applies only new ones.
+Open `http://localhost:5173` in your browser. When you pull an update that adds database tables, run `PowerShell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup-local.ps1 -SkipInstall` again **before attempting registration**. The script tracks migrations locally and validates the three account tables even if an older migration marker exists.
 
 ## Image production modes
 
@@ -50,6 +50,8 @@ Open `http://localhost:5173` in your browser. When you pull an update that adds 
 
 - `node` / `npm` not found: install Node.js LTS 22+, then reopen PowerShell.
 - Port 5173 busy: stop the other dev process first or use `npm run dev -- --port 5174`.
+- Create account says *database tables are missing* or reports HTTP 503: stop `npm.cmd run dev`; run `PowerShell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup-local.ps1 -SkipInstall`, check that `0005_accounts_and_stores.sql` was applied, then restart `npm.cmd run dev`. This updates schema without deleting your collections or image files.
+- If the email is **actually** registered, the app returns an explicit duplicate-email message (HTTP 409). Other storage failures no longer masquerade as duplicate emails.
 - Database table missing: run `setup-local.ps1` and check the migration output. Ensure `.wrangler/state` is writable.
 - Existing keys unreadable after manually changing `.dev.vars`: restore the original local encryption key. Without it, encrypted keys cannot be recovered; remove and re-enter them.
 - Blank credentials on another machine: expected. API keys do not travel in the JSON backup.

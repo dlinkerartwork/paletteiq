@@ -1,3 +1,4 @@
+import { sharedProviderSecret } from '@/lib/store-secrets';
 import { env } from 'cloudflare:workers';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '@/db';
@@ -68,7 +69,7 @@ export async function POST(request: Request) {
       binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
     backgroundDataUrl = 'data:image/' + (format === 'png' ? 'png' : 'jpeg') + ';base64,' + btoa(binary);
   }
-  const key = await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
+  const key = await userCredential(user.userId, 'openai') || sharedProviderSecret(user.userId, 'OPENAI_API_KEY');
   if (!key) return fail('Configure OpenAI key in Settings', 503);
   const prompt = [
     'You are an expert premium Etsy listing art director. Return ONLY JSON; do not generate an image.',

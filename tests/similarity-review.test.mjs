@@ -11,16 +11,21 @@ test('similarity check compares generated image with selected Etsy references an
   assert.match(moduleText, /selected Etsy reference images/);
   assert.match(moduleText, /status: 'unverified'/);
   assert.match(moduleText, /flagged \|\|= parsed\.tooSimilar \|\| score >= 75/);
-  assert.match(moduleText, /offset < urls\.length; offset \+= 5/);
+  assert.match(moduleText, /offset < urls\.length; offset \+= 10/);
+  assert.match(moduleText, /Promise\.all\(offsets\.map\(compareGroup\)\)/);
+  assert.match(moduleText, /index < urls\.length/);
 });
 
 test('single production persists similarity review after saving generated asset', () => {
-  assert.match(studio, /character\.similarityReview = await reviewImageSimilarity/);
-  assert.match(studio, /similarityReview: character\.similarityReview/);
+  assert.match(studio, /similarityReview = await reviewImageSimilarity/);
+  assert.match(studio, /current\.similarityReview = similarityReview/);
 });
 
 test('batch imports persist similarity checks alongside generated assets', () => {
-  assert.match(batch, /item\.similarityReview = await reviewImageSimilarity/);
+  const reviewQueue = readFileSync(new URL('../lib/image-review-queue.ts', import.meta.url), 'utf8');
+  assert.match(batch, /item\.similarityReview = await reviewStoredBatchImage/);
+  assert.match(reviewQueue, /return reviewImageSimilarity\(apiKey, btoa\(binary\), mime, references\)/);
+  assert.match(batch, /pendingBatchReviewCount\(items\) \? 'reviewing'/);
   assert.match(batch, /mergeNewBatchResults\(project\.characters, items, changedIds\)/);
   assert.match(recovery, /similarityReview: item\.similarityReview/);
 });

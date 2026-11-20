@@ -17,9 +17,11 @@ test('legacy D1 state remains available for one-time native import', () => {
   assert.match(desktop, /startNativeStorage/);
 });
 
-test('desktop anonymous identity requires explicitly configured desktop mode', () => {
-  assert.match(auth, /localBindings\.PALETTEIQ_DESKTOP === "1"/);
-  assert.match(auth, /host === "localhost" \|\| host === "127\.0\.0\.1"/);
+test('desktop requires a password-authenticated store rather than anonymous local identity', () => {
+  assert.match(auth, /getAccountSession\(\)/);
+  assert.match(auth, /account\.owner/);
+  assert.match(auth, /PALETTEIQ_TRUST_CHATGPT_HEADERS/);
+  assert.doesNotMatch(auth, /localNoAuth|local_seedy|PALETTEIQ_LOCAL_NO_AUTH/);
 });
 
 test('Wrangler CLI runs using Node, not Electron argv emulation', () => {

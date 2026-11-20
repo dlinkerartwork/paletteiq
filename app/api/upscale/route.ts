@@ -1,4 +1,6 @@
+import { getRecoverableAsset } from '@/lib/recovered-assets';
 import { env } from 'cloudflare:workers';
+import { sharedProviderSecret } from '@/lib/store-secrets';
 import { and, eq } from 'drizzle-orm';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { getDb } from '@/db';
@@ -29,7 +31,7 @@ async function remoteConfig(owner: string) {
   const customUrl = preferences.upscaleServerUrl || '';
   const url = customUrl || variables().PALETTEIQ_UPSCALE_SERVER_URL?.trim();
   if (customUrl && !normalizeUpscaleServerUrl(customUrl)) throw Error('Invalid saved GPU Server URL. Update it in Settings.');
-  const key = rows[0]?.upscaleCredential ? await decryptCredential(rows[0].upscaleCredential, owner) : variables().PALETTEIQ_UPSCALE_SERVER_KEY?.trim();
+  const key = rows[0]?.upscaleCredential ? await decryptCredential(rows[0].upscaleCredential, owner) : sharedProviderSecret(owner, 'PALETTEIQ_UPSCALE_SERVER_KEY');
   if (!url || !key || key.length < 32) throw Error('Remote Upscale is not configured on the PaletteIQ backend.');
   const parsed = new URL(url);
   if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== '/' && parsed.pathname !== '') throw Error('Invalid Remote Upscale server URL');
@@ -119,7 +121,7 @@ export async function POST(req: Request) {
     if (!['realesrgan-x4plus','realesrgan-x4plus-anime','realesrnet-x4plus','realesr-animevideov3','real-hat-gan-sharper-x4'].includes(model)) return bad('Invalid remote model');
     const strength = typeof prefs.upscaleCleanupStrength === 'string' ? prefs.upscaleCleanupStrength : 'low';
     if (!['low','medium','high'].includes(strength)) return bad('Invalid cleanup strength');
-    const obj = await storage()?.get(sourceKey(user.userId, sourceUrl));
+    const obj = await getRecoverableAsset(storage(), sourceKey(user.userId, sourceUrl));
     if (!obj) return bad('Source PNG not found', 404);
     const bytes = new Uint8Array(await obj.arrayBuffer());
     if (bytes.length > 30 * 1024 * 1024) return bad('Source PNG exceeds 30 MB', 413);
@@ -183,7 +185,7 @@ export async function GET(req: Request) {
     if (bytes.length > 100 * 1024 * 1024) return bad('Upscale result exceeds 100 MB', 413);
     const output = dimension(bytes);
     syncStage = 'read source PNG for QC';
-    const sourceObject = await storage()?.get(sourceKey(user.userId, task.sourceUrl));
+    const sourceObject = await getRecoverableAsset(storage(), sourceKey(user.userId, task.sourceUrl));
     if (!sourceObject) return bad('Source image unavailable for QC', 404);
     const source = dimension(new Uint8Array(await sourceObject.arrayBuffer()));
     if (task.qc && (output.width !== source.width * task.factor || output.height !== source.height * task.factor)) return bad('QC rejected incorrect output dimensions', 422);

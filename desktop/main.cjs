@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, shell, safeStorage, Menu } = require('electron');
+const { app, BrowserWindow, dialog, shell, safeStorage, Menu, Tray } = require('electron');
 const { spawn } = require('node:child_process');
 const { mkdirSync, existsSync, readFileSync, writeFileSync, unlinkSync, copyFileSync, appendFileSync, statSync, renameSync } = require('node:fs');
 const { randomBytes } = require('node:crypto');
@@ -7,6 +7,8 @@ const { loadOrCreateKey } = require('./key-vault.cjs');
 const { startNativeStorage } = require('./native-storage.cjs');
 const { backupWorkspace, restoreWorkspaceSeparate, validateWorkspace } = require('./workspace-backup.cjs');
 const { windowsDeviceCode, readValidLicense } = require('./license.cjs');
+const { pollHiddenImageBatches } = require('./background-batch-monitor.cjs');
+const { loadDesktopSmtpDefaults } = require('./smtp-config.cjs');
 
 const ROOT = app.isPackaged ? path.join(process.resourcesPath, 'paletteiq-runtime') : path.resolve(__dirname, '..');
 const SERVER_PORT = 18763;
@@ -16,6 +18,12 @@ let server = null;
 let nativeStorage = null;
 let closing = false;
 let activeDirectory = null;
+let mainWindow = null;
+let tray = null;
+let backgroundMonitorTimer = null;
+let trayInfoDisplayed = false;
+const BACKGROUND_POLL_MS = 20_000;
+
 
 function workspaceRoot() {
   const directory = path.join(app.getPath('userData'), 'paletteiq-data');
@@ -30,7 +38,29 @@ function dataDirectory() {
   const name = JSON.parse(readFileSync(pointer, 'utf8')).name;
   if (typeof name !== 'string' || !/^restored-[0-9]+-[0-9a-f]{8}$/.test(name)) throw new Error('Invalid active workspace selector');
   const directory = path.join(root, 'restored-workspaces', name);
-  validateWorkspace(directory, { requireNoCredentials: false });
+  try {
+    // Users can delete an old restored workspace while the selector still
+    // points to it. Never fail with an opaque SQLite/manifest error at startup.
+    if (!existsSync(directory)) throw new Error('The restored workspace folder no longer exists.');
+    validateWorkspace(directory, { requireNoCredentials: false });
+  } catch (cause) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    const choice = dialog.showMessageBoxSync({
+      type: 'warning',
+      title: 'Restored workspace unavailable',
+      message: 'PaletteIQ cannot open the selected restored workspace.',
+      detail: `Workspace: ${name}\nReason: ${reason}\n\nYou can open the original workspace without deleting its database or images. The old workspace selector will be preserved as a backup.`,
+      buttons: ['Open original workspace', 'Exit'],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    });
+    if (choice !== 0) throw new Error('The selected restored workspace is unavailable. The original workspace was not changed.');
+    // Keep a recoverable record of the previous selection. Never delete user
+    // data or recreate an empty folder under the missing restored workspace.
+    renameSync(pointer, path.join(root, `active-workspace.missing-${Date.now()}.json`));
+    return root;
+  }
   return directory;
 }
 
@@ -41,7 +71,7 @@ function sanitizeDiagnostic(value) {
     .replace(/sk-[A-Za-z0-9_-]{12,}/g, '[REDACTED_API_KEY]')
     .replace(/(Bearer\s+)[^\s"'<>]+/gi, '$1[REDACTED]')
     .replace(/(X-API-Key\s*[:=]\s*)[^\s,"'}]+/gi, '$1[REDACTED]')
-    .replace(/(STUDIO_CREDENTIAL_ENCRYPTION_KEY|PALETTEIQ_NATIVE_BRIDGE_TOKEN|PALETTEIQ_UPSCALE_SERVER_KEY|api[_-]?key|password|authorization|access[_-]?token)(\s*[=:]\s*)[^\s,"'}]+/gi, '$1$2[REDACTED]');
+    .replace(/(STUDIO_CREDENTIAL_ENCRYPTION_KEY|PALETTEIQ_NATIVE_BRIDGE_TOKEN|PALETTEIQ_UPSCALE_SERVER_KEY|PALETTEIQ_SMTP_PASSWORD|api[_-]?key|password|authorization|access[_-]?token)(\s*[=:]\s*)[^\s,"'}]+/gi, '$1$2[REDACTED]');
 }
 function diagnosticLogger(directory) {
   const folder = path.join(directory, 'logs');
@@ -171,7 +201,7 @@ function configureWorkspaceMenu(directory) {
       const choice = await dialog.showOpenDialog({ properties: ['openFile'], filters: [{ name: 'PaletteIQ ZIP', extensions: ['zip'] }] });
       if (choice.canceled || !choice.filePaths[0]) return;
       const restored = await restoreWorkspaceSeparate({ source: choice.filePaths[0], workspaceRoot: workspaceRoot() });
-      await dialog.showMessageBox({ type: 'info', message: 'Backup restored separately. Active workspace was not changed.', detail: `Restored to: ${restored}\nUse Workspace → Switch workspace to open the restored copy.` });
+      await dialog.showMessageBox({ type: 'info', message: 'Backup restored separately. Active workspace was not changed.', detail: `Restored to: ${restored}\nLegacy encrypted API keys are excluded from the restored workspace. Re-enter any API credentials in Settings after switching.\nTo import collections and PNG files into a chosen store instead, use Settings → Backup & Restore → Desktop Workspace ZIP.` });
     } catch (e) { await error(e); } } },
     { label: 'Switch to restored workspace…', click: async () => { try {
       const root = path.join(workspaceRoot(), 'restored-workspaces');
@@ -238,13 +268,83 @@ async function requireActivation() {
   }
 }
 
+function showPaletteIQ() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+async function configureBackgroundTray(window, diagnostics) {
+  try {
+    // Use the installed executable's Windows icon. Unlike a generated path,
+    // this also works from app.asar without shipping additional icon files.
+    const icon = await app.getFileIcon(process.execPath, { size: 'small' });
+    if (icon.isEmpty()) throw new Error('No usable Windows tray icon');
+    tray = new Tray(icon);
+    tray.setToolTip('PaletteIQ Desktop — monitoring OpenAI image batches in the background');
+    tray.setContextMenu(Menu.buildFromTemplate([
+      { label: 'Open PaletteIQ', click: showPaletteIQ },
+      { label: 'Batch completion emails continue while signed in', enabled: false },
+      { type: 'separator' },
+      { label: 'Quit completely (stop background monitoring)', click: () => app.quit() },
+    ]));
+    tray.on('double-click', showPaletteIQ);
+  } catch (error) {
+    // Do not hide the window if there is no system-tray icon to restore it.
+    tray = null;
+    diagnostics.write('tray', 'Cannot enable Close to Tray: ' +
+      (error instanceof Error ? error.message : String(error)));
+    return;
+  }
+  window.on('close', event => {
+    if (closing || !tray) return;
+    event.preventDefault();
+    window.hide();
+    // Background polling runs as long as this Electron process remains alive.
+    // Existing React pollers also continue because throttling is disabled.
+    void pollHiddenImageBatches(window, diagnostics.write);
+    if (!trayInfoDisplayed) {
+      trayInfoDisplayed = true;
+      try {
+        tray.displayBalloon({
+          title: 'PaletteIQ is still running',
+          content: 'OpenAI Batch monitoring and email notifications continue in the Windows system tray. Use Quit completely to stop.',
+          iconType: 'info',
+          noSound: true,
+        });
+      } catch { /* Windows notification preferences may suppress balloons. */ }
+    }
+  });
+  backgroundMonitorTimer = setInterval(() => {
+    void pollHiddenImageBatches(window, diagnostics.write);
+  }, BACKGROUND_POLL_MS);
+}
+
+const singleInstanceLock = app.requestSingleInstanceLock();
+if (!singleInstanceLock) app.quit();
+app.on('second-instance', showPaletteIQ);
+
 async function launch() {
   await requireActivation();
   const directory = dataDirectory();
   activeDirectory = directory;
   const secret = ensureCredentials(directory);
   const nativeBridge = { token: randomBytes(32).toString('hex') };
-  nativeStorage = await startNativeStorage({ directory, migrationsDir: path.join(ROOT, 'drizzle'), token: nativeBridge.token });
+  nativeStorage = await startNativeStorage({
+    directory, migrationsDir: path.join(ROOT, 'drizzle'), token: nativeBridge.token,
+    smtpDefaults: loadDesktopSmtpDefaults(ROOT, app.isPackaged), smtpEncryptionKey: secret,
+    chooseWorkspaceZip: async () => {
+      // Only Electron's native file picker can authorize a local ZIP path.
+      // The renderer/Worker never supplies filesystem paths to the native bridge.
+      const result = await dialog.showOpenDialog({
+        title: 'Select an old PaletteIQ workspace backup',
+        properties: ['openFile'],
+        filters: [{ name: 'PaletteIQ workspace ZIP', extensions: ['zip'] }],
+      });
+      return result.canceled ? null : result.filePaths[0] || null;
+    },
+  });
   const configPath = runtimeConfig(directory, secret, { ...nativeBridge, port: nativeStorage.port });
   await migrateLegacyDatabase(directory, secret, configPath, { ...nativeStorage, token: nativeBridge.token });
   const diagnostics = diagnosticLogger(directory);
@@ -257,16 +357,21 @@ async function launch() {
   server.on('exit', () => { server = null; if (!closing) app.quit(); });
   await waitForLocalServer();
   configureWorkspaceMenu(directory);
-  const window = new BrowserWindow({ width: 1440, height: 940, minWidth: 1050, minHeight: 680, title: 'PaletteIQ Desktop', webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true } });
+  const window = new BrowserWindow({ width: 1440, height: 940, minWidth: 1050, minHeight: 680, title: 'PaletteIQ Desktop', webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, backgroundThrottling: false } });
+  mainWindow = window;
+  window.on('closed', () => { if (mainWindow === window) mainWindow = null; });
   window.webContents.setWindowOpenHandler(({ url }) => { if (url.startsWith('https://')) void shell.openExternal(url); return { action: 'deny' }; });
   window.webContents.on('will-navigate', (event, url) => { if (!url.startsWith(`${SERVER_URL}/`) && url !== SERVER_URL) event.preventDefault(); });
   await window.loadURL(SERVER_URL);
+  await configureBackgroundTray(window, diagnostics);
 }
 
-app.whenReady().then(() => launch().catch(async error => { await dialog.showMessageBox({ type: 'error', title: 'PaletteIQ Desktop', message: error.message || String(error) }); app.quit(); }));
-app.on('window-all-closed', () => app.quit());
+if (singleInstanceLock) app.whenReady().then(() => launch().catch(async error => { await dialog.showMessageBox({ type: 'error', title: 'PaletteIQ Desktop', message: error.message || String(error) }); app.quit(); }));
+app.on('window-all-closed', () => { if (!tray || closing) app.quit(); });
 app.on('before-quit', () => {
   closing = true;
+  if (backgroundMonitorTimer) { clearInterval(backgroundMonitorTimer); backgroundMonitorTimer = null; }
+  if (tray) { tray.destroy(); tray = null; }
   if (server && !server.killed) server.kill();
   if (nativeStorage) { nativeStorage.server.close(); nativeStorage.database.close(); }
   // .dev.vars is needed by the local Worker only while the app runs.

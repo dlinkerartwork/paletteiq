@@ -1,0 +1,61 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { readFileSync } from 'node:fs';
+const file = path => readFileSync(new URL('../' + path, import.meta.url),'utf8');
+test('new account registration requires a user-provided Etsy store name', () => {
+  const account = file('lib/palette-accounts.ts');
+  const route = file('app/api/account/route.ts');
+  const ui = file('components/account-workspace.tsx');
+  assert.match(account,/createAccount\(emailInput: unknown, password: unknown, initialStoreName: unknown\)/);
+  assert.match(account,/validStoreName\(initialStoreName\)/);
+  assert.match(account,/name: \(initialStoreName as string\)\.trim\(\)/);
+  assert.doesNotMatch(account,/name: 'My Etsy Store', createdAt/);
+  assert.match(route,/createAccount\(input.email, input.password, input.name\)/);
+  assert.match(ui,/palette-first-store/);
+  assert.match(ui,/firstStoreName\.trim\(\)/);
+  assert.match(ui,/>Logout<\/span>/);
+});
+test('store deletion requires session ownership, typed name, phrase and active-store/last-store guard', () => {
+  const route = file('app/api/store-management/route.ts');
+  assert.match(route,/assertSameOrigin\(req\)/);
+  assert.match(route,/getAccountSession\(\)/);
+  assert.match(route,/eq\(paletteStores\.accountId, session.accountId\)/);
+  assert.match(route,/target\.id === session\.activeStoreId/);
+  assert.match(route,/body\.storeName !== target\.name/);
+  assert.match(route,/body\.confirmation !== 'DELETE STORE'/);
+  assert.match(route,/stores\.length < 2/);
+  assert.match(route,/active\.length/);
+  assert.match(route,/if \(!bucket \|\| !database\)/);
+  assert.match(route,/await bucket\.put\(key/);
+  assert.match(route,/await bucket\.head\(key\)/);
+  assert.ok(route.indexOf('await bucket.head(key)') < route.indexOf('await database.batch(['));
+  assert.match(route,/DELETE FROM projects WHERE owner=\?/);
+  assert.match(route,/DELETE FROM image_batches WHERE owner=\?/);
+  assert.match(route,/DELETE FROM studio_settings WHERE owner=\?/);
+  assert.match(route,/DELETE FROM paletteiq_stores WHERE id=\? AND account_id=\?/);
+  assert.doesNotMatch(route,/await bucket\.delete|\.delete\(.*generated\//);
+});
+test('Store Management provides explicit rename, delete safeguards and metadata archive download', () => {
+  const ui = file('components/store-management.tsx');
+  assert.match(ui,/send\('rename-store'/);
+  assert.match(ui,/send\('create-store'/);
+  assert.match(ui,/typedName!==deleting.name/);
+  assert.match(ui,/typedPhrase!=='DELETE STORE'/);
+  assert.match(ui,/store\.id===activeStoreId/);
+  assert.match(ui,/stores\.length===1/);
+  assert.match(ui,/store\.activeJobs>0/);
+  assert.match(ui,/Download safety archive/);
+  assert.match(ui,/original R2 image files were retained/i);
+});
+test('settings uses five independent panels and puts Backup & Restore last', () => {
+  const ui = file('components/studio-settings.tsx');
+  const tabs = Array.from(ui.matchAll(/\['(credentials|production|upscale|seo|backup)','([^']+)'\]/g));
+  assert.deepEqual(tabs.map(m=>m[1]), ['credentials','production','seo','upscale','backup']);
+  for(const tab of ['credentials','production','upscale','seo','backup'])
+    assert.match(ui,new RegExp("pane === '"+tab+"' && <section"));
+  assert.match(ui,/role="tablist"/);
+  assert.match(ui,/aria-selected/);
+  assert.match(ui,/<RestoreBackupPanel\/>/);
+  assert.match(file('lib/workspace-history.ts'),/'stores'/);
+  assert.match(file('app/page.tsx'),/<StoreManagement\/>/);
+});

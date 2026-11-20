@@ -1,0 +1,10 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "paletteiq-cloud-automation-cron",
+  "main": "worker/cloud-automation-cron.ts",
+  "compatibility_date": "2026-11-19",
+  "triggers": { "crons": ["* * * * *"] },
+  "vars": {
+    "AUTOMATION_TARGET_URL": "https://REPLACE-WITH-YOUR-DEPLOYED-PALETTEIQ-ORIGIN.example"
+  }
+}

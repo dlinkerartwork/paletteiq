@@ -1,12 +1,15 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { env } from "cloudflare:workers";
+import { getAccountSession } from "@/lib/palette-accounts";
+import { cloudAutomationUser } from "@/lib/cloud-automation-context";
 
 export type ChatGPTUser = {
   userId: string;
   displayName: string;
   email: string;
   fullName: string | null;
+  legacyAssetOwner?: string | null;
 };
 
 const USER_ID_HEADER = "oai-authenticated-user-id";
@@ -20,23 +23,21 @@ const SIGN_OUT_PATH = "/signout-with-chatgpt";
 const CALLBACK_PATH = "/callback";
 
 export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
+  const scheduledUser = cloudAutomationUser();
+  if (scheduledUser) return scheduledUser;
+  const account = await getAccountSession();
+  if (account) return {
+    userId: account.owner,
+    displayName: account.storeName,
+    email: account.email,
+    fullName: null,
+    legacyAssetOwner: account.legacyAssetOwner,
+  };
   const requestHeaders = await headers();
-  // Only the opt-in local development Worker may use an anonymous local identity.
-  // Production retains ChatGPT sign-in even if a request spoofs its Host header.
-  const host = (requestHeaders.get("host") ?? "").toLowerCase().split(":")[0];
-  const localBindings = env as unknown as Record<string, string | undefined>;
-  const localNoAuth =
-    (process.env.NODE_ENV === "development" || localBindings.PALETTEIQ_DESKTOP === "1") &&
-    localBindings.PALETTEIQ_LOCAL_NO_AUTH === "1" &&
-    (host === "localhost" || host === "127.0.0.1" || host === "[::1]");
-  if (localNoAuth) {
-    return {
-      userId: "local_seedy",
-      displayName: "Local paletteIQ User",
-      email: "local@paletteiq.invalid",
-      fullName: "Local paletteIQ User",
-    };
-  }
+  // Legacy ChatGPT identity headers remain available only behind an explicitly
+  // trusted authentication gateway. Local no-auth does NOT bypass accounts.
+  const envFlags = env as unknown as Record<string, string | undefined>;
+  if (envFlags.PALETTEIQ_TRUST_CHATGPT_HEADERS !== '1') return null;
   const userId = requestHeaders.get(USER_ID_HEADER);
   const email = requestHeaders.get(USER_EMAIL_HEADER);
   if (!userId || !email) return null;

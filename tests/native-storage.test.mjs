@@ -15,7 +15,7 @@ test('native SQLite persists records and stores clipart as files in user directo
   const secret = 'test-secret';
   let first;
   try {
-    first = await startNativeStorage({ directory: temp, migrationsDir: migrationDir, token: secret });
+    first = await startNativeStorage({ smtpEncryptionKey: 'a'.repeat(64), directory: temp, migrationsDir: migrationDir, token: secret });
     const url = `http://127.0.0.1:${first.port}`;
     const auth = { Authorization: `Bearer ${secret}` };
     const forbidden = await fetch(`${url}/sql`, { method: 'POST', body: '{}' });
@@ -40,7 +40,7 @@ test('native SQLite persists records and stores clipart as files in user directo
     assert.ok(existsSync(path.join(temp, 'database', 'paletteiq.db')));
     assert.ok(existsSync(path.join(temp, 'images', 'collections', 'local_seedy', '00000000-0000-4000-8000-000000000001.png')));
     first.server.close(); first.database.close(); first = null;
-    const second = await startNativeStorage({ directory: temp, migrationsDir: migrationDir, token: secret });
+    const second = await startNativeStorage({ smtpEncryptionKey: 'a'.repeat(64), directory: temp, migrationsDir: migrationDir, token: secret });
     assert.equal(second.database.prepare('SELECT name FROM projects WHERE id=?').get('a1').name, 'Sample');
     const restored = await fetch(`http://127.0.0.1:${second.port}/assets/${key}`, { headers: auth });
     assert.deepEqual(new Uint8Array(await restored.arrayBuffer()), replacedImage);
@@ -64,7 +64,7 @@ test('upgrading an existing desktop database adds Gemini column without losing s
       legacy.prepare('INSERT INTO projects (id, owner, name, data, updated_at) VALUES (?, ?, ?, ?, ?)').run('old', 'owner', 'Saved collection', '{"characters":[]}', 42);
       legacy.prepare('INSERT INTO studio_settings (owner, preferences, updated_at) VALUES (?, ?, ?)').run('owner', '{"target":120}', 43);
     } finally { legacy.close(); }
-    storage = await startNativeStorage({ directory: temp, migrationsDir: path.resolve('drizzle'), token: 'upgrade-secret' });
+    storage = await startNativeStorage({ smtpEncryptionKey: 'a'.repeat(64), directory: temp, migrationsDir: path.resolve('drizzle'), token: 'upgrade-secret' });
     const backups = readdirSync(path.join(temp, 'database', 'upgrade-backups'));
     assert.equal(backups.length, 1);
     const snapshot = new DatabaseSync(path.join(temp, 'database', 'upgrade-backups', backups[0]));
@@ -79,7 +79,7 @@ test('upgrading an existing desktop database adds Gemini column without losing s
     assert.equal(storage.database.prepare("SELECT COUNT(*) AS total FROM __paletteiq_migrations WHERE name = '0004_upscale_credential.sql'").get().total, 1);
     assert.equal(storage.database.prepare("SELECT COUNT(*) AS total FROM __paletteiq_migrations WHERE name = '0003_gemini_seo.sql'").get().total, 1);
     storage.server.close(); storage.database.close(); storage = null;
-    storage = await startNativeStorage({ directory: temp, migrationsDir: path.resolve('drizzle'), token: 'upgrade-secret' });
+    storage = await startNativeStorage({ smtpEncryptionKey: 'a'.repeat(64), directory: temp, migrationsDir: path.resolve('drizzle'), token: 'upgrade-secret' });
     assert.equal(storage.database.prepare("SELECT COUNT(*) AS total FROM __paletteiq_migrations WHERE name = '0003_gemini_seo.sql'").get().total, 1);
     assert.equal(readdirSync(path.join(temp, 'database', 'upgrade-backups')).length, 1);
   } finally {
@@ -104,7 +104,7 @@ test('desktop upgrade reconciles an existing Gemini column without duplicating o
       legacy.exec(readFileSync(path.join('drizzle', '0003_gemini_seo.sql'), 'utf8'));
       legacy.prepare('INSERT INTO studio_settings (owner, preferences, gemini_credential, updated_at) VALUES (?, ?, ?, ?)').run('owner', '{}', 'encrypted-existing-value', 20);
     } finally { legacy.close(); }
-    storage = await startNativeStorage({ directory: temp, migrationsDir: path.resolve('drizzle'), token: 'upgrade-secret' });
+    storage = await startNativeStorage({ smtpEncryptionKey: 'a'.repeat(64), directory: temp, migrationsDir: path.resolve('drizzle'), token: 'upgrade-secret' });
     assert.equal(storage.database.prepare('SELECT gemini_credential FROM studio_settings WHERE owner=?').get('owner').gemini_credential, 'encrypted-existing-value');
     assert.equal(storage.database.prepare("SELECT COUNT(*) AS total FROM __paletteiq_migrations WHERE name='0003_gemini_seo.sql'").get().total, 1);
     assert.equal(readdirSync(path.join(temp, 'database', 'upgrade-backups')).length, 1);

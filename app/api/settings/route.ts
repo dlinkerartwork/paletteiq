@@ -1,4 +1,5 @@
 import { validImageNaming } from '@/lib/image-file-naming';
+import { sharedProviderSecret } from '@/lib/store-secrets';
 import { eq } from 'drizzle-orm';
 import { getDb } from '@/db';
 import { studioSettings } from '@/db/schema';
@@ -11,14 +12,16 @@ import { normalizeUpscaleServerUrl } from '@/lib/upscale-server-url';
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 const seoPromptFields = ["general","title","description","tags","primaryKeyword","secondaryKeywords","longTailKeywords","categorySuggestion","attributes","materials","imageAltTexts","photoPlan","priceSuggestion","sku","digitalFiles","licenseNotes"] as const;
 const defaultSeoPrompts = Object.fromEntries(seoPromptFields.map(key => [key, '']));
-const defaultPrefs = { target: 120, model: 'gpt-image-1-mini', quality: 'low', analysisModel: 'gpt-4.1-mini', output: 'png', background: 'transparent', variations: 1, defaultStyle: 'Soft hand-painted watercolor illustration', autoSave: false, seoProvider: 'openai', seoGeminiModel: 'gemini-2.5-pro', seoOpenaiModel: 'gpt-6.1-terra', seoDraftFields: ['title','description','tags','imageAltTexts'], seoTitleMaxLength: 120, seoAltTextCount: 1, seoFileNaming: 'charactername_imagenumber', seoPrompts: defaultSeoPrompts, upscaleProvider: 'remote', upscaleServerUrl: '', upscaleFactor: 4, upscaleRequireTransparency: true, upscaleQc: true, upscaleModel: 'realesrgan-x4plus', upscaleCleanup: false, upscaleCleanupStrength: 'low' };
+import { isImageBatchModel, DEFAULT_IMAGE_BATCH_MODEL } from '@/lib/image-batch-models';
+
+const defaultPrefs = { target: 120, model: 'gpt-image-2.5-flare', quality: 'low', analysisModel: 'gpt-6.1-terra', automationPromptModel: 'gpt-6-luna', automationImageModel: DEFAULT_IMAGE_BATCH_MODEL, output: 'png', background: 'transparent', variations: 1, defaultStyle: 'Soft hand-painted watercolor illustration', autoSave: false, seoProvider: 'gemini', seoGeminiModel: 'gemini-3.5-flash', seoOpenaiModel: 'gpt-6.1-terra', seoDraftFields: ['title','description','tags','imageAltTexts'], seoTitleMaxLength: 140, seoAltTextCount: 1, seoFileNaming: 'charactername_imagenumber', seoPrompts: defaultSeoPrompts, upscaleProvider: 'remote', upscaleServerUrl: '', upscaleFactor: 4, upscaleRequireTransparency: true, upscaleQc: true, upscaleModel: 'realesrgan-x4plus', upscaleCleanup: false, upscaleCleanupStrength: 'low' };
 const isImageModel = (value: unknown): value is string => typeof value === 'string' && /^gpt-image-[a-z0-9.-]{1,80}$/.test(value);
 
 async function getSettings(req: Request) {
   const user = await getChatGPTUser();
   if (!user) return bad('Sign in required', 401);
   if (new URL(req.url).searchParams.get('models') === 'openai' || new URL(req.url).searchParams.get('models') === 'openai-seo') {
-    const key = await userCredential(user.userId, 'openai') || (env as unknown as Record<string, string | undefined>).OPENAI_API_KEY;
+    const key = await userCredential(user.userId, 'openai') || sharedProviderSecret(user.userId, 'OPENAI_API_KEY');
     if (!key) return bad('Save an OpenAI API key first.', 400);
     const response = await fetch('https://api.openai.com/v1/models', {
       headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(15_000),
@@ -26,16 +29,21 @@ async function getSettings(req: Request) {
     if (!response.ok) return bad(`Unable to list OpenAI models (HTTP ${response.status}).`, 502);
     const payload = await response.json() as { data?: Array<{ id?: string }> };
     if (new URL(req.url).searchParams.get('models') === 'openai-seo') {
-      const preferred = ['gpt-6.1-terra','gpt-6.1-sol','gpt-6-astra','gpt-6-luna','gpt-5.6','gpt-5.2','gpt-5','gpt-4.1'];
+      // Both Research & Analysis and SEO use this list. Do not force a paid
+      // heavyweight model or hide the user's smaller available GPT models.
+      // /v1/models reports access, not vision/JSON/Batch capability; each
+      // downstream API validates that when a model is submitted.
+      const preferred = ['gpt-4.1-mini','gpt-4.1','gpt-5.6','gpt-6.1-terra'];
       return Response.json({ models: (payload.data || [])
-        .filter(row => typeof row.id === 'string' && /^gpt-[a-z0-9.-]{1,80}$/.test(row.id) && !/(image|audio|realtime|transcribe|tts|search|codex|mini|nano|micro|lite|instruct)/i.test(row.id))
+        .filter(row => typeof row.id === 'string' && /^gpt-[a-z0-9.-]{1,80}$/.test(row.id) &&
+          !/(image|audio|realtime|transcribe|tts|search|codex|instruct|embedding)/i.test(row.id))
         .map(row => ({ id: row.id!, name: row.id! }))
-        .sort((a, b) => { const ai = preferred.indexOf(a.id); const bi = preferred.indexOf(b.id); return (ai < 0 ? 100 : ai) - (bi < 0 ? 100 : bi) || b.id.localeCompare(a.id, undefined, { numeric: true }); }).slice(0, 6) });
+        .sort((a, b) => { const ai = preferred.indexOf(a.id); const bi = preferred.indexOf(b.id); return (ai < 0 ? 100 : ai) - (bi < 0 ? 100 : bi) || b.id.localeCompare(a.id, undefined, { numeric: true }); }).slice(0, 100) });
     }
     // The models endpoint returns IDs, not transparency capability flags.
     // Limit options to the GPT Image family; the image API validates capabilities on use.
     return Response.json({ models: (payload.data || []).filter(row => isImageModel(row.id))
-      .map(row => ({ id: row.id!, name: row.id!, batchSupported: ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'].includes(row.id!) })).sort((left, right) => left.id.localeCompare(right.id)) });
+      .map(row => ({ id: row.id!, name: row.id!, batchSupported: isImageBatchModel(row.id) })).sort((left, right) => left.id.localeCompare(right.id)) });
   }
     if (new URL(req.url).searchParams.get('models') === 'gemini') {
     const keys = await userGeminiKeys(user.userId);
@@ -96,7 +104,8 @@ async function postSettings(req: Request) {
     const normalizedServer = normalizeUpscaleServerUrl(prefs.upscaleServerUrl);
     if (normalizedServer === null) return bad('GPU Server URL must be http(s)://localhost:PORT or a private LAN IPv4 address (for example http://192.168.1.10:8000).');
     prefs.upscaleServerUrl = normalizedServer;
-    if (!Number.isInteger(prefs.target) || prefs.target < 1 || prefs.target > 1000 || !Number.isInteger(prefs.variations) || prefs.variations < 1 || prefs.variations > 8 || !isImageModel(prefs.model) || !['low','medium','high'].includes(prefs.quality) || prefs.analysisModel !== 'gpt-4.1-mini' || !['png','jpg'].includes(prefs.output) || !['transparent','opaque'].includes(prefs.background) || (prefs.output === 'jpg' && prefs.background === 'transparent') || typeof prefs.defaultStyle !== 'string' || prefs.defaultStyle.length > 500 || typeof prefs.autoSave !== 'boolean' || !['openai','gemini'].includes(prefs.seoProvider) || typeof prefs.seoGeminiModel !== 'string' || !/^gemini-[a-z0-9.-]{1,80}$/.test(prefs.seoGeminiModel) || typeof prefs.seoOpenaiModel !== 'string' || !/^gpt-[a-z0-9.-]{1,80}$/.test(prefs.seoOpenaiModel) || !Number.isInteger(prefs.seoTitleMaxLength) || prefs.seoTitleMaxLength < 1 || prefs.seoTitleMaxLength > 140 || !Number.isInteger(prefs.seoAltTextCount) || prefs.seoAltTextCount < 1 || prefs.seoAltTextCount > 20 || !validImageNaming(prefs.seoFileNaming) || prefs.upscaleProvider !== 'remote' || ![2,4,6,8].includes(prefs.upscaleFactor) || typeof prefs.upscaleRequireTransparency !== 'boolean' || typeof prefs.upscaleQc !== 'boolean' || !['realesrgan-x4plus','realesrgan-x4plus-anime','realesrnet-x4plus','realesr-animevideov3','real-hat-gan-sharper-x4'].includes(prefs.upscaleModel) || typeof prefs.upscaleCleanup !== 'boolean' || !['low','medium','high'].includes(prefs.upscaleCleanupStrength)) return bad('Invalid settings values');
+    prefs.seoTitleMaxLength = 140; // Fixed for new and legacy user settings.
+    if (!Number.isInteger(prefs.target) || prefs.target < 1 || prefs.target > 1000 || !Number.isInteger(prefs.variations) || prefs.variations < 1 || prefs.variations > 8 || !isImageModel(prefs.model) || !['low','medium','high'].includes(prefs.quality) || !/^gpt-[a-z0-9.-]{1,80}$/.test(prefs.analysisModel) || !/^gpt-[a-z0-9.-]{1,80}$/.test(prefs.automationPromptModel) || !isImageBatchModel(prefs.automationImageModel) || !['png','jpg'].includes(prefs.output) || !['transparent','opaque'].includes(prefs.background) || (prefs.output === 'jpg' && prefs.background === 'transparent') || typeof prefs.defaultStyle !== 'string' || prefs.defaultStyle.length > 500 || typeof prefs.autoSave !== 'boolean' || !['openai','gemini'].includes(prefs.seoProvider) || typeof prefs.seoGeminiModel !== 'string' || !/^gemini-[a-z0-9.-]{1,80}$/.test(prefs.seoGeminiModel) || typeof prefs.seoOpenaiModel !== 'string' || !/^gpt-[a-z0-9.-]{1,80}$/.test(prefs.seoOpenaiModel) || !Number.isInteger(prefs.seoTitleMaxLength) || prefs.seoTitleMaxLength < 1 || prefs.seoTitleMaxLength > 140 || !Number.isInteger(prefs.seoAltTextCount) || prefs.seoAltTextCount < 1 || prefs.seoAltTextCount > 20 || !validImageNaming(prefs.seoFileNaming) || prefs.upscaleProvider !== 'remote' || ![2,4,6,8].includes(prefs.upscaleFactor) || typeof prefs.upscaleRequireTransparency !== 'boolean' || typeof prefs.upscaleQc !== 'boolean' || !['realesrgan-x4plus','realesrgan-x4plus-anime','realesrnet-x4plus','realesr-animevideov3','real-hat-gan-sharper-x4'].includes(prefs.upscaleModel) || typeof prefs.upscaleCleanup !== 'boolean' || !['low','medium','high'].includes(prefs.upscaleCleanupStrength)) return bad('Invalid settings values');
     if (!Array.isArray(prefs.seoDraftFields) || prefs.seoDraftFields.some((field: unknown) => !['title','description','tags','imageAltTexts','primaryKeyword','secondaryKeywords','longTailKeywords','categorySuggestion','attributes','materials','photoPlan','priceSuggestion','sku','digitalFiles','licenseNotes'].includes(String(field))) || new Set(prefs.seoDraftFields).size !== prefs.seoDraftFields.length) return bad('Invalid SEO draft field selection');
     if (!prefs.seoPrompts || typeof prefs.seoPrompts !== 'object' || Array.isArray(prefs.seoPrompts) || Object.keys(prefs.seoPrompts).some(key => !seoPromptFields.includes(key as typeof seoPromptFields[number])) || seoPromptFields.some(key => typeof prefs.seoPrompts[key] !== 'string' || prefs.seoPrompts[key].length > 2000)) return bad('Invalid custom SEO prompts');
     values.preferences = JSON.stringify(prefs);
@@ -136,10 +145,20 @@ function settingsError(error: unknown): Response {
 }
 
 export async function GET(req: Request) {
-  try { return await getSettings(req); } catch (error) { return settingsError(error); }
+  try {
+    const response = await getSettings(req);
+    // Every request is scoped to the authenticated active store. Do not let
+    // a browser/proxy reuse another store's settings or credential status.
+    response.headers.set('Cache-Control', 'private, no-store');
+    return response;
+  } catch (error) { return settingsError(error); }
 }
 
 export async function POST(req: Request) {
-  try { return await postSettings(req); } catch (error) { return settingsError(error); }
+  try {
+    const response = await postSettings(req);
+    response.headers.set('Cache-Control', 'private, no-store');
+    return response;
+  } catch (error) { return settingsError(error); }
 }
 
