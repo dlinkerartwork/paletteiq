@@ -22,8 +22,13 @@ import { POST as studioPost } from '@/app/api/studio/route';
 import { POST as rewritePost } from '@/app/api/regenerate-prompt/route';
 import { isImageBatchModel, imageBatchModelError, DEFAULT_IMAGE_BATCH_MODEL } from '@/lib/image-batch-models';
 import { AUTOMATION_LIMITS, activeExpansionSlots, planExpansionSlots, pendingImageIds, availableImageSlots, type ExpansionSlot } from '@/lib/automation-parallel';
+import { canAutoRecoverSimilarityPause, unverifiedImages, similarityRetryKey, similarityDue, similarityExhausted, SIMILARITY_RECHECK_COOLDOWN_MS, type RetryLedger } from '@/lib/automation-similarity';
+import { reviewStoredBatchImage } from '@/lib/image-review-queue';
+import { batchAssetKey } from '@/lib/batch-assets';
+import { nativeAssetBucket } from '@/lib/native-bridge';
+import type { SimilarityReview } from '@/lib/similarity-review';
 
-type Stage = 'research'|'expanding'|'prompts'|'images'|'revising'|'regenerating'|'verifying'|'listing'|'completed'|'paused';
+type Stage = 'research'|'expanding'|'prompts'|'images'|'reviewing'|'revising'|'regenerating'|'verifying'|'listing'|'completed'|'paused';
 type Flow = { enabled: boolean; stage: Stage; target: number; textModel?: string; promptModel?: string; batchImageModel?: string; imageQuality?: string; startedAt: number; updatedAt: number;
   resumeStage?: Stage; lastError?: string; leaseUntil?: number; expandAttempts?: number;
   promptAttempts?: number; imageAttempts?: number; revisionAttempts?: number;
@@ -31,9 +36,10 @@ type Flow = { enabled: boolean; stage: Stage; target: number; textModel?: string
   expansionBatches?: ExpansionSlot[]; // Durable, independent AI Fill slots.
   revisionBatch?: { batchId?: string; responseId?: string; status:'submitting'|'queued'|'in_progress'; startedAt:number;
     items:Array<{id:string;originalPrompt:string;imageUrl:string}> };
-  reviewQueue?: string[]; revisedIds?: string[]; regenerationBatchId?: string };
+  reviewQueue?: string[]; revisedIds?: string[]; regenerationBatchId?: string;
+  similarityRetries?: Record<string,number>; similarityNextAt?: Record<string,number> };
 type Subject = PromptProject['characters'][number] & { imageUrl?: string; origin?: string;
-  similarityReview?: { status?: string; score?: number; reason?: string } };
+  similarityReview?: SimilarityReview };
 type Project = Omit<PromptProject, 'characters'> & Pick<PromptProject, 'id' | 'name' | 'title' | 'theme' | 'subtheme' | 'microtheme' | 'style' | 'palette' | 'texture' | 'primaryKeyword' | 'keywords' | 'longTailKeywords' | 'notes' | 'emotionDirection' | 'ageDirection' | 'cutenessDirection' | 'creativeControls' | 'research' | 'promptJob'> & { characters: Subject[]; fullAutomation?: Flow;
   researchJob?: { status: string; error?: string; responseId?: string; selectedImages?: string[]; model?: string }; listing?: { title?: string };
   url?: string; images?: string[]; selectedImageUrls?: string[]; characterTarget?: number; researchModel?: string; progressivePrompts?: boolean };
@@ -122,6 +128,19 @@ function progress(p: Project) {
     promptCount: p.characters.filter(c => !!c.prompt?.trim()).length,
     imageCount: p.characters.filter(c => !!c.imageUrl).length,
     flaggedCount: p.characters.filter(c => c.similarityReview?.status === 'needs_review').length,
+    similarityProgress: {
+      stage: p.fullAutomation?.stage || 'inactive',
+      total: p.characters.filter(c => !!c.imageUrl).length,
+      clear: p.characters.filter(c => c.imageUrl && c.similarityReview?.status==='clear').length,
+      flagged: p.characters.filter(c => c.imageUrl && c.similarityReview?.status==='needs_review').length,
+      unverified: unverifiedImages(p.characters).length,
+      retryAttempts: Object.values(p.fullAutomation?.similarityRetries||{}).reduce((a,b)=>a+b,0),
+      revisionTotal: p.fullAutomation?.reviewQueue?.length||0,
+      revisionDone: p.fullAutomation?.revisedIds?.length||0,
+      regenerated: (p.fullAutomation?.reviewQueue||[]).filter(id=>
+        p.characters.some(c=>c.id===id && !!p.fullAutomation?.regenerationBatchId &&
+          c.imageUrl?.includes('batch='+p.fullAutomation.regenerationBatchId))).length,
+    },
     listingReady: Boolean(p.listing?.title) };
 }
 async function prefs(owner: string): Promise<Prefs> {
@@ -234,11 +253,91 @@ async function scheduleReadyImageWave(
   return {occupied,submitted:chunks.length};
 }
 
+/**
+ * Re-evaluate ONLY the currently saved image version. Match its exact image
+ * URL to an imported Batch receipt rather than guessing a file location.
+ * Retry claims are saved BEFORE any potentially billable visual API call;
+ * interrupted responses consume a bounded attempt, never a runaway loop.
+ */
+async function recheckUnverifiedSimilarity(owner:string,id:string) {
+  const snapshot=(await load(owner,id))?.p;
+  if(!snapshot)throw Error('Collection missing during Similarity Review');
+  const flow=snapshot.fullAutomation!;
+  const ledger:RetryLedger={attempts:flow.similarityRetries,nextAt:flow.similarityNextAt};
+  const missing=unverifiedImages(snapshot.characters);
+  if(!missing.length)return;
+  const exhausted=similarityExhausted(snapshot.characters,ledger);
+  if(exhausted.length)
+    throw Error(exhausted.length+' image(s) still unverified after three similarity rechecks. '+
+      'Open image storage and review reasons; never treat unavailable comparisons as clear.');
+  const due=similarityDue(snapshot.characters,ledger,Date.now());
+  if(!due.length)return; // Cooldown; scheduler resumes automatically.
+  const [records,secret]=await Promise.all([
+    jobs(owner,id),
+    userCredential(owner,'openai').then(key=>key||sharedProviderSecret(owner,'OPENAI_API_KEY')),
+  ]);
+  if(!secret)throw Error('OpenAI API key required to recheck saved similarity results');
+  const bucket=nativeAssetBucket()??env.BUCKET;
+  if(!bucket)throw new TransientStatusError('Image storage unavailable for similarity recheck; saved images preserved.');
+  const references=snapshot.selectedImageUrls??snapshot.images??[];
+  const receipts=records.flatMap(record=>{
+    let items:Array<{id:string;status:string;imageUrl?:string}>=[];
+    try { items=JSON.parse(record.items) as typeof items; } catch {}
+    return items.filter(item=>item.status==='done' && !!item.imageUrl)
+      .map(item=>({record,item}));
+  });
+  const targets=due.map(character=>{
+    const matched=receipts.find(({item})=>item.id===character.id &&
+      item.imageUrl===character.imageUrl);
+    if(!matched)
+      throw Error('Cannot locate the saved Image Batch receipt for '+character.name+
+        '. Existing image preserved; manual recovery needed.');
+    const extension=matched.record.format==='jpeg'?'jpg':'png';
+    return {character,record:matched.record,key:batchAssetKey(owner,character.id,extension,matched.record.id),
+      mime:extension==='jpg'?'image/jpeg' as const:'image/png' as const};
+  });
+  const now=Date.now();
+  await save(owner,id,latest=>{
+    const retries={...(latest.fullAutomation?.similarityRetries||{})};
+    const nextAt={...(latest.fullAutomation?.similarityNextAt||{})};
+    for(const target of targets){
+      const latestChar=latest.characters.find(c=>c.id===target.character.id);
+      if(latestChar?.imageUrl!==target.character.imageUrl)continue;
+      const key=similarityRetryKey(target.character);
+      retries[key]=(retries[key]||0)+1;
+      nextAt[key]=now+SIMILARITY_RECHECK_COOLDOWN_MS;
+    }
+    return {...latest,fullAutomation:{...latest.fullAutomation!,
+      similarityRetries:retries,similarityNextAt:nextAt,updatedAt:Date.now()}};
+  });
+  const results=await Promise.allSettled(targets.map(async ({key,mime})=>
+    reviewStoredBatchImage(bucket,key,mime,secret,references)));
+  for(let i=0;i<results.length;i++){
+    const target=targets[i];
+    const result=results[i];
+    const review:SimilarityReview=result.status==='fulfilled'?result.value:{
+      status:'unverified',checkedAt:Date.now(),
+      reason:'Similarity review unavailable: '+String(result.reason).slice(0,180)};
+    await save(owner,id,latest=>({...latest,characters:latest.characters.map(c=>
+      c.id===target.character.id && c.imageUrl===target.character.imageUrl &&
+      c.similarityReview?.status!=='clear' && c.similarityReview?.status!=='needs_review'
+        ? {...c,similarityReview:review}:c)}));
+  }
+}
+
 async function tick(req: Request, owner: string, id: string) {
   const key = owner + ':' + id;
   if (busy.has(key)) return { waiting: true };
   const initial = await load(owner,id);
-  if (!initial || !isActive(initial.p.fullAutomation)) return initial ? progress(initial.p) : { error: 'Collection missing' };
+  if (!initial) return { error:'Collection missing' };
+  if(canAutoRecoverSimilarityPause(initial.p.fullAutomation)) {
+    // Existing collections paused by the OLD unverified-review bug resume
+    // automatically, but never restart an explicit user pause/uncertain job.
+    await save(owner,id,p=>({...p,fullAutomation:{...p.fullAutomation!,
+      stage:'reviewing',resumeStage:undefined,lastError:undefined,updatedAt:Date.now()}}));
+  }
+  const active=(await load(owner,id))?.p;
+  if(!active || !isActive(active.fullAutomation))return progress(initial.p);
   const flow = initial.p.fullAutomation!;
   if (flow.leaseUntil && flow.leaseUntil > Date.now()) return { waiting:true, ...progress(initial.p) };
   // Persist lease to prevent double-billing from two browser tabs.
@@ -441,11 +540,16 @@ async function tick(req: Request, owner: string, id: string) {
         const missing=current.characters.filter(c=>!c.imageUrl);
         if(missing.length)
           throw Error('Missing '+missing.length+' images after Batch import. Review the original paid receipts before retrying.');
-        const unverified=current.characters.filter(c=>c.imageUrl &&
-          c.similarityReview?.status!=='clear' && c.similarityReview?.status!=='needs_review');
-        if(unverified.length)
-          throw Error(unverified.length+' image(s) have unverified similarity checks. Review required.');
-        const flagged=current.characters.filter(c=>c.imageUrl&&
+        // Never pause because the similarity provider was temporarily
+        // unavailable. Recheck persisted assets in a bounded review phase.
+        await setStage(owner,id,'reviewing');
+      }
+    } else if (f.stage === 'reviewing') {
+      await recheckUnverifiedSimilarity(owner,id);
+      const verified=(await load(owner,id))?.p;
+      if(!verified)throw Error('Collection disappeared during Similarity Review');
+      if(!unverifiedImages(verified.characters).length){
+        const flagged=verified.characters.filter(c=>c.imageUrl &&
           c.similarityReview?.status==='needs_review').map(c=>c.id);
         if(flagged.length) await setStage(owner,id,'revising',{
           reviewQueue:flagged,revisedIds:[],revisionAttempts:0});
