@@ -138,9 +138,14 @@ async function finish(owner: string, projectId: string, job: ResearchJob, respon
   if (!saved || saved.data.researchJob?.id !== job.id) return bad('Research run was superseded or deleted', 409);
   if (saved.data.researchJob.status === 'completed') return Response.json({ job: safeJob(saved.data.researchJob), project: saved.data });
   let parsed: unknown;
-  try { parsed = JSON.parse(extractText(response)); }
-  catch {
-    const failed = await persistJob(owner, projectId, job.id, { status: 'failed', error: 'Background research returned invalid JSON. Review API output and retry explicitly.' });
+  try {
+    // Reuse the same normalization for the final Style DNA synthesis.
+    // A completed merge may also wrap its research JSON one level deep.
+    parsed = JSON.parse(parseResearchWorkerOutput(extractText(response),job.source.title).resultText);
+  } catch (error) {
+    const failed = await persistJob(owner, projectId, job.id, { status: 'failed',
+      error: 'Background research output cannot be imported from the saved response: ' +
+        (error instanceof Error ? error.message : String(error)).slice(0,250) });
     return Response.json({ job: failed && safeJob(failed) });
   }
   const source = job.source;
@@ -743,6 +748,21 @@ export async function GET(req: Request) {
       return Response.json({job:safeJob(failure||latest)});
     }
     if (latest.mergeStatus==='planned') {
+      // Never pay for Style DNA synthesis when every worker returned visual
+      // notes but no actual character concepts.
+      const hasConcepts=(latest.workers||[]).some(worker=>{
+        try {
+          const parsed=JSON.parse(worker.resultText||'{}') as {characters?:unknown[]};
+          return Array.isArray(parsed.characters) && parsed.characters.length>0;
+        } catch { return false; }
+      });
+      if (!hasConcepts) {
+        const incomplete=await persistJob(user.userId,projectId,job.id,{
+          status:'failed',
+          error:'Research groups contained no usable character concepts. Existing response IDs remain saved; inspect outputs before a paid synthesis retry.',
+        });
+        return Response.json({job:safeJob(incomplete||latest)});
+      }
       // Claim the ONE paid synthesis request atomically, even if both the
       // desktop monitor and the browser poll simultaneously.
       let claimed=false;
