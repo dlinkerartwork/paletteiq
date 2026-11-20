@@ -27,7 +27,7 @@ test('hybrid Style DNA merge uses all completed worker evidence',()=>{
   assert.match(instruction,/do not invent/);
 });
 test('worker submission is durable and polling never resubmits worker',()=>{
-  assert.match(research,/const partitions = splitResearchImages\\(selectedImages, hybrid \\? 3 : 1\\)/);
+  assert.ok(research.includes("const partitions = splitResearchImages(selectedImages, hybrid ? 3 : 1)"));
   assert.match(research,/await Promise\.all\(submissions\)/);
   assert.match(research,/updateWorker\(user\.userId,projectId,job\.id,worker\.index/);
   assert.match(research,/eq\(projects\.updatedAt, saved\.row\.updatedAt\)/);
