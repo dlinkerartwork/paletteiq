@@ -1104,7 +1104,7 @@ export default function Home() {
     ...researchEmotion.observedExpressions,
     ...normalizeCreativeAnalysis(project.research).imageObservations.flatMap(o=>o.expressions),
   ]);
-  const referenceMood=researchEmotion.referenceMood || detectedReferenceMood.mood;
+  const referenceMood=detectedReferenceMood.mood || researchEmotion.referenceMood;
   const moodEvidence=researchEmotion.moodEvidence || detectedReferenceMood.evidence;
   const moodConfidence=researchEmotion.moodConfidence || detectedReferenceMood.confidence;
   const moodPresets=['joyful, cheerful and playful','happy and sweet','curious and excited',
