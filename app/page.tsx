@@ -24,7 +24,7 @@ import { collectionHasUnsavedEdits } from '@/lib/collection-unsaved';
 import { auditCreativeConcepts, expressionDistribution, familyDistribution, normalizeCreativeAnalysis, normalizeCreativeControls, reverseEngineeringKeys, styleDNAKeys, characterDNAKeys, selectDiverseConcepts, type CreativeAnalysis, type CreativeControls } from '@/lib/creative-intelligence';
 
 type Character = { id: string; name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description: string; prompt: string; status: 'draft' | 'ready' | 'done' | 'error'; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: { id: string; submittedAt?: number; factor?: number }; error?: string; similarityReview?: SimilarityReview; origin: 'listing' | 'ai' | 'manual' };
-type ResearchJobPreview = { workerPreviews?: Array<{index:number;status:string;imageCount:number;theme:string;style:string;concepts:Array<{name:string;family:string;description:string}>;error?:string}>; workersCompleted?: number; workersTotal?: number; mergeStatus?: string; id: string; status: 'submitting' | 'queued' | 'in_progress' | 'completed' | 'failed'; target: number; requested: number; completedCount: number; model: string; createdAt: number; updatedAt: number; error?: string };
+type ResearchJobPreview = { transport?: 'batch'|'background'; workerPreviews?: Array<{index:number;status:string;imageCount:number;theme:string;style:string;concepts:Array<{name:string;family:string;description:string}>;error?:string}>; workersCompleted?: number; workersTotal?: number; mergeStatus?: string; id: string; status: 'submitting' | 'queued' | 'in_progress' | 'completed' | 'failed'; target: number; requested: number; completedCount: number; model: string; createdAt: number; updatedAt: number; error?: string };
 const hasActiveResearch = (job?: ResearchJobPreview) => !!job && ['submitting','queued','in_progress'].includes(job.status);
 type PromptJobPreview = { mode?: 'batch'|'progressive'; groupStates?: Array<{key:string;status:string;error?:string}>; id: string; status: string; total: number; imported: number; failed: number; processedGroups: number; totalGroups: number; model: string; createdAt: number; updatedAt: number; error?: string };
 const hasActivePromptJob = (job?: PromptJobPreview) => !!job && !['completed','completed_with_errors','failed','cancelled','expired'].includes(job.status);
@@ -550,10 +550,10 @@ export default function Home() {
       if (fullAutoRequested && project.progressivePrompts &&
           !window.confirm('Progressive AI Prompts will create separate OpenAI Batch jobs for groups of 10 characters. Each job can incur charges, and no group is automatically resubmitted if status is uncertain. Continue?')) return;
       if (fullAutoRequested && project.hybridResearch !== false &&
-          !window.confirm('Hybrid Parallel Research will submit up to 3 paid OpenAI analysis requests, followed by 1 paid Style DNA merge request. Token usage and cost may be higher than Single Research. Continue?')) return;
+          !window.confirm('Hybrid Parallel Research will submit up to 3 paid OpenAI Batch jobs, followed by 1 paid Style DNA Batch merge. Token usage and cost may be higher than Single Research. Continue?')) return;
       // Research requests are durably tracked and can continue remotely.
       // The browser is only a status viewer, never the job runner.
-      setBusy('research-start'); setMessage('Saving the collection and submitting OpenAI background research…');
+      setBusy('research-start'); setMessage('Saving the collection and submitting OpenAI Research Batches…');
       let startedNewAutomation = false;
       try {
         if (fullAutoRequested) {
@@ -603,7 +603,7 @@ export default function Home() {
         setAnalysisProgress({ done: result.job.completedCount, total: result.job.target });
         setMessage(fullAutoRequested
           ? 'Full Automation started. PaletteIQ will expand missing characters, generate prompts and images, revise similarity-flagged prompts once, then create the Etsy listing draft. OpenAI jobs run remotely; next workflow stages resume when PaletteIQ runs (including Desktop tray).'
-          : 'OpenAI background research accepted. You may close PaletteIQ or shut down this PC; OpenAI continues processing. Reopen PaletteIQ to import the completed characters automatically. For a target above 160, use AI Fill afterward.');
+          : 'OpenAI Research Batch accepted. You may close PaletteIQ or shut down this PC; OpenAI continues processing. Reopen PaletteIQ to import the completed characters automatically. For a target above 160, use AI Fill afterward.');
       } catch (error) {
         // Never pause a pre-existing workflow merely because a stale tab
         // attempted to start again. Pause only a workflow created by THIS call.
@@ -1194,7 +1194,7 @@ export default function Home() {
           <b>{project.researchJob?.completedCount || 0} saved / {project.researchJob?.target} target</b></div>
         {!!project.researchJob?.workerPreviews?.length && <div className="panel" style={{marginTop:12}}><h3>Live Research previews (provisional)</h3><p className="sub">Each completed worker appears immediately. These are candidate ideas, not saved final characters; Merge &amp; Style DNA will reconcile and deduplicate them.</p>{project.researchJob.workerPreviews.map(w=><details key={w.index} open={w.status==='completed'}><summary>Reference group {w.index+1} · {w.imageCount} images · {w.status} · {w.concepts.length} candidate concepts</summary>{w.theme && <p className="sub">Theme: {w.theme} · Style: {w.style}</p>}{w.error && <p className="sub" role="alert">{w.error}</p>}{w.concepts.length>0 && <div className="sub">{w.concepts.map((c,i)=><p key={i}><b>{c.name}</b> {c.family?'('+c.family+')':''} — {c.description}</p>)}</div>}</details>)}</div>}
         {project.researchJob?.workersTotal && <p className="sub">Hybrid Parallel Research: {project.researchJob.workersCompleted || 0}/{project.researchJob.workersTotal} reference groups analyzed · Merge &amp; Style DNA: {project.researchJob.mergeStatus || 'pending'}. After the target characters are saved, Auto-follow opens AI Prompts directly.</p>}
-        <p className="sub">OpenAI Background research continues remotely while the PC is closed. PaletteIQ imports and synthesizes finished results when the app resumes. Character counts become available after Merge &amp; Style DNA.</p>
+        <p className="sub">New Research jobs use OpenAI Batch API (asynchronous, completion window up to 24 hours). The Batch continues remotely while the PC is closed. PaletteIQ imports completed results when the app resumes. Character counts become available after Merge &amp; Style DNA.</p>
         {project.researchJob && project.researchJob.target > project.researchJob.requested && <p className="sub">The first remote stage is capped at {project.researchJob.requested} subjects. Use AI Fill for the rest after it completes.</p>}
       </section>}
       {busy === 'analyze' && <div className="panel analysis-progress"><div className="production-progress"><span>Analyzing Etsy images and building {target} original subjects with OpenAI…</span><b>{analysisProgress.done}/{analysisProgress.total}</b></div><div className="progress"><i style={{ width: `${analysisProgress.total ? Math.min(100, 100 * analysisProgress.done / analysisProgress.total) : 0}%` }}/></div><p className="sub">Visual research runs first, then AI generates unique additions in small groups. Please keep this page open until the collection is saved.</p></div>}
