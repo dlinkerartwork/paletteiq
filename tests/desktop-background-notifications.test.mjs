@@ -59,5 +59,7 @@ test('closing Desktop hides to tray while explicit Quit stops backend and timer'
   assert.match(desktop, /Quit completely \(stop background monitoring\)/);
   assert.match(desktop, /app\.on\('before-quit', \(\) => \{/);
   assert.match(desktop, /clearInterval\(backgroundMonitorTimer\)/);
-  assert.match(desktop, /server\.kill\(\)/);
+  assert.match(desktop, /function stopOwnedBackend\(child\)/);
+  assert.match(desktop, /spawn\('taskkill', \['\/PID', String\(child\.pid\), '\/T', '\/F'\]/);
+  assert.match(desktop, /if \(server && !server\.killed\) stopOwnedBackend\(server\)/);
 });
