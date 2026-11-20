@@ -22,7 +22,7 @@ let mainWindow = null;
 let tray = null;
 let backgroundMonitorTimer = null;
 let trayInfoDisplayed = false;
-const BACKGROUND_POLL_MS = 60_000;
+const BACKGROUND_POLL_MS = 20_000;
 
 
 function workspaceRoot() {
