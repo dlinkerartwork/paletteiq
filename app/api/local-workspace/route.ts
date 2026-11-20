@@ -30,6 +30,7 @@ function discovery(req: Request) {
   if (cors) {
     headers.set('Access-Control-Allow-Origin', origin);
     headers.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    headers.set('Access-Control-Allow-Headers', 'Cache-Control, Pragma, Content-Type');
     headers.set('Access-Control-Allow-Private-Network', 'true');
   }
   return { desktop, cors, headers };
