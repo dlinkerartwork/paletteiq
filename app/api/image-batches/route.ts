@@ -180,12 +180,19 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
       }
       if (handled >= BATCH_IMPORT_LIMIT) break;
     }
-    if (!interrupted) for (const item of items) if (item.status === 'pending') { item.status = 'error'; item.error = 'No output returned by OpenAI for this item.'; changedIds.add(item.id); }
+    // If the OpenAI output is complete but we stopped due to the safe import
+    // budget, leave unhandled rows pending for another recovery cycle.
+    if (!interrupted) for (const item of items) if (item.status === 'pending') {
+      item.status = 'error'; item.error = 'No output returned by OpenAI for this item.'; changedIds.add(item.id);
+    }
   }
   // Review at most two already-persisted images per sync, independently of
   // the import budget. Keep the Batch active as "reviewing" until every saved
   // asset has a verdict; Full Automation must not treat unchecked as clear.
-  if (bucket && isTerminal) {
+  // Recovery after a PC restart prioritizes saving every already-paid PNG.
+  // Visual similarity checks can be slow/expensive; begin them only after all
+  // Batch output rows have been imported. This never skips the checks.
+  if (bucket && isTerminal && items.every(item => item.status !== 'pending')) {
     const reviewQueue = items.filter(needsBatchReview).slice(0, BATCH_REVIEW_LIMIT);
     await Promise.all(reviewQueue.map(async item => {
       const extension = job.format === 'jpeg' ? 'jpg' : 'png';
