@@ -561,6 +561,10 @@ export async function POST(req:Request) {
       return bad('An automation workflow already exists. Resume the paused workflow rather than submitting duplicate paid work.',409);
     if (current.p.characters.some(c=>c.imageUrl)) return bad('Full automation must start before image generation',409);
     const config=await prefs(user.userId);
+    // Avoid charging for Research if the listing step will be blocked by
+    // a previously saved non-Batch OpenAI SEO preference.
+    if(config.seoProvider==='openai')
+      return bad('Batch-only Full Automation requires Gemini for Etsy SEO. In Settings → SEO AI Prompts, choose Google Gemini and save before starting.',422);
     const selectedBatchImageModel=config.automationImageModel || DEFAULT_IMAGE_BATCH_MODEL;
     if (!isImageBatchModel(selectedBatchImageModel)) return bad(imageBatchModelError(selectedBatchImageModel),422);
     const now=Date.now();
