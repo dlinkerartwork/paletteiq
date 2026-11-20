@@ -701,7 +701,7 @@ export default function Home() {
       await api({ action: 'save', id: working.id, name: working.name, data: working });
       setProjects(prev => [working, ...prev.filter(p => p.id !== working.id)]);
       setMessage(`${working.characters.length}/${target} subjects ready: ${observedCount} identified from listing evidence, ${working.characters.length - observedCount} original AI proposals. ${working.characters.length < target ? 'Some suggestions were duplicates; use AI fill to complete the target.' : 'Collection saved.'}`);
-      setTab('characters');
+      if (autoFollowRef.current && latestWorkspace.current.tab === 'analysis') setTab('characters');
     } catch (e) {
       let savedPartial = false;
       if (working !== project && working.characters.length) {
@@ -1151,6 +1151,10 @@ export default function Home() {
       setMessage(completed === chosen.length
         ? `${completed} prompts generated and saved with Gemini. Review your collection.`
         : `${completed}/${chosen.length} prompts generated and saved. ${chosen.length - completed} missing or invalid; use Generate again to retry only characters without prompts.`);
+      if (autoFollowRef.current && latestWorkspace.current.tab === 'prompts' &&
+          completed === chosen.length && current.characters.length > 0 &&
+          current.characters.every(char => !!char.prompt.trim()))
+        setTab('production');
     } catch (error) {
       setMessage(`${completed}/${chosen.length} prompts generated and saved. ${error instanceof Error ? error.message : 'AI request failed'} Review the current collection, save any unsaved edits, then retry only characters without prompts.`);
     } finally { setBusy(''); }
