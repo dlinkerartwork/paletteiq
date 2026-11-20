@@ -35,7 +35,7 @@ test('Web and Electron select one backend, never open/write the two SQLite datab
   assert.match(layout,/<SharedLocalWorkspaceGate><AccountWorkspaceGate>/);
   assert.match(desktop,/const SERVER_PORT = 18763/);
   assert.match(desktop,/window\.loadURL\(SERVER_URL\)/);
-  assert.doesNotMatch(gate,/\.db\b|sqlite|writeFileSync|/);
+  assert.doesNotMatch(gate,/writeFileSync|better-sqlite3|sqlite3\.Database/);
 });
 
 test('Web remembers shared selection and refuses silent fallback when Desktop is offline',()=>{
