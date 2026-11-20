@@ -794,7 +794,9 @@ export default function Home() {
     // previews after relaunch. Do not poll failed jobs repeatedly.
     if (project.researchJob?.status === 'failed') return () => { closed = true; };
     const interval = window.setInterval(() => void pollResearch(), 6000);
-    return () => { closed = true; window.clearInterval(interval); };
+    const onOnline = () => { void pollResearch(); };
+    window.addEventListener('online',onOnline);
+    return () => { closed = true; window.clearInterval(interval); window.removeEventListener('online',onOnline); };
   }, [loadDone, project.id, project.researchJob?.id, project.researchJob?.status]);
   useEffect(() => {
     if (!loadDone || !hasActivePromptJob(project.promptJob)) return;
@@ -842,7 +844,12 @@ export default function Home() {
     };
     void pollPrompts();
     const interval = window.setInterval(() => void pollPrompts(), 10000);
-    return () => { closed = true; window.clearInterval(interval); };
+    const onOnline = () => {
+      networkPollFailures.current.delete('prompts');
+      void pollPrompts();
+    };
+    window.addEventListener('online',onOnline);
+    return () => { closed = true; window.clearInterval(interval); window.removeEventListener('online',onOnline); };
   }, [loadDone, project.id, project.promptJob?.id, project.promptJob?.status]);
   // Persisted Full Automation controller: the worker advances one bounded
   // stage at a time. OpenAI background jobs run remotely, and this controller
@@ -904,7 +911,12 @@ export default function Home() {
     };
     void step();
     const timer = window.setInterval(() => void step(), 12000);
-    return () => { stopped = true; window.clearInterval(timer); };
+    const onOnline = () => {
+      networkPollFailures.current.delete('automation');
+      void step(); // Read saved receipts first; never blindly resubmit paid work.
+    };
+    window.addEventListener('online',onOnline);
+    return () => { stopped = true; window.clearInterval(timer); window.removeEventListener('online',onOnline); };
   }, [loadDone, project.id, project.fullAutomation?.enabled, project.fullAutomation?.stage]);
   // Keep all OTHER active collections advancing while this window is open.
   // The current collection has its own tab-following controller above. The
