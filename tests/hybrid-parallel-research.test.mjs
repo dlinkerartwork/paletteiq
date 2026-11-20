@@ -49,7 +49,7 @@ test('Hybrid mode can be disabled to use the original single request and warns b
   assert.match(page,/hybridResearch\?: boolean/);
   assert.match(page,/Hybrid Parallel Research \(3 workers \+ Style DNA merge\)/);
   assert.match(page,/hybridResearch: fullAutoRequested && project\.hybridResearch !== false/);
-  assert.match(page,/up to 3 paid OpenAI analysis requests, followed by 1 paid Style DNA merge request/);
+  assert.match(page,/up to 3 paid OpenAI Batch jobs, followed by 1 paid Style DNA Batch merge/);
   assert.match(research,/body\.retryFailed !== true && body\.hybridResearch !== false/);
   assert.match(research,/Worker submission interrupted before a tracking ID was saved/);
 });
