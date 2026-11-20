@@ -747,7 +747,8 @@ export default function Home() {
   // Keep the UI interactive; poll only the remote response status, then import
   // the server-owned collection once. Works after refresh/relaunch as well.
   useEffect(() => {
-    if (!loadDone || !hasActiveResearch(project.researchJob)) return;
+    if (!loadDone || (!hasActiveResearch(project.researchJob) &&
+        project.researchJob?.status !== 'failed')) return;
     const projectId = project.id, jobId = project.researchJob!.id;
     let closed = false, polling = false;
     const pollResearch = async () => {
@@ -789,6 +790,9 @@ export default function Home() {
       } finally { polling = false; }
     };
     void pollResearch();
+    // One read-only refresh for a previously failed job exposes safe group
+    // previews after relaunch. Do not poll failed jobs repeatedly.
+    if (project.researchJob?.status === 'failed') return () => { closed = true; };
     const interval = window.setInterval(() => void pollResearch(), 6000);
     return () => { closed = true; window.clearInterval(interval); };
   }, [loadDone, project.id, project.researchJob?.id, project.researchJob?.status]);
