@@ -11,7 +11,7 @@ import { primaryCharacterSubject } from '@/lib/primary-character-focus';
 import { projectPromptContext, isActivePromptBatch, type PromptProject } from '@/lib/prompt-batch-jobs';
 import { normalizeListing } from '@/lib/etsy-listing';
 import { safeRejectedImageResearch } from '@/lib/research-image-input';
-import { GET as researchGet, submitResearchBatch, getResearchBatchResult } from '@/app/api/research-jobs/route';
+import { GET as researchGet, submitResearchBatch, getResearchBatchResult, submitStandardTextResponse, getStandardTextResponseResult } from '@/app/api/research-jobs/route';
 import { diversityExpansionInstruction, productionPromptInstruction } from '@/lib/creative-research-prompts';
 import { familyDistribution, expressionDistribution } from '@/lib/creative-intelligence';
 import { userCredential } from '@/lib/credentials';
@@ -26,8 +26,8 @@ type Stage = 'research'|'expanding'|'prompts'|'images'|'revising'|'regenerating'
 type Flow = { enabled: boolean; stage: Stage; target: number; textModel?: string; promptModel?: string; batchImageModel?: string; imageQuality?: string; startedAt: number; updatedAt: number;
   resumeStage?: Stage; lastError?: string; leaseUntil?: number; expandAttempts?: number;
   promptAttempts?: number; imageAttempts?: number; revisionAttempts?: number;
-  expansionBatch?: { batchId?: string; status:'submitting'|'queued'|'in_progress'; startedAt:number; count:number };
-  revisionBatch?: { batchId?: string; status:'submitting'|'queued'|'in_progress'; startedAt:number;
+  expansionBatch?: { batchId?: string; responseId?: string; status:'submitting'|'queued'|'in_progress'; startedAt:number; count:number };
+  revisionBatch?: { batchId?: string; responseId?: string; status:'submitting'|'queued'|'in_progress'; startedAt:number;
     items:Array<{id:string;originalPrompt:string;imageUrl:string}> };
   reviewQueue?: string[]; revisedIds?: string[]; regenerationBatchId?: string };
 type Subject = PromptProject['characters'][number] & { imageUrl?: string; origin?: string;
@@ -198,14 +198,16 @@ async function tick(req: Request, owner: string, id: string) {
         throw Error('Character expansion did not reach the target: '+p.characters.length+'/'+f.target);
       else if(f.expansionBatch){
         const receipt=f.expansionBatch;
-        if(!receipt.batchId){
+        if(!receipt.batchId&&!receipt.responseId){
           // Submission may have been accepted by OpenAI but response was lost.
           // A fresh request is NEVER submitted for the same expansion.
           throw Error('AI Fill Batch ID missing after submission. Inspect OpenAI Batch activity; do not resubmit automatically.');
         }
         const secret=await userCredential(owner,'openai')||sharedProviderSecret(owner,'OPENAI_API_KEY');
         if(!secret)throw Error('OpenAI API key required for AI Fill Batch recovery');
-        const output=await getResearchBatchResult(secret,receipt.batchId,'character-expansion');
+        const output=receipt.responseId
+          ? await getStandardTextResponseResult(secret,receipt.responseId)
+          : await getResearchBatchResult(secret,receipt.batchId!,'character-expansion');
         if(output.status==='failed')throw Error('AI Fill Batch failed: '+(output.error||'remote error'));
         if(output.status==='completed' && output.text){
           const parsed=JSON.parse(output.text) as {characters?:Array<Record<string,string>>};
@@ -250,11 +252,10 @@ async function tick(req: Request, owner: string, id: string) {
         await save(owner,id,latest=>({...latest,fullAutomation:{
           ...latest.fullAutomation!,expansionBatch:claim}}));
         try{
-          const batchId=await submitResearchBatch(secret,'character-expansion',textModel(p),
-            [{role:'user',content:[{type:'input_text',text:instruction}]}],
-            Math.min(13000,3000+count*190));
+          const responseId=await submitStandardTextResponse(secret,textModel(p),
+            instruction,Math.min(13000,3000+count*190));
           await save(owner,id,latest=>({...latest,fullAutomation:{
-            ...latest.fullAutomation!,expansionBatch:{...claim,status:'queued',batchId}}}));
+            ...latest.fullAutomation!,expansionBatch:{...claim,status:'queued',responseId}}}));
         }catch(error){
           throw Error('AI Fill Batch submission needs inspection before retrying. '+
             (error instanceof Error?error.message:String(error)));
@@ -286,10 +287,10 @@ async function tick(req: Request, owner: string, id: string) {
         const missing=p.characters.filter(c=>!c.imageUrl&&!!c.prompt?.trim());
         if (p.characters.some(c=>!c.prompt?.trim())) await setStage(owner,id,'prompts');
         else if (missing.length) {
-          if ((f.imageAttempts||0)>=Math.ceil(f.target/120)+3)
+          if ((f.imageAttempts||0)>=Math.ceil(f.target/20)+3)
             throw Error('Too many image Batch attempts; review failed images before further API charges.');
-          const fresh=missing.filter(c=>eligibleForBulk(c)).slice(0,120);
-          const retry=missing.filter(c=>retryableFailedImage(c)).slice(0,120);
+          const fresh=missing.filter(c=>eligibleForBulk(c)).slice(0,20);
+          const retry=missing.filter(c=>retryableFailedImage(c)).slice(0,20);
           const selected=fresh.length?fresh:retry;
           if (!selected.length) throw Error('Cannot safely retry unimported images. Check Batch activity.');
           await save(owner,id,latest=>({...latest,fullAutomation:{
@@ -313,10 +314,12 @@ async function tick(req: Request, owner: string, id: string) {
         throw Error('Could not revise flagged prompts; manual inspection required');
       else if(f.revisionBatch){
         const receipt=f.revisionBatch;
-        if(!receipt.batchId)throw Error('Similarity rewrite Batch receipt missing; check OpenAI before any retry');
+        if(!receipt.batchId&&!receipt.responseId)throw Error('Similarity rewrite response receipt missing; check OpenAI before any retry');
         const secret=await userCredential(owner,'openai')||sharedProviderSecret(owner,'OPENAI_API_KEY');
         if(!secret)throw Error('OpenAI key needed to recover prompt revision Batch');
-        const out=await getResearchBatchResult(secret,receipt.batchId,'similarity-revision');
+        const out=receipt.responseId
+          ? await getStandardTextResponseResult(secret,receipt.responseId)
+          : await getResearchBatchResult(secret,receipt.batchId!,'similarity-revision');
         if(out.status==='failed')throw Error('Similarity revision Batch failed: '+out.error);
         if(out.status==='completed'&&out.text){
           const decoded=JSON.parse(out.text) as {prompts?:Array<{id?:string;prompt?:string}>};
@@ -324,7 +327,8 @@ async function tick(req: Request, owner: string, id: string) {
             .filter(c=>typeof c.id==='string'&&typeof c.prompt==='string'&&c.prompt.trim().length>100)
             .map(c=>[c.id!,c.prompt!.trim().slice(0,8000)]));
           const revised=await save(owner,id,latest=>{
-            if(latest.fullAutomation?.revisionBatch?.batchId!==receipt.batchId)return latest;
+            if(latest.fullAutomation?.revisionBatch?.batchId!==receipt.batchId ||
+              latest.fullAutomation?.revisionBatch?.responseId!==receipt.responseId)return latest;
             const approved=new Map(receipt.items.filter(item=>{
               const current=latest.characters.find(c=>c.id===item.id);
               return received.has(item.id)&&current?.prompt===item.originalPrompt &&
@@ -369,11 +373,10 @@ async function tick(req: Request, owner: string, id: string) {
         await save(owner,id,latest=>({...latest,fullAutomation:{
           ...latest.fullAutomation!,revisionBatch:claim}}));
         try{
-          const batchId=await submitResearchBatch(secret,'similarity-revision',
-            p.fullAutomation?.promptModel||'gpt-6-luna',
-            [{role:'user',content:[{type:'input_text',text:instruction}]}],5500);
+          const responseId=await submitStandardTextResponse(secret,
+            p.fullAutomation?.promptModel||'gpt-6-luna',instruction,5500);
           await save(owner,id,latest=>({...latest,fullAutomation:{
-            ...latest.fullAutomation!,revisionBatch:{...claim,batchId,status:'queued'}}}));
+            ...latest.fullAutomation!,revisionBatch:{...claim,responseId,status:'queued'}}}));
         }catch(error){
           throw Error('Similarity rewrite Batch submission may have reached OpenAI. '+
             (error instanceof Error?error.message:String(error)));
@@ -384,8 +387,8 @@ async function tick(req: Request, owner: string, id: string) {
       else {
         // A single review regeneration Batch has a hard upper bound. Never
         // silently split or repeatedly charge for a larger flagged queue.
-        if ((f.reviewQueue||[]).length > 120)
-          throw Error('More than 120 images were flagged for similarity. Review and split manually; Full Automation will not submit multiple regeneration Batches.');
+        if ((f.reviewQueue||[]).length > 20)
+          throw Error('More than 20 images were flagged. One final regeneration Batch is limited to 20; review the flagged queue before proceeding.');
         const records=await jobs(owner,id);
         const active=records.find(row=>isActiveBatchStatus(row.status)&&
           (JSON.parse(row.items) as Array<{id:string}>).some(item=>(f.reviewQueue||[]).includes(item.id)));
