@@ -36,7 +36,7 @@ test('Full Automation freezes selected batch model and quality at start', () => 
   assert.match(flow,/batchImageModel:selectedBatchImageModel,imageQuality:quality\(config\)/);
   assert.match(flow,/const selected = p\.fullAutomation\?\.batchImageModel \|\| prefs\.automationImageModel/);
   assert.match(flow,/if \(!isImageBatchModel\(selected\)\) throw Error\(imageBatchModelError/);
-  assert.match(flow,/model:imageModel\(p,config\),quality:f\.imageQuality \|\| quality\(config\),regenerate:!fresh\.length/);
+  assert.match(flow,/model:imageModel\(p,config\),quality:f\.imageQuality\|\|quality\(config\)/);
   assert.match(flow,/model:imageModel\(p,config\),quality:f\.imageQuality \|\| quality\(config\),regenerate:true/);
   assert.doesNotMatch(flow,/prefs\.automationImageModel! : 'gpt-image-2\.5-flare'/);
 });
