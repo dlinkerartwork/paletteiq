@@ -21,12 +21,14 @@ import { GET as imageGet, POST as imagePost } from '@/app/api/image-batches/rout
 import { POST as studioPost } from '@/app/api/studio/route';
 import { POST as rewritePost } from '@/app/api/regenerate-prompt/route';
 import { isImageBatchModel, imageBatchModelError, DEFAULT_IMAGE_BATCH_MODEL } from '@/lib/image-batch-models';
+import { AUTOMATION_LIMITS, activeExpansionSlots, planExpansionSlots, pendingImageIds, availableImageSlots, type ExpansionSlot } from '@/lib/automation-parallel';
 
 type Stage = 'research'|'expanding'|'prompts'|'images'|'revising'|'regenerating'|'verifying'|'listing'|'completed'|'paused';
 type Flow = { enabled: boolean; stage: Stage; target: number; textModel?: string; promptModel?: string; batchImageModel?: string; imageQuality?: string; startedAt: number; updatedAt: number;
   resumeStage?: Stage; lastError?: string; leaseUntil?: number; expandAttempts?: number;
   promptAttempts?: number; imageAttempts?: number; revisionAttempts?: number;
-  expansionBatch?: { batchId?: string; responseId?: string; status:'submitting'|'queued'|'in_progress'; startedAt:number; count:number };
+  expansionBatch?: Omit<ExpansionSlot, 'id'>; // Backwards-compatible paid receipt.
+  expansionBatches?: ExpansionSlot[]; // Durable, independent AI Fill slots.
   revisionBatch?: { batchId?: string; responseId?: string; status:'submitting'|'queued'|'in_progress'; startedAt:number;
     items:Array<{id:string;originalPrompt:string;imageUrl:string}> };
   reviewQueue?: string[]; revisedIds?: string[]; regenerationBatchId?: string };
@@ -53,7 +55,7 @@ async function load(owner: string, id: string) {
   return rows[0] ? { row: rows[0], p: JSON.parse(rows[0].data) as Project } : null;
 }
 async function save(owner: string, id: string, fn: (p: Project) => Project) {
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 12; attempt++) {
     const old = await load(owner, id);
     if (!old) throw Error('Collection missing');
     const next = fn(old.p);
@@ -204,78 +206,136 @@ async function tick(req: Request, owner: string, id: string) {
         if (after?.p.researchJob?.status === 'completed') await setStage(owner,id,'expanding');
       }
     } else if (f.stage === 'expanding') {
-      if (p.characters.length >= f.target) await setStage(owner,id,'prompts');
-      else if ((f.expandAttempts||0) >= Math.min(60,Math.ceil(f.target/10)+8))
-        throw Error('Character expansion did not reach the target: '+p.characters.length+'/'+f.target);
-      else if(f.expansionBatch){
-        const receipt=f.expansionBatch;
-        if(!receipt.batchId&&!receipt.responseId){
-          // Submission may have been accepted by OpenAI but response was lost.
-          // A fresh request is NEVER submitted for the same expansion.
-          throw Error('AI Fill Batch ID missing after submission. Inspect OpenAI Batch activity; do not resubmit automatically.');
-        }
+      const maxAttempts=Math.min(60,Math.ceil(f.target/10)+8);
+      const receipts=activeExpansionSlots(f);
+      if (receipts.some(receipt=>receipt.status==='uncertain'))
+        throw Error('An AI Fill slot has uncertain paid submission status. Inspect OpenAI activity; no automatic retry.');
+      if (receipts.length) {
         const secret=await userCredential(owner,'openai')||sharedProviderSecret(owner,'OPENAI_API_KEY');
-        if(!secret)throw Error('OpenAI API key required for AI Fill Batch recovery');
-        const output=receipt.responseId
-          ? await getStandardTextResponseResult(secret,receipt.responseId)
-          : await getResearchBatchResult(secret,receipt.batchId!,'character-expansion');
-        if(output.status==='failed')throw Error('AI Fill Batch failed: '+(output.error||'remote error'));
-        if(output.status==='completed' && output.text){
-          const parsed=JSON.parse(output.text) as {characters?:Array<Record<string,string>>};
-          const proposals=Array.isArray(parsed.characters)?parsed.characters:[];
-          const candidates=proposals.map(c=>({
-            id:crypto.randomUUID(),name:String(c.name||''),family:c.family||'',
-            expression:c.expression||'',shape:c.shape||'',silhouette:c.silhouette||'',
-            accessories:c.accessories||'',colorPlan:c.colorPlan||'',description:c.description||'',
-            prompt:'',status:'draft',origin:'ai',
-          }));
-          const selected=selectDiverseConcepts(candidates,p.characters,f.target,
-            receipt.count,normalizeCreativeControls(p.creativeControls).characterVariation,
-            primaryCharacterSubject(p.title||p.name));
-          const revised=await save(owner,id,latest=>{
-            const activeReceipt = latest.fullAutomation?.expansionBatch;
-            // For Standard Responses, batchId is undefined for every receipt.
-            // Verify the actual responseId AND presence of the active receipt,
-            // otherwise an old poll could import the same AI Fill twice.
-            if (!activeReceipt || (receipt.responseId
-              ? activeReceipt.responseId !== receipt.responseId
-              : activeReceipt.batchId !== receipt.batchId)) return latest;
-            const seen=new Set(latest.characters.map(c=>c.name.trim().toLowerCase()));
-            const unique=selected.filter(c=>{const name=c.name.trim().toLowerCase();
-              if(!name||seen.has(name))return false;seen.add(name);return true;});
-            return {...latest,characters:[...latest.characters,...unique],
-              fullAutomation:{...latest.fullAutomation!,expansionBatch:undefined,
-                expandAttempts:(latest.fullAutomation?.expandAttempts||0)+1,updatedAt:Date.now()}};
-          });
-          if(revised.characters.length>=f.target)await setStage(owner,id,'prompts');
-        }else if(output.status==='in_progress'&&receipt.status==='queued'){
-          await save(owner,id,latest=>({...latest,fullAutomation:{
-            ...latest.fullAutomation!,expansionBatch:{...receipt,status:'in_progress'}}}));
-        }
-      } else {
-        const count=Math.min(15,f.target-p.characters.length);
-        const existing=p.characters.map(c=>({
-          name:c.name,family:c.family,expression:c.expression,
+        if(!secret)throw Error('OpenAI API key required for saved AI Fill receipt recovery');
+        // The remote status requests run concurrently; import commits are
+        // version-guarded and sequential so no worker overwrites another.
+        const results=await Promise.allSettled(receipts.map(async receipt=>{
+          if(!receipt.responseId&&!receipt.batchId) {
+            if(Date.now()-receipt.startedAt<120_000)return {receipt,output:{status:'submitting'}};
+            throw Error('AI Fill receipt '+receipt.id+' has no saved OpenAI ID. Inspect activity; never resubmit automatically.');
+          }
+          try {
+            const output=receipt.responseId
+              ? await getStandardTextResponseResult(secret,receipt.responseId)
+              : await getResearchBatchResult(secret,receipt.batchId!,'character-expansion');
+            return {receipt,output};
+          }catch(error) {
+            // Status GET cannot start paid work, and can safely be retried
+            // after loss of connectivity without resetting the receipt.
+            throw new TransientStatusError('Saved AI Fill status unavailable for '+receipt.id+': '+
+              (error instanceof Error?error.message:String(error)).slice(0,180));
+          }
         }));
-        const context=projectPromptContext(p);
-        const instruction=diversityExpansionInstruction({
-          count,target:f.target,title:p.title||p.name,analysis:context,existing,
-          distribution:familyDistribution(existing),expressionCounts:expressionDistribution(existing),
-        });
-        const secret=await userCredential(owner,'openai')||sharedProviderSecret(owner,'OPENAI_API_KEY');
-        if(!secret)throw Error('OpenAI API key required for AI Fill Batch');
-        const claim={status:'submitting' as const,startedAt:Date.now(),count};
-        // Persist the claim BEFORE making a paid Batch request.
-        await save(owner,id,latest=>({...latest,fullAutomation:{
-          ...latest.fullAutomation!,expansionBatch:claim}}));
-        try{
-          const responseId=await submitStandardTextResponse(secret,textModel(p),
-            instruction,Math.min(13000,3000+count*190));
+        for(const result of results){
+          if(result.status==='rejected')throw result.reason;
+          const {receipt,output}=result.value;
+          if(output.status==='failed')
+            throw Error('AI Fill '+receipt.id+' failed: '+(output.error||'remote error')+
+              '. Inspect the existing response; no new paid request was sent.');
+          if(output.status==='completed' && output.text){
+            let parsed:{characters?:Array<Record<string,string>>};
+            try { parsed=JSON.parse(output.text) as typeof parsed; }
+            catch { throw Error('AI Fill '+receipt.id+' returned invalid JSON. Original response ID is preserved.'); }
+            const proposals=Array.isArray(parsed.characters)?parsed.characters:[];
+            const candidates=proposals.map(c=>({
+              id:crypto.randomUUID(),name:String(c.name||''),family:c.family||'',
+              expression:c.expression||'',shape:c.shape||'',silhouette:c.silhouette||'',
+              accessories:c.accessories||'',colorPlan:c.colorPlan||'',description:c.description||'',
+              prompt:'',status:'draft',origin:'ai',
+            }));
+            await save(owner,id,latest=>{
+              const current=latest.fullAutomation!;
+              const present=receipt.id==='legacy'
+                ? current.expansionBatch : current.expansionBatches?.find(slot=>slot.id===receipt.id);
+              if(!present || (receipt.responseId ? present.responseId!==receipt.responseId :
+                  present.batchId!==receipt.batchId)) return latest;
+              const selected=selectDiverseConcepts(candidates,latest.characters,current.target,
+                Math.min(receipt.count,Math.max(0,current.target-latest.characters.length)),
+                normalizeCreativeControls(latest.creativeControls).characterVariation,
+                primaryCharacterSubject(latest.title||latest.name));
+              const seen=new Set(latest.characters.map(c=>c.name.trim().toLowerCase()));
+              const unique=selected.filter(c=>{const name=c.name.trim().toLowerCase();
+                if(!name||seen.has(name))return false;seen.add(name);return true;});
+              return {...latest,characters:[...latest.characters,...unique],
+                fullAutomation:{...current,
+                  expansionBatch:receipt.id==='legacy'?undefined:current.expansionBatch,
+                  expansionBatches:(current.expansionBatches||[]).filter(slot=>slot.id!==receipt.id),
+                  expandAttempts:(current.expandAttempts||0)+(receipt.id==='legacy'?1:0),
+                  updatedAt:Date.now()}};
+            });
+          }else if(output.status==='in_progress' && receipt.status==='queued'){
+            await save(owner,id,latest=>{
+              const current=latest.fullAutomation!;
+              return {...latest,fullAutomation:{...current,
+                expansionBatch:receipt.id==='legacy'&&current.expansionBatch
+                  ? {...current.expansionBatch,status:'in_progress'}:current.expansionBatch,
+                expansionBatches:(current.expansionBatches||[]).map(slot=>slot.id===receipt.id
+                  ? {...slot,status:'in_progress'}:slot)}};
+            });
+          }
+        }
+      }
+      const fresh=(await load(owner,id))?.p;
+      if(!fresh)throw Error('AI Fill collection missing after status recovery');
+      const flow=fresh.fullAutomation!;
+      const active=activeExpansionSlots(flow);
+      if(fresh.characters.length>=flow.target){
+        if(!active.length)await setStage(owner,id,'prompts');
+      }else if(!active.some(slot=>slot.status==='uncertain')){
+        const counts=planExpansionSlots(flow.target,fresh.characters.length,active,
+          flow.expandAttempts||0,maxAttempts);
+        if(!counts.length && !active.length)
+          throw Error('Character expansion did not reach the target: '+
+            fresh.characters.length+'/'+flow.target+'. Review missing characters before more paid requests.');
+        if(counts.length){
+          const secret=await userCredential(owner,'openai')||sharedProviderSecret(owner,'OPENAI_API_KEY');
+          if(!secret)throw Error('OpenAI API key required for parallel AI Fill');
+          const claims:ExpansionSlot[]=counts.map(count=>({
+            id:crypto.randomUUID(),status:'submitting',startedAt:Date.now(),count,
+          }));
+          // Atomic durable reservation BEFORE any OpenAI request. A crash after
+          // submission will leave an uncertain receipt, not a duplicate charge.
           await save(owner,id,latest=>({...latest,fullAutomation:{
-            ...latest.fullAutomation!,expansionBatch:{...claim,status:'queued',responseId}}}));
-        }catch(error){
-          throw Error('AI Fill Batch submission needs inspection before retrying. '+
-            (error instanceof Error?error.message:String(error)));
+            ...latest.fullAutomation!,
+            expansionBatches:[...(latest.fullAutomation?.expansionBatches||[]),...claims],
+            expandAttempts:(latest.fullAutomation?.expandAttempts||0)+claims.length,
+            updatedAt:Date.now()}}));
+          const context=projectPromptContext(fresh);
+          const existing=fresh.characters.map(c=>({name:c.name,family:c.family,expression:c.expression}));
+          const instructions=claims.map((claim,index)=>diversityExpansionInstruction({
+            count:claim.count,target:flow.target,title:fresh.title||fresh.name,
+            analysis:context,existing,
+            distribution:familyDistribution(existing),expressionCounts:expressionDistribution(existing),
+          })+'\nPARALLEL AI FILL SLOT '+(index+1)+'/'+claims.length+
+            ': propose an independent set of original visual subjects. Avoid near-duplicate poses and accessories.');
+          const submitted=await Promise.allSettled(claims.map(async (claim,index)=>{
+            try{
+              const responseId=await submitStandardTextResponse(secret,textModel(fresh),
+                instructions[index],Math.min(13000,3000+claim.count*190));
+              await save(owner,id,latest=>({...latest,fullAutomation:{
+                ...latest.fullAutomation!,
+                expansionBatches:(latest.fullAutomation?.expansionBatches||[]).map(slot=>
+                  slot.id===claim.id?{...slot,responseId,status:'queued' as const}:slot)}}));
+            }catch(error){
+              await save(owner,id,latest=>({...latest,fullAutomation:{
+                ...latest.fullAutomation!,
+                expansionBatches:(latest.fullAutomation?.expansionBatches||[]).map(slot=>
+                  slot.id===claim.id?{...slot,status:'uncertain' as const,
+                    error:'Paid AI Fill submission may have reached OpenAI: '+
+                      (error instanceof Error?error.message:String(error)).slice(0,160)}:slot)}}))
+                .catch(()=>{});
+              throw error;
+            }
+          }));
+          if(submitted.some(item=>item.status==='rejected'))
+            throw Error('Parallel AI Fill submission has uncertain receipts. '+
+              'Inspect OpenAI activity and saved IDs; do not automatically resubmit.');
         }
       }
     } else if (f.stage === 'prompts') {
