@@ -182,7 +182,7 @@ export function mergeSourceEmotionProfile(analysis: CreativeAnalysis, title: str
     ...analysis.imageObservations.flatMap(o=>o.expressions||[]),
   ];
   const inferred=referenceMoodFromExpressions(evidence);
-  const visualMood=analysis.emotionProfile.referenceMood || inferred.mood;
+  const visualMood=inferred.mood || analysis.emotionProfile.referenceMood;
   const dominantMood = explicitMood.length ? explicitMood.join(' / ') :
     (visualMood || (tagMood.length ? tagMood.join(' / ') :
       analysis.emotionProfile.dominantMood || analysis.mood));
