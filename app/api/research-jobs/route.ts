@@ -192,6 +192,36 @@ async function finish(owner: string, projectId: string, job: ResearchJob, respon
 }
 
 // New jobs use actual OpenAI Batch pricing, not Background Responses.
+// Standard Responses requests return a resumable receipt, not a Batch job.
+// Existing Batch receipts are still read by getResearchBatchResult.
+export async function submitStandardTextResponse(key:string,model:string,
+  instruction:string,maxTokens:number):Promise<string>{
+  const response=await openai(key,'responses',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({model,input:[{role:'user',content:[{type:'input_text',text:instruction}]}],
+      background:true,store:true,text:{format:{type:'json_object'}},
+      max_output_tokens:maxTokens}),
+  });
+  if(!response.ok)throw Error('OpenAI standard Responses HTTP '+response.status+': '+
+    (await response.text()).slice(0,220));
+  const data=await response.json() as ApiResponse;
+  if(!data.id||!/^resp_[\w-]+$/.test(data.id))
+    throw Error('OpenAI standard response accepted without a valid tracking ID');
+  return data.id;
+}
+export async function getStandardTextResponseResult(key:string,responseId:string):
+  Promise<{status:string;text?:string;error?:string}>{
+  const result=await openai(key,'responses/'+encodeURIComponent(responseId));
+  if(!result.ok)throw Error('OpenAI standard Responses status HTTP '+result.status);
+  const data=await result.json() as ApiResponse;
+  if(data.status==='completed'){
+    const text=extractText(data);
+    return text?{status:'completed',text}:{status:'failed',error:'Empty standard Responses output'};
+  }
+  if(['failed','cancelled','incomplete'].includes(data.status||''))
+    return {status:'failed',error:data.error?.message||data.incomplete_details?.reason||'Standard Response failed'};
+  return {status:data.status||'in_progress'};
+}
 export async function submitResearchBatch(key:string,customId:string,model:string,
   input:unknown,maxTokens:number):Promise<string>{
   const form=new FormData();
