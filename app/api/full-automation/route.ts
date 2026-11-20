@@ -19,7 +19,7 @@ import { POST as rewritePost } from '@/app/api/regenerate-prompt/route';
 import { isImageBatchModel, imageBatchModelError, DEFAULT_IMAGE_BATCH_MODEL } from '@/lib/image-batch-models';
 
 type Stage = 'research'|'expanding'|'prompts'|'images'|'revising'|'regenerating'|'verifying'|'listing'|'completed'|'paused';
-type Flow = { enabled: boolean; stage: Stage; target: number; textModel?: string; batchImageModel?: string; imageQuality?: string; startedAt: number; updatedAt: number;
+type Flow = { enabled: boolean; stage: Stage; target: number; textModel?: string; promptModel?: string; batchImageModel?: string; imageQuality?: string; startedAt: number; updatedAt: number;
   resumeStage?: Stage; lastError?: string; leaseUntil?: number; expandAttempts?: number;
   promptAttempts?: number; imageAttempts?: number; revisionAttempts?: number;
   reviewQueue?: string[]; revisedIds?: string[]; regenerationBatchId?: string };
@@ -150,7 +150,7 @@ const imageModel = (p: Project, prefs: Prefs) => {
 };
 // A collection's text model is frozen when Full Automation starts. Changes to
 // Settings must not silently switch models on already accepted paid jobs.
-const textModel = (p: Project, fallback = 'gpt-4.1-mini') => {
+const textModel = (p: Project, fallback = 'gpt-6.1-terra') => {
   const saved = p.fullAutomation?.textModel || p.researchJob?.model;
   return saved && /^gpt-[a-z0-9.-]{1,80}$/.test(saved) ? saved : fallback;
 };
@@ -231,7 +231,7 @@ async function tick(req: Request, owner: string, id: string) {
         await save(owner,id,latest=>({...latest,fullAutomation:{
           ...latest.fullAutomation!,promptAttempts:(latest.fullAutomation?.promptAttempts||0)+1,updatedAt:Date.now()}}));
         const config=await prefs(owner);
-        const model=textModel(p,config.automationPromptModel||'gpt-4.1-mini');
+        const model=p.fullAutomation?.promptModel || config.automationPromptModel || 'gpt-6-luna';
         await apiPost(req,promptPost,{projectId:id,characterIds:missing.slice(0,200).map(c=>c.id),model,regenerate:false,progressive:p.progressivePrompts===true});
       } else throw Error('Incomplete prompts after three attempts. Review missing prompts before resuming.');
     } else if (f.stage === 'images') {
@@ -442,7 +442,7 @@ export async function POST(req:Request) {
   if (body.action==='start') {
     const target=Number(body.target);
     if (!Number.isInteger(target)||target<1||target>200) return bad('Full automation supports 1–200 characters');
-    const requestedModel=String(body.model||'gpt-4.1-mini');
+    const requestedModel=String(body.model||'gpt-6.1-terra');
     if (!/^gpt-[a-z0-9.-]{1,80}$/.test(requestedModel)) return bad('Choose a valid OpenAI text/vision model');
     if (current.p.fullAutomation && current.p.fullAutomation.stage !== 'completed')
       return bad('An automation workflow already exists. Resume the paused workflow rather than submitting duplicate paid work.',409);
@@ -451,7 +451,9 @@ export async function POST(req:Request) {
     const selectedBatchImageModel=config.automationImageModel || DEFAULT_IMAGE_BATCH_MODEL;
     if (!isImageBatchModel(selectedBatchImageModel)) return bad(imageBatchModelError(selectedBatchImageModel),422);
     const now=Date.now();
-    const flow:Flow={enabled:true,stage:'research',target,textModel:requestedModel,batchImageModel:selectedBatchImageModel,imageQuality:quality(config),startedAt:now,updatedAt:now,
+    const savedPromptModel=String(config.automationPromptModel||'gpt-6-luna');
+    if(!/^gpt-[a-z0-9.-]{1,80}$/.test(savedPromptModel))return bad('Invalid saved AI Prompt Batch model',422);
+    const flow:Flow={enabled:true,stage:'research',target,textModel:requestedModel,promptModel:savedPromptModel,batchImageModel:selectedBatchImageModel,imageQuality:'low',startedAt:now,updatedAt:now,
       expandAttempts:0,promptAttempts:0,imageAttempts:0};
     return Response.json(progress(await save(user.userId,id,p=>({...p,characterTarget:target,researchModel:requestedModel,fullAutomation:flow}))));
   }
