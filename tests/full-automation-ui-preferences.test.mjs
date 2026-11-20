@@ -55,5 +55,8 @@ test('Auto-follow navigates only on a safe server-confirmed stage transition', (
   assert.match(page, /const clean = !collectionHasUnsavedEdits\(view\.project, savedProjectSnapshots\.current\.get\(id\)\)/);
   assert.match(page, /autoFollowRef\.current && view\.project\.id === id && clean/);
   assert.match(page, /paletteiq-auto-follow-automation/);
-  assert.match(page, /Auto-follow Full Automation \(switch tabs when stages complete\)/);
+  assert.match(page, /Auto Follow — switch tabs when the current stage finishes/);
+  assert.match(page, /className="research-auto-follow"/);
+  assert.match(page, /editor\.tab === 'analysis'/);
+  assert.match(page, /editor\.tab === 'prompts'/);
 });
