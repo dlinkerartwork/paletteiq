@@ -53,6 +53,9 @@ test('restart recovery prioritizes importing paid PNGs before expensive similari
   assert.match(imageRoute,/const IMAGE_BATCH_SYNC_PER_COLLECTION = 4/);
   assert.match(imageRoute,/sort\(\(a,b\)=>a\.updatedAt-b\.updatedAt\)/);
   assert.match(page,/setInterval\(\(\) => void resumeBatches\(\), 12000\)/);
+  assert.match(page,/const mergeImportedAssets = \(local:Project,remote:Project\):Project =>/);
+  assert.match(page,/collectionHasUnsavedEdits\(item,savedProjectSnapshots\.current\.get\(item\.id\)\)/);
+  assert.match(page,/return stored\?mergeImportedAssets\(prev,stored\):prev/);
   assert.match(production,/setInterval\(\(\) => void refresh\(false, true\), 8000\)/);
   assert.match(desktop,/const BACKGROUND_POLL_MS = 20_000/);
   assert.match(imageRoute,/if \(isTerminal && bucket\) \{/);
