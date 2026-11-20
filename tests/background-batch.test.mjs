@@ -13,7 +13,7 @@ test('desktop batch resumes without visiting Image Production', () => {
 });
 
 test('background sync updates only recovered image fields, preserving unsaved character details', () => {
-  assert.match(page, /characters: prev\.characters\.map\(char =>/);
+  assert.match(page, /characters:local\.characters\.map\(char=>/);
   assert.match(page, /\.\.\.char, imageUrl: stored\.imageUrl/);
 });
 
