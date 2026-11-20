@@ -23,13 +23,12 @@ test('Research and prompts default to separate Terra/Luna models; Image Producti
   assert.match(page,/const selectedModel = lockedPromptModel \|\| preferences\.automationPromptModel/);
 });
 
-test('new Research/Hybrid and Style DNA use actual OpenAI Batch receipts',()=>{
-  assert.match(research,/transport:'batch', workers/);
-  assert.match(research,/if\(job\.transport==='batch'\) return pollResearchBatch/);
-  assert.match(research,/completion_window:'24h'/);
-  assert.match(research,/endpoint:'\/v1\/responses'/);
-  assert.match(research,/batchId=await submitResearchBatch/);
-  assert.match(research,/mergeBatchId:batchId,mergeStatus:'queued'/);
+test('New Research runs parallel standard Responses with persisted worker IDs',()=>{
+  assert.match(research,/transport:'standard', workers/);
+  assert.match(research,/const submissions = workers.map\(async worker/);
+  assert.match(research,/background:true, store:true/);
+  assert.match(research,/responseId:result.id/);
+  assert.match(research,/if\(job.transport==='batch'\) return pollResearchBatch/);
 });
 
 test('Batch response parser selects exact custom ID and validates JSON',()=>{
@@ -45,16 +44,15 @@ test('Batch response parser selects exact custom ID and validates JSON',()=>{
   assert.match(batchResearchResult(JSON.stringify({custom_id:'test-research',error:{message:'bad'}}),'test-research').error,/bad/);
 });
 
-test('AI Fill and similarity rewrites use recoverable OpenAI Batches, no direct OpenAI text call in automation',()=>{
+test('AI Fill and similarity rewrites use standard Responses; older Batch IDs stay recoverable',()=>{
   assert.match(automation,/expansionBatch\?:/);
   assert.match(automation,/revisionBatch\?:/);
-  assert.match(automation,/submitResearchBatch\(secret,'character-expansion'/);
-  assert.match(automation,/submitResearchBatch\(secret,'similarity-revision'/);
-  assert.match(automation,/getResearchBatchResult\(secret,receipt\.batchId,'character-expansion'\)/);
-  assert.match(automation,/getResearchBatchResult\(secret,receipt\.batchId,'similarity-revision'\)/);
+  assert.match(automation,/submitStandardTextResponse\(secret,textModel\(p\)/);
+  assert.match(automation,/getStandardTextResponseResult\(secret,receipt.responseId\)/);
+  assert.match(automation,/getResearchBatchResult\(secret,receipt.batchId!/);
+  assert.match(automation,/if\(!receipt.batchId&&!receipt.responseId\)/);
   assert.doesNotMatch(automation,/apiPost\(req,studioPost,\{\s*action:'expand'/);
   assert.doesNotMatch(automation,/apiPost\(req,rewritePost,/);
-  assert.match(automation,/if\(!receipt\.batchId\)/);
 });
 
 test('Etsy Listing Draft preserves Etsy API title description tags by default; enriches other SEO with Gemini',()=>{
