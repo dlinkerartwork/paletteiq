@@ -25,12 +25,12 @@ test('Full Automation uses a user-chosen model initialized from saved Settings',
 });
 
 test('chosen GPT model remains bound to text stages, image Batch stays image-capable', () => {
-  assert.match(flow, /submitResearchBatch\\(secret,'character-expansion',textModel\\(p\\)/);
-  assert.match(flow, /const model=p\\.fullAutomation\\?\\.promptModel \\|\\| config\\.automationPromptModel/);
+  assert.ok(flow.includes("submitResearchBatch(secret,'character-expansion',textModel(p)"));
+  assert.ok(flow.includes("const model=p.fullAutomation?.promptModel || p.fullAutomation?.textModel || config.automationPromptModel"));
   assert.match(flow, /seoOpenaiModel:textModel\(p,config\.seoOpenaiModel/);
   assert.match(flow, /model:imageModel\(p,config\)/);
   assert.match(studio, /model: expansionModel, input/);
-  assert.match(flow, /p\\.fullAutomation\\?\\.promptModel\\|\\|'gpt-6-luna'/);
+  assert.ok(flow.includes("p.fullAutomation?.promptModel||'gpt-6-luna'"));
 });
 
 test('character target stays at collection or active workflow count after settings load', () => {
