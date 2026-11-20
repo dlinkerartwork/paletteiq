@@ -33,7 +33,7 @@ test('Full Automation freezes selected batch model and quality at start', () => 
   assert.match(flow,/batchImageModel\?: string; imageQuality\?: string/);
   assert.match(flow,/selectedBatchImageModel=config\.automationImageModel \|\| DEFAULT_IMAGE_BATCH_MODEL/);
   assert.match(flow,/if \(!isImageBatchModel\(selectedBatchImageModel\)\) return bad\(imageBatchModelError/);
-  assert.match(flow,/batchImageModel:selectedBatchImageModel,imageQuality:'low'/);
+  assert.match(flow,/batchImageModel:selectedBatchImageModel,imageQuality:quality\(config\)/);
   assert.match(flow,/const selected = p\.fullAutomation\?\.batchImageModel \|\| prefs\.automationImageModel/);
   assert.match(flow,/if \(!isImageBatchModel\(selected\)\) throw Error\(imageBatchModelError/);
   assert.match(flow,/model:imageModel\(p,config\),quality:f\.imageQuality \|\| quality\(config\),regenerate:!fresh\.length/);
