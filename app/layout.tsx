@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { AccountWorkspaceGate } from '@/components/account-workspace';
+import SharedLocalWorkspaceGate from '@/components/shared-local-workspace-gate';
 
 export const metadata: Metadata = {
   title: "Clipart Intelligence Studio | paletteIQ",
@@ -18,7 +19,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="antialiased"><AccountWorkspaceGate>{children}</AccountWorkspaceGate></body>
+      <body className="antialiased"><SharedLocalWorkspaceGate><AccountWorkspaceGate>{children}</AccountWorkspaceGate></SharedLocalWorkspaceGate></body>
     </html>
   );
 }
