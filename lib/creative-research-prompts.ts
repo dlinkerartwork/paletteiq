@@ -215,6 +215,12 @@ angry/sad bundle or inject angry expressions into a happy birthday collection.
 Baby subjects should look infant/juvenile through proportions; "cute" alone
 does not imply every face must smile. Keep expressions diverse across characters
 without weakening the collection's requested tone. Nonface props: expression='not applicable'.
+When emotionProfile.dominantMood contains joyful, cheerful, happy or playful,
+all newly invented characters WITH faces must have positive lively expressions
+(smiling/upturned mouth, lifted cheeks, bright engaged eyes, playful energetic
+pose). Different joyful looks are welcome; sad, tearful, droopy, lifeless,
+worried or melancholic faces are not. The user-selected mood, when provided,
+overrides ambiguous AI descriptions of pastel or watercolor references.
 Avoid overusing a single facial expression: compare existing expression counts.
 Strictly follow STYLE DNA (shapes, lighting, palette, texture, effects, outline) from
 the reference research. Fulfill CHARACTER DNA (identity, silhouette, face, accessories,
