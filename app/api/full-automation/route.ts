@@ -287,17 +287,35 @@ async function tick(req: Request, owner: string, id: string) {
         const missing=p.characters.filter(c=>!c.imageUrl&&!!c.prompt?.trim());
         if (p.characters.some(c=>!c.prompt?.trim())) await setStage(owner,id,'prompts');
         else if (missing.length) {
-          if ((f.imageAttempts||0)>=Math.ceil(f.target/20)+3)
-            throw Error('Too many image Batch attempts; review failed images before further API charges.');
-          const fresh=missing.filter(c=>eligibleForBulk(c)).slice(0,20);
-          const retry=missing.filter(c=>retryableFailedImage(c)).slice(0,20);
+          const fresh=missing.filter(c=>eligibleForBulk(c));
+          const retry=missing.filter(c=>retryableFailedImage(c));
           const selected=fresh.length?fresh:retry;
-          if (!selected.length) throw Error('Cannot safely retry unimported images. Check Batch activity.');
+          if(!selected.length)throw Error('Cannot safely retry unimported images. Check Batch activity.');
+          // One scheduling wave submits up to three independent batches
+          // concurrently, each with at most 20 image requests. Once all
+          // accepted jobs finish importing and reviewing, the next wave starts.
+          const chunks:Array<Subject[]>=[];
+          for(let i=0;i<selected.length&&chunks.length<3;i+=20)
+            chunks.push(selected.slice(i,i+20));
+          if((f.imageAttempts||0)+chunks.length>Math.ceil(f.target/20)+3)
+            throw Error('Too many image Batch attempts; inspect existing jobs before further charges.');
           await save(owner,id,latest=>({...latest,fullAutomation:{
-            ...latest.fullAutomation!,imageAttempts:(latest.fullAutomation?.imageAttempts||0)+1,updatedAt:Date.now()}}));
+            ...latest.fullAutomation!,
+            imageAttempts:(latest.fullAutomation?.imageAttempts||0)+chunks.length,
+            updatedAt:Date.now()}}));
           const config=await prefs(owner);
-          await apiPost(req,imagePost,{projectId:id,characterIds:selected.map(c=>c.id),
-            model:imageModel(p,config),quality:f.imageQuality || quality(config),regenerate:!fresh.length});
+          // POST validates overlapping pending IDs server-side. Failed or
+          // ambiguous submissions are never re-attempted in this tick.
+          const results=await Promise.allSettled(chunks.map(chunk=>apiPost(req,imagePost,{
+            projectId:id,characterIds:chunk.map(c=>c.id),
+            model:imageModel(p,config),quality:f.imageQuality||quality(config),
+            regenerate:!fresh.length,
+          })));
+          const rejected=results.filter((result):result is PromiseRejectedResult=>result.status==='rejected');
+          if(rejected.length)throw Error('Image Batch submission uncertain for '+rejected.length+
+            ' group(s). Check OpenAI Batch activity before any further paid submissions. '+
+            rejected.map(result=>String(result.reason)).join(' | ').slice(0,250));
+
         } else {
           const unverified=p.characters.filter(c=>c.imageUrl &&
             c.similarityReview?.status!=='clear' && c.similarityReview?.status!=='needs_review');
