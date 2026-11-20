@@ -157,10 +157,10 @@ export function referenceMoodFromExpressions(
 ): {mood:string;confidence:string;evidence:string} {
   const observed=expressions.map(x=>x.trim()).filter(Boolean).slice(0,80);
   const weights=[
-    {mood:'joyful, cheerful and playful',words:/\\b(smiling|smile|grinning|grin|joyful|happy|cheerful|excited|delighted|laughing|playful|giggl|sparkling eyes|bright eyes|uplifted mouth|upturned mouth)\\b/i},
-    {mood:'sad and tender',words:/\\b(sad|crying|cry|teary|tearful|frowning|frown|sorrow|downturned mouth|downcast)\\b/i},
-    {mood:'sleepy and peaceful',words:/\\b(sleepy|sleeping|dreamy|drowsy|yawning|peaceful|serene|relaxed|closed sleeping eyes)\\b/i},
-    {mood:'grumpy and angry',words:/\\b(angry|grumpy|furrowed|scowling|irritated|pouting|scowl)\\b/i},
+    {mood:'joyful, cheerful and playful',words:/\b(smiling|smile|grinning|grin|joyful|happy|cheerful|excited|delighted|laughing|playful|giggl(?:ing|e|es)|sparkling eyes|bright eyes|uplifted mouth|upturned mouth)\b/i},
+    {mood:'sad and tender',words:/\b(sad|crying|cry|teary|tearful|frowning|frown|sorrow|downturned mouth|downcast)\b/i},
+    {mood:'sleepy and peaceful',words:/\b(sleepy|sleeping|dreamy|drowsy|yawning|peaceful|serene|relaxed|closed sleeping eyes)\b/i},
+    {mood:'grumpy and angry',words:/\b(angry|grumpy|furrowed|scowling|irritated|pouting|scowl)\b/i},
   ];
   const scored=weights.map(item=>({...item,count:observed.filter(v=>item.words.test(v)).length}))
     .sort((a,b)=>b.count-a.count);
