@@ -17,7 +17,7 @@ type StoredCharacter = { id: string; name: string; family?: string; expression?:
 type Source = { title: string; description: string; tags: string[]; images: string[] };
 type ResearchJob = {
   id: string; status: 'submitting' | 'queued' | 'in_progress' | 'completed' | 'failed';
-  model: string; transport?: 'batch'; responseId?: string; mergeBatchId?: string; createdAt: number; updatedAt: number;
+  model: string; transport?: 'batch'|'standard'; responseId?: string; mergeBatchId?: string; createdAt: number; updatedAt: number;
   target: number; requested: number; completedCount: number;
   selectedImages: string[]; source: Source; error?: string;
   workers?: HybridWorker[]; mergeStatus?: 'planned'|'submitting'|'queued'|'in_progress'|'completed'|'failed'|'uncertain';
@@ -408,7 +408,7 @@ export async function POST(req: Request) {
   }));
   const job: ResearchJob = { id: crypto.randomUUID(), status: 'submitting', model, target, requested,
     createdAt: now, updatedAt: now, completedCount: saved.data.characters?.length || 0,
-    selectedImages, source, transport:'batch', workers,
+    selectedImages, source, transport:'standard', workers,
     ...(hybrid ? { mergeStatus:'planned' as const } : {}) };
   // Claim the collection before the paid API call. Reject concurrent tabs using
   // the saved row version, so duplicate submissions cannot quietly incur charges.
@@ -418,9 +418,8 @@ export async function POST(req: Request) {
     .where(and(eq(projects.id, projectId), eq(projects.owner, user.userId), eq(projects.updatedAt, saved.row.updatedAt)))
     .returning({ id: projects.id });
   if (!claim.length) return bad('Collection changed in another tab. Refresh and retry before paying for analysis.', 409);
-  // Every NEW OpenAI Research job uses the Batch endpoint; legacy
-  // background response IDs below remain readable for previously paid jobs.
-  // Worker batches use independent receipts so previews appear as each finishes.
+  // New Research uses parallel standard Responses with persisted response IDs.
+  // Legacy Batch IDs remain recoverable without resubmitting paid work.
   if(job.transport==='batch'){
     const submissions=workers.map(async worker=>{
       try{
