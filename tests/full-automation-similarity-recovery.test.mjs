@@ -82,7 +82,7 @@ test('existing regeneration receipts block duplicate paid replacements after dis
   const existing=section.indexOf('const existing=records.find(');
   const post=section.indexOf('const result=await apiPost(req,imagePost');
   assert.ok(existing>=0 && post>existing);
-  assert.match(section,/row.openaiBatchId.startsWith\('pending:'\)/);
+  assert.match(section,/existing\.openaiBatchId\.startsWith\('pending:'\)/);
   assert.match(section,/item.replaceFromImageUrl/);
   assert.match(section,/await setStage\(owner,id,'verifying',\{regenerationBatchId:existing.id\}\)/);
   assert.match(section,/await recheckUnverifiedSimilarity\(owner,id\)/);
