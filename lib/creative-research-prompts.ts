@@ -39,6 +39,14 @@ Record titleCues and tagCues separately from observedExpressions so that a happy
 title does NOT become a false claim that every reference image has smiling faces.
 Inspect visible eyes, mouth, eyebrows, posture, tear/smile cues, and expressions
 per selected image. If faces are obscured or not present, say 'not visible'.
+REFERENCE MOOD MUST BE GROUNDED IN ACTUAL FACES AND BODY LANGUAGE: explicitly
+classify the dominant mood of the selected reference art (joyful / playful,
+sad, sleepy / peaceful, grumpy, or unverified), add concrete supporting facial
+evidence and confidence. "Cute", pastel, dreamy, or watercolor alone do NOT
+prove that a character is sad, sleepy, or happy. Smiling mouths, raised cheeks,
+sparkly lively eyes, energetic gestures and upright playful poses support
+cheerful/playful output; do not mislabel them as melancholy. If image evidence
+is mixed, record mixed mood honestly and let the user choose the target.
 When title disagrees with visible expressions, explain the mismatch in notes and
 prioritize the explicit title mood for NEW concepts while retaining visual evidence.
 Do not default every animal to a cheerful smile; plan varied expressions WITHIN
@@ -95,6 +103,9 @@ Return ONLY JSON (no markdown) with:
 "medium":"art technique","lighting":"lighting treatment","mood":"visual mood",
 "emotionProfile":{"titleCues":["words in title about age/cuteness/emotion"],
 "tagCues":["related words from tags"],"observedExpressions":["visible facial expressions ONLY"],
+"referenceMood":"dominant mood demonstrated by selected visible faces; empty if unverified",
+"moodEvidence":"visible eyes, mouth, cheeks, gestures supporting that mood; no invented evidence",
+"moodConfidence":"high, medium, low, or unverified",
 "dominantMood":"commercial mood requested by title, reconciled with reference faces",
 "ageCues":["baby/youth proportions when evidenced or requested"],
 "styleCues":["cute/kawaii/sweet visual treatment when evidenced or requested"],
@@ -256,6 +267,15 @@ it to the title and preserve identity. For objects without faces, convey tone
 through color/pose/accessories instead; do not add anthropomorphic faces.
 Describe precise eye, brow, mouth, cheek and posture cues instead of saying
 "cute" or "happy" with no visual details.
+TARGET MOOD OVERRIDES AMBIGUOUS STYLING: When emotionProfile.dominantMood is
+joyful, cheerful or playful, every character with a face MUST look upbeat and
+lively: upturned mouth or joyful grin, lifted cheeks, bright eyes and positive
+body language. Vary the way each character expresses joy. DO NOT output sad,
+tearful, lifeless, downcast, sleepy, worried, frowning or melancholic facial
+expressions, even if the source palette is pastel, gentle or watercolor.
+When explicitly sad or sleepy mood is selected, honor that instead. Keep
+face-free props non-anthropomorphic. A user-edited target mood takes priority
+over an AI's uncertain visual interpretation.
 FOR EACH PROMPT explicitly describe these NINE elements in natural English
 without dumping numeric labels or JSON inside prompt strings:
 1 CHARACTER IDENTITY (the exact subject/species/object);
