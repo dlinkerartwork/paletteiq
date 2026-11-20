@@ -192,7 +192,7 @@ async function finish(owner: string, projectId: string, job: ResearchJob, respon
 }
 
 // New jobs use actual OpenAI Batch pricing, not Background Responses.
-async function submitResearchBatch(key:string,customId:string,model:string,
+export async function submitResearchBatch(key:string,customId:string,model:string,
   input:unknown,maxTokens:number):Promise<string>{
   const form=new FormData();
   form.set('purpose','batch');
@@ -215,7 +215,7 @@ async function submitResearchBatch(key:string,customId:string,model:string,
     throw Error('OpenAI Batch accepted but no valid tracking ID was returned');
   return batch.id;
 }
-async function getResearchBatchResult(key:string,batchId:string,requestKey:string):
+export async function getResearchBatchResult(key:string,batchId:string,requestKey:string):
   Promise<{status:string;text?:string;error?:string}>{
   const poll=await openai(key,'batches/'+encodeURIComponent(batchId));
   if(!poll.ok)throw Error('OpenAI Research Batch status HTTP '+poll.status);
