@@ -141,6 +141,25 @@ export default function Home() {
     return () => { cancelled = true; };
   }, []);
   const [message, setMessage] = useState('');
+  // Multiple independent job monitors share one connection warning. Network
+  // failures are not OpenAI Batch failures, and must never trigger paid POSTs.
+  const [backendConnectionWarning, setBackendConnectionWarning] = useState('');
+  const networkPollFailures = useRef(new Map<string, {attempts:number;nextAt:number}>());
+  const canPollBackend = (scope:string) =>
+    Date.now() >= (networkPollFailures.current.get(scope)?.nextAt||0);
+  const noteBackendPollHealthy = (scope:string) => {
+    networkPollFailures.current.delete(scope);
+    if(networkPollFailures.current.size===0) setBackendConnectionWarning('');
+  };
+  const noteBackendPollError = (scope:string,error:unknown):boolean => {
+    const message=error instanceof Error?error.message:String(error);
+    if(!/failed to fetch|networkerror|network request failed|load failed/i.test(message))return false;
+    const count=(networkPollFailures.current.get(scope)?.attempts||0)+1;
+    const delay=Math.min(60000,5000*Math.pow(2,Math.min(count-1,4)));
+    networkPollFailures.current.set(scope,{attempts:count,nextAt:Date.now()+delay});
+    setBackendConnectionWarning('PaletteIQ local server connection interrupted. Saved automation and OpenAI Batch IDs are preserved. Monitoring will resume automatically when the connection returns; do not resubmit paid jobs.');
+    return true;
+  };
   const [target, setTarget] = useState(120);
   const [fullAutoRequested, setFullAutoRequested] = useState(false);
   const setCollectionTarget = (requested: number) => {
@@ -733,12 +752,13 @@ export default function Home() {
     const projectId = project.id, jobId = project.promptJob!.id;
     let closed = false, polling = false;
     const pollPrompts = async () => {
-      if (closed || polling) return;
+      if (closed || polling || !canPollBackend('prompts')) return;
       polling = true;
       try {
         const response = await fetch('/api/prompt-jobs?projectId=' + encodeURIComponent(projectId));
         const result = await response.json() as { error?: string; job?: PromptJobPreview; project?: Project };
         if (!response.ok) throw Error(result.error || 'Could not retrieve OpenAI prompt batch status');
+        noteBackendPollHealthy('prompts');
         if (closed || !result.job || result.job.id !== jobId) return;
         if (result.project) {
           // Progressive groups are imported independently. Show saved prompts
@@ -762,7 +782,7 @@ export default function Home() {
             setMessage('OpenAI prompt Batch ended: ' + (result.job.error || result.job.status) + '. Review before retrying to avoid duplicate charges.');
         }
       } catch (error) {
-        if (!closed) setMessage('Prompt batch status temporarily unavailable: ' + (error instanceof Error ? error.message : String(error)) + '. The saved job will be checked again.');
+        if (!closed && !noteBackendPollError('prompts',error)) setMessage('Prompt batch status temporarily unavailable: ' + (error instanceof Error ? error.message : String(error)) + '. The saved job will be checked again.');
       } finally { polling = false; }
     };
     void pollPrompts();
@@ -778,7 +798,7 @@ export default function Home() {
     const id = project.id;
     let stopped = false, running = false;
     const step = async () => {
-      if (stopped || running) return;
+      if (stopped || running || !canPollBackend('automation')) return;
       running = true;
       try {
         const response = await fetch('/api/full-automation', { method: 'POST',
@@ -792,6 +812,7 @@ export default function Home() {
         const stored = await row.json() as Array<{ id:string; data:Project }>;
         const updated = stored.find(entry => entry.id === id)?.data;
         if (!updated || stopped) return;
+        noteBackendPollHealthy('automation');
         // Follow stage transitions only for the active collection, while the
         // user is watching the previous stage and has no unsaved editor data.
         // A manual tab switch suspends following until their tab again matches
@@ -822,7 +843,7 @@ export default function Home() {
         else if (updated.fullAutomation?.stage === 'completed')
           setMessage('Full Automation complete: images verified and Etsy Listing Draft saved. Review the listing before publishing.');
       } catch (error) {
-        if (!stopped) setMessage('Full Automation status unavailable; saved progress remains intact: ' +
+        if (!stopped && !noteBackendPollError('automation',error)) setMessage('Full Automation status unavailable; saved progress remains intact: ' +
           (error instanceof Error ? error.message : String(error)));
       } finally { running = false; }
     };
@@ -1199,6 +1220,16 @@ export default function Home() {
       </div><div className="crumb"><button className="breadcrumb-button" onClick={() => navigateTab('collections')}>Collections</button> <span>/</span> <b>{stepIndex >= 0 ? `${project.name} / ${title}` : title}</b></div><div className="top-actions"><StoreSwitcher/>{stepIndex >= 0 && <button className="save-btn" onClick={() => save()} disabled={!!busy}><Check size={16}/> {busy === 'save' ? 'Saving...' : 'Save collection'}</button>}</div></header>
       <div className="content"><div className="page-head"><div><div className="eyebrow"><Sparkles size={13}/> AI-POWERED CREATIVE PRODUCTION {stepIndex >= 0 && <span> / {title}</span>}</div><h1>{stepIndex >= 0 ? project.name : tab === 'overview' ? 'Your creative command center' : title}</h1><p>{tab === 'overview' ? 'From market insight to an original, production-ready clipart collection.' : tab === 'collections' ? 'Find a saved collection and resume its production pipeline.' : tab === 'stores' ? 'Manage Etsy stores, rename them, or safely delete a store after making a recovery archive.' : tab === 'analysis' ? 'Turn an Etsy listing into structured, actionable creative intelligence.' : tab === 'characters' ? 'Build, refine and organize 120+ subjects.' : tab === 'prompts' ? 'Generate unique prompts with OpenAI for each character.' : tab === 'thumbnails' ? 'Arrange original clipart freely (including beyond canvas edges), reuse Etsy SEO defaults, and optionally generate expressive AI lettering.' : tab === 'listing-images' ? 'Generate 15 Etsy listing images from original collection PNGs; review and approve each one.' : 'Continue preparing your clipart product.'}</p></div>{stepIndex >= 0 && <div className="head-buttons"><button className="outline-btn" onClick={() => { const blob = new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${project.name.replace(/[^\w-]/g,'_')}.json`; a.click(); URL.revokeObjectURL(a.href); }}><Download size={16}/> Export JSON</button></div>}</div>
       {duplicateListing && <div role="alertdialog" aria-label="Previously used Etsy reference" style={{ position: 'fixed', right: 24, top: 88, zIndex: 1000, width: 'min(420px, calc(100vw - 48px))', padding: 18, borderRadius: 14, border: '1px solid #ffc69e', background: '#fff9f3', color: '#53260e', boxShadow: '0 12px 40px #0002' }}><strong>Reference Etsy ini sudah pernah digunakan</strong><p style={{ marginTop: 8, marginBottom: 8 }}>Digunakan dalam collection: {duplicateListing.collections.join(', ')}. Anda tetap bisa memakai URL yang sama untuk collection baru.</p><div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}><button type="button" className="outline-btn" onClick={() => setDuplicateListing(null)}>Batal</button><button type="button" className="primary-btn" onClick={() => { setSourceUrl(duplicateListing.url); void loadListingImages(true); }}>Tetap gunakan</button></div></div>}
+      {!!backendConnectionWarning && <div className="notice" role="status"><CircleHelp size={17}/><span>{backendConnectionWarning}</span><button type="button" onClick={async()=>{
+        networkPollFailures.current.clear();
+        try{
+          const response=await fetch('/api/studio',{cache:'no-store'});
+          if(!response.ok)throw Error('Local server HTTP '+response.status);
+          setBackendConnectionWarning('');
+        }catch{
+          setBackendConnectionWarning('PaletteIQ local server still unreachable. OpenAI Batch jobs remain saved; status checks will retry automatically. Do not submit another paid job.');
+        }
+      }}>Check connection</button></div>}
       {!!message && <div className="notice"><CircleHelp size={17}/><span>{message}</span><button onClick={() => setMessage('')}><X size={16}/></button></div>}
       {project.fullAutomation?.enabled && <section className="panel analysis-progress" aria-live="polite">
         <div className="production-progress"><span><Sparkles size={16}/> Full Automation · {project.fullAutomation.stage.replaceAll('_',' ')}</span><b>{project.characters.filter(c=>c.imageUrl).length} images / {project.fullAutomation.target} target</b></div>
