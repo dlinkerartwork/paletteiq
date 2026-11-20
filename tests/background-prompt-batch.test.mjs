@@ -111,7 +111,7 @@ test('UI resumes background prompts without a full-page reload or repeat API cha
   assert.match(page, /hasActivePromptJob\(project.promptJob\)/);
   assert.match(page, /window.setInterval\(\(\) => void pollPrompts\(\), 10000\)/);
   assert.match(page, /onClick=\{\(\) => generatePrompts\(\)\}/);
-  assert.match(page, /OpenAI Batch running/);
+  assert.match(page, /OpenAI prompt requests running/);
   assert.doesNotMatch(route, /window.location.reload/);
 });
 
