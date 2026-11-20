@@ -439,14 +439,51 @@ export async function POST(req: Request) {
     createdAt: now, updatedAt: now, completedCount: saved.data.characters?.length || 0,
     selectedImages, source, transport:'standard', workers,
     ...(hybrid ? { mergeStatus:'planned' as const } : {}) };
-  // Claim the collection before the paid API call. Reject concurrent tabs using
-  // the saved row version, so duplicate submissions cannot quietly incur charges.
-  const updated = { ...saved.data, researchJob: job };
-  const claim = await getDb().update(projects)
-    .set({ data: JSON.stringify(updated), updatedAt: Math.max(now, saved.row.updatedAt + 1) })
-    .where(and(eq(projects.id, projectId), eq(projects.owner, user.userId), eq(projects.updatedAt, saved.row.updatedAt)))
-    .returning({ id: projects.id });
-  if (!claim.length) return bad('Collection changed in another tab. Refresh and retry before paying for analysis.', 409);
+  // Etsy metadata and image preparation can take several seconds. During that
+  // time the Full Automation monitor or another job can legitimately update
+  // this same collection row. Refresh immediately before the paid-job claim,
+  // and retry ONLY the local compare-and-swap (never an OpenAI request).
+  // A successful claim remains the sole authorization to submit paid work.
+  let claimedControls = saved.data.creativeControls;
+  let claimed = false;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const fresh = await getCollection(user.userId, projectId);
+    if (!fresh) return bad('Collection disappeared while preparing research. No OpenAI request was sent.', 404);
+    if (fresh.data.url !== url)
+      return bad('Collection Etsy URL changed while preparing research. No OpenAI request was sent.', 409);
+    const currentImages = fresh.data.selectedImageUrls ?? fresh.data.images ?? [];
+    if (currentImages.length !== selectedImages.length ||
+        currentImages.some((image, index) => image !== selectedImages[index]))
+      return bad('Selected Etsy images changed while preparing research. Review the current selection; no OpenAI request was sent.', 409);
+    // A concurrent request may already have claimed the job. Never replace
+    // its receipt, even if the browser still shows an older research status.
+    if (active(fresh.data.researchJob))
+      return Response.json({error:'Research is already submitting or running. No duplicate OpenAI request was sent.',
+        job:safeJob(fresh.data.researchJob!)}, {status:409});
+    if (fresh.data.researchJob &&
+        !(body.retryFailed === true && safeRejectedImageResearch(fresh.data.researchJob)))
+      return bad('Research status changed while preparing the request. Check the saved job and OpenAI usage; no new request was sent.',409);
+    if (body.retryFailed === true && !safeRejectedImageResearch(fresh.data.researchJob))
+      return bad('Research is no longer eligible for a safe retry. No OpenAI request was sent.',409);
+
+    job.completedCount = fresh.data.characters?.length || 0;
+    const stamp = Math.max(Date.now(), fresh.row.updatedAt + 1);
+    const claim = await getDb().update(projects)
+      .set({ data: JSON.stringify({ ...fresh.data, researchJob: job }), updatedAt: stamp })
+      .where(and(eq(projects.id, projectId), eq(projects.owner, user.userId),
+        eq(projects.updatedAt, fresh.row.updatedAt)))
+      .returning({ id: projects.id });
+    if (claim.length) {
+      claimedControls = fresh.data.creativeControls;
+      claimed = true;
+      break;
+    }
+    // A racing metadata/status write lost this CAS; reread and revalidate.
+    // The backoff is only for database contention, not paid-job submission.
+    await new Promise(resolve => setTimeout(resolve, 30 * (attempt + 1)));
+  }
+  if (!claimed)
+    return bad('Collection was updated repeatedly while claiming research. No OpenAI request was sent; check saved research status before retrying.', 409);
   // New Research uses parallel standard Responses with persisted response IDs.
   // Legacy Batch IDs remain recoverable without resubmitting paid work.
   if(job.transport==='batch'){
@@ -458,7 +495,7 @@ export async function POST(req: Request) {
         const indices=worker.images.map(url=>selectedImages.indexOf(url));
         const count=Math.ceil(requested/workers.length);
         const instruction=researchAnalysisInstruction(source,worker.images.length,count,
-          normalizeCreativeControls(saved.data.creativeControls))+
+          normalizeCreativeControls(claimedControls))+
           '\nRESEARCH WORKER '+(worker.index+1)+'/'+workers.length+
           ': analyze only supplied reference images; never infer other image contents.';
         const input=[{role:'user',content:[
@@ -496,7 +533,7 @@ export async function POST(req: Request) {
         const indices = worker.images.map(url => selectedImages.indexOf(url));
         const subjectCount = Math.ceil(requested / workers.length);
         const instruction = researchAnalysisInstruction(source, worker.images.length, subjectCount,
-          normalizeCreativeControls(saved.data.creativeControls)) +
+          normalizeCreativeControls(claimedControls)) +
           '\nHYBRID WORKER ' + (worker.index + 1) + '/' + workers.length +
           ': analyze ONLY your supplied image group. Final cross-group Style DNA synthesis follows.';
         const input = [{ role:'user', content:[
@@ -543,7 +580,7 @@ export async function POST(req: Request) {
   }
   try {
     const instruction = researchAnalysisInstruction(source, selectedImages.length, requested,
-      normalizeCreativeControls(saved.data.creativeControls));
+      normalizeCreativeControls(claimedControls));
     const input = [{ role: 'user', content: [
       { type: 'input_text', text: instruction },
       ...imageDataUrls.map(image_url => ({ type: 'input_image', image_url })),

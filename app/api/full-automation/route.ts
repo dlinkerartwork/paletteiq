@@ -68,7 +68,7 @@ async function save(owner: string, id: string, fn: (p: Project) => Project) {
 }
 async function setStage(owner: string, id: string, phase: Stage, extras: Partial<Flow> = {}) {
   return save(owner, id, p => ({ ...p, fullAutomation: {
-    ...p.fullAutomation!, ...extras, stage: phase, leaseUntil: 0, updatedAt: Date.now(),
+    ...p.fullAutomation!, ...extras, stage: phase, updatedAt: Date.now(),
   } }));
 }
 function canRestartMissingResearch(p: Project) {
@@ -135,13 +135,21 @@ async function apiPost(req: Request, handler: (req: Request) => Promise<Response
   if (!response.ok) throw Error(String(data.error || 'Internal workflow operation failed').slice(0, 330));
   return data;
 }
+class TransientStatusError extends Error {}
 async function apiGet(req: Request, handler: (req: Request) => Promise<Response>, projectId: string, imageSync = false) {
   const url = new URL(req.url);
   url.searchParams.set('projectId', projectId);
   if (imageSync) url.searchParams.set('sync', '1');
-  const response = await handler(new Request(url));
+  let response: Response;
+  try { response = await handler(new Request(url)); }
+  catch (error) { throw new TransientStatusError('Background job status unavailable: ' +
+    (error instanceof Error ? error.message : String(error)).slice(0, 180)); }
   const data = await response.json() as Record<string, unknown>;
-  if (!response.ok) throw Error(String(data.error || 'Workflow status retrieval failed').slice(0, 330));
+  if (!response.ok) {
+    const message = String(data.error || 'Workflow status retrieval failed').slice(0, 280);
+    if (response.status >= 500 || response.status === 429) throw new TransientStatusError(message);
+    throw Error(message);
+  }
   return data;
 }
 async function jobs(owner: string, id: string) {
@@ -172,8 +180,11 @@ async function tick(req: Request, owner: string, id: string) {
   const flow = initial.p.fullAutomation!;
   if (flow.leaseUntil && flow.leaseUntil > Date.now()) return { waiting:true, ...progress(initial.p) };
   // Persist lease to prevent double-billing from two browser tabs.
+  const leaseToken = Date.now() + 300_000;
+  // JSON1 modifies one durable field without materializing and serializing
+  // every character, reference image and prompt on each 12-second poll.
   const claimed = await getDb().update(projects).set({
-    data: JSON.stringify({ ...initial.p, fullAutomation: { ...flow, leaseUntil:Date.now()+300000 } }),
+    data: sql`json_set(${projects.data}, '$.fullAutomation.leaseUntil', ${leaseToken})`,
     updatedAt: Math.max(Date.now(),initial.row.updatedAt+1),
   }).where(and(eq(projects.owner,owner),eq(projects.id,id),
     eq(projects.updatedAt,initial.row.updatedAt))).returning({id:projects.id});
@@ -222,7 +233,13 @@ async function tick(req: Request, owner: string, id: string) {
             receipt.count,normalizeCreativeControls(p.creativeControls).characterVariation,
             primaryCharacterSubject(p.title||p.name));
           const revised=await save(owner,id,latest=>{
-            if(latest.fullAutomation?.expansionBatch?.batchId!==receipt.batchId)return latest;
+            const activeReceipt = latest.fullAutomation?.expansionBatch;
+            // For Standard Responses, batchId is undefined for every receipt.
+            // Verify the actual responseId AND presence of the active receipt,
+            // otherwise an old poll could import the same AI Fill twice.
+            if (!activeReceipt || (receipt.responseId
+              ? activeReceipt.responseId !== receipt.responseId
+              : activeReceipt.batchId !== receipt.batchId)) return latest;
             const seen=new Set(latest.characters.map(c=>c.name.trim().toLowerCase()));
             const unique=selected.filter(c=>{const name=c.name.trim().toLowerCase();
               if(!name||seen.has(name))return false;seen.add(name);return true;});
@@ -267,9 +284,12 @@ async function tick(req: Request, owner: string, id: string) {
       // job failed, became uncertain, expired, or completed with missing items.
       // In particular, progressive mode may have accepted a Batch ID that
       // failed to persist; only a person can review that charge risk.
-      if (p.promptJob && ['failed','cancelled','expired','completed_with_errors'].includes(p.promptJob.status))
-        throw Error('Prompt Batch needs review before any paid retry. '+missing.length+' prompts remain. Check OpenAI Batch activity first.');
+      // Successful manual completion is not a PAID retry. Previously
+      // failed prompt groups must not prevent already-saved 100/100 prompts
+      // from advancing to Image Production.
       if (!missing.length) await setStage(owner,id,'images');
+      else if (p.promptJob && ['failed','cancelled','expired','completed_with_errors'].includes(p.promptJob.status))
+        throw Error('Prompt Batch needs review before any paid retry. '+missing.length+' prompts remain. Check OpenAI Responses activity first.');
       else if (p.promptJob && isActivePromptBatch(p.promptJob)) await apiGet(req,promptGet,id);
       else if (p.promptJob && p.promptJob.status==='completed')
         throw Error('Prompt Batch completed with '+missing.length+' missing prompts. Review saved results before another paid request.');
@@ -282,6 +302,12 @@ async function tick(req: Request, owner: string, id: string) {
       } else throw Error('Incomplete prompts after three attempts. Review missing prompts before resuming.');
     } else if (f.stage === 'images') {
       const records=await jobs(owner,id);
+      // Reserved image submissions have not been reconciled with OpenAI.
+      // A crash between remote acceptance and receipt persistence must NEVER
+      // make a new automatic billable submission for those same characters.
+      if (records.some(row=>['submitting','uncertain'].includes(row.status) ||
+          row.openaiBatchId.startsWith('pending:')))
+        throw Error('Image Batch submission needs review: an earlier request has an uncertain OpenAI receipt. Verify activity before any paid retry.');
       if (records.some(row=>isActiveBatchStatus(row.status))) await apiGet(req,imageGet,id,true);
       else {
         const missing=p.characters.filter(c=>!c.imageUrl&&!!c.prompt?.trim());
@@ -454,6 +480,13 @@ async function tick(req: Request, owner: string, id: string) {
     const updated=await load(owner,id);
     return updated?progress(updated.p):{error:'Collection missing'};
   } catch (error) {
+    // A temporary GET/status failure must not permanently pause a previously
+    // submitted paid Batch. Keep the durable receipt and retry status polling.
+    if (error instanceof TransientStatusError) {
+      const latest = await load(owner,id).catch(()=>null);
+      return { waiting:true, warning:error.message.slice(0,250),
+        ...(latest?progress(latest.p):{}) };
+    }
     const message=error instanceof Error?error.message.slice(0,380):'Full automation failed';
     await save(owner,id,p=>({...p,fullAutomation:{...p.fullAutomation!,
       stage:'paused',resumeStage:p.fullAutomation?.stage||'research',
@@ -462,7 +495,13 @@ async function tick(req: Request, owner: string, id: string) {
     return {error:message,...(updated?progress(updated.p):{})};
   } finally {
     busy.delete(key);
-    await save(owner,id,p=>p.fullAutomation?({...p,fullAutomation:{...p.fullAutomation,leaseUntil:0}}):p).catch(()=>{});
+    // Clear only our own lease; never replace a concurrently saved Collection
+    // snapshot or clear a different scheduler's lease.
+    await getDb().update(projects).set({
+      data: sql`json_set(${projects.data}, '$.fullAutomation.leaseUntil', 0)`,
+      updatedAt: sql`${projects.updatedAt} + 1`,
+    }).where(and(eq(projects.owner,owner),eq(projects.id,id),
+      sql`CAST(json_extract(${projects.data}, '$.fullAutomation.leaseUntil') AS INTEGER) = ${leaseToken}`)).catch(()=>{});
   }
 }
 // Only the independently deployed Cloudflare Cron Worker may request this tick.
@@ -555,13 +594,16 @@ export async function POST(req:Request) {
     // Least recently updated collections go first. Their tick mutates
     // updatedAt, rotating the queue so long-running Research/Batch jobs do
     // not starve later collections when there are more than three.
-    const rows=await getDb().select().from(projects).where(eq(projects.owner,user.userId))
-      .orderBy(asc(projects.updatedAt)).limit(TICK_SCAN_LIMIT);
-    const active=rows.map(x=>({id:x.id,flow:(JSON.parse(x.data) as Project).fullAutomation}))
-      .filter(x=>isActive(x.flow));
-    // A collection with a live lease is already running elsewhere. Skip it
-    // rather than letting three long requests block all other collections.
-    const available=active.filter(item=>!item.flow?.leaseUntil || item.flow.leaseUntil<=Date.now());
+    // Query active workflow metadata in SQLite: avoid parsing every large
+    // Collection JSON (including image references) on every scheduler tick.
+    const active = await getDb().select({
+      id: projects.id,
+      leaseUntil: sql<number>`CAST(COALESCE(json_extract(${projects.data}, '$.fullAutomation.leaseUntil'), 0) AS INTEGER)`,
+    }).from(projects).where(and(eq(projects.owner,user.userId), sql`
+      json_extract(${projects.data}, '$.fullAutomation.enabled') = 1
+      AND json_extract(${projects.data}, '$.fullAutomation.stage') NOT IN ('completed','paused')
+    `)).orderBy(asc(projects.updatedAt)).limit(TICK_SCAN_LIMIT);
+    const available=active.filter(item=>!item.leaseUntil || item.leaseUntil<=Date.now());
     const selected=available.slice(0,MULTI_COLLECTION_TICK_LIMIT);
     const results=await Promise.all(selected.map(async item=>{
       try { return {projectId:item.id,...await tick(req,user.userId,item.id)}; }
@@ -620,9 +662,12 @@ export async function POST(req:Request) {
   }
   if (body.action==='resume') {
     if (current.p.fullAutomation?.stage!=='paused') return bad('No paused automation to resume',409);
-    return Response.json(progress(await save(user.userId,id,p=>({
-      ...p,fullAutomation:{...p.fullAutomation!,stage:resumeStage(p.fullAutomation),
-        lastError:undefined,leaseUntil:0,updatedAt:Date.now()}}))));
+    return Response.json(progress(await save(user.userId,id,p=>{
+      if (p.fullAutomation?.stage !== 'paused')
+        throw Error('Automation status changed; refresh before resuming.');
+      return {...p,fullAutomation:{...p.fullAutomation!,stage:resumeStage(p.fullAutomation),
+        lastError:undefined,leaseUntil:0,updatedAt:Date.now()}};
+    })));
   }
   if (body.action==='tick') return Response.json(await tick(req,user.userId,id));
   return bad('Unknown automation action');

@@ -868,10 +868,17 @@ export default function Home() {
           body:JSON.stringify({action:'tick',syncAll:true}),
         });
         if (!response.ok || stopped) return;
-        const rows=await fetch('/api/studio',{cache:'no-store'});
-        if (!rows.ok || stopped) return;
-        const list=await rows.json() as Array<{id:string;data:Project}>;
-        const fresh=new Map(list.map(item=>[item.id,item.data]));
+        // The all-collections endpoint can return megabytes of images and
+        // prompts per poll. Fetch only collections that actually have an
+        // active Full Automation workflow.
+        const rows = await Promise.all(otherActive.slice(0,10).map(async item=>{
+          const response = await fetch('/api/studio?projectId=' + encodeURIComponent(item.id),
+            {cache:'no-store'});
+          return response.ok ? ((await response.json()) as Array<{id:string;data:Project}>)[0] : null;
+        }));
+        if (stopped) return;
+        const fresh=new Map(rows.filter((item):item is {id:string;data:Project}=>Boolean(item))
+          .map(item=>[item.id,item.data]));
         if (stopped) return;
         setProjects(previous=>previous.map(old=>{
           if (old.id===latestWorkspace.current.project.id || !old.fullAutomation?.enabled)
@@ -1007,6 +1014,11 @@ export default function Home() {
     } finally { setBusy(''); }
   };
   const changeAutomation = async (action: 'pause' | 'resume') => {
+    if (action === 'resume' && !window.confirm(
+      'Resume the saved Full Automation workflow? Existing OpenAI receipts will be checked. ' +
+      'If the next stage is Image Generation, this may submit NEW paid image batches. ' +
+      'Verify previous OpenAI activity and costs before continuing.'
+    )) return;
     setBusy('automation');
     try {
       const response = await fetch('/api/full-automation', { method:'POST',
@@ -1236,6 +1248,11 @@ export default function Home() {
         {project.fullAutomation.stage === 'paused' && savedResearchError && <p className="sub" role="alert">Last research error: {savedResearchError}</p>}
         {project.fullAutomation.stage === 'paused' && <button type="button" className="outline-btn" disabled={!!busy} onClick={() => void refreshAutomationStatus(project.id).then(() => setMessage('Saved Full Automation and Research status refreshed.')).catch(error => setMessage(error instanceof Error ? error.message : String(error)))}>Refresh Full Automation status</button>}
         {project.fullAutomation.stage === 'paused' && project.researchJob?.error && <p className="sub" role="alert">Saved research job error: {project.researchJob.error}</p>}
+        {project.fullAutomation.stage === 'paused' && project.characters.length >= project.fullAutomation.target &&
+          project.characters.every(c => !!c.prompt.trim()) && <p className="sub" role="status">
+          All {project.fullAutomation.target} image prompts are saved. The paused workflow will NOT
+          submit Image Batches until you explicitly select Resume after reviewing OpenAI costs.
+        </p>}
         {project.fullAutomation.stage === 'paused' && canRestartMissingResearch && <div className="sub" role="status">No background research job is recorded for this workflow. Resuming alone would pause again. Start the missing research only after checking OpenAI activity for any untracked charge.</div>}
         {project.fullAutomation.stage === 'paused' && canRetryRejectedResearch && <button type="button" className="outline-btn" disabled={!!busy} onClick={() => void retryRejectedResearch()}>Retry rejected image research (check OpenAI usage first)</button>}
         {project.fullAutomation.stage === 'paused' && canRestartMissingResearch && <button type="button" className="outline-btn" disabled={!!busy} onClick={() => void recoverMissingResearch()}>Start missing research (check OpenAI usage first)</button>}

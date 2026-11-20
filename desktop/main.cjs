@@ -21,6 +21,7 @@ let activeDirectory = null;
 let mainWindow = null;
 let tray = null;
 let backgroundMonitorTimer = null;
+let backendHealthTimer = null;
 let trayInfoDisplayed = false;
 const BACKGROUND_POLL_MS = 20_000;
 
@@ -175,6 +176,19 @@ async function migrateLegacyDatabase(directory, secret, configPath, storage) {
     }
   }
   writeFileSync(doneMarker, 'ok\n');
+}
+
+function stopOwnedBackend(child) {
+  if (!child || !child.pid) return;
+  // Wrangler launches workerd as a child process. Killing only node.exe can
+  // leave detached worker processes occupying RAM after Electron quits.
+  if (process.platform === 'win32') {
+    const killer = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'],
+      { windowsHide: true, stdio: 'ignore' });
+    killer.on('error', () => { try { child.kill(); } catch { /* Already gone. */ } });
+  } else {
+    try { child.kill(); } catch { /* Already gone. */ }
+  }
 }
 
 async function waitForLocalServer(timeoutMs = 30_000) {
@@ -349,13 +363,80 @@ async function launch() {
   await migrateLegacyDatabase(directory, secret, configPath, { ...nativeStorage, token: nativeBridge.token });
   const diagnostics = diagnosticLogger(directory);
   diagnostics.write('desktop', 'PaletteIQ backend starting.');
-  server = launchWrangler(['dev', '--local', '--config', configPath, '--persist-to', path.join(directory, 'state'), '--ip', '127.0.0.1', '--port', String(SERVER_PORT)], directory, secret, { stdio: 'pipe' });
-  server.stdout?.on('data', chunk => diagnostics.write('stdout', chunk));
-  server.stderr?.on('data', chunk => diagnostics.write('stderr', chunk));
-  server.on('error', error => diagnostics.write('process', error.message));
-
-  server.on('exit', () => { server = null; if (!closing) app.quit(); });
+  let backendInitialized = false;
+  let recovering = false;
+  let recoveryCount = 0;
+  let recoveryWindowStarted = Date.now();
+  let healthFailures = 0;
+  const maxRecoveries = 2;
+  const backendArgs = ['dev', '--local', '--config', configPath, '--persist-to',
+    path.join(directory, 'state'), '--ip', '127.0.0.1', '--port', String(SERVER_PORT)];
+  const startBackend = () => {
+    const child = launchWrangler(backendArgs, directory, secret, { stdio: 'pipe' });
+    server = child;
+    child.stdout?.on('data', chunk => diagnostics.write('stdout', chunk));
+    child.stderr?.on('data', chunk => diagnostics.write('stderr', chunk));
+    child.on('error', error => diagnostics.write('process', error.message));
+    child.on('exit', (code, signal) => {
+      diagnostics.write('process', 'Backend exited: PID ' + child.pid +
+        ', code=' + code + ', signal=' + signal);
+      if (server === child) server = null;
+      if (!closing && backendInitialized && !recovering) void recoverBackend('Wrangler exited');
+    });
+    return child;
+  };
+  const recoverBackend = async reason => {
+    if (closing || recovering) return;
+    if (Date.now() - recoveryWindowStarted > 30 * 60 * 1000) {
+      recoveryWindowStarted = Date.now(); recoveryCount = 0;
+    }
+    if (recoveryCount >= maxRecoveries) return;
+    recovering = true;
+    recoveryCount++;
+    diagnostics.write('desktop', 'Recovering local backend (' + recoveryCount +
+      '/' + maxRecoveries + '): ' + reason);
+    try {
+      const old = server;
+      // Stop only the process tree spawned by this Electron instance.
+      if (old) { server = null; stopOwnedBackend(old); }
+      await new Promise(resolve => setTimeout(resolve, 1200));
+      if (closing) return;
+      startBackend();
+      await waitForLocalServer(45_000);
+      healthFailures = 0;
+      diagnostics.write('desktop', 'Backend recovery succeeded; saved OpenAI receipts remain intact.');
+      // React's fetch monitors recover themselves. Do not reload an editor
+      // that may contain unsaved user changes.
+      if (mainWindow && !mainWindow.isDestroyed() &&
+          mainWindow.webContents.getURL().startsWith('chrome-error://'))
+        await mainWindow.loadURL(SERVER_URL);
+    } catch (error) {
+      diagnostics.write('desktop', 'Backend recovery failed: ' +
+        (error instanceof Error ? error.message : String(error)));
+    } finally {
+      recovering = false;
+      if (!closing && (!server || healthFailures >= 3) && recoveryCount < maxRecoveries)
+        setTimeout(() => { void recoverBackend('Retry after failed recovery'); }, 2500);
+    }
+  };
+  startBackend();
   await waitForLocalServer();
+  backendInitialized = true;
+  backendHealthTimer = setInterval(() => {
+    if (closing || recovering) return;
+    void (async () => {
+      try {
+        const response = await fetch(SERVER_URL,
+          { signal: AbortSignal.timeout(3000) });
+        if (response.status < 500) { healthFailures = 0; return; }
+      } catch { /* Health check failed. */ }
+      healthFailures++;
+      if (healthFailures >= 3)
+        void recoverBackend('Three consecutive HTTP health failures');
+      else if (healthFailures === 3)
+        diagnostics.write('desktop', 'Backend unavailable after recovery budget; inspect desktop-backend.log.');
+    })();
+  }, 15000);
   configureWorkspaceMenu(directory);
   const window = new BrowserWindow({ width: 1440, height: 940, minWidth: 1050, minHeight: 680, title: 'PaletteIQ Desktop', webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, backgroundThrottling: false } });
   mainWindow = window;
@@ -371,8 +452,9 @@ app.on('window-all-closed', () => { if (!tray || closing) app.quit(); });
 app.on('before-quit', () => {
   closing = true;
   if (backgroundMonitorTimer) { clearInterval(backgroundMonitorTimer); backgroundMonitorTimer = null; }
+  if (backendHealthTimer) { clearInterval(backendHealthTimer); backendHealthTimer = null; }
   if (tray) { tray.destroy(); tray = null; }
-  if (server && !server.killed) server.kill();
+  if (server && !server.killed) stopOwnedBackend(server);
   if (nativeStorage) { nativeStorage.server.close(); nativeStorage.database.close(); }
   // .dev.vars is needed by the local Worker only while the app runs.
   if (activeDirectory) {

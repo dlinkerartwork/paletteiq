@@ -242,7 +242,7 @@ async function progressPromptBatches(owner:string,id:string,jobId:string,key:str
   try {
     const stored=await ownedProject(owner,id);
     const job=stored?.data.promptJob;
-    if(!job||job.id!==jobId||job.mode!=='progressive') return null;
+    if(!job||job.id!==jobId||(job.mode!=='progressive'&&job.mode!=='standard')) return null;
     const groups=job.progressiveBatches||[];
     const active=groups.filter(g=>['submitting','queued','in_progress'].includes(g.status)).length;
     const capacity=Math.max(0,PROGRESSIVE_ACTIVE_LIMIT-active);
@@ -281,7 +281,7 @@ async function synchronizeProgressive(owner:string,id:string,job:PromptBatchJob)
           ? await (await openai(key,'batches/'+encodeURIComponent(group.batchId))).json() as RemoteBatch
           : {status:response?.status||'in_progress'} as RemoteBatch;
         if(!TERMINAL.has(remote.status) && remote.status!=='incomplete'){
-          await progressiveGroupUpdate(owner,id,job.id,group.key,{status:'in_progress'});
+          if(group.status!=='in_progress') await progressiveGroupUpdate(owner,id,job.id,group.key,{status:'in_progress'});
           return;
         }
         if(group.batchId && remote.status==='completed'&&!remote.output_file_id&&!remote.error_file_id) return;
@@ -303,8 +303,9 @@ async function synchronizeProgressive(owner:string,id:string,job:PromptBatchJob)
                 const decoded=JSON.parse(raw) as {prompts?:Array<{id?:string;prompt?:string}>};
                 const allowed=new Set(groupSpec.flatMap(g=>g.ids));
                 for(const item of decoded.prompts||[])
-                  if(item.id&&allowed.has(item.id)&&typeof item.prompt==='string'&&item.prompt.trim())
-                    prompts.set(item.id,item.prompt.trim());
+                  if(item.id&&allowed.has(item.id)&&typeof item.prompt==='string'&&
+                     item.prompt.trim().length>60&&!prompts.has(item.id))
+                    prompts.set(item.id,item.prompt.trim().slice(0,6000));
               }catch{errors.set(group.key,'Invalid JSON from standard Responses API');}
               return {prompts,errors};
             })()

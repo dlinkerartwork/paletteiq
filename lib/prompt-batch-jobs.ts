@@ -81,7 +81,7 @@ export function buildPromptBatchInput(p: PromptProject, selected: PromptTarget[]
       custom_id: key, method: 'POST', url: '/v1/responses',
       body: { model, input: [{ role: 'user', content: [{ type: 'input_text', text: instruction }] }],
         text: { format: { type: 'json_object' } },
-        max_output_tokens: 8000 },
+        max_output_tokens: 12000 },
     }));
   }
   return { jsonl: lines.join('\n') + '\n', groups };
