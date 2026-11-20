@@ -296,6 +296,21 @@ async function recheckUnverifiedSimilarity(owner:string,id:string) {
     return {character,record:matched.record,key:batchAssetKey(owner,character.id,extension,matched.record.id),
       mime:extension==='jpg'?'image/jpeg' as const:'image/png' as const};
   });
+  // A read-only connectivity probe prevents the retry budget being used
+  // while the desktop/ISP is offline. Do not spend or reserve a visual POST
+  // when the provider cannot be reached at all.
+  let connectivity:Response;
+  try {
+    connectivity=await fetch('https://api.openai.com/v1/models',{
+      method:'GET',headers:{Authorization:'Bearer '+secret},
+    });
+  }catch{
+    throw new TransientStatusError('OpenAI connection offline; similarity retry receipts are preserved until connectivity returns.');
+  }
+  if(connectivity.status===429 || connectivity.status>=500)
+    throw new TransientStatusError('OpenAI temporarily unavailable for similarity recheck (HTTP '+connectivity.status+').');
+  if(!connectivity.ok)
+    throw Error('OpenAI rejected similarity recheck connectivity (HTTP '+connectivity.status+'). Verify the API key; no visual comparison was sent.');
   const now=Date.now();
   await save(owner,id,latest=>{
     const retries={...(latest.fullAutomation?.similarityRetries||{})};
