@@ -420,6 +420,11 @@ async function tick(req: Request, owner: string, id: string) {
         const model=p.fullAutomation?.promptModel || p.fullAutomation?.textModel || config.automationPromptModel || 'gpt-6-luna';
         await apiPost(req,promptPost,{projectId:id,characterIds:missing.slice(0,200).map(c=>c.id),model,regenerate:false,progressive:p.progressivePrompts===true});
       } else throw Error('Incomplete prompts after three attempts. Review missing prompts before resuming.');
+      // Pipeline overlap: groups imported early are already immutable prompt
+      // inputs. Start complete 20-image Batches while other prompt groups run.
+      // Never submit images for characters whose prompt is not yet saved.
+      if(missing.length)
+        await scheduleReadyImageWave(req,owner,id,true);
     } else if (f.stage === 'images') {
       // Refresh and refill free image slots every cycle, instead of waiting
       // for an entire three-Batch wave to finish before starting more work.
