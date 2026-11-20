@@ -18,6 +18,10 @@ import { pendingImageBatchNotification, queueFinishedImageBatchEmail, type Email
 
 import { isImageBatchModel, imageBatchModelError } from '@/lib/image-batch-models';
 const syncingJobIds = new Set<string>();
+// A different Batch within the same collection must not concurrently write
+// a stale project snapshot and erase already imported images.
+const syncingProjectIds = new Set<string>();
+const IMAGE_BATCH_SYNC_PER_COLLECTION = 4;
 type BatchItem = EmailBatchItem & { imageUrl?: string; error?: string; similarityReview?: SimilarityReview; replaceFromImageUrl?: string };
 type OpenAIBatch = { id: string; status: string; output_file_id?: string | null; error_file_id?: string | null; request_counts?: { total: number; completed: number; failed: number } };
 const fail = (message: string, code = 400) => Response.json({ error: message }, { status: code });
@@ -117,8 +121,9 @@ async function* jsonlLines(stream: ReadableStream<Uint8Array>) {
 }
 
 async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner: string, userEmail: string, storeName: string) {
-  if (syncingJobIds.has(job.id)) return job;
+  if (syncingJobIds.has(job.id) || syncingProjectIds.has(job.projectId)) return job;
   syncingJobIds.add(job.id);
+  syncingProjectIds.add(job.projectId);
   try {
   const db = getDb();
   const savedProject = await db.select().from(projects).where(and(eq(projects.id, job.projectId), eq(projects.owner, owner))).limit(1);
@@ -227,7 +232,7 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
     catch { /* Keep the completion durable; notification can retry on syncAll. */ }
   }
   return savedJob;
-  } finally { syncingJobIds.delete(job.id); }
+  } finally { syncingJobIds.delete(job.id); syncingProjectIds.delete(job.projectId); }
 }
 
 export async function GET(req: Request) {
@@ -239,11 +244,17 @@ export async function GET(req: Request) {
     // restart, even when the user is not on the Image Production page.
     const db = getDb();
     const activeCandidates = await db.select().from(imageBatches).where(and(eq(imageBatches.owner, user.userId), notInArray(imageBatches.status, ['completed', 'completed_with_errors', 'failed', 'cancelled', 'expired']))).orderBy(asc(imageBatches.updatedAt)).limit(30);
-    // Fair polling across collections, while serializing updates within each collection.
+    // Fair polling across collections, and independent progress for up to
+    // four active Batch receipts per collection. A validating Batch must not
+    // prevent importing another Batch that has already published output.
     const seenProjects = new Set<string>();
+    const perProject = new Map<string,number>();
     const active = activeCandidates.filter(row => {
-      if (seenProjects.has(row.projectId) || seenProjects.size >= 2) return false;
+      if (!seenProjects.has(row.projectId) && seenProjects.size >= 2) return false;
+      const count=perProject.get(row.projectId)||0;
+      if(count>=IMAGE_BATCH_SYNC_PER_COLLECTION)return false;
       seenProjects.add(row.projectId);
+      perProject.set(row.projectId,count+1);
       return true;
     });
     const key = await userCredential(user.userId, 'openai') || sharedProviderSecret(user.userId, 'OPENAI_API_KEY');
@@ -296,11 +307,18 @@ export async function GET(req: Request) {
   const rows = await db.select().from(imageBatches).where(and(eq(imageBatches.owner, user.userId), eq(imageBatches.projectId, projectId))).orderBy(desc(imageBatches.createdAt)).limit(200);
   const key = await userCredential(user.userId, 'openai') || sharedProviderSecret(user.userId, 'OPENAI_API_KEY');
   const sync = new URL(req.url).searchParams.get('sync') === '1';
-  const syncTarget = rows.find(row => isActiveBatchStatus(row.status))?.id;
-  const jobs = await Promise.all(rows.map(async row => {
-    if (!sync || !key || row.id !== syncTarget) return safeJob(row);
-    try { return safeJob(await syncJob(row, key, user.userId, user.email, user.displayName)); }
-    catch (error) { return { ...safeJob(row), warning: error instanceof Error ? error.message : 'Unable to sync' }; }
-  }));
-  return Response.json({ jobs });
+  // Poll multiple Batch receipts instead of blocking all imports behind
+  // the first still-validating or in-progress Batch. Serialize imports so
+  // different jobs cannot overwrite each other's collection updates.
+  const freshById = new Map<string,ReturnType<typeof safeJob>>();
+  if(sync && key){
+    const pendingRows=rows.filter(row=>isActiveBatchStatus(row.status))
+      .slice(0,IMAGE_BATCH_SYNC_PER_COLLECTION);
+    for(const row of pendingRows){
+      try { freshById.set(row.id,safeJob(await syncJob(row,key,user.userId,user.email,user.displayName))); }
+      catch(error){freshById.set(row.id,{...safeJob(row),
+        warning:error instanceof Error?error.message:'Unable to sync'}); }
+    }
+  }
+  return Response.json({jobs:rows.map(row=>freshById.get(row.id)||safeJob(row))});
 }
