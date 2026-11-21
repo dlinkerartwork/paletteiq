@@ -640,7 +640,9 @@ export async function POST(req: Request) {
       '. No new OpenAI background job was submitted.', 422);
   }
   const now = Date.now();
-  const hybrid = selectedImages.length > 1 && body.retryFailed !== true;
+  // Small collections need one cohesive Style DNA + exact character catalog, not
+  // three provisional candidate groups followed by a separate paid merge.
+  const hybrid = requested > 20 && selectedImages.length > 1 && body.retryFailed !== true;
   const partitions = splitResearchImages(selectedImages, hybrid ? 3 : 1);
   const workers: HybridWorker[] = partitions.map((part, index) => ({
     index, images: part, status:'planned',
@@ -800,8 +802,11 @@ export async function POST(req: Request) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model, input, background: true, store: true,
+        ...(requested <= 20 ? { reasoning: { effort: 'low' } } : {}),
         text: { format: { type: 'json_object' } },
-        max_output_tokens: Math.min(30000, 3200 + requested * 190),
+        max_output_tokens: requested <= 20
+          ? Math.min(13000, Math.max(8192, 3200 + requested * 250))
+          : Math.min(30000, 3200 + requested * 190),
       }),
     });
     if (!ai.ok) throw new Error('OpenAI background research failed to start (HTTP ' + ai.status + '): ' + (await ai.text()).slice(0, 260));
