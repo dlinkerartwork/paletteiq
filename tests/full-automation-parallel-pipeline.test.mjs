@@ -72,7 +72,9 @@ test('prompt groups can feed image batches while other groups remain active',()=
   // Windows Git checkouts may use CRLF instead of LF. Assert that the same
   // pipeline test works on both platforms, regardless of newline style.
   assert.match(promptCode.replace(/\r?\n/g,'\r\n'),overlapPattern);
-  assert.match(flow,/partialPrompts && usable\.length<20/);
+  assert.match(flow,/partialPrompts && usable\.length<groupSize/);
+  assert.match(flow,/const groupSize=f\.imageBatchSize===10\?10:20/);
+  assert.match(flow,/Math\.ceil\(f\.target\/groupSize\)/);
   assert.match(flow,/pendingImageIds\(records\)/);
   assert.match(flow,/Promise\.allSettled\(chunks\.map\(chunk=>apiPost/);
 });
