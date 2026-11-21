@@ -97,8 +97,8 @@ test('existing regeneration receipts block duplicate paid replacements after dis
   const post=section.indexOf('const result=await apiPost(req,imagePost');
   assert.ok(existing>=0 && post>existing);
   assert.match(section,/existing\.openaiBatchId\.startsWith\('pending:'\)/);
-  assert.match(section,/item.replaceFromImageUrl/);
-  assert.match(section,/await setStage\(owner,id,'verifying',\{regenerationBatchId:existing.id\}\)/);
+  assert.match(section,/matchesCurrentReplacementVersion/);
+  assert.match(section,/await setStage\(owner,id,'verifying',\{regenerationBatchId:existing.id,regenerationRounds:round\}\)/);
   assert.match(section,/await recheckUnverifiedSimilarity\(owner,id\)/);
   assert.match(section,/MAX_AUTOMATIC_REGENERATION_ROUNDS/);
   assert.match(section,/matchesCurrentReplacementVersion/);
@@ -109,7 +109,7 @@ test('existing regeneration receipts block duplicate paid replacements after dis
 
 test('scheduler recovers only old similarity pauses; UI exposes each progress stage',()=>{
   assert.match(flow,/canAutoRecoverSimilarityPause\(initial.p.fullAutomation\)/);
-  assert.match(flow,/stage:'reviewing',resumeStage:undefined,lastError:undefined/);
+  assert.match(flow,/stage:canAutoRecoverFirstReplacementPause\(p.fullAutomation\)\?'verifying':'reviewing'/);
   assert.match(flow,/LIKE '% image\(s\) have unverified similarity checks\. Review required\.'/);
   assert.match(page,/Similarity verification \/ retry/);
   assert.match(page,/Generate revised similarity-safe prompts/);
