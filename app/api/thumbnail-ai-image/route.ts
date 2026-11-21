@@ -1,3 +1,4 @@
+import { geminiKeyCycle, isGeminiQuotaResponse, GEMINI_ALL_KEYS_EXHAUSTED } from '@/lib/gemini-keyring';
 import { sharedProviderSecret } from '@/lib/store-secrets';
 import { env } from 'cloudflare:workers';
 import { thumbnailImagePrompt } from '@/lib/thumbnail-image-prompt';
@@ -232,15 +233,18 @@ export async function POST(req: Request) {
     const keys = await userGeminiKeys(user.userId);
     if (!keys.length) return bad('Configure a Gemini API key in Settings', 503);
     let failure = 'Gemini image generation unavailable';
-    for (const key of keys) {
+    let quotaFailures = 0;
+    const keyCycle = geminiKeyCycle(user.userId, keys);
+    for (const key of keyCycle) {
       const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent', {
         method: 'POST', headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
         body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { responseModalities: ['IMAGE', 'TEXT'], ...(model.startsWith('gemini-3') ? { imageConfig: { aspectRatio: Math.abs(width / height - 1) < 0.1 ? '1:1' : width > height ? '3:2' : '2:3', imageSize: Math.max(width, height) > 2048 ? '4K' : Math.max(width, height) > 1024 ? '2K' : '1K' } } : {}) } }),
         signal: AbortSignal.timeout(120000)
       });
       if (!response.ok) {
-        failure = 'Gemini image generation failed (HTTP ' + response.status + '): ' + (await response.text()).slice(0, 350);
-        if ([401,403,429,500,502,503,504].includes(response.status)) continue;
+        const detail = await response.text();
+        failure = 'Gemini image generation failed (HTTP ' + response.status + '): ' + detail.slice(0, 350);
+        if (isGeminiQuotaResponse(response.status, detail)) { quotaFailures++; continue; }
         break;
       }
       const result = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ inlineData?: { mimeType?: string; data?: string } }> } }> };
@@ -250,7 +254,7 @@ export async function POST(req: Request) {
       if (imageBase64) break;
       failure = 'Gemini returned no PNG image. Choose a supported image generation model.';
     }
-    if (!imageBase64) return bad(failure, 502);
+    if (!imageBase64) return bad(quotaFailures === keyCycle.length ? GEMINI_ALL_KEYS_EXHAUSTED : failure, quotaFailures === keyCycle.length ? 429 : 502);
   }
   if (!imageBase64) return bad('AI provider returned no image', 502);
   const bytes = Uint8Array.from(atob(imageBase64), ch => ch.charCodeAt(0));
