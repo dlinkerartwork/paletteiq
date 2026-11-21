@@ -362,8 +362,13 @@ async function synchronizeProgressive(owner:string,id:string,job:PromptBatchJob,
           const chars=current.data.characters.map(c=>({...c}));
           const byId=new Map(chars.map(c=>[c.id,c]));
           const items=current.data.promptJob.items.map(item=>{
+            const existingCharacter=byId.get(item.id);
+            const recoverLostDonePrompt=recoverExisting && item.status==='done' &&
+              !existingCharacter?.prompt?.trim();
             if(!groupSpec[0]?.ids.includes(item.id) ||
-              (item.status!=='pending' && !(recoverExisting && item.status==='error')))return item;
+              (item.status!=='pending' &&
+                !(recoverExisting && item.status==='error') && !recoverLostDonePrompt))
+              return item;
             const character=byId.get(item.id);
             if(!character||promptFingerprint(character.prompt||'')!==item.originalFingerprint)
               return {...item,status:'skipped' as const,error:'Manually edited or deleted; original prompt preserved.'};
@@ -482,7 +487,13 @@ async function synchronize(owner: string, projectId: string,recoverExisting=fals
     return fail('Prompt batch changed while importing. Reopen the collection.', 409);
   const characters = new Map(latest.data.characters.map(c => [c.id, c]));
   const items = latest.data.promptJob.items.map(item => {
-    if (item.status !== 'pending' && !(recoverExisting && item.status==='error')) return item;
+    // A paid Prompt item can be marked done even if an older browser Save
+    // subsequently erased its prompt text. Read the SAME saved receipt and
+    // restore that result, never create a second OpenAI submission.
+    if (item.status !== 'pending' &&
+      !(recoverExisting && (item.status==='error' ||
+        (item.status==='done' && !characters.get(item.id)?.prompt?.trim()))))
+      return item;
     const character = characters.get(item.id);
     if (!character) return { ...item, status: 'skipped' as const, error: 'Character was deleted before prompt import.' };
     if (promptFingerprint(character.prompt || '') !== item.originalFingerprint)
