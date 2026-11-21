@@ -824,6 +824,13 @@ async function tickCloudCollections(req: Request) {
         AND json_extract(${projects.data}, '$.fullAutomation.resumeStage') = 'images'
         AND json_extract(${projects.data}, '$.fullAutomation.lastError')
           LIKE '% image(s) have unverified similarity checks. Review required.')
+      OR (json_extract(${projects.data}, '$.fullAutomation.stage') = 'paused'
+        AND json_extract(${projects.data}, '$.fullAutomation.resumeStage') = 'verifying'
+        AND json_extract(${projects.data}, '$.fullAutomation.regenerationBatchId') IS NOT NULL
+        AND (json_extract(${projects.data}, '$.fullAutomation.regenerationRounds') IS NULL
+          OR CAST(json_extract(${projects.data}, '$.fullAutomation.regenerationRounds') AS INTEGER) < 2)
+        AND json_extract(${projects.data}, '$.fullAutomation.lastError')
+          LIKE '% replacement image(s) are still too similar. One automatic regeneration was already attempted; inspect manually.')
     )
   `).orderBy(asc(projects.updatedAt)).limit(MULTI_COLLECTION_TICK_LIMIT);
   const results: Array<{ projectId: string; waiting?: boolean; error?: string; stage?: string }> = [];
@@ -899,6 +906,13 @@ export async function POST(req:Request) {
         AND json_extract(${projects.data}, '$.fullAutomation.resumeStage') = 'images'
         AND json_extract(${projects.data}, '$.fullAutomation.lastError')
           LIKE '% image(s) have unverified similarity checks. Review required.')
+      OR (json_extract(${projects.data}, '$.fullAutomation.stage') = 'paused'
+        AND json_extract(${projects.data}, '$.fullAutomation.resumeStage') = 'verifying'
+        AND json_extract(${projects.data}, '$.fullAutomation.regenerationBatchId') IS NOT NULL
+        AND (json_extract(${projects.data}, '$.fullAutomation.regenerationRounds') IS NULL
+          OR CAST(json_extract(${projects.data}, '$.fullAutomation.regenerationRounds') AS INTEGER) < 2)
+        AND json_extract(${projects.data}, '$.fullAutomation.lastError')
+          LIKE '% replacement image(s) are still too similar. One automatic regeneration was already attempted; inspect manually.')
     )
     `)).orderBy(asc(projects.updatedAt)).limit(TICK_SCAN_LIMIT);
     const available=active.filter(item=>!item.leaseUntil || item.leaseUntil<=Date.now());
