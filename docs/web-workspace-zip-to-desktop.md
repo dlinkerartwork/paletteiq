@@ -24,10 +24,27 @@ Desktop; no Web server is required to use or restore a Desktop workspace.**
      including Batch subdirectories).
 
 **Do not use Export current store (.json)** for complete image migration.
-The older JSON backup deliberately excludes the image bytes and will not
-rebuild the generated artwork on Desktop. If even one referenced PNG/JPG
-is missing, ZIP export refuses to start instead of producing a deceptive
-completed Collection. Retry after repairing the original Web image storage.
+The older JSON backup deliberately excludes image bytes and will not
+rebuild the generated artwork on Desktop.
+
+If the Web storage reports missing PNG/JPG assets, the Export panel shows
+the number of **available** and **missing** images, and a sample of missing
+paths. A normal complete ZIP remains blocked until all referenced images
+are available. You can either inspect/recover saved Batch results in the
+original Web workspace and retry, or explicitly check the warning and select
+**Export partial ZIP**. Partial ZIPs contain *all available real images*,
+the original Collection metadata, and a full missing-image report inside
+`database/web-collections.json` (field `missingAssets`), with counts in
+`manifest.json`. **No missing image is invented, regenerated, or represented
+by a fake blank PNG**.
+
+When importing a partial ZIP, click **Preview ZIP** in Desktop and enable
+**Allow partial image recovery**. The existing store importer removes only
+missing image references in the *imported copy*, marks characters without
+any surviving image as Ready, and pauses imported Full Automation for manual
+inspection. The original Web database and already-saved paid job receipts
+stay untouched. The ZIP must not be treated as an archive of all 100 images
+unless its missing-image count is zero.
 
 ## 2. Import into Desktop (choose the destination store)
 
