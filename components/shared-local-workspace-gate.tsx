@@ -118,16 +118,6 @@ export default function SharedLocalWorkspaceGate({children}:{children:React.Reac
         background:'white',color:'#183c63',fontWeight:700,cursor:'pointer',
       }}>Use shared Desktop workspace</button>
     </div>}
-    {mode==='standalone'&&isIndependentLocalWeb()&&<div role="status" style={{
-      padding:'8px 16px',background:'#f4f4f5',color:'#444',
-      display:'flex',justifyContent:'center',alignItems:'center',gap:10,flexWrap:'wrap',fontSize:12,
-    }}>
-      <span>Independent Web workspace — not synchronized with Desktop.</span>
-      <button type="button" onClick={()=>{setMode('checking');setAttempt(n=>n+1);}}
-        style={{textDecoration:'underline',border:0,background:'transparent',cursor:'pointer',color:'inherit'}}>
-        Check Desktop connection
-      </button>
-    </div>}
     {children}
   </>;
 }
