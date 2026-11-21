@@ -40,8 +40,8 @@ test('AI prompt creation directs original redesigns while preserving niche and i
 
 test('similarity thresholds guide image prompts but do not claim a guaranteed visual outcome', () => {
   assert.equal(normalizeSimilarityLimit(60),60);
-  assert.equal(normalizeSimilarityLimit(150),80);
-  assert.equal(normalizeSimilarityLimit(-1),80);
+  assert.equal(normalizeSimilarityLimit(150),40);
+  assert.equal(normalizeSimilarityLimit(-1),40);
   const generated=originalImagePrompt('Soft gouache fox','character-fox','',60);
   assert.match(generated,/no more than 60%/);
   assert.match(generated,/advisory creative target, not a measurable guarantee/);
