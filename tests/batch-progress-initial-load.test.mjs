@@ -10,5 +10,5 @@ test('Image Production renders cached Batch jobs before OpenAI sync', () => {
   assert.match(component, /await refresh\(false, true\)/);
   assert.match(component, /sync=\$\{sync \? '1' : '0'\}/);
   assert.match(component, /Loading saved Batch progress/);
-  assert.match(component, /!jobsLoaded \|\| working \|\| !ids\.length/);
+  assert.match(component, /!jobsLoaded \|\| !batchSettingsLoaded \|\| working \|\| !ids\.length/);
 });
