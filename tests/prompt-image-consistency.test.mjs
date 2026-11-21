@@ -52,6 +52,10 @@ test('stale saves cannot overwrite active, completed or terminal paid Prompt lin
   assert.match(studio,/const completedPromptIds=new Set/);
   assert.match(studio,/serverPromptJob\?\.items/);
   assert.match(studio,/incoming.characters,old.characters\|\|\[\],completedPromptIds/);
+  assert.match(studio,/eq\(projects.updatedAt,current\[0\].updatedAt\)/);
+  assert.match(studio,/\.onConflictDoNothing\(\)\.returning/);
+  assert.match(studio,/Collection changed while saving/);
+  assert.doesNotMatch(studio,/\.onConflictDoUpdate\(\{ target: projects.id/);
   assert.match(prompts,/const recoverLostDonePrompt=recoverExisting && item.status==='done'/);
   assert.match(prompts,/!existingCharacter\?\.prompt\?\.trim\(\)/);
   assert.match(prompts,/\(item.status==='done' && !characters.get\(item.id\)\?\.prompt\?\.trim\(\)\)/);
