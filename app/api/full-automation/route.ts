@@ -1012,6 +1012,32 @@ export async function POST(req:Request) {
     });
     return Response.json(progress(next));
   }
+  if (body.action==='accept-current-characters') {
+    // Accept ONLY a paused expansion with no outstanding or ambiguous paid
+    // receipts. Never silently skip an OpenAI response that could import more.
+    const flow=current.p.fullAutomation;
+    if (!flow?.enabled || flow.stage!=='paused' ||
+        flow.resumeStage!=='expanding' ||
+        !current.p.characters.length ||
+        current.p.characters.length>=flow.target ||
+        activeExpansionSlots(flow).length)
+      return bad('Character acceptance requires a paused AI Fill, a partial library and no unresolved OpenAI expansion receipts. Refresh Full Automation status.',409);
+    const accepted=await save(user.userId,id,p=>{
+      const f=p.fullAutomation;
+      if (!f?.enabled || f.stage!=='paused' ||
+          f.resumeStage!=='expanding' || !p.characters.length ||
+          p.characters.length>=f.target || activeExpansionSlots(f).length)
+        throw Error('AI Fill changed while accepting the saved characters. Refresh status.');
+      const acceptedCount=p.characters.length;
+      return {...p,characterTarget:acceptedCount,
+        fullAutomation:{...f,target:acceptedCount,
+          resumeStage:'prompts',lastError:undefined,
+          leaseUntil:0,updatedAt:Date.now()}};
+    });
+    // Deliberately stay paused: the user must separately authorize Resume,
+    // which may submit NEW PAID Prompt and Image requests.
+    return Response.json({...progress(accepted),acceptedCharacterCount:accepted.characters.length});
+  }
   if (body.action==='resume-expansion') {
     // An exhausted, paused AI Fill needs a NEW user-approved paid allowance.
     // Never reset uncertain or still-active response receipts.
