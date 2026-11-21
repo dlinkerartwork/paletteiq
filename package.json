@@ -21,7 +21,7 @@
     "license:init": "node scripts/license-cli.mjs init",
     "license:issue": "node scripts/license-cli.mjs issue",
     "typecheck": "tsc --noEmit",
-    "dev:diagnose": "node scripts/diagnose-startup.mjs"
+    "dev:diagnose": "node --import ./scripts/trace-invalid-json.mjs ./scripts/run-framework.mjs dev"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
