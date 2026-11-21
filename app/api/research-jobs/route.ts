@@ -418,7 +418,30 @@ export async function POST(req: Request) {
     // Every URL is checked against the original stored worker group.
     const prepared=new Map<number,string[]>();
     try {
-      for (const w of failed) prepared.set(w.index,await fetchResearchImageDataUrls(w.images));
+      // Original first submission used Etsy's smaller 570px reference images.
+      // Re-resolve the SAME saved artwork to thumbnails for retries, without
+      // changing selected images or the charged worker's original group.
+      const listing=listingId(saved.data.url||'');
+      const etsyKey=await userCredential(user.userId,'etsy') ||
+        sharedProviderSecret(user.userId,'ETSY_API_KEY');
+      const thumbnails=new Map<string,string>();
+      if (listing && etsyKey) {
+        const listingResponse=await fetch(
+          'https://api.etsy.com/v3/application/listings/'+listing+'?includes=Images',
+          {headers:{'x-api-key':etsyKey}});
+        if (listingResponse.ok) {
+          const listingData=await listingResponse.json() as {
+            images?: Array<{url_fullxfull?:string;url_570xN?:string}>;
+          };
+          for (const im of listingData.images||[]) {
+            if (im.url_fullxfull && im.url_570xN && validImage(im.url_570xN))
+              thumbnails.set(im.url_fullxfull,im.url_570xN);
+          }
+        }
+      }
+      for (const w of failed)
+        prepared.set(w.index,await fetchResearchImageDataUrls(
+          w.images.map(url=>thumbnails.get(url)||url)));
     } catch(error) {
       return bad('Research references unavailable. No retry submitted: '+
         (error instanceof Error?error.message:String(error)).slice(0,220),422);
