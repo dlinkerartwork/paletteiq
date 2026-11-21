@@ -1254,6 +1254,39 @@ export default function Home() {
     } catch (e) { setMessage(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(''); }
   };
+  const acceptCurrentCharacters = async () => {
+    const flow=project.fullAutomation;
+    if(!flow?.enabled || flow.stage!=='paused' || flow.resumeStage!=='expanding' ||
+       !project.characters.length || project.characters.length>=flow.target)return;
+    if(!window.confirm(
+      'Accept '+project.characters.length+' saved characters instead of the original target of '+
+      flow.target+'? This will STOP AI Fill for this collection, update its target and '+
+      'prepare the AI Prompts stage. NO new paid OpenAI request is sent by accepting. '+
+      'Future Resume may generate NEW PAID prompts/images after a separate confirmation. '+
+      'Your existing characters, prompts, generated PNGs and job receipts are preserved.'
+    ))return;
+    setBusy('accept-characters');
+    try{
+      const response=await fetch('/api/full-automation',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action:'accept-current-characters',projectId:project.id}),
+      });
+      const result=await response.json() as {error?:string;flow?:FullAutomation;acceptedCharacterCount?:number};
+      if(!response.ok||!result.flow||!result.acceptedCharacterCount)
+        throw Error(result.error||'Could not accept the saved character count');
+      const accepted=result.acceptedCharacterCount;
+      setTarget(accepted);
+      setProject(prev=>prev.id===project.id?{...prev,characterTarget:accepted,fullAutomation:result.flow}:prev);
+      setProjects(prev=>prev.map(item=>item.id===project.id?
+        {...item,characterTarget:accepted,fullAutomation:result.flow}:item));
+      setMessage('Accepted '+accepted+' saved characters as the final collection target. '+
+        'AI Fill will not request more concepts. Full Automation remains paused at AI Prompts; '+
+        'click Resume separately after reviewing future OpenAI charges.');
+    }catch(error){
+      setMessage('Character acceptance stopped: '+(error instanceof Error?error.message:String(error))+
+        '. Refresh Full Automation status; no new paid request was submitted.');
+    }finally{setBusy('');}
+  };
   const retryPausedExpansion = async () => {
     const flow=project.fullAutomation;
     if(!flow || flow.stage!=='paused' || flow.resumeStage!=='expanding' ||
@@ -1605,6 +1638,13 @@ export default function Home() {
           project.fullAutomation.lastError?.startsWith('Character expansion did not reach the target:') &&
           project.characters.length<project.fullAutomation.target &&
           <div className="sub" role="status">AI Fill reached its attempt budget at {project.characters.length}/{project.fullAutomation.target} characters. Existing characters are saved. This is separate from the image similarity threshold. Inspect OpenAI activity before approving more paid concept requests.</div>}
+        {project.fullAutomation.stage === 'paused' && project.fullAutomation.resumeStage==='expanding' &&
+          project.characters.length>0 && project.characters.length<project.fullAutomation.target &&
+          <button type="button" className="primary-btn step-success-btn" disabled={!!busy}
+            onClick={()=>void acceptCurrentCharacters()}>
+            {busy==='accept-characters'?'Accepting saved characters…':
+              'Accept '+project.characters.length+' characters & continue'}
+          </button>}
         {project.fullAutomation.stage === 'paused' && project.fullAutomation.resumeStage==='expanding' &&
           project.fullAutomation.lastError?.startsWith('Character expansion did not reach the target:') &&
           project.characters.length<project.fullAutomation.target &&
