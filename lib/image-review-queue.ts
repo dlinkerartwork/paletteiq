@@ -19,7 +19,7 @@ export function pendingBatchReviewCount(items: ReviewableBatchItem[]): number {
 
 export async function reviewStoredBatchImage(
   bucket: R2Bucket, key: string, mime: 'image/png' | 'image/jpeg',
-  apiKey: string, references: string[],
+  apiKey: string, references: string[], maxSimilarityPercent = 80,
 ): Promise<SimilarityReview> {
   const object = await bucket.get(key);
   if (!object) return { status: 'unverified', reason: 'Saved image is temporarily unavailable; check image storage.', checkedAt: Date.now() };
@@ -29,5 +29,5 @@ export async function reviewStoredBatchImage(
   for (let offset = 0; offset < bytes.length; offset += 8192) {
     binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
   }
-  return reviewImageSimilarity(apiKey, btoa(binary), mime, references);
+  return reviewImageSimilarity(apiKey, btoa(binary), mime, references, maxSimilarityPercent);
 }
