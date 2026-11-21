@@ -129,6 +129,12 @@ export async function POST(req: Request) {
           incoming.characters = [...persisted as SubjectInput[], ...incoming.characters.filter(c => !persistedIds.has(c.id))];
         }
       }
+      // Previous paid Prompt receipts are server-owned recovery evidence.
+      // An older browser tab must not silently drop them after a missing-only
+      // paid retry has archived the previous group's Response IDs.
+      const savedPromptHistory=(old as {promptJobHistory?: unknown}).promptJobHistory;
+      if(Array.isArray(savedPromptHistory))
+        (incoming as typeof incoming & {promptJobHistory?:unknown[]}).promptJobHistory=savedPromptHistory;
       // Remote OpenAI prompt batches are authoritative. Keep their job ID and
       // recovered paid prompts when an older browser tab saves its snapshot.
       const serverPromptJob = (old as { promptJob?: {
