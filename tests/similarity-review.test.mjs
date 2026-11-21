@@ -44,3 +44,10 @@ test('saved similarity threshold applies throughout image production',()=>{
   assert.match(flow,/storePrefs\.maxReferenceSimilarityPercent \?\? 40/);
   assert.match(page,/step-success-btn/);
 });
+
+test('Source listing refactor keeps its JSX panel wrapper balanced',()=>{
+  const page=readFileSync(new URL('../app/page.tsx',import.meta.url),'utf8');
+  assert.match(page,/<section className="source-setup-section">/);
+  assert.match(page,/<\/section>\s*<p className="sub">OpenAI analysis can continue remotely/);
+  assert.doesNotMatch(page,/<\/section>\s*<\/div><p className="sub">OpenAI analysis can continue remotely/);
+});
