@@ -9,7 +9,9 @@ const brief = (value: unknown) => JSON.stringify(value).slice(0, 28000);
 /** Text signals complement the selected images; they cannot prove an object is visible. */
 export function researchAnalysisInstruction(source: ListingResearchSource, selectedImageCount: number, requestedSubjects = 20, requestedControls?: Partial<CreativeControls>): string {
   const subjectCount = Math.max(1, Math.min(160, Math.floor(requestedSubjects)));
-  const fullCatalog = subjectCount > 20;
+  // Every request has an exact output quota. Small collections must never
+  // create dozens of provisional candidates for a ten-character target.
+  const fullCatalog = true;
   const creativeControls = normalizeCreativeControls(requestedControls);
   const focal=primaryCharacterSubject(source.title);
   const focalGoal=primaryCharacterTarget(subjectCount,focal);
@@ -162,7 +164,7 @@ Return ONLY JSON (no markdown) with:
 "notes":"detailed, evidence-aware synthesis and uncertainties"}.
 ${fullCatalog
   ? `FULL CATALOG MODE: Return EXACTLY ${subjectCount} ORIGINAL, distinct character concepts
-in one response. Aim for 12–20 coherent subject families/species where the niche permits;
+in one response. Include diverse coherent families/species up to the requested count where the niche permits;
 avoid repeating the same species under different names. Descriptions must be concise,
 specific and no longer than 170 characters each. Every item needs an explicit family,
 an expression (or "not applicable" for faceless objects), unique shape/silhouette,
