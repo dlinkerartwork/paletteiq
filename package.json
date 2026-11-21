@@ -20,7 +20,8 @@
     "db:generate": "drizzle-kit generate",
     "license:init": "node scripts/license-cli.mjs init",
     "license:issue": "node scripts/license-cli.mjs issue",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "dev:diagnose": "node scripts/diagnose-startup.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
