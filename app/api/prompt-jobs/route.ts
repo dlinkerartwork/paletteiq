@@ -98,6 +98,10 @@ export async function POST(req: Request) {
   }
   if (isActivePromptBatch(saved.data.promptJob))
     return Response.json({ error: 'This collection already has an active prompt batch. Resume it rather than submitting a duplicate.', job: safeJob(saved.data.promptJob!) }, { status: 409 });
+  if(automation?.enabled && automation.stage==='paused' &&
+    (automation as {resumeStage?:string}).resumeStage==='prompts' &&
+    saved.data.promptJob && !body.recoveryRetry)
+    return fail('Use Recover Existing Prompt Responses first, then the explicit missing-only paid retry. Existing receipts must be checked.',409);
   if(body.recoveryRetry) {
     // Explicit PAID retry is permitted only when the previous groups are
     // conclusively terminal and their receipt IDs have all been persisted.
