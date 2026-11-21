@@ -58,7 +58,7 @@ test('only the exact old automatic unavailable-review pause is recoverable',()=>
 test('review stage persists retry BEFORE potential paid visual comparison and updates same image version only',()=>{
   const entry=flow.indexOf('async function recheckUnverifiedSimilarity(');
   const claim=flow.indexOf('similarityRetries:retries,similarityNextAt:nextAt',entry);
-  const remote=flow.indexOf('reviewStoredBatchImage(bucket,key,mime,secret,references,storePrefs.maxReferenceSimilarityPercent ?? 80)',entry);
+  const remote=flow.indexOf('reviewStoredBatchImage(bucket,key,mime,secret,references,storePrefs.maxReferenceSimilarityPercent ?? 40)',entry);
   const commit=flow.indexOf('c.imageUrl===target.character.imageUrl',remote);
   assert.ok(entry>0 && claim>entry && remote>claim && commit>remote);
   assert.match(flow,/item.imageUrl===character.imageUrl/);
@@ -72,7 +72,7 @@ test('offline connection is probed with a free GET before claiming a billable si
   const code=flow.slice(begin,flow.indexOf('async function tick(',begin));
   const probe=code.indexOf("await fetch('https://api.openai.com/v1/models'");
   const claim=code.indexOf('similarityRetries:retries,similarityNextAt:nextAt');
-  const paid=code.indexOf('reviewStoredBatchImage(bucket,key,mime,secret,references,storePrefs.maxReferenceSimilarityPercent ?? 80)');
+  const paid=code.indexOf('reviewStoredBatchImage(bucket,key,mime,secret,references,storePrefs.maxReferenceSimilarityPercent ?? 40)');
   assert.ok(probe>=0 && claim>probe && paid>claim);
   assert.match(code,/new TransientStatusError\('OpenAI connection offline/);
   assert.match(code,/connectivity.status===429 \|\| connectivity.status>=500/);
