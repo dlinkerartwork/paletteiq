@@ -15,8 +15,8 @@ test('originality guard supplies explicit design changes rather than generic ori
 });
 
 test('both single and batch generation always apply the originality guard to saved prompts', () => {
-  assert.match(single, /originalImagePrompt\(character\.prompt, character\.id, crypto\.randomUUID\(\), preferences\.maxReferenceSimilarityPercent \?\? 80\)/);
-  assert.match(batch, /originalImagePrompt\(c!\.prompt, c!\.id, '', prefs\.maxReferenceSimilarityPercent \?\? 80\)/);
+  assert.match(single, /originalImagePrompt\(character\.prompt, character\.id, crypto\.randomUUID\(\), preferences\.maxReferenceSimilarityPercent \?\? 40\)/);
+  assert.match(batch, /originalImagePrompt\(c!\.prompt, c!\.id, '', prefs\.maxReferenceSimilarityPercent \?\? 40\)/);
 });
 
 test('regeneration retains originality guard and varies art direction', () => {
