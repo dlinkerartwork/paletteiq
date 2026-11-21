@@ -3,7 +3,7 @@ import { sharedProviderSecret } from '@/lib/store-secrets';
 import { and, eq } from 'drizzle-orm';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { getDb } from '@/db';
-import { projects } from '@/db/schema';
+import { projects, studioSettings } from '@/db/schema';
 import { userCredential } from '@/lib/credentials';
 import {
   buildPromptBatchInput, isActivePromptBatch, parsePromptBatchOutput,
@@ -127,7 +127,17 @@ export async function POST(req: Request) {
     return fail('Some prompts already exist. Confirm regeneration before submitting a batch.', 409);
   const key = await userCredential(user.userId, 'openai') || sharedProviderSecret(user.userId, 'OPENAI_API_KEY');
   if (!key) return fail('Connect an OpenAI API key in Settings before generating prompts.', 503);
-  const generation = buildPromptBatchInput(saved.data, selected as NonNullable<typeof selected[number]>[], model);
+  // Capture the store's limit in the immutable paid job input. A later Settings
+  // change must never rewrite an in-flight OpenAI prompt receipt.
+  const settings = await getDb().select({preferences:studioSettings.preferences})
+    .from(studioSettings).where(eq(studioSettings.owner,user.userId)).limit(1);
+  let maxReferenceSimilarityPercent=80;
+  try {
+    const candidate=JSON.parse(settings[0]?.preferences||'{}').maxReferenceSimilarityPercent;
+    if (Number.isInteger(candidate) && candidate>=0 && candidate<=100)
+      maxReferenceSimilarityPercent=candidate;
+  } catch { /* use default for damaged or legacy settings */ }
+  const generation = buildPromptBatchInput(saved.data, selected as NonNullable<typeof selected[number]>[], model, maxReferenceSimilarityPercent);
   if (generation.jsonl.length > 3_000_000) return fail('Prompt batch is too large. Select fewer characters.', 413);
   const now = Date.now();
   const job: PromptBatchJob = {
