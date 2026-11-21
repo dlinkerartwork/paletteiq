@@ -314,7 +314,7 @@ fully visible isolated clipart asset (transparent background, clean edges).
 No text, logo, watermark, frame, white outline, sticker cutline, exterior glow,
 drop shadow, or unrelated extra standalone elements.
 Do NOT reproduce the source shop's distinctive character designs or arrangements.
-${similarityOriginalityGuidance(input.maxReferenceSimilarityPercent ?? 80)}
+${similarityOriginalityGuidance(input.maxReferenceSimilarityPercent ?? 40)}
 For every prompt provide a specific original pose, silhouette and visual arrangement tailored to its character DNA, not vague generic warnings.
 If previousPrompt exists, develop a fresh version, still matching niche context.
 Do not embed the entire listing image or copy a seller's existing design.
