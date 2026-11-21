@@ -1,3 +1,4 @@
+import { geminiKeyCycle, isGeminiQuotaResponse, GEMINI_ALL_KEYS_EXHAUSTED } from '@/lib/gemini-keyring';
 import { sharedProviderSecret } from '@/lib/store-secrets';
 import { env } from 'cloudflare:workers';
 import { and, eq } from 'drizzle-orm';
@@ -81,7 +82,9 @@ export async function POST(req: Request) {
       }
       let responseText = '';
       let lastError = 'Gemini layout analysis unavailable';
-      for (const geminiKey of geminiKeys) {
+      let quotaFailures = 0;
+      const keyCycle = geminiKeyCycle(user.userId, geminiKeys);
+      for (const geminiKey of keyCycle) {
         const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent', {
           method: 'POST', headers: { 'x-goog-api-key': geminiKey, 'Content-Type': 'application/json' },
           body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }, { inline_data: { mime_type: mime, data: imageBase64 } }] }], generationConfig: { responseMimeType: 'application/json' } }),
@@ -89,14 +92,15 @@ export async function POST(req: Request) {
         });
         if (!response.ok) {
           lastError = 'Gemini layout analysis failed (HTTP ' + response.status + '). The selected model may not support image input.';
-          if ([401, 403, 429, 500, 502, 503, 504].includes(response.status)) continue;
+          const detail = await response.text();
+          if (isGeminiQuotaResponse(response.status, detail)) { quotaFailures++; continue; }
           break;
         }
         const body = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
         responseText = body.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('') || '';
         break;
       }
-      if (!responseText) return Response.json({ error: lastError }, { status: 502 });
+      if (!responseText) return Response.json({ error: quotaFailures === keyCycle.length ? GEMINI_ALL_KEYS_EXHAUSTED : lastError }, { status: quotaFailures === keyCycle.length ? 429 : 502 });
       parsed = JSON.parse(responseText) as Layout;
     }
     const slots = Array.isArray(parsed.slots) ? parsed.slots.filter(s => s && typeof s === 'object').slice(0, count).map(s => ({
