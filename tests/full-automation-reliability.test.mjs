@@ -56,3 +56,19 @@ test('desktop supervises backend with bounded restarts, and nonoverlapping hidde
   assert.match(monitor,/if \(polling\) return false/);
   assert.match(page,/may submit NEW paid image batches/);
 });
+
+test('research retry requires explicit payment confirmation and remote token-limit verification',()=>{
+  const research=read('app/api/research-jobs/route.ts');
+  assert.match(research,/body\.action === 'retry-token-limited'/);
+  assert.match(research,/data\.status!=='incomplete' \|\| data\.incomplete_details\?\.reason!=='max_output_tokens'/);
+  assert.match(research,/max_output_tokens:13000/);
+  assert.match(research,/retryClaimId=crypto\.randomUUID\(\)/);
+  assert.match(research,/claim\.retryClaimId!==retryClaimId/);
+  assert.match(research,/retryHistory:\[/);
+  assert.match(research,/current\.workers!\.map\(w=>failed\.some/);
+  assert.match(research,/status:'uncertain',error:'Retry submission may have reached OpenAI/);
+  assert.match(page,/retryTokenLimitedResearch/);
+  assert.match(page,/action:'retry-token-limited'/);
+  assert.match(page,/window\.confirm\(/);
+  assert.match(page,/Retry token-limited Research workers \(paid/);
+});
