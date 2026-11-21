@@ -893,6 +893,15 @@ export async function GET(req: Request) {
       });
       return Response.json({job:safeJob(failure||latest)});
     }
+    // Adaptive small-catalog Research uses ONE standard response and no merge.
+    // Import the saved worker output immediately once it completes. Previously
+    // this path returned in_progress forever because only merge jobs reached finish().
+    if (!latest.mergeStatus && latest.workers?.length===1 &&
+        latest.workers[0].status==='completed' && latest.workers[0].resultText) {
+      return finish(user.userId,projectId,latest,{
+        output:[{content:[{text:latest.workers[0].resultText}]}],
+      });
+    }
     if (latest.mergeStatus==='planned') {
       // Never pay for Style DNA synthesis when every worker returned visual
       // notes but no actual character concepts.
