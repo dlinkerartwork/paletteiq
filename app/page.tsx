@@ -1282,6 +1282,12 @@ export default function Home() {
   const expand = async () => {
     if (busy) return;
     if (project.characters.length >= target) { setMessage('Target already reached.'); return; }
+    if(project.fullAutomation?.enabled &&
+       !['paused','completed'].includes(project.fullAutomation.stage)) {
+      setMessage('Full Automation owns AI Fill while active. Pause it before starting a manual paid expansion.');
+      return;
+    }
+    if(!window.confirm('AI Fill may submit multiple NEW PAID OpenAI requests to complete '+(target-project.characters.length)+' missing characters. Saved images and existing characters will remain. Continue?'))return;
     setBusy('expand');
     let current = project, emptyRounds = 0, retries = 0;
     try {
@@ -1292,11 +1298,22 @@ export default function Home() {
           existing: current.characters.map(c => ({ name: c.name, family: c.family, expression: c.expression })) });
         const proposals = (res.characters ?? []).map((v: Concept) =>
           makeChar(String(v.name || ''), 'ai', String(v.description || ''), String(v.family || ''), String(v.expression || ''), v));
-        const batch = selectDiverseConcepts(proposals, current.characters, target, target - current.characters.length, normalizeCreativeControls(current.creativeControls).characterVariation);
+        const need=target-current.characters.length;
+        const variation=normalizeCreativeControls(current.creativeControls).characterVariation;
+        const strict=selectDiverseConcepts(proposals,current.characters,target,need,variation);
+        const batch=strict.length<need && current.characters.length>=Math.ceil(target/2)
+          ? [...strict,...selectDiverseConcepts(proposals,
+              [...current.characters,...strict],target,need-strict.length,variation,null,true)]
+          : strict;
         if (!batch.length && ++emptyRounds >= 2) break;
         if (batch.length) emptyRounds = 0;
         current = { ...current, characters: [...current.characters, ...batch] };
         setProject(current);
+        // Manual AI Fill can recover a paused workflow. Checkpoint each
+        // accepted round before the next paid text request.
+        if(current.fullAutomation?.stage==='paused') {
+          await api({action:'save',id:current.id,name:current.name,data:current});
+        }
       }
       setMessage(`Expanded to ${current.characters.length}/${target} diverse subjects across ${Object.keys(familyDistribution(current.characters)).length} families. Save your collection.`);
     } catch (e) {
