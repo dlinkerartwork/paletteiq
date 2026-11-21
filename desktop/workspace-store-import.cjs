@@ -103,6 +103,8 @@ function isImageFile(file, format) {
 function readArchive(folder) {
   const location = path.join(folder,'database','paletteiq.db');
   const legacy = new DatabaseSync(location,{readOnly:true});
+  const sourceManifest=JSON.parse(fs.readFileSync(path.join(folder,'manifest.json'),'utf8'));
+  const sourceType=sourceManifest.source==='web'?'web':'desktop';
   try {
     const rows = legacy.prepare('SELECT id, owner, name, data FROM projects ORDER BY updated_at DESC').all();
     if (rows.length > MAX_PROJECTS) throw Error('Backup has too many collections');
@@ -113,7 +115,7 @@ function readArchive(folder) {
         project.id !== row.id || typeof project.name !== 'string' || !Array.isArray(project.characters) ||
         typeof row.data !== 'string' || row.data.length > MAX_PROJECT_CHARS)
         throw Error('Invalid collection data in workspace backup');
-      return { id:row.id, name:row.name, sourceOwner:row.owner, project };
+      return { id:row.id, name:row.name, sourceOwner:row.owner, sourceType, project };
     });
     const settings = legacy.prepare('SELECT owner, preferences FROM studio_settings').all();
     return {projects,settings};
@@ -219,6 +221,20 @@ function convertProject(row, owner, allowMissing) {
     }
     // Old async jobs should not resume in a new store by accident.
     if (character && character.upscaleJob) delete character.upscaleJob;
+  }
+  // A Web ZIP is a COPY of a different localhost process. Source jobs may
+  // still be running and may already charge OpenAI. Never automatically start
+  // another paid request using only the copied collection metadata: the live
+  // Web image_batches table and exclusive scheduler ownership were NOT moved.
+  // Completed characters, images, prompt text and Listing Draft are kept.
+  if(row.sourceType==='web' && rewritten.fullAutomation?.enabled) {
+    const previous=rewritten.fullAutomation;
+    if(previous.stage!=='completed'){
+      rewritten.fullAutomation={...previous,enabled:false,stage:'paused',
+        resumeStage:undefined,leaseUntil:0,
+        lastError:'Imported from Web localhost. This is a saved COPY; active OpenAI receipts remain in the original Web workspace. Check its OpenAI activity and Batch status before starting automation here. No paid jobs were resubmitted.',
+        importedFromWeb:true,updatedAt:Date.now()};
+    }
   }
   delete rewritten.researchJob;
   delete rewritten.promptJob;
