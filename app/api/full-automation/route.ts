@@ -127,6 +127,17 @@ function progress(p: Project) {
     canRetryRejectedResearch: Boolean(canRetryRejectedResearch(p)),
     canRestartMissingResearch: Boolean(canRestartMissingResearch(p)), characterCount: p.characters.length,
     promptCount: p.characters.filter(c => !!c.prompt?.trim()).length,
+    promptMissingCount: p.characters.filter(c=>!c.prompt?.trim()).length,
+    promptRecovery: p.promptJob ? {
+      status:p.promptJob.status, failed:p.promptJob.failed,
+      received:p.promptJob.items.filter(item=>item.status==='done').length,
+      missing:p.characters.filter(c=>!c.prompt?.trim()).length,
+      failedGroups:(p.promptJob.progressiveBatches||[]).filter(g=>g.status==='failed')
+        .map(g=>({key:g.key,error:g.error||''})),
+      unresolvedGroups:(p.promptJob.progressiveBatches||[])
+        .filter(g=>!['completed','failed'].includes(g.status))
+        .map(g=>({key:g.key,status:g.status,error:g.error||''})),
+    }:null,
     imageCount: p.characters.filter(c => !!c.imageUrl).length,
     flaggedCount: p.characters.filter(c => c.similarityReview?.status === 'needs_review').length,
     similarityProgress: {
@@ -522,30 +533,41 @@ async function tick(req: Request, owner: string, id: string) {
         }
       }
     } else if (f.stage === 'prompts') {
-      const missing=p.characters.filter(c=>!c.prompt?.trim());
-      // Never automatically create another paid Prompt Batch when the earlier
-      // job failed, became uncertain, expired, or completed with missing items.
-      // In particular, progressive mode may have accepted a Batch ID that
-      // failed to persist; only a person can review that charge risk.
-      // Successful manual completion is not a PAID retry. Previously
-      // failed prompt groups must not prevent already-saved 100/100 prompts
-      // from advancing to Image Production.
+      // The snapshot captured at tick start may lag behind concurrent
+      // imports of up to four Responses groups. Re-read the saved collection
+      // before declaring ANY prompts missing or issuing a paid request.
+      let current=(await load(owner,id))?.p||p;
+      let missing=current.characters.filter(c=>!c.prompt?.trim());
+      if(current.promptJob && isActivePromptBatch(current.promptJob)){
+        // Status GET only: imports already-paid results. It never submits a
+        // new Response/Batch or discards the original receipt.
+        await apiGet(req,promptGet,id);
+        current=(await load(owner,id))?.p||current;
+        missing=current.characters.filter(c=>!c.prompt?.trim());
+      }
+      // Successful manual completion must win over old failed receipts.
       if (!missing.length) await setStage(owner,id,'images');
-      else if (p.promptJob && ['failed','cancelled','expired','completed_with_errors'].includes(p.promptJob.status))
-        throw Error('Prompt Batch needs review before any paid retry. '+missing.length+' prompts remain. Check OpenAI Responses activity first.');
-      else if (p.promptJob && isActivePromptBatch(p.promptJob)) await apiGet(req,promptGet,id);
-      else if (p.promptJob && p.promptJob.status==='completed')
-        throw Error('Prompt Batch completed with '+missing.length+' missing prompts. Review saved results before another paid request.');
-      else if ((f.promptAttempts||0)<3) {
+      else if (current.promptJob &&
+        ['failed','cancelled','expired','completed_with_errors'].includes(current.promptJob.status))
+        throw Error('Prompt Batch needs review before any paid retry. '+missing.length+
+          ' of '+current.characters.length+' saved prompts are missing ('+
+          current.characters.filter(c=>!!c.prompt?.trim()).length+
+          ' available). Try Recover Existing Prompt Responses (no paid POST), then review missing prompts and receipts.');
+      else if (current.promptJob && current.promptJob.status==='completed')
+        throw Error('Prompt Batch completed with '+missing.length+
+          ' of '+current.characters.length+' missing prompts. Recover saved Responses before approving a paid retry.');
+      else if (!current.promptJob && (f.promptAttempts||0)<3) {
         await save(owner,id,latest=>({...latest,fullAutomation:{
           ...latest.fullAutomation!,promptAttempts:(latest.fullAutomation?.promptAttempts||0)+1,updatedAt:Date.now()}}));
         const config=await prefs(owner);
         const model=p.fullAutomation?.promptModel || p.fullAutomation?.textModel || config.automationPromptModel || 'gpt-6-luna';
-        await apiPost(req,promptPost,{projectId:id,characterIds:missing.slice(0,200).map(c=>c.id),model,regenerate:false,progressive:p.progressivePrompts===true});
-      } else throw Error('Incomplete prompts after three attempts. Review missing prompts before resuming.');
-      // Pipeline overlap: groups imported early are already immutable prompt
-      // inputs. Start complete 20-image Batches while other prompt groups run.
-      // Never submit images for characters whose prompt is not yet saved.
+        await apiPost(req,promptPost,{projectId:id,
+          characterIds:missing.slice(0,200).map(c=>c.id),model,regenerate:false,
+          progressive:current.progressivePrompts===true});
+      } else if(!current.promptJob)
+        throw Error('Incomplete prompts after three attempts. Review missing prompts before resuming.');
+      // While the current Prompt Responses are in progress, let ready images
+      // proceed without waiting for unrelated prompt groups.
       if(missing.length)
         await scheduleReadyImageWave(req,owner,id,true);
     } else if (f.stage === 'images') {

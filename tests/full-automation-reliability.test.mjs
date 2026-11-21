@@ -13,7 +13,9 @@ test('100/100 prompts advance before terminal errors block paid retries',()=>{
   const end=flow.indexOf("} else if (f.stage === 'images')",begin);
   const source=flow.slice(begin,end);
   assert.ok(source.indexOf("if (!missing.length) await setStage(owner,id,'images')") < source.indexOf("['failed','cancelled','expired','completed_with_errors']"));
-  assert.match(source,/if \(p\.promptJob && isActivePromptBatch\(p\.promptJob\)\) await apiGet/);
+  assert.match(source,/if\(current\.promptJob && isActivePromptBatch\(current\.promptJob\)\)/);
+  assert.match(source,/await apiGet\(req,promptGet,id\)/);
+  assert.match(source,/missing=current\.characters\.filter/);
 });
 test('AI Fill validates exact response receipt on import',()=>{
   assert.match(flow,/const present=receipt\.id==='legacy'/);

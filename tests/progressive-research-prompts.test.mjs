@@ -25,9 +25,10 @@ test('Progressive prompt mode uses immutable JSONL, at most four concurrent paid
   assert.match(route,/status:'uncertain',error:'Submission may have reached OpenAI/);
   assert.match(route,/if\(group\.status==='submitting'&&!group\.batchId&&!group\.responseId/);
   assert.match(route,/group\.key===groupKey && !\['completed','failed','uncertain'\]/);
-  assert.match(route,/if \(job\.mode==='progressive'\|\|job\.mode==='standard'\) return synchronizeProgressive/);
+  assert.match(route,/if \(job\.mode==='progressive'\|\|job\.mode==='standard'\)/);
+  assert.match(route,/return synchronizeProgressive\(owner,projectId,job,recoverExisting\)/);
   assert.match(route,/progressPromptBatches\(owner,id,job\.id,key\)/);
-  assert.match(automation,/progressive:p\.progressivePrompts===true/);
+  assert.match(automation,/progressive:current\.progressivePrompts===true/);
 });
 
 test('Progressive prompts are imported one group at a time and shown immediately',()=>{

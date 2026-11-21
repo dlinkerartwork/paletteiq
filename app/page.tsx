@@ -27,7 +27,14 @@ import { auditCreativeConcepts, expressionDistribution, familyDistribution, norm
 type Character = { id: string; name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description: string; prompt: string; status: 'draft' | 'ready' | 'done' | 'error'; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: { id: string; submittedAt?: number; factor?: number }; error?: string; similarityReview?: SimilarityReview; origin: 'listing' | 'ai' | 'manual' };
 type ResearchJobPreview = { transport?: 'batch'|'background'; workerPreviews?: Array<{index:number;status:string;imageCount:number;theme:string;style:string;concepts:Array<{name:string;family:string;description:string}>;error?:string;warning?:string}>; workersCompleted?: number; workersTotal?: number; mergeStatus?: string; id: string; status: 'submitting' | 'queued' | 'in_progress' | 'completed' | 'failed'; target: number; requested: number; completedCount: number; model: string; createdAt: number; updatedAt: number; error?: string };
 const hasActiveResearch = (job?: ResearchJobPreview) => !!job && ['submitting','queued','in_progress'].includes(job.status);
-type PromptJobPreview = { mode?: 'batch'|'progressive'|'standard'; groupStates?: Array<{key:string;status:string;error?:string}>; id: string; status: string; total: number; imported: number; failed: number; processedGroups: number; totalGroups: number; model: string; createdAt: number; updatedAt: number; error?: string };
+type PromptJobGroupPreview = {key:string;status:string;error?:string;batchId?:string;responseId?:string};
+type PromptJobPreview = { mode?: 'batch'|'progressive'|'standard';
+  groupStates?: PromptJobGroupPreview[]; progressiveBatches?: PromptJobGroupPreview[];
+  id: string; status: string; total: number; imported: number; failed: number;
+  processedGroups: number; totalGroups: number; model: string; createdAt: number;
+  updatedAt: number; error?: string };
+const savedPromptGroups = (job?:PromptJobPreview):PromptJobGroupPreview[] =>
+  job?.progressiveBatches?.length ? job.progressiveBatches : job?.groupStates || [];
 const hasActivePromptJob = (job?: PromptJobPreview) => !!job && !['completed','completed_with_errors','failed','cancelled','expired'].includes(job.status);
 type FullAutomation = { enabled: boolean; textModel?: string; promptModel?: string; batchImageModel?: string; imageQuality?: string; stage: 'research' | 'expanding' | 'prompts' | 'images' | 'reviewing' | 'revising' | 'regenerating' | 'verifying' | 'listing' | 'completed' | 'paused'; resumeStage?: string; target: number; updatedAt: number; lastError?: string; reviewQueue?: string[]; revisedIds?: string[]; regenerationBatchId?: string; regenerationRounds?: number; similarityRetries?: Record<string,number> };
 type Project = { fullAutomation?: FullAutomation; characterTarget?: number; researchModel?: string; hybridResearch?: boolean; progressivePrompts?: boolean; id: string; name: string; url: string; upscaleBatch?: StoredUpscaleBatch; researchJob?: ResearchJobPreview; promptJob?: PromptJobPreview; theme: string; subtheme: string; microtheme?: string; primaryKeyword?: string; longTailKeywords?: string[]; research?: CreativeAnalysis; creativeControls?: CreativeControls; sourceDescription?: string; sourceTags?: string[]; emotionDirection?: string; ageDirection?: string; cutenessDirection?: string; style: string; palette: string; texture: string; keywords: string[]; characters: Character[]; title: string; images: string[]; selectedImageUrls?: string[]; notes: string; listing?: ListingData; seoReview?: SavedSeoReview; thumbnails?: ThumbnailDesign[]; listingImages?: ListingImageRecord[]; listingStudioSettings?: ListingStudioConfig; lastDownloadedAt?: number; downloadCount?: number; lastDownloadImageCount?: number; downloadedImageIds?: string[] };
@@ -173,6 +180,9 @@ export default function Home() {
   const [researchRecovery, setResearchRecovery] = useState<{state:string;message:string}|null>(null);
   const [savedResearchStatus, setSavedResearchStatus] = useState('unknown');
   const [savedResearchError, setSavedResearchError] = useState<string|null>(null);
+  const [savedPromptProgress,setSavedPromptProgress]=useState<{
+    projectId:string;present:number;missing:number;total:number;
+  }|null>(null);
   useEffect(() => { setFullAutoRequested(Boolean(project.fullAutomation?.enabled)); }, [project.id, project.fullAutomation?.enabled]);
   const [model, setModel] = useState('gpt-image-1-mini');
   const [quality, setQuality] = useState('low');
@@ -982,7 +992,7 @@ export default function Home() {
   const refreshAutomationStatus = async (projectId: string): Promise<FullAutomation | null> => {
     const response = await fetch('/api/full-automation?projectId=' + encodeURIComponent(projectId),
       { cache: 'no-store' });
-    const state = await response.json() as { error?: string; flow?: FullAutomation | null; canRestartMissingResearch?: boolean; canRetryRejectedResearch?: boolean; researchRecovery?: {state:string;message:string}|null; researchJobStatus?:string; researchJobError?:string|null };
+    const state = await response.json() as { error?: string; flow?: FullAutomation | null; canRestartMissingResearch?: boolean; canRetryRejectedResearch?: boolean; researchRecovery?: {state:string;message:string}|null; researchJobStatus?:string; researchJobError?:string|null; promptCount?:number;promptMissingCount?:number };
     if (!response.ok) throw Error(state.error || 'Unable to check saved Full Automation status');
     const flow = state.flow ?? null;
     setCanRestartMissingResearch(Boolean(state.canRestartMissingResearch));
@@ -990,6 +1000,9 @@ export default function Home() {
     setResearchRecovery(state.researchRecovery ?? null);
     setSavedResearchStatus(state.researchJobStatus || 'unknown');
     setSavedResearchError(state.researchJobError || null);
+    if(Number.isInteger(state.promptCount)&&Number.isInteger(state.promptMissingCount))
+      setSavedPromptProgress({projectId,present:state.promptCount!,
+        missing:state.promptMissingCount!,total:state.promptCount!+state.promptMissingCount!});
     setProject(prev => prev.id === projectId ? { ...prev, fullAutomation: flow ?? undefined } : prev);
     setProjects(prev => prev.map(item => item.id === projectId
       ? { ...item, fullAutomation: flow ?? undefined } : item));
@@ -1002,7 +1015,7 @@ export default function Home() {
       try {
         const response = await fetch('/api/full-automation?projectId=' + encodeURIComponent(project.id),
           { cache: 'no-store' });
-        const state = await response.json() as { flow?: FullAutomation | null; canRestartMissingResearch?: boolean; canRetryRejectedResearch?: boolean; researchRecovery?: {state:string;message:string}|null; researchJobStatus?:string; researchJobError?:string|null };
+        const state = await response.json() as { flow?: FullAutomation | null; canRestartMissingResearch?: boolean; canRetryRejectedResearch?: boolean; researchRecovery?: {state:string;message:string}|null; researchJobStatus?:string; researchJobError?:string|null;promptCount?:number;promptMissingCount?:number };
         if (!response.ok || cancelled) return;
         const flow = state.flow ?? null;
         setCanRestartMissingResearch(Boolean(state.canRestartMissingResearch));
@@ -1010,6 +1023,9 @@ export default function Home() {
         setResearchRecovery(state.researchRecovery ?? null);
         setSavedResearchStatus(state.researchJobStatus || 'unknown');
         setSavedResearchError(state.researchJobError || null);
+        if(Number.isInteger(state.promptCount)&&Number.isInteger(state.promptMissingCount))
+          setSavedPromptProgress({projectId:project.id,present:state.promptCount!,
+            missing:state.promptMissingCount!,total:state.promptCount!+state.promptMissingCount!});
         setProject(prev => prev.id === project.id ? { ...prev, fullAutomation: flow ?? undefined } : prev);
         setProjects(prev => prev.map(item => item.id === project.id
           ? { ...item, fullAutomation: flow ?? undefined } : item));
@@ -1091,6 +1107,101 @@ export default function Home() {
         '. Check saved research and OpenAI usage before retrying.');
       try { await refreshAutomationStatus(project.id); } catch { /* Keep failure visible. */ }
     } finally { setBusy(''); }
+  };
+  const fetchSavedPromptSnapshot = async (id:string):Promise<Project> => {
+    const response=await fetch('/api/studio?projectId='+encodeURIComponent(id),{cache:'no-store'});
+    if(!response.ok)throw Error('Cannot reload saved Prompt Collection');
+    const rows=await response.json() as Array<{id:string;data:Project}>;
+    const saved=rows.find(row=>row.id===id)?.data;
+    if(!saved)throw Error('Saved Collection not found');
+    const view=latestWorkspace.current;
+    if(view.project.id===id &&
+      collectionHasUnsavedEdits(view.project,savedProjectSnapshots.current.get(id)))
+      throw Error('Unsaved Collection edits detected. Save them before recovering prompts, then refresh.');
+    savedProjectSnapshots.current.set(id,JSON.stringify(saved));
+    setProject(previous=>previous.id===id?saved:previous);
+    setProjects(previous=>previous.map(item=>item.id===id?saved:item));
+    return saved;
+  };
+  const recoverSavedPromptResponses = async () => {
+    if(busy||!project.fullAutomation || project.fullAutomation.stage!=='paused')return;
+    setBusy('prompt-recover');
+    try{
+      const response=await fetch('/api/prompt-jobs',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action:'recover-existing',projectId:project.id}),
+      });
+      const result=await response.json() as {error?:string;job?:PromptJobPreview};
+      if(!response.ok)throw Error(result.error||'Cannot recover stored OpenAI Responses');
+      const saved=await fetchSavedPromptSnapshot(project.id);
+      const missing=saved.characters.filter(c=>!c.prompt?.trim()).length;
+      await refreshAutomationStatus(project.id);
+      setMessage(missing
+        ? 'Existing OpenAI Responses checked without new paid requests. '+missing+
+          ' of '+saved.characters.length+' prompts are still missing. Inspect failed groups before authorizing a paid retry.'
+        : 'All '+saved.characters.length+' prompts are saved after receipt recovery. Click Resume Full Automation to continue from Image Generation.');
+    }catch(error){setMessage('Saved Prompt recovery: '+
+      (error instanceof Error?error.message:String(error)));}
+    finally{setBusy('');}
+  };
+  const retryOnlyMissingPrompts = async () => {
+    if(busy||!project.fullAutomation||project.fullAutomation.stage!=='paused')return;
+    setBusy('prompt-retry-check');
+    try{
+      // Always reconcile and reload the exact authoritative missing set
+      // before presenting the confirmation and paid POST.
+      const recovery=await fetch('/api/prompt-jobs',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action:'recover-existing',projectId:project.id}),
+      });
+      const result=await recovery.json() as {error?:string};
+      if(!recovery.ok)throw Error(result.error||'Cannot inspect existing Responses');
+      const saved=await fetchSavedPromptSnapshot(project.id);
+      const previous=saved.promptJob;
+      const groups=savedPromptGroups(previous);
+      const safe=previous&&['completed','completed_with_errors'].includes(previous.status)&&
+        groups.length>0&&groups.every(g=>['completed','failed'].includes(g.status));
+      if(!safe)throw Error('Uncertain or active Prompt receipt exists. Inspect the saved group IDs in OpenAI activity before retrying.');
+      const missing=saved.characters.filter(c=>!c.prompt?.trim());
+      if(!missing.length){
+        setMessage('All prompts already saved. Click Resume Full Automation; no paid prompt retry is necessary.');
+        return;
+      }
+      if(!window.confirm(
+        'Generate ONLY '+missing.length+' missing prompts with new paid OpenAI Responses? '+
+        'All previously saved prompts and images will be preserved. Existing Response IDs were checked, '+
+        'but the new '+missing.length+' prompts will incur additional API charges. Continue?'
+      ))return;
+      const model=saved.fullAutomation?.promptModel||saved.fullAutomation?.textModel||saved.promptJob?.model||
+        preferences.automationPromptModel;
+      const submit=await fetch('/api/prompt-jobs',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({projectId:saved.id,characterIds:missing.map(c=>c.id),
+          model,recoveryRetry:true,regenerate:false}),
+      });
+      const accepted=await submit.json() as {error?:string;job?:PromptJobPreview};
+      if(!submit.ok||!accepted.job)throw Error(accepted.error||'Saved paid Prompt receipt needs inspection');
+      await fetchSavedPromptSnapshot(project.id);
+      const uncertain=savedPromptGroups(accepted.job).some(g=>g.status==='uncertain');
+      if(uncertain){
+        setMessage('New paid Prompt request has an uncertain submission receipt. Inspect OpenAI activity before resuming.');
+        return;
+      }
+      const resumed=await fetch('/api/full-automation',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action:'resume',projectId:saved.id}),
+      });
+      const status=await resumed.json() as {error?:string;flow?:FullAutomation};
+      if(!resumed.ok||!status.flow)
+        throw Error('New Prompt receipt saved, but Full Automation remains paused: '+
+          (status.error||'Refresh status and Resume manually'));
+      await fetchSavedPromptSnapshot(saved.id);
+      setMessage('Submitted '+missing.length+' missing prompts only. Full Automation resumed with the new saved OpenAI receipt.');
+    }catch(error){
+      setMessage('Prompt recovery/retry stopped: '+
+        (error instanceof Error?error.message:String(error))+
+        '. Check saved OpenAI activity before any other paid retry.');
+    }finally{setBusy('');}
   };
   const changeAutomation = async (action: 'pause' | 'resume') => {
     if (action === 'resume' && !window.confirm(
@@ -1354,6 +1465,36 @@ export default function Home() {
         {project.fullAutomation.stage === 'paused' && project.fullAutomation.resumeStage==='research' && savedResearchError && <p className="sub" role="alert">Last research error: {savedResearchError}</p>}
         {project.fullAutomation.stage === 'paused' && <button type="button" className="outline-btn" disabled={!!busy} onClick={() => void refreshAutomationStatus(project.id).then(() => setMessage('Saved Full Automation and Research status refreshed.')).catch(error => setMessage(error instanceof Error ? error.message : String(error)))}>Refresh Full Automation status</button>}
         {project.fullAutomation.stage === 'paused' && project.fullAutomation.resumeStage==='research' && project.researchJob?.error && <p className="sub" role="alert">Saved research job error: {project.researchJob.error}</p>}
+        {project.fullAutomation.stage==='paused' &&
+          project.fullAutomation.resumeStage==='prompts' && <>
+          <p className="sub" role="status">Saved prompts: {savedPromptProgress?.projectId===project.id
+              ? savedPromptProgress.present : project.characters.filter(c=>!!c.prompt?.trim()).length}/
+            {savedPromptProgress?.projectId===project.id
+              ? savedPromptProgress.total : project.characters.length}.
+            Missing {savedPromptProgress?.projectId===project.id
+              ? savedPromptProgress.missing : project.characters.filter(c=>!c.prompt?.trim()).length}.
+            A prior Prompt Response may have failed or returned incomplete output.
+            Read existing OpenAI receipts first; no new paid requests are needed for that check.</p>
+          {savedPromptGroups(project.promptJob).filter(g=>
+            ['failed','uncertain'].includes(g.status)).map(g=>
+              <p key={g.key} className="sub" role="alert">Prompt group {g.key}: {g.status}
+                {g.error?' — '+g.error:''}</p>)}
+          <div className="head-buttons">
+            <button type="button" className="outline-btn" disabled={!!busy||!project.promptJob}
+              onClick={()=>void recoverSavedPromptResponses()}>
+              Recover Existing Prompt Responses (no new paid job)
+            </button>
+            {project.promptJob &&
+              ['completed','completed_with_errors'].includes(project.promptJob.status) &&
+              savedPromptGroups(project.promptJob).length>0 &&
+              savedPromptGroups(project.promptJob).every(g=>['completed','failed'].includes(g.status)) &&
+              project.characters.some(c=>!c.prompt?.trim()) &&
+              <button type="button" className="outline-btn" disabled={!!busy}
+                onClick={()=>void retryOnlyMissingPrompts()}>
+                Retry only missing prompts (paid — confirm first)
+              </button>}
+          </div>
+        </>}
         {project.fullAutomation.stage === 'paused' && project.characters.length >= project.fullAutomation.target &&
           project.characters.every(c => !!c.prompt.trim()) && <p className="sub" role="status">
           All {project.fullAutomation.target} image prompts are saved. The paused workflow will NOT
@@ -1497,7 +1638,7 @@ export default function Home() {
         <div className="production-progress"><span>OpenAI {project.promptJob.mode==='standard'?'Standard Parallel Responses':project.promptJob.mode==='progressive'?'Legacy Progressive Prompt Batches':'Legacy Prompt Batch'} · {project.promptJob.status}</span>
           <b>{project.promptJob.processedGroups}/{project.promptJob.totalGroups} groups · {project.promptJob.imported}/{project.promptJob.total} imported</b></div>
         <div className="progress"><i style={{ width: `${project.promptJob.totalGroups ? 100 * project.promptJob.processedGroups / project.promptJob.totalGroups : 0}%` }}/></div>
-        {(project.promptJob.mode==='progressive'||project.promptJob.mode==='standard') && <div className="sub">{project.promptJob.groupStates?.map(g=><p key={g.key}>{g.key}: {g.status}{g.error?' — '+g.error:''}</p>)}</div>}
+        {(project.promptJob.mode==='progressive'||project.promptJob.mode==='standard') && <div className="sub">{savedPromptGroups(project.promptJob).map(g=><p key={g.key}>{g.key}: {g.status}{g.error?' — '+g.error:''}</p>)}</div>}
         <p className="sub">{(project.promptJob.mode==='progressive'||project.promptJob.mode==='standard')?'Completed groups are imported and rendered without waiting for the other groups.':'A single OpenAI Batch exposes completed request counts, but its actual prompt output is generally available only after Batch result files are published.'} OpenAI processing can continue while the PC is off. Import does not replace manually edited prompts.</p>
         {project.promptJob.error && <p className="sub">{project.promptJob.error}</p>}
       </div>}
