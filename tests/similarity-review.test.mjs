@@ -38,7 +38,7 @@ test('saved similarity threshold applies throughout image production',()=>{
   assert.match(settings,/maxReferenceSimilarityPercent: 40/);
   assert.match(settings,/Similarity threshold must be an integer from 0 to 100/);
   assert.match(prefs,/MAXIMUM SIMILARITY WITH REFERENCES/);
-  assert.match(page,/MAXIMUM SIMILARITY (%)/);
+  assert.match(page,/MAXIMUM SIMILARITY \\(\\%\\)/);
   assert.match(batch,/references, maxReferenceSimilarityPercent/);
   assert.match(studio,/preferences\.maxReferenceSimilarityPercent \?\? 80/);
   assert.match(flow,/storePrefs\.maxReferenceSimilarityPercent \?\? 80/);
