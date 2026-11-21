@@ -156,6 +156,72 @@ test('Missing Web ZIP image cannot silently be restored as a complete generated 
   }finally{cleanup(f);}
 });
 
+test('Partial ZIP import keeps the available originals, never copies missing PNGs, and requires explicit consent',()=>{
+  const f=fixture();
+  try{
+    const sourcePath=path.join(f.folder,'images','collections',owner,'batches',batchId,charId+'.png');
+    rmSync(sourcePath);
+    materializeWebArchive(f.folder);
+    const opts={archiveFolder:f.folder,database:f.db,directory:f.live,
+      accountId:account,storeId:store,mode:'skip'};
+    const report=planWorkspaceStoreImport(opts);
+    assert.equal(report.filesMissing,1);
+    assert.equal(report.filesAvailable,2);
+    assert.throws(()=>applyWorkspaceStoreImport(opts),/missing/i);
+    const restored=applyWorkspaceStoreImport({...opts,allowMissing:true});
+    assert.equal(restored.imagesCopied,2);
+    assert.equal(restored.imagesMissing,1);
+    const project=JSON.parse(f.db.prepare('SELECT data FROM projects WHERE id=?').get(projectId).data);
+    assert.equal(project.characters[0].imageUrl,undefined);
+    assert.ok(project.characters[0].upscaledImageUrl,'Available upscale remains');
+    assert.equal(project.characters[0].prompt,'Watercolor hammock, transparent PNG');
+    assert.equal(project.listing.title,'Boho Summer Beach Clipart');
+    assert.equal(project.webImportReport.missingImages,1);
+    assert.equal(project.webImportReport.partialRestore,true);
+    assert.equal(project.fullAutomation.stage,'paused');
+    assert.equal(project.fullAutomation.enabled,false);
+    assert.match(project.fullAutomation.lastError,/missing PNG\/JPG/);
+    const liveRoot=path.join(f.live,'images','collections',owner);
+    const upscaleUrl=new URL(project.characters[0].upscaledImageUrl,'http://localhost');
+    assert.deepEqual(readFileSync(path.join(liveRoot,upscaleUrl.pathname.split('/').pop()+'.png')),png);
+  }finally{cleanup(f);}
+});
+
+test('A previously completed Web automation becomes paused when any saved image is missing',()=>{
+  const f=fixture();
+  try{
+    const snapshot=JSON.parse(readFileSync(path.join(f.folder,'database','web-collections.json'),'utf8'));
+    const project=JSON.parse(snapshot.projects[0].data);
+    project.fullAutomation={...project.fullAutomation,stage:'completed',enabled:true};
+    snapshot.projects[0].data=JSON.stringify(project);
+    writeFileSync(path.join(f.folder,'database','web-collections.json'),JSON.stringify(snapshot));
+    rmSync(path.join(f.folder,'images','collections',owner,'batches',batchId,charId+'.png'));
+    materializeWebArchive(f.folder);
+    applyWorkspaceStoreImport({archiveFolder:f.folder,database:f.db,directory:f.live,
+      accountId:account,storeId:store,mode:'skip',allowMissing:true});
+    const saved=JSON.parse(f.db.prepare('SELECT data FROM projects WHERE id=?').get(projectId).data);
+    assert.equal(saved.fullAutomation.stage,'paused');
+    assert.equal(saved.fullAutomation.enabled,false);
+    assert.equal(saved.webImportReport.missingImages,1);
+    assert.equal(saved.listing.title,'Boho Summer Beach Clipart');
+  }finally{cleanup(f);}
+});
+
+test('Exporter reports all missing asset paths but omits unavailable bytes only on explicit partial download',()=>{
+  const api=read('app/api/web-workspace-export/route.ts');
+  const panel=read('components/web-workspace-export-panel.tsx');
+  assert.match(api,/if\(!await headRecoverableAsset\(bucket,record.storage\)\)missing.push\(record.archive\)/);
+  assert.match(api,/if\(preview\)return json/);
+  assert.match(api,/if\(missing.length&&!allowMissing\)return json/);
+  assert.match(api,/missingImages:missing.length/);
+  assert.match(api,/missingAssets:missing/);
+  assert.match(api,/for\(const paths of available\)/);
+  assert.match(panel,/partial ZIP/);
+  assert.match(panel,/setAcceptPartial\(false\)/);
+  assert.match(panel,/disabled=\{!acceptPartial\|\|busy\}/);
+  assert.match(panel,/\?allowMissing=1/);
+});
+
 test('Web workspace export and Desktop zip import routes remain authenticated and never replay paid jobs',()=>{
   const api=read('app/api/web-workspace-export/route.ts');
   const native=read('desktop/workspace-backup.cjs');
