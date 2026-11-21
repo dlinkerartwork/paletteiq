@@ -8,6 +8,7 @@ const os = require('node:os');
 
 const execFileAsync = promisify(execFile);
 const marker = 'paletteiq-workspace-backup';
+const { materializeWebArchive } = require('./web-workspace-archive.cjs');
 
 async function zipCommand(source, destination, extract = false) {
   const command = extract
@@ -23,7 +24,7 @@ try {
    $total += $e.Length;
    if ($total -gt 8589934592) { throw 'Archive too large' };
    $valid = ($n -eq 'manifest.json' -or $n -eq 'database/paletteiq.db' -or
-      $n -eq 'database/' -or $n -eq 'images/' -or $n -eq 'images/collections/' -or
+      $n -eq 'database/web-collections.json' -or $n -eq 'database/' -or $n -eq 'images/' -or $n -eq 'images/collections/' -or
       $n -match '^images/collections/[a-zA-Z0-9_-]{1,120}/(?:batches/[0-9a-f-]{36}/)?[0-9a-f-]{36}[.](png|jpg)$' -or
       $n -match '^images/collections/[a-zA-Z0-9_-]{1,120}/(?:batches/(?:[0-9a-f-]{36}/)?)?$');
    if ($n -and -not $valid) { throw 'Unexpected archive entry: ' + $n };
@@ -145,6 +146,10 @@ async function prepareWorkspaceStoreImport({ source, workspaceRoot }) {
   const staging = mkdtempSync(path.join(imports, '.pending-'));
   try {
     await zipCommand(source, staging, true);
+    // A portable Web export has JSON metadata (no SQLite). Build the same
+    // sanitized staging structure that the existing Desktop importer expects.
+    // The downloaded Web ZIP itself is never mutated.
+    materializeWebArchive(staging);
     // The original ZIP is immutable. Scrub its extracted SQLite copy so
     // historic credentials never linger in the temporary import workspace.
     validateWorkspace(staging, { requireNoCredentials: false });
