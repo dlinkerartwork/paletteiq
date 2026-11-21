@@ -481,7 +481,12 @@ export async function POST(req: Request) {
       }
       await updateWorker(user.userId,projectId,job.id,w.index,{
         responseId:receipt.id,status:receipt.status==='in_progress'?'in_progress':'queued',
-        error:undefined}).catch(()=>{});
+        error:undefined}).then(savedReceipt=>{
+          if (!savedReceipt) throw Error('Research job changed before receipt could be stored');
+        }).catch(()=>{
+          throw Error('OpenAI accepted retry '+receipt.id+
+            ' but PaletteIQ could not save its receipt. Inspect OpenAI Logs; do not retry blindly.');
+        });
     }));
     const latest=(await getCollection(user.userId,projectId))?.data.researchJob;
     if (!latest) return bad('Retry submissions need review. Check saved receipts and OpenAI Logs.',503);
@@ -489,7 +494,7 @@ export async function POST(req: Request) {
       'Token-limited workers were retried with 13000 max output tokens. '+
       'Only failed groups were submitted; completed groups were preserved. '+
       (submissions.some(r=>r.status==='rejected')?
-        'Some receipt saves failed; inspect OpenAI Logs before any further retry.':
+        'Some retry receipts could not be saved; inspect OpenAI Logs before any further retry.':
         'Resume Full Automation after checking the Research status.')},{status:202});
   }
   if (body.action === 'recover-existing') {
