@@ -32,6 +32,7 @@ export default function ImageProduction({ project, model, batchPreferredModel, q
   const automationActive = !!project.fullAutomation?.enabled && !['paused','completed'].includes(project.fullAutomation.stage);
   const [batchModel, setBatchModel] = useState(batchPreferredModel);
   const [batchGroupSize, setBatchGroupSize] = useState<10|20>(10);
+  const [batchSettingsLoaded, setBatchSettingsLoaded] = useState(false);
   const [imageModels, setImageModels] = useState<Array<{ id: string; name: string; batchSupported: boolean }>>([]);
   const [imageModelError, setImageModelError] = useState('');
   useEffect(() => {
@@ -71,9 +72,9 @@ export default function ImageProduction({ project, model, batchPreferredModel, q
   const pendingUpscaleKey = project.characters.filter(c => c.upscaleJob).map(c => c.id + ':' + c.upscaleJob!.id).join('|');
   useEffect(() => {
     let live = true;
-    void fetch('/api/settings').then(async r => await r.json() as { preferences?: { upscaleFactor?: number; imageBatchSize?: number } }).then(data => {
-      if (live) { setUpscaleProvider('remote'); setUpscaleFactor(data.preferences?.upscaleFactor || 4); setBatchGroupSize(data.preferences?.imageBatchSize === 20 ? 20 : 10); }
-    }).catch(() => {});
+    void fetch('/api/settings', { cache: 'no-store' }).then(async r => { if (!r.ok) throw Error('Could not load saved Image Batch size'); return await r.json() as { preferences?: { upscaleFactor?: number; imageBatchSize?: number } }; }).then(data => {
+      if (live) { setUpscaleProvider('remote'); setUpscaleFactor(data.preferences?.upscaleFactor || 4); setBatchGroupSize(data.preferences?.imageBatchSize === 20 ? 20 : 10); setBatchSettingsLoaded(true); }
+    }).catch(error => { if (live) setImageModelError(error instanceof Error ? error.message : String(error)); });
     return () => { live = false; };
   }, []);
   const [singleProgress, setSingleProgress] = useState({ done: 0, total: 0 });
@@ -313,7 +314,7 @@ export default function ImageProduction({ project, model, batchPreferredModel, q
   };
 
   const submitBatch = async (ids = selectedBatchIds, regenerate = false) => {
-    if (!jobsLoaded || working || !ids.length || ids.some(id => pending.has(id))) return;
+    if (!jobsLoaded || !batchSettingsLoaded || working || !ids.length || ids.some(id => pending.has(id))) return;
     if (soundEnabled) primeProductionAudio();
     setWorking(true);
     setMessage('Submitting independent Image Batches (up to 3 uploads at once). Each completed Batch is imported without waiting for the others...');
@@ -483,7 +484,7 @@ export default function ImageProduction({ project, model, batchPreferredModel, q
         {mode === 'batch' && <div><label className="input-label">IMAGES PER BATCH</label><select value={batchGroupSize} disabled aria-label="Images per Batch (configured in Settings)"><option value={10}>10 images per Batch</option><option value={20}>20 images per Batch</option></select><p className="sub">Change the default under Settings → Production Defaults. Groups submit independently. Existing Batch jobs are unchanged.</p></div>}
         {mode === 'standard-bulk' && <div><label className="input-label">PARALLEL WORKERS</label><select value={bulkWorkers} onChange={e => setBulkWorkers(Number(e.target.value))}><option value={3}>3 workers</option><option value={4}>4 workers</option><option value={5}>5 workers</option></select></div>}
         {mode === 'single' && <div className="character-choice"><label className="input-label">CHOOSE NEVER-GENERATED CHARACTER</label><select value={chosenSingle?.id ?? ''} onChange={e => setSingleId(e.target.value)}><option value="" disabled>Select a character...</option>{eligible.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>}
-        <button className="primary-btn" disabled={automationActive || working || downloading || !jobsLoaded || (mode === 'single' ? !chosenSingle : !selectedBatchIds.length)} onClick={() => mode === 'single' ? void generateSingle() : mode === 'standard-bulk' ? void generateStandardBulk() : void submitBatch()}>{working ? <LoaderCircle size={17} className="spin"/> : <Sparkles size={17}/>} {mode === 'single' ? 'Generate single image' : mode === 'standard-bulk' ? `Generate ${selectedBatchIds.length} images in Standard Bulk` : `Submit ${selectedBatchIds.length} new prompts to Batch`}</button>
+        <button className="primary-btn" disabled={automationActive || working || downloading || !jobsLoaded || (mode === 'batch' && !batchSettingsLoaded) || (mode === 'single' ? !chosenSingle : !selectedBatchIds.length)} onClick={() => mode === 'single' ? void generateSingle() : mode === 'standard-bulk' ? void generateStandardBulk() : void submitBatch()}>{working ? <LoaderCircle size={17} className="spin"/> : <Sparkles size={17}/>} {mode === 'single' ? 'Generate single image' : mode === 'standard-bulk' ? `Generate ${selectedBatchIds.length} images in Standard Bulk` : `Submit ${selectedBatchIds.length} new prompts to Batch`}</button>
       </div>
       {mode === 'batch' && <p className="sub">On PaletteIQ Desktop, OpenAI Batch completion emails are sent directly via the built-in SMTP settings (installer .env defaults or store override). Close to tray keeps monitoring while Windows is signed in. No GPU server, LAN, public HTTPS or OpenAI webhook is required; PNG import may still be pending.</p>}
       {mode === 'standard-bulk' && <p className="sub">Standard Bulk uses live requests and requires this app to stay open. Select image cards to limit the job; otherwise all eligible prompts are used. Failed or uncertain requests are not retried automatically.</p>}
