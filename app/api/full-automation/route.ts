@@ -45,7 +45,7 @@ type Subject = PromptProject['characters'][number] & { imageUrl?: string; origin
 type Project = Omit<PromptProject, 'characters'> & Pick<PromptProject, 'id' | 'name' | 'title' | 'theme' | 'subtheme' | 'microtheme' | 'style' | 'palette' | 'texture' | 'primaryKeyword' | 'keywords' | 'longTailKeywords' | 'notes' | 'emotionDirection' | 'ageDirection' | 'cutenessDirection' | 'creativeControls' | 'research' | 'promptJob'> & { characters: Subject[]; fullAutomation?: Flow;
   researchJob?: { status: string; error?: string; responseId?: string; selectedImages?: string[]; model?: string }; listing?: { title?: string };
   url?: string; images?: string[]; selectedImageUrls?: string[]; characterTarget?: number; researchModel?: string; progressivePrompts?: boolean };
-type Prefs = { automationPromptModel?: string; automationImageModel?: string; imageBatchSize?: 10 | 20;
+type Prefs = { maxReferenceSimilarityPercent?: number; automationPromptModel?: string; automationImageModel?: string; imageBatchSize?: 10 | 20;
   quality?: string; seoProvider?: string; seoOpenaiModel?: string; seoGeminiModel?: string };
 const idValid = (x: unknown): x is string => typeof x === 'string' && /^[\w-]{8,80}$/.test(x);
 const isActive = (f?: Flow) => !!f?.enabled && f.stage !== 'completed' && f.stage !== 'paused';
@@ -289,9 +289,10 @@ async function recheckUnverifiedSimilarity(owner:string,id:string) {
       'Open image storage and review reasons; never treat unavailable comparisons as clear.');
   const due=similarityDue(snapshot.characters,ledger,Date.now());
   if(!due.length)return; // Cooldown; scheduler resumes automatically.
-  const [records,secret]=await Promise.all([
+  const [records,secret,storePrefs]=await Promise.all([
     jobs(owner,id),
     userCredential(owner,'openai').then(key=>key||sharedProviderSecret(owner,'OPENAI_API_KEY')),
+    prefs(owner),
   ]);
   if(!secret)throw Error('OpenAI API key required to recheck saved similarity results');
   const bucket=nativeAssetBucket()??env.BUCKET;
@@ -343,7 +344,7 @@ async function recheckUnverifiedSimilarity(owner:string,id:string) {
       similarityRetries:retries,similarityNextAt:nextAt,updatedAt:Date.now()}};
   });
   const results=await Promise.allSettled(targets.map(async ({key,mime})=>
-    reviewStoredBatchImage(bucket,key,mime,secret,references)));
+    reviewStoredBatchImage(bucket,key,mime,secret,references,storePrefs.maxReferenceSimilarityPercent ?? 80)));
   for(let i=0;i<results.length;i++){
     const target=targets[i];
     const result=results[i];
