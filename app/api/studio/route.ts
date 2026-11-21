@@ -9,6 +9,7 @@ import { userCredential, userGeminiKeys } from '@/lib/credentials';
 import { normalizeListing, adaptReferenceSeoToCollection } from '@/lib/etsy-listing';
 import { normalizeAiSeoReview } from '@/lib/seo-intelligence';
 import { originalImagePrompt } from '@/lib/originality';
+import { preserveSavedPromptLineage } from '@/lib/prompt-image-consistency';
 import { generateSeoJson, seoPreferences } from '@/lib/seo-provider';
 import { clampEtsyTitle, ETSY_TITLE_MAX, ETSY_TITLE_IDEAL_MIN } from '@/lib/seo-title-policy';
 import { hasTargetSeoAltLength, normalizeSeoAlt } from '@/lib/seo-alt-text';
@@ -160,6 +161,15 @@ export async function POST(req: Request) {
           });
         }
       }
+      // A browser may have seen a Prompt job reach its final status before
+      // receiving every independently imported Character. When it saves that
+      // old snapshot, never erase a persisted prompt that generated a PNG or
+      // was already imported successfully from an OpenAI receipt. This rule
+      // also applies after the Prompt job becomes terminal.
+      const completedPromptIds=new Set((serverPromptJob?.items||[])
+        .filter(item=>item.status==='done').map(item=>item.id));
+      incoming.characters=preserveSavedPromptLineage(
+        incoming.characters,old.characters||[],completedPromptIds);
       // GPU Batch manifests are server-owned. Never let a stale Save from an
       // earlier tab remove a committed remote batch, its email, or job IDs.
       const remoteUpscaleBatch = (old as { upscaleBatch?: unknown }).upscaleBatch;
