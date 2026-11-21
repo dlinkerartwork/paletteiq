@@ -1,3 +1,4 @@
+import { similarityOriginalityGuidance } from './originality.ts';
 import { primaryCharacterSubject, primaryCharacterTarget } from './primary-character-focus.ts';
 import { normalizeCreativeControls, type CreativeAnalysis, type CreativeControls } from './creative-intelligence.ts';
 
@@ -240,7 +241,7 @@ EXISTING SUBJECTS (avoid duplicates): ${brief(existing.slice(-750))}`;
 }
 
 export function productionPromptInstruction(input: {
-  title: string; analysis: Partial<CreativeAnalysis>;
+  title: string; analysis: Partial<CreativeAnalysis>; maxReferenceSimilarityPercent?: number;
   characters: Array<{ id: string; name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description?: string; previousPrompt?: string }>;
 }): string {
   return `Create ONE detailed standalone English IMAGE GENERATION prompt for EACH supplied subject.
@@ -313,6 +314,8 @@ fully visible isolated clipart asset (transparent background, clean edges).
 No text, logo, watermark, frame, white outline, sticker cutline, exterior glow,
 drop shadow, or unrelated extra standalone elements.
 Do NOT reproduce the source shop's distinctive character designs or arrangements.
+${similarityOriginalityGuidance(input.maxReferenceSimilarityPercent ?? 80)}
+For every prompt provide a specific original pose, silhouette and visual arrangement tailored to its character DNA, not vague generic warnings.
 If previousPrompt exists, develop a fresh version, still matching niche context.
 Do not embed the entire listing image or copy a seller's existing design.
 TITLE: ${limit(input.title,350)}
