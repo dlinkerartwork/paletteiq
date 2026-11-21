@@ -231,12 +231,22 @@ function convertProject(row, owner, allowMissing) {
   // another paid request using only the copied collection metadata: the live
   // Web image_batches table and exclusive scheduler ownership were NOT moved.
   // Completed characters, images, prompt text and Listing Draft are kept.
-  if(row.sourceType==='web' && rewritten.fullAutomation?.enabled) {
-    const previous=rewritten.fullAutomation;
-    if(previous.stage!=='completed'){
+  const webMissing=row.sourceType==='web' && row.files.filter(f=>!f.present).length;
+  if(row.sourceType==='web'){
+    rewritten.webImportReport={
+      missingImages:webMissing,
+      partialRestore:Boolean(webMissing),
+      requiresImageReview:Boolean(webMissing),
+      importedAt:new Date().toISOString(),
+    };
+    if(rewritten.fullAutomation && (webMissing ||
+      rewritten.fullAutomation.stage!=='completed')){
+      const previous=rewritten.fullAutomation;
       rewritten.fullAutomation={...previous,enabled:false,stage:'paused',
         resumeStage:undefined,leaseUntil:0,
-        lastError:'Imported from Web localhost. This is a saved COPY; active OpenAI receipts remain in the original Web workspace. Check its OpenAI activity and Batch status before starting automation here. No paid jobs were resubmitted.',
+        lastError:webMissing
+          ? 'Web workspace import has '+webMissing+' missing PNG/JPG file(s). Completed images may be incomplete. Review and repair missing originals before resuming Full Automation; never replay old paid requests blindly.'
+          : 'Imported from Web localhost. This is a saved COPY; active OpenAI receipts remain in the original Web workspace. Check its OpenAI activity and Batch status before starting automation here. No paid jobs were resubmitted.',
         importedFromWeb:true,updatedAt:Date.now()};
     }
   }
