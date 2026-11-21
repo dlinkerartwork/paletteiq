@@ -131,7 +131,7 @@ export async function POST(req: Request) {
   // change must never rewrite an in-flight OpenAI prompt receipt.
   const settings = await getDb().select({preferences:studioSettings.preferences})
     .from(studioSettings).where(eq(studioSettings.owner,user.userId)).limit(1);
-  let maxReferenceSimilarityPercent=80;
+  let maxReferenceSimilarityPercent=40;
   try {
     const candidate=JSON.parse(settings[0]?.preferences||'{}').maxReferenceSimilarityPercent;
     if (Number.isInteger(candidate) && candidate>=0 && candidate<=100)
