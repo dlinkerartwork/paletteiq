@@ -22,6 +22,7 @@ type ResearchJob = {
   target: number; requested: number; completedCount: number;
   selectedImages: string[]; source: Source; error?: string;
   retryHistory?: Array<{worker:number;responseId:string;at:number;reason:string}>;
+  retryClaimId?: string;
   workers?: HybridWorker[]; mergeStatus?: 'planned'|'submitting'|'queued'|'in_progress'|'completed'|'failed'|'uncertain';
 };
 type Collection = {
@@ -424,21 +425,20 @@ export async function POST(req: Request) {
     }
     // Single atomic claim prevents two browser tabs from double-submitting.
     // Keep successful workers and historical OpenAI IDs intact.
-    let claimed=false;
+    const retryClaimId=crypto.randomUUID();
     const now=Date.now();
     const claim=await mutateJob(user.userId,projectId,job.id,current=>{
       if (!canRetryTokenLimitedWorkers(current) ||
           failed.some(w=>current.workers?.find(x=>x.index===w.index)?.responseId!==w.responseId))
         return current;
-      claimed=true;
-      return {...current,status:'in_progress',error:undefined,
+      return {...current,status:'in_progress',error:undefined,retryClaimId,
         retryHistory:[...(current.retryHistory||[]),
           ...failed.map(w=>({worker:w.index,responseId:w.responseId!,at:now,reason:'max_output_tokens'}))],
         workers:current.workers!.map(w=>failed.some(x=>x.index===w.index)
           ? {...w,status:'submitting' as const,responseId:undefined,error:undefined,startedAt:now}
           : w)};
     });
-    if (!claimed || !claim || claim.status!=='in_progress')
+    if (!claim || claim.retryClaimId!==retryClaimId || claim.status!=='in_progress')
       return bad('Another Research retry claimed these workers. Refresh status; no new request submitted.',409);
     const controls=normalizeCreativeControls(saved.data.creativeControls);
     // Do not automatically retry HTTP errors or ambiguous accepted submissions.
