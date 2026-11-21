@@ -927,7 +927,10 @@ export default function Home() {
         const view = latestWorkspace.current;
         const oldStage = view.project.fullAutomation?.stage;
         const newStage = updated.fullAutomation?.stage;
-        const fromTab = automationStageTab(oldStage);
+        // A paused, explicitly accepted character target moves to Prompts on
+        // the next Resume. Treat its saved resumeStage as the previous screen.
+        const fromTab = automationStageTab(oldStage) ||
+          (oldStage==='paused' ? automationStageTab(view.project.fullAutomation?.resumeStage as FullAutomation['stage']) : null);
         const toTab = automationStageTab(newStage);
         const clean = !collectionHasUnsavedEdits(view.project, savedProjectSnapshots.current.get(id));
         if (clean) savedProjectSnapshots.current.set(id, JSON.stringify(updated));
@@ -1250,6 +1253,12 @@ export default function Home() {
       if (!response.ok || !result.flow) throw Error(result.error || 'Full Automation could not change state');
       setProject(prev => ({ ...prev, fullAutomation: result.flow }));
       setProjects(prev => prev.map(p => p.id === project.id ? { ...p, fullAutomation: result.flow } : p));
+      if(action==='resume' && autoFollowRef.current &&
+         isStudioTabEnabled(automationStageTab(result.flow.stage)||'') &&
+         !thumbnailSaveControlsRef.current?.hasUnsaved()) {
+        const destination=automationStageTab(result.flow.stage);
+        if(destination && latestWorkspace.current.tab==='analysis')setTab(destination);
+      }
       setMessage(action === 'resume' ? 'Full Automation resumed. Previously accepted OpenAI batches will be checked before new submissions.' : 'Full Automation paused; existing OpenAI jobs continue remotely.');
     } catch (e) { setMessage(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(''); }
@@ -1275,10 +1284,16 @@ export default function Home() {
       if(!response.ok||!result.flow||!result.acceptedCharacterCount)
         throw Error(result.error||'Could not accept the saved character count');
       const accepted=result.acceptedCharacterCount;
+      // The server just committed the new target and stage. Reload the durable
+      // collection so polling doesn't mistake the accepted target change for
+      // unsaved local edits and hide subsequently imported paid prompts/images.
+      const saved=await fetchSavedPromptSnapshot(project.id);
+      if(saved.characterTarget!==accepted || saved.fullAutomation?.target!==accepted)
+        throw Error('Accepted target is saved, but the refreshed collection is inconsistent. Refresh status before proceeding.');
       setTarget(accepted);
-      setProject(prev=>prev.id===project.id?{...prev,characterTarget:accepted,fullAutomation:result.flow}:prev);
-      setProjects(prev=>prev.map(item=>item.id===project.id?
-        {...item,characterTarget:accepted,fullAutomation:result.flow}:item));
+      // Accept is an explicit workflow-navigation action. It never schedules
+      // another request; Resume separately authorizes paid prompt/image work.
+      if(isStudioTabEnabled('prompts'))setTab('prompts');
       setMessage('Accepted '+accepted+' saved characters as the final collection target. '+
         'AI Fill will not request more concepts. Full Automation remains paused at AI Prompts; '+
         'click Resume separately after reviewing future OpenAI charges.');
