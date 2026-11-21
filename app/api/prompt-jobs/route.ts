@@ -13,7 +13,7 @@ import {
 const fail = (error: string, status = 400) => Response.json({ error }, { status });
 
 const MAX_PROMPTS = 200;
-const TERMINAL = new Set(['completed', 'failed', 'cancelled', 'expired']);
+const TERMINAL = new Set(['completed', 'failed', 'cancelled', 'expired', 'incomplete']);
 type RemoteBatch = {
   id: string; status: string; output_file_id?: string | null;
   error_file_id?: string | null; request_counts?: { total: number; completed: number; failed: number };
@@ -21,6 +21,7 @@ type RemoteBatch = {
 };
 type PromptRequest = {
   projectId?: string; characterIds?: string[]; model?: string; regenerate?: boolean; progressive?: boolean;
+  action?: 'recover-existing'; recoveryRetry?: boolean;
 };
 const safeJob = (job: PromptBatchJob) => ({
   id: job.id, status: job.status, total: job.total, imported: job.imported,
@@ -66,6 +67,13 @@ export async function POST(req: Request) {
   let body: PromptRequest;
   try { body = await req.json() as PromptRequest; } catch { return fail('Invalid JSON'); }
   const projectId = String(body.projectId || '');
+  if(body.action==='recover-existing') {
+    // This endpoint is a read-only provider reconciliation: status GET and
+    // import of already-paid saved responses, NEVER a new provider POST.
+    try {return await synchronize(user.userId,projectId,true);}
+    catch(error){return fail('Saved prompt recovery failed: '+
+      (error instanceof Error?error.message:String(error)).slice(0,280),502);}
+  }
   const ids = body.characterIds;
   if (!Array.isArray(ids) || !ids.length || ids.length > MAX_PROMPTS ||
       ids.some(x => typeof x !== 'string' || !/^[\w-]{1,120}$/.test(x)) ||
@@ -90,6 +98,23 @@ export async function POST(req: Request) {
   }
   if (isActivePromptBatch(saved.data.promptJob))
     return Response.json({ error: 'This collection already has an active prompt batch. Resume it rather than submitting a duplicate.', job: safeJob(saved.data.promptJob!) }, { status: 409 });
+  if(body.recoveryRetry) {
+    // Explicit PAID retry is permitted only when the previous groups are
+    // conclusively terminal and their receipt IDs have all been persisted.
+    // Never replace an active, uncertain or merely submitting paid job.
+    const prev=saved.data.promptJob;
+    if(!automation?.enabled || automation.stage!=='paused' ||
+      (automation as {resumeStage?:string}).resumeStage!=='prompts' ||
+      !prev || !['completed','completed_with_errors'].includes(prev.status))
+      return fail('Review the saved terminal Prompt job before requesting a paid retry.',409);
+    const groups=prev.progressiveBatches||[];
+    if(!groups.length || groups.some(g=>!['completed','failed'].includes(g.status) ||
+      !(g.responseId||g.batchId)))
+      return fail('Some previous Prompt group receipts are unresolved. Do not send a paid retry.',409);
+    const missing=saved.data.characters.filter(c=>!c.prompt?.trim()).map(c=>c.id);
+    if(missing.length!==ids.length || missing.some((id,i)=>id!==ids[i]))
+      return fail('Missing prompts changed. Refresh the Collection before requesting a paid retry.',409);
+  }
   const byId = new Map(saved.data.characters.map(c => [c.id, c]));
   const selected = ids.map(x => byId.get(x));
   if (selected.some(c => !c || !c.name.trim())) return fail('Some selected characters are missing or have no names.', 422);
@@ -111,8 +136,18 @@ export async function POST(req: Request) {
   };
   // Claim the collection atomically before spending credits. Closing the
   // browser after Batch acceptance will not cancel server-side processing.
+  const previous=saved.data.promptJob;
+  const retainedReceipts=body.recoveryRetry&&previous
+    ? [...(((saved.data.promptJobHistory as Array<Record<string,unknown>>|undefined)||[])).slice(-5),{
+        id:previous.id,status:previous.status,model:previous.model,
+        createdAt:previous.createdAt,batchId:previous.batchId,
+        progressiveBatches:previous.progressiveBatches?.map(g=>({
+          key:g.key,status:g.status,batchId:g.batchId,responseId:g.responseId,
+        })),
+      }] : undefined;
   const claimed = await getDb().update(projects)
-    .set({ data: JSON.stringify({ ...saved.data, promptJob: job }),
+    .set({ data: JSON.stringify({ ...saved.data, promptJob: job,
+      ...(retainedReceipts?{promptJobHistory:retainedReceipts}:{}) }),
       updatedAt: Math.max(now, saved.row.updatedAt + 1) })
     .where(and(eq(projects.id, projectId), eq(projects.owner, user.userId), eq(projects.updatedAt, saved.row.updatedAt)))
     .returning({ id: projects.id });
@@ -263,13 +298,15 @@ async function progressPromptBatches(owner:string,id:string,jobId:string,key:str
     return refreshed;
   }finally{progressiveLocks.delete(lock);}
 }
-async function synchronizeProgressive(owner:string,id:string,job:PromptBatchJob) {
+async function synchronizeProgressive(owner:string,id:string,job:PromptBatchJob,recoverExisting=false) {
   const key=await userCredential(owner,'openai')||sharedProviderSecret(owner,'OPENAI_API_KEY');
   if(!key) return fail('OpenAI key missing for progressive prompt recovery',503);
   // Read each original receipt only. Polling may run in multiple windows;
   // versioned imports ensure a group cannot import twice.
   const settled=await Promise.all((job.progressiveBatches||[])
-    .filter(g=>(g.batchId||g.responseId)&&['queued','in_progress'].includes(g.status))
+    .filter(g=>(g.batchId||g.responseId)&&
+      (['queued','in_progress'].includes(g.status) ||
+        (recoverExisting && ['completed','failed'].includes(g.status))))
     .map(async group=>{
       try{
         const response=group.responseId
@@ -313,11 +350,13 @@ async function synchronizeProgressive(owner:string,id:string,job:PromptBatchJob)
         for(let attempt=0;attempt<6;attempt++){
           const current=await ownedProject(owner,id);
           if(!current||current.data.promptJob?.id!==job.id)return;
-          if(['completed','failed'].includes(current.data.promptJob.progressiveBatches?.find(g=>g.key===group.key)?.status||''))return;
+          if(!recoverExisting &&
+            ['completed','failed'].includes(current.data.promptJob.progressiveBatches?.find(g=>g.key===group.key)?.status||''))return;
           const chars=current.data.characters.map(c=>({...c}));
           const byId=new Map(chars.map(c=>[c.id,c]));
           const items=current.data.promptJob.items.map(item=>{
-            if(!groupSpec[0]?.ids.includes(item.id)||item.status!=='pending')return item;
+            if(!groupSpec[0]?.ids.includes(item.id) ||
+              (item.status!=='pending' && !(recoverExisting && item.status==='error')))return item;
             const character=byId.get(item.id);
             if(!character||promptFingerprint(character.prompt||'')!==item.originalFingerprint)
               return {...item,status:'skipped' as const,error:'Manually edited or deleted; original prompt preserved.'};
@@ -385,18 +424,20 @@ async function synchronizeProgressive(owner:string,id:string,job:PromptBatchJob)
     const fresh=await ownedProject(owner,id);
     return Response.json({job:safeJob(finished||updated),project:fresh?.data});
   }
-  await progressPromptBatches(owner,id,job.id,key);
+  // Manual reconciliation must never submit any planned groups.
+  if(!recoverExisting) await progressPromptBatches(owner,id,job.id,key);
   const fresh=await ownedProject(owner,id);
   return Response.json({job:safeJob(fresh?.data.promptJob||updated),project:fresh?.data});
 }
 
-async function synchronize(owner: string, projectId: string) {
+async function synchronize(owner: string, projectId: string,recoverExisting=false) {
   const saved = await ownedProject(owner, projectId);
   if (!saved) return fail('Collection not found', 404);
   const job = saved.data.promptJob;
   if (!job) return Response.json({ job: null });
-  if (!isActivePromptBatch(job)) return Response.json({ job: safeJob(job) });
-  if (job.mode==='progressive'||job.mode==='standard') return synchronizeProgressive(owner,projectId,job);
+  if (!isActivePromptBatch(job) && !recoverExisting) return Response.json({ job: safeJob(job) });
+  if (job.mode==='progressive'||job.mode==='standard')
+    return synchronizeProgressive(owner,projectId,job,recoverExisting);
   if (!job.batchId) {
     if (job.status === 'submitting' && Date.now() - job.createdAt > 120_000) {
       const failed = await markFailed(owner, projectId, job.id,
@@ -434,7 +475,7 @@ async function synchronize(owner: string, projectId: string) {
     return fail('Prompt batch changed while importing. Reopen the collection.', 409);
   const characters = new Map(latest.data.characters.map(c => [c.id, c]));
   const items = latest.data.promptJob.items.map(item => {
-    if (item.status !== 'pending') return item;
+    if (item.status !== 'pending' && !(recoverExisting && item.status==='error')) return item;
     const character = characters.get(item.id);
     if (!character) return { ...item, status: 'skipped' as const, error: 'Character was deleted before prompt import.' };
     if (promptFingerprint(character.prompt || '') !== item.originalFingerprint)
