@@ -344,7 +344,7 @@ async function recheckUnverifiedSimilarity(owner:string,id:string) {
       similarityRetries:retries,similarityNextAt:nextAt,updatedAt:Date.now()}};
   });
   const results=await Promise.allSettled(targets.map(async ({key,mime})=>
-    reviewStoredBatchImage(bucket,key,mime,secret,references,storePrefs.maxReferenceSimilarityPercent ?? 80)));
+    reviewStoredBatchImage(bucket,key,mime,secret,references,storePrefs.maxReferenceSimilarityPercent ?? 40)));
   for(let i=0;i<results.length;i++){
     const target=targets[i];
     const result=results[i];
@@ -659,7 +659,7 @@ async function tick(req: Request, owner: string, id: string) {
           imageUrl:c.imageUrl||''}));
         const currentRound=savedRegenerationRounds(f)+1;
         const settings=await prefs(owner);
-        const similarityLimit=settings.maxReferenceSimilarityPercent ?? 80;
+        const similarityLimit=settings.maxReferenceSimilarityPercent ?? 40;
         const instruction=productionPromptInstruction({
           title:p.title||p.name,analysis:projectPromptContext(p),
           characters:targets.map(c=>({...c,previousPrompt:c.prompt})),
