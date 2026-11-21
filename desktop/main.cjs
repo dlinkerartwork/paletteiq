@@ -13,6 +13,21 @@ const { loadDesktopSmtpDefaults } = require('./smtp-config.cjs');
 const ROOT = app.isPackaged ? path.join(process.resourcesPath, 'paletteiq-runtime') : path.resolve(__dirname, '..');
 const SERVER_PORT = 18763;
 const SERVER_URL = `http://127.0.0.1:${SERVER_PORT}`;
+const WINDOWS_BACKGROUND_START_ARG = '--paletteiq-background';
+const canStartWithWindows = () => process.platform === 'win32' && app.isPackaged;
+function windowsStartupEnabled() {
+  if (!canStartWithWindows()) return false;
+  try { return Boolean(app.getLoginItemSettings({ args: [WINDOWS_BACKGROUND_START_ARG] }).openAtLogin); }
+  catch { return false; }
+}
+function setWindowsStartup(enabled) {
+  if (!canStartWithWindows()) throw Error('Windows startup is available in the installed Desktop build only');
+  app.setLoginItemSettings({
+    openAtLogin: enabled,
+    openAsHidden: true,
+    args: enabled ? [WINDOWS_BACKGROUND_START_ARG] : [],
+  });
+}
 app.setName('PaletteIQ Desktop');
 let server = null;
 let nativeStorage = null;
@@ -299,7 +314,21 @@ async function configureBackgroundTray(window, diagnostics) {
     tray.setToolTip('PaletteIQ Desktop — monitoring OpenAI image batches in the background');
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: 'Open PaletteIQ', click: showPaletteIQ },
-      { label: 'Batch completion emails continue while signed in', enabled: false },
+      { label: 'Open Shared Workspace in Web Browser', click: () =>
+        void shell.openExternal(SERVER_URL).catch(error =>
+          diagnostics.write('web', error instanceof Error ? error.message : String(error))) },
+      { type: 'separator' },
+      { label: 'Start PaletteIQ with Windows (restore jobs in tray)',
+        type: 'checkbox', checked: windowsStartupEnabled(), enabled: canStartWithWindows(),
+        click: item => {
+          try { setWindowsStartup(item.checked); }
+          catch(error) {
+            diagnostics.write('startup',error instanceof Error?error.message:String(error));
+            item.checked=windowsStartupEnabled();
+          }
+        },
+      },
+      { label: 'Saved OpenAI jobs are recovered when PaletteIQ runs', enabled: false },
       { type: 'separator' },
       { label: 'Quit completely (stop background monitoring)', click: () => app.quit() },
     ]));
@@ -438,13 +467,20 @@ async function launch() {
     })();
   }, 15000);
   configureWorkspaceMenu(directory);
-  const window = new BrowserWindow({ width: 1440, height: 940, minWidth: 1050, minHeight: 680, title: 'PaletteIQ Desktop', webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, backgroundThrottling: false } });
+  // An opt-in Windows startup starts the same saved backend quietly; it is
+  // never a second scheduler or a second SQLite owner.
+  const startHidden = process.argv.includes(WINDOWS_BACKGROUND_START_ARG) &&
+    canStartWithWindows();
+  const window = new BrowserWindow({ width: 1440, height: 940, minWidth: 1050, minHeight: 680, show: !startHidden, title: 'PaletteIQ Desktop', webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, backgroundThrottling: false } });
   mainWindow = window;
   window.on('closed', () => { if (mainWindow === window) mainWindow = null; });
   window.webContents.setWindowOpenHandler(({ url }) => { if (url.startsWith('https://')) void shell.openExternal(url); return { action: 'deny' }; });
   window.webContents.on('will-navigate', (event, url) => { if (!url.startsWith(`${SERVER_URL}/`) && url !== SERVER_URL) event.preventDefault(); });
   await window.loadURL(SERVER_URL);
   await configureBackgroundTray(window, diagnostics);
+  if (startHidden && !tray) window.show(); // No invisible app without a tray.
+  // Kicks the saved batch/workflow recovery once after a Windows login.
+  if (startHidden && tray) void pollHiddenImageBatches(window, diagnostics.write);
 }
 
 if (singleInstanceLock) app.whenReady().then(() => launch().catch(async error => { await dialog.showMessageBox({ type: 'error', title: 'PaletteIQ Desktop', message: error.message || String(error) }); app.quit(); }));
