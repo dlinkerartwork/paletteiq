@@ -180,6 +180,9 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
   const savedProject = await db.select().from(projects).where(and(eq(projects.id, job.projectId), eq(projects.owner, owner))).limit(1);
   const reviewSources = savedProject.length ? JSON.parse(savedProject[0].data) as { selectedImageUrls?: string[]; images?: string[] } : {};
   const references = reviewSources.selectedImageUrls ?? reviewSources.images ?? [];
+  const settingsRows=await db.select({ preferences:studioSettings.preferences }).from(studioSettings).where(eq(studioSettings.owner,owner)).limit(1);
+  let maxReferenceSimilarityPercent = 80;
+  try { const value=Number(JSON.parse(settingsRows[0]?.preferences||'{}').maxReferenceSimilarityPercent); if(Number.isInteger(value) && value>=0 && value<=100) maxReferenceSimilarityPercent=value; } catch { /* retain default */ }
   const batch = await (await openai(key, `batches/${encodeURIComponent(job.openaiBatchId)}`)).json() as OpenAIBatch;
   // Email is triggered by OpenAI's verified completed status, not by the
   // later PNG download, similarity review or collection import. OpenAI may
@@ -250,7 +253,7 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
       try {
         item.similarityReview = await reviewStoredBatchImage(
           bucket, batchAssetKey(owner, item.id, extension, job.id),
-          extension === 'jpg' ? 'image/jpeg' : 'image/png', key, references);
+          extension === 'jpg' ? 'image/jpeg' : 'image/png', key, references, maxReferenceSimilarityPercent);
       } catch (error) {
         item.similarityReview = { status: 'unverified',
           reason: 'Similarity review failed: ' +
