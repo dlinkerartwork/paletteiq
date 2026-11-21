@@ -1,3 +1,4 @@
+import { geminiKeyCycle, isGeminiQuotaResponse, GEMINI_ALL_KEYS_EXHAUSTED } from '@/lib/gemini-keyring';
 import { headRecoverableAsset } from '@/lib/recovered-assets';
 import { env } from 'cloudflare:workers';
 import { sharedProviderSecret } from '@/lib/store-secrets';
@@ -281,14 +282,17 @@ export async function POST(req: Request) {
       parts.push({ inline_data: { mime_type: mime, data: btoa(binary) } });
     }
     let lastError = 'Gemini visual analysis unavailable';
-    for (const key of geminiKeys) {
+    let quotaFailures = 0;
+    const keyCycle = geminiKeyCycle(user.userId, geminiKeys);
+    for (const key of keyCycle) {
       const ai = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
         method: 'POST', headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
         body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: { responseMimeType: 'application/json' } }),
       });
       if (!ai.ok) {
-        lastError = `Gemini visual analysis failed (${ai.status}): ${(await ai.text()).slice(0, 180)}`;
-        if ([429, 500, 502, 503, 504].includes(ai.status)) continue;
+        const detail = await ai.text();
+        lastError = `Gemini visual analysis failed (${ai.status}): ${detail.slice(0, 180)}`;
+        if (isGeminiQuotaResponse(ai.status, detail)) { quotaFailures++; continue; }
         return fail(lastError, 502);
       }
       try {
@@ -297,7 +301,7 @@ export async function POST(req: Request) {
         return Response.json({ source, selectedImages, analysis: normalizeResearchPayload(JSON.parse(raw), source) });
       } catch { return fail('Could not parse Gemini visual analysis', 502); }
     }
-    return fail(lastError, 502);
+    return fail(quotaFailures === keyCycle.length ? GEMINI_ALL_KEYS_EXHAUSTED : lastError, quotaFailures === keyCycle.length ? 429 : 502);
   }
   if (body.action === 'expand') {
     const aiKey = await userCredential(user.userId, 'openai') || sharedProviderSecret(user.userId, 'OPENAI_API_KEY');
