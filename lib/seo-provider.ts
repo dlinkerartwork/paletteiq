@@ -5,7 +5,7 @@ import { getDb } from '@/db';
 import { studioSettings } from '@/db/schema';
 import { userCredential, userGeminiKeys } from '@/lib/credentials';
 import { ETSY_TITLE_MAX } from './seo-title-policy';
-import { isGeminiQuotaExhausted, isGeminiModelUnavailable } from '@/lib/gemini-keyring';
+import { isGeminiQuotaResponse, isGeminiModelUnavailable, geminiKeyCycle, GEMINI_ALL_KEYS_EXHAUSTED } from '@/lib/gemini-keyring';
 
 export type SeoGenerationPreferences = {
   seoProvider: 'openai' | 'gemini';
@@ -57,8 +57,8 @@ export async function generateSeoJson(owner: string, instruction: string, provid
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
   const payload = JSON.stringify({ contents: [{ role: 'user', parts: [{ text: instruction }] }], generationConfig: { responseMimeType: 'application/json', ...(model.startsWith('gemini-2.5-') ? { thinkingConfig: { thinkingBudget: 0 } } : {}) } });
   let exhausted = 0;
-  for (let index = 0; index < keys.length; index++) {
-    const key = keys[index];
+  const cycle = geminiKeyCycle(owner, keys);
+  for (const key of cycle) {
     for (let attempt = 0; attempt < 3; attempt++) {
       const response = await fetch(endpoint, {
         signal: AbortSignal.timeout(45_000),
@@ -75,7 +75,7 @@ export async function generateSeoJson(owner: string, instruction: string, provid
       let status = '';
       let message = detail;
       try { const parsed = JSON.parse(detail) as { error?: { status?: string; message?: string } }; status = parsed.error?.status || ''; message = parsed.error?.message || detail; } catch { /* Raw provider message. */ }
-      if (isGeminiQuotaExhausted(response.status, status)) { exhausted++; break; }
+      if (isGeminiQuotaResponse(response.status, detail)) { exhausted++; break; }
       if (isGeminiModelUnavailable(response.status, message)) throw new Error(`Gemini model ${model} is unavailable for this account. Select a supported model in Settings or Etsy Listing Draft.`);
       if (response.status === 503 && attempt < 2) {
         await new Promise(resolve => setTimeout(resolve, 650 * (attempt + 1)));
@@ -84,6 +84,6 @@ export async function generateSeoJson(owner: string, instruction: string, provid
       throw new Error(`Gemini SEO generation failed (${response.status}): ${message.slice(0, 240)}`);
     }
   }
-  if (exhausted === keys.length) throw new Error('All configured Gemini API keys have exhausted their quotas. Add or replenish a key in Settings, then retry.');
+  if (exhausted === cycle.length) throw new Error(GEMINI_ALL_KEYS_EXHAUSTED);
   throw new Error('Gemini SEO generation failed: no available API key');
 }
