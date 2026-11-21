@@ -17,7 +17,7 @@ test('shared workspace discovery is limited to the actual local Desktop runtime'
   assert.match(discover,/DESKTOP_PORT = '18763'/);
   assert.match(discover,/u\.protocol === 'http:' && u\.hostname === DESKTOP_HOST && u\.port === DESKTOP_PORT/);
   assert.match(discover,/\['localhost', '127\.0\.0\.1'\]/);
-  assert.match(discover,/desktop \? 200 : 404/);
+  assert.match(discover,/status:desktop\?200:404/);
   assert.match(discover,/Access-Control-Allow-Origin/);
   assert.match(discover,/Access-Control-Allow-Methods', 'GET, OPTIONS'/);
   assert.match(discover,/Access-Control-Allow-Private-Network/);
