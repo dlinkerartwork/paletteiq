@@ -19,6 +19,7 @@ import TablePagination from '@/components/table-pagination';
 import EtsyListingDraft, { type SavedSeoReview } from '@/components/etsy-listing-draft';
 import type { EtsyListingDraft as ListingData } from '@/lib/etsy-listing';
 import type { SimilarityReview } from '@/lib/similarity-review';
+import { canAutoRecoverFirstReplacementPause, MAX_AUTOMATIC_REGENERATION_ROUNDS } from '@/lib/automation-similarity';
 import { readWorkspaceHistoryState, routeEquals, routeFromWorkspaceHash, workspaceHash, isStudioTabEnabled, workspaceShortcut, type WorkspaceRoute, WORKSPACE_TAB_IDS } from '@/lib/workspace-history';
 import { collectionHasUnsavedEdits } from '@/lib/collection-unsaved';
 import { auditCreativeConcepts, expressionDistribution, familyDistribution, normalizeCreativeAnalysis, normalizeCreativeControls, referenceMoodFromExpressions, reverseEngineeringKeys, styleDNAKeys, characterDNAKeys, selectDiverseConcepts, type CreativeAnalysis, type CreativeControls } from '@/lib/creative-intelligence';
@@ -28,7 +29,7 @@ type ResearchJobPreview = { transport?: 'batch'|'background'; workerPreviews?: A
 const hasActiveResearch = (job?: ResearchJobPreview) => !!job && ['submitting','queued','in_progress'].includes(job.status);
 type PromptJobPreview = { mode?: 'batch'|'progressive'|'standard'; groupStates?: Array<{key:string;status:string;error?:string}>; id: string; status: string; total: number; imported: number; failed: number; processedGroups: number; totalGroups: number; model: string; createdAt: number; updatedAt: number; error?: string };
 const hasActivePromptJob = (job?: PromptJobPreview) => !!job && !['completed','completed_with_errors','failed','cancelled','expired'].includes(job.status);
-type FullAutomation = { enabled: boolean; textModel?: string; promptModel?: string; batchImageModel?: string; imageQuality?: string; stage: 'research' | 'expanding' | 'prompts' | 'images' | 'reviewing' | 'revising' | 'regenerating' | 'verifying' | 'listing' | 'completed' | 'paused'; target: number; updatedAt: number; lastError?: string; reviewQueue?: string[]; revisedIds?: string[]; regenerationBatchId?: string; similarityRetries?: Record<string,number> };
+type FullAutomation = { enabled: boolean; textModel?: string; promptModel?: string; batchImageModel?: string; imageQuality?: string; stage: 'research' | 'expanding' | 'prompts' | 'images' | 'reviewing' | 'revising' | 'regenerating' | 'verifying' | 'listing' | 'completed' | 'paused'; resumeStage?: string; target: number; updatedAt: number; lastError?: string; reviewQueue?: string[]; revisedIds?: string[]; regenerationBatchId?: string; regenerationRounds?: number; similarityRetries?: Record<string,number> };
 type Project = { fullAutomation?: FullAutomation; characterTarget?: number; researchModel?: string; hybridResearch?: boolean; progressivePrompts?: boolean; id: string; name: string; url: string; upscaleBatch?: StoredUpscaleBatch; researchJob?: ResearchJobPreview; promptJob?: PromptJobPreview; theme: string; subtheme: string; microtheme?: string; primaryKeyword?: string; longTailKeywords?: string[]; research?: CreativeAnalysis; creativeControls?: CreativeControls; sourceDescription?: string; sourceTags?: string[]; emotionDirection?: string; ageDirection?: string; cutenessDirection?: string; style: string; palette: string; texture: string; keywords: string[]; characters: Character[]; title: string; images: string[]; selectedImageUrls?: string[]; notes: string; listing?: ListingData; seoReview?: SavedSeoReview; thumbnails?: ThumbnailDesign[]; listingImages?: ListingImageRecord[]; listingStudioSettings?: ListingStudioConfig; lastDownloadedAt?: number; downloadCount?: number; lastDownloadImageCount?: number; downloadedImageIds?: string[] };
 const etsyListingId = (value: string) => { try { const url = new URL(value.trim()); return ['etsy.com', 'www.etsy.com'].includes(url.hostname) ? url.pathname.match(/^\/listing\/(\d+)/)?.[1] || null : null; } catch { return null; } };
 const uid = () => crypto.randomUUID();
@@ -859,7 +860,8 @@ export default function Home() {
         project.fullAutomation.stage==='completed' ||
         (project.fullAutomation.stage==='paused' &&
           !/^\d+ image\(s\) have unverified similarity checks\. Review required\.$/
-            .test(project.fullAutomation.lastError||''))) return;
+            .test(project.fullAutomation.lastError||'') &&
+          !canAutoRecoverFirstReplacementPause(project.fullAutomation))) return;
     const id = project.id;
     let stopped = false, running = false;
     const step = async () => {
@@ -934,7 +936,9 @@ export default function Home() {
       const otherActive=view.projects.filter(p=>p.id!==view.project.id &&
         p.fullAutomation?.enabled &&
         (!['paused','completed'].includes(p.fullAutomation.stage) ||
-          (p.fullAutomation.stage==='paused' && /^\d+ image\(s\) have unverified similarity checks\. Review required\.$/.test(p.fullAutomation.lastError||''))));
+          (p.fullAutomation.stage==='paused' &&
+            (/^\d+ image\(s\) have unverified similarity checks\. Review required\.$/.test(p.fullAutomation.lastError||'') ||
+              canAutoRecoverFirstReplacementPause(p.fullAutomation)))));
       if (!otherActive.length) return;
       running=true;
       try {
@@ -1334,17 +1338,22 @@ export default function Home() {
               <div className="production-progress"><span>{project.fullAutomation.stage==='revising' && <LoaderCircle size={15} className="spin"/>} Generate revised similarity-safe prompts</span>
                 <b>{project.fullAutomation.revisedIds?.length||0}/{project.fullAutomation.reviewQueue?.length||0} prompts</b></div>
               <div className="progress"><i style={{width:`${100*(project.fullAutomation.revisedIds?.length||0)/(project.fullAutomation.reviewQueue?.length||1)}%`}}/></div>
-              <div className="production-progress"><span>{['regenerating','verifying'].includes(project.fullAutomation.stage) && <LoaderCircle size={15} className="spin"/>} Regenerate flagged images</span>
+              <div className="production-progress"><span>{['regenerating','verifying'].includes(project.fullAutomation.stage) && <LoaderCircle size={15} className="spin"/>} Regenerate flagged images — round {Math.min(MAX_AUTOMATIC_REGENERATION_ROUNDS,project.fullAutomation.regenerationRounds|| (project.fullAutomation.regenerationBatchId?1:1))}/{MAX_AUTOMATIC_REGENERATION_ROUNDS}</span>
                 <b>{(project.fullAutomation.reviewQueue||[]).filter(id=>project.characters.some(c=>c.id===id && !!project.fullAutomation?.regenerationBatchId && c.imageUrl?.includes('batch='+project.fullAutomation.regenerationBatchId))).length}/{project.fullAutomation.reviewQueue?.length||0} images</b></div>
               <div className="progress"><i style={{width:`${100*(project.fullAutomation.reviewQueue||[]).filter(id=>project.characters.some(c=>c.id===id && !!project.fullAutomation?.regenerationBatchId && c.imageUrl?.includes('batch='+project.fullAutomation.regenerationBatchId))).length/(project.fullAutomation.reviewQueue?.length||1)}%`}}/></div>
               {project.fullAutomation.stage==='verifying' && <p className="sub">Checking the newly generated images before completing the listing.</p>}
             </>}
           </div> : null}
         {project.fullAutomation.lastError && <p className="sub" role="alert">{project.fullAutomation.lastError}</p>}
-        {project.fullAutomation.stage === 'paused' && <p className="sub" role="status">Saved research status: {savedResearchStatus}. {researchRecovery?.message || 'Refresh status to inspect the saved stage and job.'}</p>}
-        {project.fullAutomation.stage === 'paused' && savedResearchError && <p className="sub" role="alert">Last research error: {savedResearchError}</p>}
+        {project.fullAutomation.stage === 'paused' &&
+          (project.fullAutomation.resumeStage==='research'||researchRecovery) &&
+          <p className="sub" role="status">Saved research status: {savedResearchStatus}. {researchRecovery?.message || 'Refresh status to inspect the saved stage and job.'}</p>}
+        {project.fullAutomation.stage === 'paused' &&
+          project.fullAutomation.resumeStage!=='research' && !researchRecovery &&
+          <p className="sub" role="status">Paused at {project.fullAutomation.resumeStage||'saved workflow stage'}. Research is not the current blocker; review the saved Image Batch and similarity results.</p>}
+        {project.fullAutomation.stage === 'paused' && project.fullAutomation.resumeStage==='research' && savedResearchError && <p className="sub" role="alert">Last research error: {savedResearchError}</p>}
         {project.fullAutomation.stage === 'paused' && <button type="button" className="outline-btn" disabled={!!busy} onClick={() => void refreshAutomationStatus(project.id).then(() => setMessage('Saved Full Automation and Research status refreshed.')).catch(error => setMessage(error instanceof Error ? error.message : String(error)))}>Refresh Full Automation status</button>}
-        {project.fullAutomation.stage === 'paused' && project.researchJob?.error && <p className="sub" role="alert">Saved research job error: {project.researchJob.error}</p>}
+        {project.fullAutomation.stage === 'paused' && project.fullAutomation.resumeStage==='research' && project.researchJob?.error && <p className="sub" role="alert">Saved research job error: {project.researchJob.error}</p>}
         {project.fullAutomation.stage === 'paused' && project.characters.length >= project.fullAutomation.target &&
           project.characters.every(c => !!c.prompt.trim()) && <p className="sub" role="status">
           All {project.fullAutomation.target} image prompts are saved. The paused workflow will NOT
@@ -1388,7 +1397,7 @@ export default function Home() {
       <section className="panel step-panel"><div className="section-title"><div><h2>Your production pipeline</h2><p>Follow these steps to create a consistent, original clipart bundle.</p></div></div><div className="step-grid">{[{ n:'01', icon: FileSearch, name:'Research & analyze', desc:'Import Etsy market signals', to:'analysis' },{ n:'02', icon: Layers3, name:'Build 120+ subjects', desc:'Expand and customize ideas', to:'characters' },{ n:'03', icon: WandSparkles, name:'Craft unique prompts', desc:'Ensure style consistency', to:'prompts' },{ n:'04', icon: ImageIcon, name:'Generate & review', desc:'Produce individual assets', to:'production' }].map(x => <button className="step" key={x.n} onClick={() => navigateTab(x.to)}><span className="step-no">{x.n}</span><x.icon size={24}/><b>{x.name}</b><small>{x.desc}</small><ArrowRight size={16} className="step-arrow"/></button>)}</div></section></>}
       {tab === 'analysis' && <div className="analysis-grid"><div className="panel"><div className="panel-heading"><div className="heading-icon violet"><Search size={20}/></div><div><h2>Source listing</h2><p>Analyze a listing with connected data sources.</p></div></div><label className="input-label">ETSY PRODUCT LINK</label><div className="field-inline"><input value={sourceUrl} onChange={e => setSourceUrl(e.target.value)} placeholder="Paste Etsy listing URL"/><button className="primary-btn" disabled={!!busy || !sourceUrl} onClick={() => void loadListingImages()}>{busy === 'images' ? 'Loading…' : 'Load images'}</button></div><div className="settings-fields" style={{ marginTop: 14 }}>
          <div><label className="input-label" htmlFor="analysis-character-target">TARGET CHARACTERS TO GENERATE</label><input id="analysis-character-target" aria-label="Target characters to generate" type="number" min={1} max={fullAutoRequested ? 200 : 1000} value={target} disabled={!!busy || (project.fullAutomation?.enabled && project.fullAutomation.stage !== 'completed')} onChange={e => setCollectionTarget(Number(e.target.value))}/><p className="sub">If AI returns fewer unique characters, Full Automation asks AI to expand the original character library to the target.</p></div>
-         <div><label className="input-label">AUTOMATION</label><label style={{ display:'flex',alignItems:'center',gap:9,fontWeight:600 }}><input type="checkbox" checked={fullAutoRequested} disabled={!!busy || (project.fullAutomation?.enabled && project.fullAutomation.stage !== 'completed' && project.fullAutomation.stage !== 'paused')} onChange={e => { setFullAutoRequested(e.target.checked); if (e.target.checked && target>200) setTarget(200); }}/> Full Automation</label><p className="sub">Analyze → fill character target → generate prompts → OpenAI image Batches → review similarity → rewrite flagged prompts → one regeneration Batch → Etsy Listing Draft. OpenAI API charges apply. Jobs resume when PaletteIQ is running, including Desktop tray.</p></div>
+         <div><label className="input-label">AUTOMATION</label><label style={{ display:'flex',alignItems:'center',gap:9,fontWeight:600 }}><input type="checkbox" checked={fullAutoRequested} disabled={!!busy || (project.fullAutomation?.enabled && project.fullAutomation.stage !== 'completed' && project.fullAutomation.stage !== 'paused')} onChange={e => { setFullAutoRequested(e.target.checked); if (e.target.checked && target>200) setTarget(200); }}/> Full Automation</label><p className="sub">Analyze → fill character target → generate prompts → OpenAI image Batches → review similarity → rewrite flagged prompts → up to two bounded regeneration rounds → Etsy Listing Draft. OpenAI API charges apply. Jobs resume when PaletteIQ is running, including Desktop tray.</p></div>
         <div className="research-auto-follow"><label><input type="checkbox" checked={autoFollowAutomation} onChange={e=>updateAutoFollowAutomation(e.target.checked)}/> Auto Follow — switch tabs when the current stage finishes</label><p className="sub">Works for manual Research and AI Prompts. Switches tabs only; never automatically starts a paid request.</p></div>
         {fullAutoRequested && <p className="sub">AI Prompts: standard OpenAI Responses API, 4 parallel groups of 10. Existing Batch jobs will still be recovered.</p>}
         {fullAutoRequested && <p className="sub">Research &amp; Analysis uses up to 3 parallel standard OpenAI Responses workers, then one Style DNA merge request. Each response ID is saved for recovery.</p>}

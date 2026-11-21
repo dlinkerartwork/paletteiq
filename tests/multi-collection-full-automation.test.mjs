@@ -20,7 +20,7 @@ test('each collection retains its own lease and paid job state',()=>{
   assert.match(flow,/if \(busy\.has\(key\)\)/);
   assert.match(flow,/flow\.leaseUntil && flow\.leaseUntil > Date\.now\(\)/);
   assert.match(flow,/eq\(projects\.id,id\)/);
-  assert.match(flow,/eq\(projects\.updatedAt,initial\.row\.updatedAt\)/);
+  assert.match(flow,/eq\(projects\.updatedAt,latestBeforeClaim\.row\.updatedAt\)/);
 });
 
 test('visible and hidden Desktop controllers tick multiple collections',()=>{

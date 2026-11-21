@@ -4,7 +4,9 @@ import {readFileSync} from 'node:fs';
 import {
   SIMILARITY_RECHECK_LIMIT,SIMILARITY_RECHECK_PER_TICK,SIMILARITY_RECHECK_COOLDOWN_MS,
   unverifiedImages,similarityDue,similarityExhausted,similarityRetryKey,
-  canAutoRecoverSimilarityPause,
+  canAutoRecoverSimilarityPause, canAutoRecoverFirstReplacementPause,
+  MAX_AUTOMATIC_REGENERATION_ROUNDS, savedRegenerationRounds,
+  matchesCurrentReplacementVersion,
 } from '../lib/automation-similarity.ts';
 
 const flow=readFileSync(new URL('../app/api/full-automation/route.ts',import.meta.url),'utf8');
@@ -95,20 +97,85 @@ test('existing regeneration receipts block duplicate paid replacements after dis
   const post=section.indexOf('const result=await apiPost(req,imagePost');
   assert.ok(existing>=0 && post>existing);
   assert.match(section,/existing\.openaiBatchId\.startsWith\('pending:'\)/);
-  assert.match(section,/item.replaceFromImageUrl/);
-  assert.match(section,/await setStage\(owner,id,'verifying',\{regenerationBatchId:existing.id\}\)/);
+  assert.match(section,/matchesCurrentReplacementVersion/);
+  assert.match(section,/await setStage\(owner,id,'verifying',\{regenerationBatchId:existing.id,regenerationRounds:round\}\)/);
   assert.match(section,/await recheckUnverifiedSimilarity\(owner,id\)/);
-  assert.match(section,/One automatic regeneration was already attempted/);
+  assert.match(section,/MAX_AUTOMATIC_REGENERATION_ROUNDS/);
+  assert.match(section,/matchesCurrentReplacementVersion/);
+  assert.match(section,/regenerationRounds:completedRounds/);
+  assert.match(section,/stage === 'verifying'/);
   assert.match(image,/openaiBatchId: 'pending:' \+ reservationId/);
 });
 
 test('scheduler recovers only old similarity pauses; UI exposes each progress stage',()=>{
   assert.match(flow,/canAutoRecoverSimilarityPause\(initial.p.fullAutomation\)/);
-  assert.match(flow,/stage:'reviewing',resumeStage:undefined,lastError:undefined/);
+  assert.match(flow,/stage:canAutoRecoverFirstReplacementPause\(p.fullAutomation\)\?'verifying':'reviewing'/);
   assert.match(flow,/LIKE '% image\(s\) have unverified similarity checks\. Review required\.'/);
   assert.match(page,/Similarity verification \/ retry/);
   assert.match(page,/Generate revised similarity-safe prompts/);
   assert.match(page,/Regenerate flagged images/);
   assert.match(page,/stage==='reviewing'/);
   assert.match(page,/stage==='verifying'/);
+});
+
+
+test('previously paused first-round replacement resumes using exact saved receipt, never manual pauses',()=>{
+  const paused={enabled:true,stage:'paused',resumeStage:'verifying',
+    regenerationBatchId:'saved-batch',reviewQueue:['image-a','image-b'],
+    lastError:'2 replacement image(s) are still too similar. One automatic regeneration was already attempted; inspect manually.'};
+  assert.equal(MAX_AUTOMATIC_REGENERATION_ROUNDS,2);
+  assert.equal(canAutoRecoverFirstReplacementPause(paused),true);
+  assert.equal(savedRegenerationRounds(paused),1,'old batches without round metadata imply round one');
+  assert.equal(canAutoRecoverFirstReplacementPause({...paused,regenerationRounds:2}),false);
+  assert.equal(canAutoRecoverFirstReplacementPause({...paused,regenerationBatchId:undefined}),false);
+  assert.equal(canAutoRecoverFirstReplacementPause({...paused,reviewQueue:[]}),false);
+  assert.equal(canAutoRecoverFirstReplacementPause({...paused,resumeStage:'research'}),false);
+  assert.equal(canAutoRecoverFirstReplacementPause({...paused,lastError:'Paused by user'}),false);
+  assert.equal(canAutoRecoverFirstReplacementPause({...paused,lastError:'Regeneration Batch receipt uncertain.'}),false);
+  assert.equal(canAutoRecoverFirstReplacementPause({...paused,enabled:false}),false);
+  assert.equal(savedRegenerationRounds({regenerationRounds:2,regenerationBatchId:'saved-batch'}),2);
+  assert.equal(savedRegenerationRounds({regenerationRounds:0}),0);
+});
+
+test('Batch receipt matching compares character AND exact previous image version',()=>{
+  const ids=['a','b'];
+  const versions=new Map([['a','/api/images/a?batch=new'],['b','/api/images/b?batch=new']]);
+  const previousRound=[
+    {id:'a',replaceFromImageUrl:'/api/images/a?batch=original'},
+    {id:'b',replaceFromImageUrl:'/api/images/b?batch=original'},
+  ];
+  const currentRound=[
+    {id:'a',replaceFromImageUrl:'/api/images/a?batch=new'},
+    {id:'b',replaceFromImageUrl:'/api/images/b?batch=new'},
+  ];
+  assert.equal(matchesCurrentReplacementVersion(previousRound,ids,versions),false);
+  assert.equal(matchesCurrentReplacementVersion(currentRound,ids,versions),true);
+  assert.equal(matchesCurrentReplacementVersion([currentRound[0]],ids,versions),false);
+  assert.equal(matchesCurrentReplacementVersion(currentRound,[],versions),false);
+  assert.equal(matchesCurrentReplacementVersion(currentRound,['missing'],versions),false);
+});
+
+test('second-round similarity recovery is bounded and cannot restart finished Batch with stale receipt',()=>{
+  const start=flow.indexOf("} else if (f.stage === 'regenerating')");
+  const verifying=flow.indexOf("} else if (f.stage === 'verifying')",start);
+  const listing=flow.indexOf("} else if (f.stage === 'listing')",verifying);
+  const code=flow.slice(start,listing);
+  assert.match(code,/const round=savedRegenerationRounds\(f\)\+1/);
+  assert.match(code,/round>MAX_AUTOMATIC_REGENERATION_ROUNDS/);
+  assert.match(code,/regenerationBatchId:existing.id,regenerationRounds:round/);
+  assert.match(code,/regenerationBatchId:batch.id,regenerationRounds:round/);
+  assert.match(code,/const completedRounds=savedRegenerationRounds\(f\)/);
+  assert.match(code,/if\(completedRounds<MAX_AUTOMATIC_REGENERATION_ROUNDS\)/);
+  assert.match(code,/reviewQueue:stillFlagged,revisedIds:\[\],revisionAttempts:0/);
+  assert.match(code,/regenerationBatchId:undefined/);
+  assert.match(code,/Maximum reached; inspect manually/);
+  assert.match(flow,/canAutoRecoverFirstReplacementPause\(initial.p.fullAutomation\)/);
+  assert.match(flow,/stage:canAutoRecoverFirstReplacementPause\(p.fullAutomation\)\?'verifying':'reviewing'/);
+  assert.match(flow,/latestBeforeClaim.row.updatedAt/);
+  const clause=flow.match(/One automatic regeneration was already attempted; inspect manually\.'/g)||[];
+  assert.ok(clause.length>=2,'Both scheduler entrypoints must include recovery of saved first-round pauses');
+  assert.match(page,/canAutoRecoverFirstReplacementPause\(project.fullAutomation\)/);
+  assert.match(page,/canAutoRecoverFirstReplacementPause\(p.fullAutomation\)/);
+  assert.match(page,/Research is not the current blocker/);
+  assert.match(page,/regenerationRounds/);
 });
