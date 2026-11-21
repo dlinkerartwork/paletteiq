@@ -16,7 +16,7 @@ const encoder=new TextEncoder();
 const entry=(name:string,body:string):ZipEntry=>({name,stream:async()=>new ReadableStream<Uint8Array>({
   start(controller){controller.enqueue(encoder.encode(body));controller.close();},
 })});
-const filename=(date:Date)=>'paletteiq-web-workspace-'+date.toISOString().slice(0,10)+'.zip';
+const filename=(date:Date,partial=false)=>'paletteiq-web-workspace-'+date.toISOString().slice(0,10)+(partial?'-partial':'')+'.zip';
 const maxCollections=5000;
 const maxAssets=19500;
 
@@ -61,33 +61,48 @@ export async function GET(request:Request) {
     }
     if(assets.size>maxAssets)return json({error:'Too many saved PNG/JPG assets for one ZIP; export smaller stores separately.'},413);
     const missing:string[]=[];
-    // Preflight all saved media; a missing object blocks export before a ZIP
-    // download starts. Never silently discard an image reference.
+    const available:Array<{archive:string;storage:string}>=[];
+    // Scan every referenced object. The default export is strict, but users
+    // can explicitly download all *available* PNG/JPG plus a complete missing
+    // asset report instead of losing the whole migration.
     for(const record of assets.values()){
-      if(!await headRecoverableAsset(bucket,record.storage)){
-        if(missing.length<10)missing.push(record.archive);
-      }
+      if(!await headRecoverableAsset(bucket,record.storage))missing.push(record.archive);
+      else available.push(record);
     }
-    if(missing.length)return json({error:'Web workspace contains missing saved PNG/JPG assets; no incomplete ZIP was exported.',
-      missing,checkedAssets:assets.size},409);
+    const params=new URL(request.url).searchParams;
+    const preview=params.get('preview')==='1';
+    const allowMissing=params.get('allowMissing')==='1';
+    if(preview)return json({
+      collections:rows.length,images:available.length,referencedImages:assets.size,
+      missingCount:missing.length,missing:missing.slice(0,30),
+      partialExportAvailable:missing.length>0,
+      message:missing.length
+        ? 'Some saved PNG/JPG objects are unavailable. A strict export will stop. You may explicitly export a partial ZIP containing all available images and a full missing-asset report; missing images will remain unverified until restored or regenerated.'
+        : 'All saved image references are available. The ZIP includes real PNG/JPG, Collection metadata and non-secret settings.',
+    });
+    if(missing.length&&!allowMissing)return json({
+      error:'Some saved PNG/JPG objects are missing. Use preview and explicitly choose partial export, or repair storage before retrying.',
+      missing:missing.slice(0,30),missingCount:missing.length,availableImages:available.length,
+      referencedImages:assets.size,
+    },409);
+    const exportPayload={...payload,missingAssets:missing};
     const manifest={format:PORTABLE_WEB_FORMAT,version:PORTABLE_WEB_VERSION,
       source:'web',createdAt:payload.exportedAt,credentialsExcluded:true,
-      collections:rows.length,images:assets.size};
+      collections:rows.length,images:available.length,missingImages:missing.length,
+      referencedImages:assets.size,partial:missing.length>0};
     const entries:ZipEntry[]=[
       entry('manifest.json',JSON.stringify(manifest,null,2)),
-      entry('database/web-collections.json',JSON.stringify(payload)),
+      entry('database/web-collections.json',JSON.stringify(exportPayload)),
     ];
-    for(const paths of assets.values()){
+    // Do not manufacture blank PNG files: the Desktop importer detects
+    // absent assets and requires explicit "Allow partial image recovery",
+    // removing broken URLs only in the imported copy.
+    for(const paths of available){
       entries.push({name:paths.archive,stream:async()=> (await getRecoverableAsset(bucket,paths.storage))?.body||null});
     }
-    const wantsPreview=new URL(request.url).searchParams.get('preview')==='1';
-    if(wantsPreview)return json({
-      collections:rows.length,images:assets.size,
-      message:'Export includes real PNG/JPG files, Collection metadata and non-secret settings. Active OpenAI jobs will be paused for review when imported into Desktop.',
-    });
     return new Response(zipStream(entries),{headers:{
       'Content-Type':'application/zip',
-      'Content-Disposition':'attachment; filename="'+filename(new Date())+'"',
+      'Content-Disposition':'attachment; filename="'+filename(new Date(),missing.length>0)+'"',
       'Cache-Control':'private, no-store',
       'X-Content-Type-Options':'nosniff',
     }});
