@@ -61,7 +61,7 @@ export function projectPromptContext(p: PromptProject): CreativeAnalysis {
     } };
 }
 
-export function buildPromptBatchInput(p: PromptProject, selected: PromptTarget[], model: string, maxReferenceSimilarityPercent = 80) {
+export function buildPromptBatchInput(p: PromptProject, selected: PromptTarget[], model: string, maxReferenceSimilarityPercent = 40) {
   const context = projectPromptContext(p);
   const groups: PromptBatchGroup[] = [];
   const lines: string[] = [];
