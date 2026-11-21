@@ -181,7 +181,7 @@ test('second-round similarity recovery is bounded and cannot restart finished Ba
 });
 
 test('flagged-image rewrites receive the store maximum similarity and prior score',()=>{
-  assert.match(flow,/const similarityLimit=settings\.maxReferenceSimilarityPercent \?\? 80/);
+  assert.match(flow,/const similarityLimit=settings\.maxReferenceSimilarityPercent \?\? 40/);
   assert.match(flow,/maxReferenceSimilarityPercent:similarityLimit/);
   assert.match(flow,/Your revised prompts must aim to score no higher than/);
   assert.match(flow,/reason:c\.similarityReview\?\.reason\|\|''/);
