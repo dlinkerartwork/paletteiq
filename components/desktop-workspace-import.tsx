@@ -91,19 +91,19 @@ export default function DesktopWorkspaceImportPanel() {
     try{
       const data=await callNative({action:'apply',selectionId,storeId,mode,allowMissing,importPreferences});
       setResult(data as unknown as Result);setPreview(null);setSelectionId('');setFileName('');
-      setNotice('Workspace import complete. Verify source PNGs and prompts after switching to the destination store; imported Web paid jobs stay paused.');
+      setNotice('Workspace import complete. Check image previews after switching to the destination store.');
     }catch(e){setError(e instanceof Error?e.message:'Import failed');}
     finally{setBusy('');}
   };
   if(!desktop)return null;
   return <section className="desktop-workspace-import">
     <div className="restore-heading"><Archive size={21}/><div>
-      <strong>Web / Desktop Workspace ZIP → Selected Store</strong>
-      <p className="sub">Import an old Desktop Workspace ZIP or a <strong>Web Workspace ZIP with PNGs</strong> exported from the Web localhost Settings. The source ZIP and existing Desktop images stay unchanged.</p>
+      <strong>Desktop Workspace ZIP → Selected Store</strong>
+      <p className="sub">Import an old PaletteIQ Desktop ZIP containing database/paletteiq.db and images/collections. The original ZIP and all existing store images stay untouched.</p>
     </div></div>
     <div className="restore-fields">
       <div>
-        <label className="input-label">1 · WEB OR DESKTOP WORKSPACE ZIP</label>
+        <label className="input-label">1 · OLD WORKSPACE BACKUP ZIP</label>
         <div className="restore-file-choice">
           <button type="button" className="outline-btn" disabled={!!busy} onClick={()=>void choose()}>
             {busy==='choose'?<LoaderCircle size={16} className="spin"/>:<FolderOpen size={16}/>} Choose workspace ZIP…
@@ -137,7 +137,7 @@ export default function DesktopWorkspaceImportPanel() {
       <input type="checkbox" checked={allowMissing} disabled={!!busy} onChange={e=>setAllowMissing(e.target.checked)}/>
       <span><strong>Allow partial image recovery</strong> — {preview.filesMissing} PNG/JPG file(s) were missing or invalid. Their image links will be removed from imported data. Generated status will revert to Ready when no original image survives.</span>
     </label> : null}
-    <p className="restore-image-note"><ShieldCheck size={17}/> A full local SQLite safety snapshot is saved before changes. Copied images receive new IDs under the selected store; existing images are never replaced. Historical batch jobs are not resumed. Imported active Web automations remain paused for safe manual reconciliation.</p>
+    <p className="restore-image-note"><ShieldCheck size={17}/> A full local SQLite safety snapshot is saved before changes. Copied images receive new IDs under the selected store; existing images are never replaced. Historical batch jobs are not resumed.</p>
     {error&&<p role="alert" className="restore-error"><XCircle size={16}/> {error}</p>}
     {notice&&<p role="status" className="restore-message">{notice}</p>}
     {preview&&<div className="restore-preview">

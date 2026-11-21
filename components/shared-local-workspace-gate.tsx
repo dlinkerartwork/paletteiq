@@ -38,11 +38,6 @@ export default function SharedLocalWorkspaceGate({children}:{children:React.Reac
 
   useEffect(()=>{
     if(!isIndependentLocalWeb()) { setMode('shared'); return; }
-    // Temporary, explicit original-Web export mode. Never redirect a user
-    // away from the old Web database when they need to back it up first.
-    if(new URLSearchParams(window.location.search).get('webExport')==='1') {
-      setMode('standalone');return;
-    }
     let alive=true;
     const wanted=preference();
     setPreferred(wanted);

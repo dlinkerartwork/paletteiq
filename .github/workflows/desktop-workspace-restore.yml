@@ -5,8 +5,6 @@ on:
     paths:
       - 'desktop/workspace-backup.cjs'
       - 'desktop/workspace-store-import.cjs'
-      - 'desktop/web-workspace-archive.cjs'
-      - 'tests/web-workspace-zip-to-desktop.test.mjs'
       - 'tests/desktop-workspace-*.test.mjs'
       - '.github/workflows/desktop-workspace-restore.yml'
   push:
@@ -32,4 +30,4 @@ jobs:
           node-version: '22'
       - name: Verify Windows ZIP extraction and real image restoration
         shell: pwsh
-        run: node --experimental-strip-types --test tests/desktop-workspace-store-import.test.mjs tests/desktop-workspace-zip-windows.test.mjs tests/web-workspace-zip-to-desktop.test.mjs
+        run: node --experimental-strip-types --test tests/desktop-workspace-store-import.test.mjs tests/desktop-workspace-zip-windows.test.mjs

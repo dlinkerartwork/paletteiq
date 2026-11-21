@@ -57,11 +57,11 @@ Desktop still provides the shared backend and reconnection behavior when running
 
 ## Existing data and safety
 
-**This does not automatically import collections from your independent Web
+**This does not import or transfer collections from an independent Web
 localhost development database** into the Desktop workspace. Those collections
-remain separate and are not deleted, replaced, or silently merged. Back them
-up and use the supported Workspace ZIP import into a selected store only after
-reviewing any conflicts.
+remain separate and are not deleted, replaced, or silently merged. The separate
+Web-to-Desktop ZIP migration feature has been removed. The Desktop Workspace
+ZIP restore feature is for backups created by PaletteIQ Desktop.
 
 The discovery endpoint is read-only and active only in the configured Desktop
 runtime at `127.0.0.1:18763`. It only permits CORS probes from HTTP loopback
