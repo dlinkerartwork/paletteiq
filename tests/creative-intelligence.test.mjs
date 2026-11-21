@@ -200,3 +200,22 @@ test('AI-enhanced Etsy SEO considers title, microtheme and confirmed artwork exp
   assert.match(api,/Never describe a sad, angry/);
   assert.match(api,/In faithful TRANSLATION mode/);
 });
+
+test('large niche collection may accept distinct established-family variants after strict quota stalls',()=>{
+  const existing=[
+    ...Array.from({length:14},(_,i)=>({name:'Woodland Fox '+i,family:'fox',
+      silhouette:'Distinct fox pose geometry '+i+' with original balance'})),
+    ...Array.from({length:40},(_,i)=>({name:'Woodland subject '+i,family:'family-'+(i%5),
+      silhouette:'Distinct woodland silhouette '+i+' and angle'})),
+  ];
+  const proposals=Array.from({length:15},(_,i)=>({
+    name:'New woodland fox '+i,family:'fox',
+    silhouette:'New independent fox silhouette '+i+' with changed proportions',
+  }));
+  const strict=selectDiverseConcepts(proposals,existing,100,15,4,null);
+  const relaxed=selectDiverseConcepts(proposals,existing,100,15,4,null,true);
+  assert.equal(strict.length,0,'strict family cap rejects already saturated fox family');
+  assert.ok(relaxed.length>0,'late-stage family-cap relaxation accepts novel fox poses');
+  const duplicate=selectDiverseConcepts([{...proposals[0],name:existing[0].name}],existing,100,1,4,null,true);
+  assert.deepEqual(duplicate,[],'even relaxed mode rejects same-name and silhouette duplicates');
+});
