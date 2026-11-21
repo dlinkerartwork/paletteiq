@@ -61,7 +61,7 @@ export function projectPromptContext(p: PromptProject): CreativeAnalysis {
     } };
 }
 
-export function buildPromptBatchInput(p: PromptProject, selected: PromptTarget[], model: string) {
+export function buildPromptBatchInput(p: PromptProject, selected: PromptTarget[], model: string, maxReferenceSimilarityPercent = 80) {
   const context = projectPromptContext(p);
   const groups: PromptBatchGroup[] = [];
   const lines: string[] = [];
@@ -70,7 +70,7 @@ export function buildPromptBatchInput(p: PromptProject, selected: PromptTarget[]
     const key = 'prompt-group-' + Math.floor(index / 10);
     groups.push({ key, ids: subset.map(c => c.id) });
     const instruction = productionPromptInstruction({
-      title: p.title || p.name, analysis: context,
+      title: p.title || p.name, analysis: context, maxReferenceSimilarityPercent,
       characters: subset.map(c => ({
         id: c.id, name: c.name, family: c.family, expression: c.expression,
         description: c.description, shape: c.shape, silhouette: c.silhouette,
