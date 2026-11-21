@@ -8,6 +8,8 @@ const production=readFileSync(new URL('../components/image-production.tsx',impor
 test('Image Production submits multiple independent groups without awaiting OpenAI Batch completion',()=>{
   assert.match(production,/const \[batchGroupSize, setBatchGroupSize\] = useState<10\|20>\(10\)/);
   assert.match(production,/for\(let offset=0;offset<ids\.length;offset\+=batchGroupSize\)/);
+  assert.match(production,/data\.preferences\?\.imageBatchSize === 20 \? 20 : 10/);
+  assert.match(production,/configured in Settings/);
   assert.match(imageRoute,/data\.characterIds\.length > 20/);
   assert.match(production,/const workers=Array\.from\(\{length:Math\.min\(3,chunks\.length\)\},async\(\)=>/);
   assert.match(production,/await Promise\.all\(workers\)/);
