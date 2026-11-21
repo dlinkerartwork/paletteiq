@@ -1012,6 +1012,27 @@ export async function POST(req:Request) {
     });
     return Response.json(progress(next));
   }
+  if (body.action==='resume-expansion') {
+    // An exhausted, paused AI Fill needs a NEW user-approved paid allowance.
+    // Never reset uncertain or still-active response receipts.
+    const f=current.p.fullAutomation;
+    if (!f || f.stage!=='paused' || f.resumeStage!=='expanding' ||
+        !f.lastError?.startsWith('Character expansion did not reach the target:') ||
+        current.p.characters.length>=f.target || activeExpansionSlots(f).length)
+      return bad('Expansion is not eligible for a new paid allowance. Inspect saved AI Fill receipts and refresh status.',409);
+    const extra=6;
+    const maxAttempts=Math.min(60,Math.ceil(f.target/10)+8);
+    return Response.json(progress(await save(user.userId,id,p=>{
+      const flow=p.fullAutomation;
+      if (!flow || flow.stage!=='paused' || flow.resumeStage!=='expanding' ||
+          !flow.lastError?.startsWith('Character expansion did not reach the target:') ||
+          p.characters.length>=flow.target || activeExpansionSlots(flow).length)
+        throw Error('Expansion state changed; inspect saved receipts before retrying.');
+      return {...p,fullAutomation:{...flow,stage:'expanding',
+        expandAttempts:Math.max(0,maxAttempts-extra),
+        lastError:undefined,leaseUntil:0,updatedAt:Date.now()}};
+    })));
+  }
   if (body.action==='resume') {
     if (current.p.fullAutomation?.stage!=='paused') return bad('No paused automation to resume',409);
     return Response.json(progress(await save(user.userId,id,p=>{
