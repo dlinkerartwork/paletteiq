@@ -277,7 +277,7 @@ export function auditCreativeConcepts(items: DiverseConcept[], style?: Partial<S
 }
 
 export function selectDiverseConcepts<T extends DiverseConcept>(
-  proposals: T[], existing: Array<{ name: string; family?: string; expression?: string; silhouette?: string }>, target: number, limit: number, characterVariation = 4, focusSubject: string | null = null,
+  proposals: T[], existing: Array<{ name: string; family?: string; expression?: string; silhouette?: string }>, target: number, limit: number, characterVariation = 4, focusSubject: string | null = null, relaxFamilyCap = false,
 ): T[] {
   if (limit <= 0) return [];
   const current = familyDistribution(existing);
@@ -290,7 +290,14 @@ export function selectDiverseConcepts<T extends DiverseConcept>(
   // This caps repetition of the SAME species/category, not the number of poses.
   const variation = Math.max(1, Math.min(5, Math.round(characterVariation)));
   const desiredFamilies = Math.max(4, 8 + (variation - 4) * 2);
-  const perFamilyCap = Math.max(3, Math.ceil(Math.max(1, target) / desiredFamilies));
+  // Initial research prioritizes many families. Near the target, a limited
+  // second pass can use distinct poses from established families instead of
+  // deadlocking a niche with fewer than eight plausible species/categories.
+  // Duplicate names and same-family silhouette matches are NEVER relaxed.
+  const eligibleFamilies = Math.max(4, Object.keys(current).length);
+  const perFamilyCap = relaxFamilyCap
+    ? Math.max(3, Math.ceil(Math.max(1, target) / eligibleFamilies))
+    : Math.max(3, Math.ceil(Math.max(1, target) / desiredFamilies));
   // Silhouette repeats within the same subject family are not meaningfully
   // different assets simply because their colors or accessories change.
   const silhouetteSignature = (item: { name: string; family?: string; silhouette?: string }) => {
