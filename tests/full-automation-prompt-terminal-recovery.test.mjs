@@ -57,7 +57,7 @@ test('Full Automation counts prompts from fresh saved project and never bills on
   assert.match(code,/missing=current.characters.filter/);
   assert.match(code,/if \(!missing.length\) await setStage\(owner,id,'images'\)/);
   assert.match(code,/\['failed','cancelled','expired','completed_with_errors'\]/);
-  assert.match(code,/if\(!current.promptJob\)/);
+  assert.match(code,/else if \(!current.promptJob &&/);
   assert.match(flow,/promptMissingCount: p.characters.filter/);
   assert.match(flow,/promptRecovery: p.promptJob \?/);
 });
