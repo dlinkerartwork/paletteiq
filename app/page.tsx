@@ -1254,6 +1254,31 @@ export default function Home() {
     } catch (e) { setMessage(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(''); }
   };
+  const retryPausedExpansion = async () => {
+    const flow=project.fullAutomation;
+    if(!flow || flow.stage!=='paused' || flow.resumeStage!=='expanding' ||
+       !flow.lastError?.startsWith('Character expansion did not reach the target:')) return;
+    if(!window.confirm(
+      'Continue AI Fill from '+project.characters.length+'/'+flow.target+'? '+
+      'This authorizes up to SIX NEW PAID OpenAI AI Fill requests. '+
+      'Saved characters, prompts, image batches and earlier receipts are preserved. '+
+      'Check existing OpenAI activity and costs before approving.'
+    ))return;
+    setBusy('expansion-retry');
+    try {
+      const response=await fetch('/api/full-automation',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action:'resume-expansion',projectId:project.id}),
+      });
+      const result=await response.json() as {error?:string;flow?:FullAutomation};
+      if(!response.ok||!result.flow)throw Error(result.error||'Could not safely resume expansion');
+      setProject(prev=>({...prev,fullAutomation:result.flow}));
+      setProjects(prev=>prev.map(item=>item.id===project.id?{...item,fullAutomation:result.flow}:item));
+      setMessage('AI Fill rearmed with up to six additional paid attempts. Existing OpenAI receipts and all saved characters are preserved. Refresh status to follow the result.');
+    } catch(error) {
+      setMessage('AI Fill recovery blocked: '+(error instanceof Error?error.message:String(error)));
+    } finally {setBusy('');}
+  };
   const expand = async () => {
     if (busy) return;
     if (project.characters.length >= target) { setMessage('Target already reached.'); return; }
@@ -1559,7 +1584,17 @@ export default function Home() {
         {project.fullAutomation.stage === 'paused' && canRestartMissingResearch && <div className="sub" role="status">No background research job is recorded for this workflow. Resuming alone would pause again. Start the missing research only after checking OpenAI activity for any untracked charge.</div>}
         {project.fullAutomation.stage === 'paused' && canRetryRejectedResearch && <button type="button" className="outline-btn" disabled={!!busy} onClick={() => void retryRejectedResearch()}>Retry rejected image research (check OpenAI usage first)</button>}
         {project.fullAutomation.stage === 'paused' && canRestartMissingResearch && <button type="button" className="outline-btn" disabled={!!busy} onClick={() => void recoverMissingResearch()}>Start missing research (check OpenAI usage first)</button>}
-        {project.fullAutomation.stage === 'paused' && !canRestartMissingResearch && !canRetryRejectedResearch && !project.researchJob?.canRetryTokenLimitedWorkers && <button type="button" className="outline-btn" disabled={!!busy} onClick={() => void changeAutomation('resume')}>Resume Full Automation (review costs/jobs first)</button>}
+        {project.fullAutomation.stage === 'paused' && project.fullAutomation.resumeStage==='expanding' &&
+          project.fullAutomation.lastError?.startsWith('Character expansion did not reach the target:') &&
+          <div className="sub" role="status">AI Fill reached its attempt budget at {project.characters.length}/{project.fullAutomation.target} characters. Existing characters are saved. This is separate from the image similarity threshold. Inspect OpenAI activity before approving more paid concept requests.</div>}
+        {project.fullAutomation.stage === 'paused' && project.fullAutomation.resumeStage==='expanding' &&
+          project.fullAutomation.lastError?.startsWith('Character expansion did not reach the target:') &&
+          <button type="button" className="outline-btn" disabled={!!busy} onClick={()=>void retryPausedExpansion()}>
+            {busy==='expansion-retry'?'Checking saved expansion…':'Continue AI Fill — up to 6 paid attempts (confirm)'}
+          </button>}
+        {project.fullAutomation.stage === 'paused' && !canRestartMissingResearch && !canRetryRejectedResearch && !project.researchJob?.canRetryTokenLimitedWorkers &&
+          !(project.fullAutomation.resumeStage==='expanding' && project.fullAutomation.lastError?.startsWith('Character expansion did not reach the target:')) &&
+          <button type="button" className="outline-btn" disabled={!!busy} onClick={() => void changeAutomation('resume')}>Resume Full Automation (review costs/jobs first)</button>}
         {project.fullAutomation.stage !== 'paused' && project.fullAutomation.stage !== 'completed' && <button type="button" className="outline-btn" disabled={!!busy} onClick={() => void changeAutomation('pause')}>Pause automation</button>}
       </section>}
       {project.researchJob?.status==='failed' &&
