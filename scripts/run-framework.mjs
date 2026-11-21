@@ -25,8 +25,8 @@ if (command === "dev" && process.env.PALETTEIQ_TRACE_INVALID_JSON === "1") {
             const raw = copy ? await copy.text() : "";
             prefix = raw.slice(0, 160)
               .replace(/sk-[A-Za-z0-9_-]+/g, "[REDACTED_KEY]")
-              .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}/g, "[REDACTED_EMAIL]")
-              .replace(/https?:\\/\\/[^\\s"'<>]+/g, "[REDACTED_URL]");
+              .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "[REDACTED_EMAIL]")
+              .replace(/https?:\/\/[^\s"'<>]+/g, "[REDACTED_URL]")
           } catch { /* preserve the original parse error */ }
           let pathname = "<unavailable>";
           try { pathname = new URL(response.url).pathname; } catch {}
