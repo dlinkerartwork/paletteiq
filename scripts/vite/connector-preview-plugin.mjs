@@ -95,7 +95,12 @@ export function connectorPreview() {
           method: "POST", headers: { "Content-Type": "application/json", "X-Sites-Preview": ${JSON.stringify(bridgeToken)} },
           body: JSON.stringify({connectorId, actionName, arguments: args})
         });
-        return response.json();
+        try {
+          if (!response.ok) return { status: "upstream_error", message: "Connector preview HTTP " + response.status + "; check provider activity before retrying." };
+          return await response.json();
+        } catch {
+          return { status: "upstream_error", message: "Connector preview returned a non-JSON response; the action may have completed. Check activity before retrying." };
+        }
       } };`;
     },
     configureServer(vite) {
