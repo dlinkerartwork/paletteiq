@@ -37,7 +37,7 @@ export default function WebWorkspaceExportPanel() {
       const anchor=document.createElement('a');
       anchor.href='/api/web-workspace-export';
       anchor.download='paletteiq-web-workspace.zip';
-      document.body.append(anchor);anchor.click();anchor.remove();
+      document.body.appendChild(anchor);anchor.click();anchor.remove();
     }catch(error){
       setMessage(error instanceof Error?error.message:'Web Workspace ZIP export failed');
     }finally{setBusy(false);}
