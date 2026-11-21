@@ -84,3 +84,13 @@ test('small Research targets use one response with a strict character quota',()=
   assert.match(research,/const needed = Math\.max\(0, job\.target - uniquePrevious\.length\)/);
   assert.match(research,/selectDiverseConcepts\(candidates, uniquePrevious, job\.target, needed/);
 });
+
+test('adaptive single-worker research finishes without a second paid merge',()=>{
+  const research=read('app/api/research-jobs/route.ts');
+  const completed=research.indexOf("if (!latest.mergeStatus && latest.workers?.length===1");
+  const merge=research.indexOf("if (latest.mergeStatus==='planned')",completed);
+  assert.ok(completed>0 && merge>completed,'single worker must be imported before merge handling');
+  assert.match(research.slice(completed,merge),/latest\.workers\[0\]\.status==='completed'/);
+  assert.match(research.slice(completed,merge),/return finish\(user\.userId,projectId,latest/);
+  assert.match(research.slice(completed,merge),/resultText/);
+});
