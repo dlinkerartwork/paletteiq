@@ -1,7 +1,7 @@
 export type SimilarityReview = { status: 'clear' | 'needs_review' | 'unverified'; score?: number; reason: string; checkedAt: number };
 
 /** Advisory visual review, not a copyright determination or mathematical similarity guarantee. */
-export async function reviewImageSimilarity(apiKey: string, generatedBase64: string, mime: string, references: string[], maxSimilarityPercent = 80): Promise<SimilarityReview> {
+export async function reviewImageSimilarity(apiKey: string, generatedBase64: string, mime: string, references: string[], maxSimilarityPercent = 40): Promise<SimilarityReview> {
   const checkedAt = Date.now();
   const urls = references.filter(url => {
     try { const parsed = new URL(url); return parsed.protocol === 'https:' && (parsed.hostname === 'etsystatic.com' || parsed.hostname.endsWith('.etsystatic.com')); }
