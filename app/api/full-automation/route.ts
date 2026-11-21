@@ -604,7 +604,9 @@ async function tick(req: Request, owner: string, id: string) {
               latest.fullAutomation?.revisionBatch?.responseId!==receipt.responseId)return latest;
             const approved=new Map(receipt.items.filter(item=>{
               const current=latest.characters.find(c=>c.id===item.id);
-              return received.has(item.id)&&current?.prompt===item.originalPrompt &&
+              return received.has(item.id)&&
+                received.get(item.id)!.replace(/\s+/g,' ').trim() !== item.originalPrompt.replace(/\s+/g,' ').trim() &&
+                current?.prompt===item.originalPrompt &&
                 current?.imageUrl===item.imageUrl &&
                 current?.similarityReview?.status==='needs_review';
             }).map(item=>[item.id,received.get(item.id)!]));
@@ -629,12 +631,15 @@ async function tick(req: Request, owner: string, id: string) {
         if(!targets.length)throw Error('Similarity revision targets missing');
         const items=targets.map(c=>({id:c.id,originalPrompt:c.prompt||'',
           imageUrl:c.imageUrl||''}));
+        const currentRound=savedRegenerationRounds(f)+1;
         const instruction=productionPromptInstruction({
           title:p.title||p.name,analysis:projectPromptContext(p),
           characters:targets.map(c=>({...c,previousPrompt:c.prompt})),
         })+'\nIMPORTANT: Previously generated images were flagged for similarity. '+
           'For every character ID, create a substantially ORIGINAL prompt: change pose, '+
           'camera angle, characteristic accessories, silhouette, composition and detail. '+
+          'For round '+currentRound+', use a different pose, silhouette and layout from the prior rejected picture. '+
+          'Avoid copying any Etsy reference arrangement. '+
           'Preserve the intended subject, color palette and Style DNA. '+
           'Return valid JSON as {"prompts":[{"id":"...","prompt":"..."}]} only. '+
           'Untrusted review observations: '+JSON.stringify(targets.map(c=>({
@@ -661,29 +666,33 @@ async function tick(req: Request, owner: string, id: string) {
         if ((f.reviewQueue||[]).length > 20)
           throw Error('More than 20 images were flagged. One review regeneration Batch is limited to 20.');
         const records=await jobs(owner,id);
+        const versions=new Map(p.characters.filter(c=>!!c.imageUrl)
+          .map(c=>[c.id,c.imageUrl!] as const));
         const regenerationRecords=records.filter(row=>{
           let items:Array<{id:string;replaceFromImageUrl?:string}>=[];
           try { items=JSON.parse(row.items) as typeof items; } catch { return false; }
-          return (f.reviewQueue||[]).every(charId=>items.some(item=>
-            item.id===charId && !!item.replaceFromImageUrl));
+          return matchesCurrentReplacementVersion(items,f.reviewQueue||[],versions);
         }).sort((a,b)=>b.createdAt-a.createdAt);
         // A network interruption after image POST but before the automation
         // stores regenerationBatchId must recover the already reserved Batch.
         // Never submit again based only on a missing Flow receipt.
         const existing=records.find(row=>row.id===f.regenerationBatchId) ||
           regenerationRecords[0];
+        const round=savedRegenerationRounds(f)+1;
+        if(round>MAX_AUTOMATIC_REGENERATION_ROUNDS)
+          throw Error('Automatic similarity regeneration budget exhausted. Review saved Batch activity.');
         if(existing){
           if(['submitting','uncertain'].includes(existing.status) ||
               existing.openaiBatchId.startsWith('pending:'))
             throw Error('Similarity regeneration submission is uncertain. Inspect the saved Batch receipt; no duplicate paid images were submitted.');
-          await setStage(owner,id,'verifying',{regenerationBatchId:existing.id});
+          await setStage(owner,id,'verifying',{regenerationBatchId:existing.id,regenerationRounds:round});
         }else{
           const config=await prefs(owner);
           const result=await apiPost(req,imagePost,{projectId:id,characterIds:f.reviewQueue,
             model:imageModel(p,config),quality:f.imageQuality || quality(config),regenerate:true});
           const batch=result.job as {id?:string}|undefined;
           if(!batch?.id)throw Error('Similarity regeneration Batch accepted without saved local ID. Inspect Batch activity.');
-          await setStage(owner,id,'verifying',{regenerationBatchId:batch.id});
+          await setStage(owner,id,'verifying',{regenerationBatchId:batch.id,regenerationRounds:round});
         }
       }
     } else if (f.stage === 'verifying') {
@@ -715,9 +724,21 @@ async function tick(req: Request, owner: string, id: string) {
         if(!unverifiedImages(checked.characters).length){
           const stillFlagged=(f.reviewQueue||[]).filter(charId=>
             checked.characters.find(c=>c.id===charId)?.similarityReview?.status!=='clear');
-          if(stillFlagged.length)
-            throw Error(stillFlagged.length+' replacement image(s) are still too similar. One automatic regeneration was already attempted; inspect manually.');
-          await setStage(owner,id,'listing');
+          if(stillFlagged.length){
+            const completedRounds=savedRegenerationRounds(f);
+            if(completedRounds<MAX_AUTOMATIC_REGENERATION_ROUNDS){
+              // Round two targets ONLY still-flagged versions. Never erase
+              // the prior paid Batch, and never regenerate images that passed.
+              await setStage(owner,id,'revising',{
+                reviewQueue:stillFlagged,revisedIds:[],revisionAttempts:0,
+                revisionBatch:undefined,regenerationBatchId:undefined,
+                regenerationRounds:completedRounds,
+              });
+            }else{
+              throw Error(stillFlagged.length+' replacement image(s) are still too similar after '+
+                completedRounds+' automatic regenerations. Maximum reached; inspect manually.');
+            }
+          }else await setStage(owner,id,'listing');
         }
       }
     } else if (f.stage === 'listing') {
