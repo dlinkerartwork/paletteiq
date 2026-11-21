@@ -1604,7 +1604,7 @@ export default function Home() {
         </section>
         <section className="source-setup-section">
           <div className="source-setup-heading"><span className="source-setup-step">2</span><div><h3>Collection goals</h3><p>Choose how many characters to create and how original the generated images should be.</p></div></div>
-          <div className="source-setup-fields">
+          <div className="source-setup-fields source-goals-row">
             <div className="source-setup-field"><label className="input-label" htmlFor="analysis-character-target">TARGET CHARACTERS</label>
               <input id="analysis-character-target" aria-label="Target characters to generate" type="number" min={1} max={fullAutoRequested?200:1000} value={target} disabled={!!busy||(project.fullAutomation?.enabled&&project.fullAutomation.stage!=='completed')} onChange={e=>setCollectionTarget(Number(e.target.value))}/>
               <p className="sub">Full Automation fills missing unique characters up to this target.</p>
@@ -1613,9 +1613,9 @@ export default function Home() {
               <input id="analysis-max-reference-similarity" type="number" min={0} max={100} step={1} value={preferences.maxReferenceSimilarityPercent??40} onChange={e=>setPreferences(prev=>({...prev,maxReferenceSimilarityPercent:Math.max(0,Math.min(100,Number(e.target.value)))}))}/>
               <p className="sub">Default 40%. Images scoring above your limit require review. This is an AI-estimated score, not a guarantee.</p>
             </div>
+            <div className="source-similarity-save"><button type="button" className="outline-btn" disabled={!!busy} onClick={async()=>{setBusy('save-similarity');try{const res=await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'preferences',preferences})});const data=await res.json() as {error?:string};if(!res.ok)throw Error(data.error||'Could not save similarity setting');setMessage('Maximum similarity saved: '+(preferences.maxReferenceSimilarityPercent??40)+'%. New comparisons will use it.');}catch(error){setMessage('Could not save similarity setting: '+(error instanceof Error?error.message:String(error)));}finally{setBusy('');}}} aria-label="Save similarity threshold">{busy==='save-similarity'?'Saving…':'Save'}</button>
+            </div>
           </div>
-          <div className="source-similarity-save"><button type="button" className="outline-btn" disabled={!!busy} onClick={async()=>{setBusy('save-similarity');try{const res=await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'preferences',preferences})});const data=await res.json() as {error?:string};if(!res.ok)throw Error(data.error||'Could not save similarity setting');setMessage('Maximum similarity saved: '+(preferences.maxReferenceSimilarityPercent??40)+'%. New comparisons will use it.');}catch(error){setMessage('Could not save similarity setting: '+(error instanceof Error?error.message:String(error)));}finally{setBusy('');}}}>{busy==='save-similarity'?'Saving…':'Save similarity setting'}</button>
-            <span>Also available in Settings → Production defaults</span></div>
         </section>
         <section className="source-setup-section">
           <div className="source-setup-heading"><span className="source-setup-step">3</span><div><h3>Automation &amp; analysis</h3><p>Select how PaletteIQ should process your references.</p></div></div>
