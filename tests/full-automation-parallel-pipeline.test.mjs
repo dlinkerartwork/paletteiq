@@ -101,3 +101,25 @@ test('paused expansion may be explicitly rearmed only with no existing paid rece
   assert.match(page,/Manual AI Fill can recover a paused workflow/);
   assert.match(page,/await api\(\{action:'save',id:current\.id,name:current\.name,data:current\}\)/);
 });
+
+test('user can accept saved partial characters without any new paid AI Fill',()=>{
+  const start=flow.indexOf("if (body.action==='accept-current-characters')");
+  const end=flow.indexOf("if (body.action==='resume-expansion')",start);
+  assert.ok(start>0 && end>start,'acceptance endpoint precedes the paid retry endpoint');
+  const accept=flow.slice(start,end);
+  assert.match(accept,/flow\.stage!=='paused'/);
+  assert.match(accept,/flow\.resumeStage!=='expanding'/);
+  assert.match(accept,/activeExpansionSlots\(flow\)\.length/);
+  assert.match(accept,/activeExpansionSlots\(f\)\.length/);
+  assert.match(accept,/characterTarget:acceptedCount/);
+  assert.match(accept,/target:acceptedCount/);
+  assert.match(accept,/resumeStage:'prompts'/);
+  assert.match(accept,/lastError:undefined/);
+  assert.match(accept,/acceptedCharacterCount:accepted\.characters\.length/);
+  assert.doesNotMatch(accept,/submitStandardTextResponse|apiPost|submitImageBatch/);
+  assert.match(page,/const acceptCurrentCharacters = async \(\) =>/);
+  assert.match(page,/action:'accept-current-characters'/);
+  assert.match(page,/NO new paid OpenAI request is sent by accepting/);
+  assert.match(page,/setTarget\(accepted\)/);
+  assert.match(page,/Accept '\+project\.characters\.length\+' characters & continue'/);
+});
