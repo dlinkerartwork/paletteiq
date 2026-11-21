@@ -1,6 +1,6 @@
 /** Applied at generation time, including to prompts saved before originality rules existed. */
 export const normalizeSimilarityLimit = (value: unknown): number =>
-  typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 100 ? value : 80;
+  typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 100 ? value : 40;
 
 /** A creative target for the advisory review, never a guaranteed numeric outcome. */
 export const similarityOriginalityGuidance = (maximumPercent: number): string =>
@@ -13,7 +13,7 @@ export const similarityOriginalityGuidance = (maximumPercent: number): string =>
   'This percentage is an advisory creative target, not a measurable guarantee; ' +
   'the generated image must still pass a separate visual review.';
 
-export const originalImagePrompt = (prompt: string, characterId: string, variation = '', maximumPercent = 80) => {
+export const originalImagePrompt = (prompt: string, characterId: string, variation = '', maximumPercent = 40) => {
   const creativeSeed = [...(characterId + variation)].reduce((hash, char) => (Math.imul(hash, 31) + char.charCodeAt(0)) >>> 0, 17);
   const views = ['a gentle three-quarter angle', 'a natural side-facing pose', 'a dynamic diagonal arrangement', 'an expressive front-facing pose'];
   const details = ['a distinct silhouette and asymmetric accent details', 'fresh proportions and a different focal detail', 'an inventive pose with independently arranged elements', 'a new arrangement of features and decorative accents'];
