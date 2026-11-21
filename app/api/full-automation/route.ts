@@ -22,7 +22,7 @@ import { POST as studioPost } from '@/app/api/studio/route';
 import { POST as rewritePost } from '@/app/api/regenerate-prompt/route';
 import { isImageBatchModel, imageBatchModelError, DEFAULT_IMAGE_BATCH_MODEL } from '@/lib/image-batch-models';
 import { AUTOMATION_LIMITS, activeExpansionSlots, planExpansionSlots, pendingImageIds, availableImageSlots, type ExpansionSlot } from '@/lib/automation-parallel';
-import { canAutoRecoverSimilarityPause, unverifiedImages, similarityRetryKey, similarityDue, similarityExhausted, SIMILARITY_RECHECK_COOLDOWN_MS, type RetryLedger } from '@/lib/automation-similarity';
+import { canAutoRecoverSimilarityPause, canAutoRecoverFirstReplacementPause, unverifiedImages, similarityRetryKey, similarityDue, similarityExhausted, matchesCurrentReplacementVersion, savedRegenerationRounds, SIMILARITY_RECHECK_COOLDOWN_MS, MAX_AUTOMATIC_REGENERATION_ROUNDS, type RetryLedger } from '@/lib/automation-similarity';
 import { reviewStoredBatchImage } from '@/lib/image-review-queue';
 import { batchAssetKey } from '@/lib/batch-assets';
 import { nativeAssetBucket } from '@/lib/native-bridge';
@@ -37,6 +37,7 @@ type Flow = { enabled: boolean; stage: Stage; target: number; textModel?: string
   revisionBatch?: { batchId?: string; responseId?: string; status:'submitting'|'queued'|'in_progress'; startedAt:number;
     items:Array<{id:string;originalPrompt:string;imageUrl:string}> };
   reviewQueue?: string[]; revisedIds?: string[]; regenerationBatchId?: string;
+  regenerationRounds?: number;
   similarityRetries?: Record<string,number>; similarityNextAt?: Record<string,number> };
 type Subject = PromptProject['characters'][number] & { imageUrl?: string; origin?: string;
   similarityReview?: SimilarityReview };
@@ -137,6 +138,8 @@ function progress(p: Project) {
       retryAttempts: Object.values(p.fullAutomation?.similarityRetries||{}).reduce((a,b)=>a+b,0),
       revisionTotal: p.fullAutomation?.reviewQueue?.length||0,
       revisionDone: p.fullAutomation?.revisedIds?.length||0,
+      regenerationRound: savedRegenerationRounds(p.fullAutomation),
+      regenerationRoundLimit: MAX_AUTOMATIC_REGENERATION_ROUNDS,
       regenerated: (p.fullAutomation?.reviewQueue||[]).filter(id=>
         p.characters.some(c=>c.id===id && !!p.fullAutomation?.regenerationBatchId &&
           c.imageUrl?.includes('batch='+p.fullAutomation.regenerationBatchId))).length,
@@ -345,25 +348,31 @@ async function tick(req: Request, owner: string, id: string) {
   if (busy.has(key)) return { waiting: true };
   const initial = await load(owner,id);
   if (!initial) return { error:'Collection missing' };
-  if(canAutoRecoverSimilarityPause(initial.p.fullAutomation)) {
-    // Existing collections paused by the OLD unverified-review bug resume
-    // automatically, but never restart an explicit user pause/uncertain job.
-    await save(owner,id,p=>({...p,fullAutomation:{...p.fullAutomation!,
-      stage:'reviewing',resumeStage:undefined,lastError:undefined,updatedAt:Date.now()}}));
+  if(canAutoRecoverSimilarityPause(initial.p.fullAutomation) ||
+      canAutoRecoverFirstReplacementPause(initial.p.fullAutomation)) {
+    // Only recover the exact legacy paused similarity verdict; other
+    // pauses and uncertain paid receipts must stay stopped.
+    await save(owner,id,p=>{
+      if(!canAutoRecoverSimilarityPause(p.fullAutomation) &&
+          !canAutoRecoverFirstReplacementPause(p.fullAutomation))return p;
+      return {...p,fullAutomation:{...p.fullAutomation!,
+        stage:canAutoRecoverFirstReplacementPause(p.fullAutomation)?'verifying':'reviewing',
+        resumeStage:undefined,lastError:undefined,updatedAt:Date.now()}};
+    });
   }
-  const active=(await load(owner,id))?.p;
-  if(!active || !isActive(active.fullAutomation))return progress(initial.p);
-  const flow = initial.p.fullAutomation!;
-  if (flow.leaseUntil && flow.leaseUntil > Date.now()) return { waiting:true, ...progress(initial.p) };
+  const latestBeforeClaim=(await load(owner,id))||initial;
+  if(!isActive(latestBeforeClaim.p.fullAutomation))return progress(latestBeforeClaim.p);
+  const flow = latestBeforeClaim.p.fullAutomation!;
+  if (flow.leaseUntil && flow.leaseUntil > Date.now()) return { waiting:true, ...progress(latestBeforeClaim.p) };
   // Persist lease to prevent double-billing from two browser tabs.
   const leaseToken = Date.now() + 300_000;
   // JSON1 modifies one durable field without materializing and serializing
   // every character, reference image and prompt on each 12-second poll.
   const claimed = await getDb().update(projects).set({
     data: sql`json_set(${projects.data}, '$.fullAutomation.leaseUntil', ${leaseToken})`,
-    updatedAt: Math.max(Date.now(),initial.row.updatedAt+1),
+    updatedAt: Math.max(Date.now(),latestBeforeClaim.row.updatedAt+1),
   }).where(and(eq(projects.owner,owner),eq(projects.id,id),
-    eq(projects.updatedAt,initial.row.updatedAt))).returning({id:projects.id});
+    eq(projects.updatedAt,latestBeforeClaim.row.updatedAt))).returning({id:projects.id});
   if (!claimed.length) return { waiting:true };
   busy.add(key);
   try {
@@ -567,7 +576,8 @@ async function tick(req: Request, owner: string, id: string) {
         const flagged=verified.characters.filter(c=>c.imageUrl &&
           c.similarityReview?.status==='needs_review').map(c=>c.id);
         if(flagged.length) await setStage(owner,id,'revising',{
-          reviewQueue:flagged,revisedIds:[],revisionAttempts:0});
+          reviewQueue:flagged,revisedIds:[],revisionAttempts:0,
+          regenerationRounds:0,regenerationBatchId:undefined});
         else await setStage(owner,id,'listing');
       }
     } else if (f.stage === 'revising') {
