@@ -112,8 +112,9 @@ export async function POST(req: Request) {
       !prev || !['completed','completed_with_errors'].includes(prev.status))
       return fail('Review the saved terminal Prompt job before requesting a paid retry.',409);
     const groups=prev.progressiveBatches||[];
-    if(!groups.length || groups.some(g=>!['completed','failed'].includes(g.status) ||
-      !(g.responseId||g.batchId)))
+    if(!groups.length || groups.length!==prev.groups.length ||
+      groups.some(g=>!['completed','failed'].includes(g.status) ||
+        !(g.responseId||g.batchId)))
       return fail('Some previous Prompt group receipts are unresolved. Do not send a paid retry.',409);
     const missing=saved.data.characters.filter(c=>!c.prompt?.trim()).map(c=>c.id);
     if(missing.length!==ids.length || missing.some((id,i)=>id!==ids[i]))
@@ -141,8 +142,10 @@ export async function POST(req: Request) {
   // Claim the collection atomically before spending credits. Closing the
   // browser after Batch acceptance will not cancel server-side processing.
   const previous=saved.data.promptJob;
+  const priorHistory=Array.isArray(saved.data.promptJobHistory)
+    ? (saved.data.promptJobHistory as Array<Record<string,unknown>>).slice(-5) : [];
   const retainedReceipts=body.recoveryRetry&&previous
-    ? [...(((saved.data.promptJobHistory as Array<Record<string,unknown>>|undefined)||[])).slice(-5),{
+    ? [...priorHistory,{
         id:previous.id,status:previous.status,model:previous.model,
         createdAt:previous.createdAt,batchId:previous.batchId,
         progressiveBatches:previous.progressiveBatches?.map(g=>({
