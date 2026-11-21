@@ -10,7 +10,7 @@ const recovery = readFileSync(new URL('../lib/batch-recovery.ts', import.meta.ur
 test('similarity check compares generated image with selected Etsy references and never treats unknown as passed', () => {
   assert.match(moduleText, /selected Etsy reference images/);
   assert.match(moduleText, /status: 'unverified'/);
-  assert.match(moduleText, /flagged \\|\\|= score > threshold/);
+  assert.match(moduleText, /flagged \|\|= score > threshold/);
   assert.match(moduleText, /offset < urls\.length; offset \+= 10/);
   assert.match(moduleText, /Promise\.all\(offsets\.map\(compareGroup\)\)/);
   assert.match(moduleText, /index < urls\.length/);
@@ -24,7 +24,7 @@ test('single production persists similarity review after saving generated asset'
 test('batch imports persist similarity checks alongside generated assets', () => {
   const reviewQueue = readFileSync(new URL('../lib/image-review-queue.ts', import.meta.url), 'utf8');
   assert.match(batch, /item\.similarityReview = await reviewStoredBatchImage/);
-  assert.match(reviewQueue, /return reviewImageSimilarity\\(apiKey, btoa\\(binary\\), mime, references, maxSimilarityPercent\\)/);
+  assert.match(reviewQueue, /return reviewImageSimilarity\(apiKey, btoa\(binary\), mime, references, maxSimilarityPercent\)/);
   assert.match(batch, /pendingBatchReviewCount\(items\) \? 'reviewing'/);
   assert.match(batch, /mergeNewBatchResults\(project\.characters, items, changedIds\)/);
   assert.match(recovery, /similarityReview: item\.similarityReview/);
