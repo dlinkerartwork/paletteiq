@@ -134,3 +134,15 @@ test('foreground Gemini retains partial valid prompt groups and checkpoints ever
   assert.match(page, /await api\(\{ action: 'save', id: current\.id, name: current\.name, data: current \}\)/);
   assert.match(page, /retry only characters without prompts/);
 });
+
+test('saved prompt batches embed the active store similarity threshold once',()=>{
+  const subjects=[sample('duck',1),sample('fox',2)];
+  const low=buildPromptBatchInput(project,subjects,'gpt-4.1-mini',55);
+  const high=buildPromptBatchInput(project,subjects,'gpt-4.1-mini',85);
+  const text=job=>JSON.parse(job.jsonl.trim()).body.input[0].content[0].text;
+  assert.match(text(low),/no more than 55%/);
+  assert.match(text(high),/no more than 85%/);
+  assert.notEqual(text(low),text(high));
+  assert.match(route,/maxReferenceSimilarityPercent/);
+  assert.match(route,/buildPromptBatchInput\(saved\.data, selected as NonNullable<typeof selected\[number\]>\[\], model, maxReferenceSimilarityPercent\)/);
+});
