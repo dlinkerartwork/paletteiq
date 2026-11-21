@@ -179,3 +179,11 @@ test('second-round similarity recovery is bounded and cannot restart finished Ba
   assert.match(page,/Research is not the current blocker/);
   assert.match(page,/regenerationRounds/);
 });
+
+test('flagged-image rewrites receive the store maximum similarity and prior score',()=>{
+  assert.match(flow,/const similarityLimit=settings\.maxReferenceSimilarityPercent \?\? 80/);
+  assert.match(flow,/maxReferenceSimilarityPercent:similarityLimit/);
+  assert.match(flow,/Your revised prompts must aim to score no higher than/);
+  assert.match(flow,/reason:c\.similarityReview\?\.reason\|\|''/);
+  assert.match(flow,/score:c\.similarityReview\?\.score\|\|0/);
+});
