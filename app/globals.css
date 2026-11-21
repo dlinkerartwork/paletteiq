@@ -610,3 +610,35 @@ h1,h2,.stat strong,.step b,.source-card strong,.asset-meta b { color:#302721; }
   color:#fff;
 }
 .primary-btn.step-success-btn:disabled { background:#168447; border-color:#168447; color:#fff; opacity:.75; }
+
+/* Source listing: progressive three-step setup instead of interleaved controls. */
+.source-listing-panel .panel-heading { margin-bottom:22px; }
+.source-setup-section { padding:20px 0; border-top:1px solid #eceef4; }
+.source-setup-section:first-of-type { border-top:0; padding-top:0; }
+.source-setup-heading { display:flex; align-items:flex-start; gap:11px; margin-bottom:15px; }
+.source-setup-heading h3 { margin:0 0 4px; font-size:13px; font-weight:750; color:#30354c; }
+.source-setup-heading p { margin:0; font-size:11px; line-height:1.5; color:#8991a3; }
+.source-setup-step { display:grid; place-items:center; width:26px; height:26px; border-radius:9px; background:#eeebff; color:#735cdb; font-weight:800; font-size:12px; flex:none; }
+.source-setup-url { display:flex; align-items:stretch; gap:9px; }
+.source-setup-url input { flex:1; min-width:0; }
+.source-setup-url .primary-btn { flex:none; }
+.source-setup-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; align-items:start; }
+.source-setup-field { min-width:0; }
+.source-setup-section .input-label { margin-top:10px; }
+.source-setup-section .sub { font-size:11px; line-height:1.55; margin-top:7px; }
+.source-setup-success { display:flex; align-items:center; gap:6px; font-size:11px; color:#237d4a; margin:10px 0 0; }
+.source-similarity-save { display:flex; align-items:center; justify-content:flex-end; gap:11px; flex-wrap:wrap; margin-top:14px; }
+.source-similarity-save .outline-btn { padding:9px 13px; }
+.source-similarity-save span { font-size:10px; color:#9298a7; }
+.source-automation-choice { background:#fbfbfe; border:1px solid #edecf5; border-radius:10px; padding:12px 13px; margin-bottom:10px; }
+.source-automation-choice label { display:flex; align-items:center; gap:9px; font-size:12px; color:#33374d; cursor:pointer; }
+.source-automation-choice input { accent-color:#8069e8; }
+.source-automation-choice .sub { margin:6px 0 0 25px; }
+.source-setup-hint { font-size:11px; line-height:1.6; color:#7d8495; background:#f8f7fd; border-radius:9px; padding:10px 12px; margin:12px 0 0; }
+@media(max-width:900px) {
+  .source-setup-fields { grid-template-columns:1fr; }
+  .source-setup-url { flex-wrap:wrap; }
+  .source-setup-url input { flex-basis:100%; }
+  .source-setup-url .primary-btn { width:100%; }
+  .source-similarity-save { justify-content:flex-start; }
+}
