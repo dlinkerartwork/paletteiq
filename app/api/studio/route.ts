@@ -342,7 +342,7 @@ export async function POST(req: Request) {
       previousPrompt: String(c.prompt ?? '').slice(0, 1200) }));
     const promptSettings=await getDb().select({preferences:studioSettings.preferences})
       .from(studioSettings).where(eq(studioSettings.owner,user.userId)).limit(1);
-    let maxReferenceSimilarityPercent=80;
+    let maxReferenceSimilarityPercent=40;
     try {
       const value=JSON.parse(promptSettings[0]?.preferences||'{}').maxReferenceSimilarityPercent;
       if(Number.isInteger(value) && value>=0 && value<=100) maxReferenceSimilarityPercent=value;
@@ -520,7 +520,7 @@ Collection: ${JSON.stringify(brief).slice(0, 14000)}. Etsy API SEO reference (ke
     const preferences = settings[0] ? JSON.parse(settings[0].preferences) as { output?: string; background?: string; maxReferenceSimilarityPercent?: number } : {};
     const format = preferences.output === 'jpg' ? 'jpeg' : 'png';
     const background = preferences.background === 'opaque' || format === 'jpeg' ? 'opaque' : 'transparent';
-    const ai = await fetch('https://api.openai.com/v1/images/generations', { method: 'POST', headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: body.model, quality: body.quality, size: '1024x1024', background, output_format: format, n: 1, prompt: originalImagePrompt(character.prompt, character.id, crypto.randomUUID(), preferences.maxReferenceSimilarityPercent ?? 80) }) });
+    const ai = await fetch('https://api.openai.com/v1/images/generations', { method: 'POST', headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: body.model, quality: body.quality, size: '1024x1024', background, output_format: format, n: 1, prompt: originalImagePrompt(character.prompt, character.id, crypto.randomUUID(), preferences.maxReferenceSimilarityPercent ?? 40) }) });
     if (!ai.ok) return fail(`OpenAI image generation failed (${ai.status}): ${(await ai.text()).slice(0,200)}`, 502);
     const data = await ai.json() as { data?: Array<{ b64_json?: string }> };
     const b64 = data.data?.[0]?.b64_json;
@@ -533,7 +533,7 @@ Collection: ${JSON.stringify(brief).slice(0, 14000)}. Etsy API SEO reference (ke
     // prevent safe recovery of the generated asset.
     let similarityReview: SimilarityReview | undefined;
     try {
-      similarityReview = await reviewImageSimilarity(aiKey, b64, format === 'jpeg' ? 'image/jpeg' : 'image/png', project.selectedImageUrls ?? project.images ?? [], preferences.maxReferenceSimilarityPercent ?? 80);
+      similarityReview = await reviewImageSimilarity(aiKey, b64, format === 'jpeg' ? 'image/jpeg' : 'image/png', project.selectedImageUrls ?? project.images ?? [], preferences.maxReferenceSimilarityPercent ?? 40);
     } catch { similarityReview = undefined; }
     // Concurrent Standard workers must update only their own character.
     // CAS retries preserve images saved by other workers and the latest edits.
