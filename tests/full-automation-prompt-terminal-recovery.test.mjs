@@ -41,6 +41,9 @@ test('an explicit paid retry is guarded by completed receipts, latest missing ID
   assert.match(header,/missing.length!==ids.length/);
   assert.match(header,/missing.some\(\(id,i\)=>id!==ids\[i\]\)/);
   assert.match(route,/promptJobHistory:retainedReceipts/);
+  const studio=read('app/api/studio/route.ts');
+  assert.match(studio,/incoming as typeof incoming & \{promptJobHistory\?:unknown\[\]\}/);
+  assert.match(studio,/promptJobHistory=savedPromptHistory/);
   assert.match(route,/if \(isActivePromptBatch\(saved.data.promptJob\)\)/);
   assert.match(route,/!body.recoveryRetry/);
 });
@@ -72,5 +75,8 @@ test('UI offers free receipt recovery and requires explicit cost confirmation fo
   assert.match(page,/characterIds:missing.map\(c=>c.id\)/);
   assert.match(page,/recoveryRetry:true,regenerate:false/);
   assert.match(page,/savedPromptProgress\?\.projectId===project.id/);
+  assert.match(page,/const savedPromptGroups = \(job\?:PromptJobPreview\)/);
+  assert.match(page,/job\?\.progressiveBatches\?\.length \? job.progressiveBatches/);
+  assert.match(page,/const groups=savedPromptGroups\(previous\)/);
   assert.match(page,/existing OpenAI receipts/i);
 });
