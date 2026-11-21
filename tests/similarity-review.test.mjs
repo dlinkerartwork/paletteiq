@@ -35,10 +35,10 @@ test('saved similarity threshold applies throughout image production',()=>{
   const prefs=readFileSync(new URL('../components/studio-settings.tsx',import.meta.url),'utf8');
   const flow=readFileSync(new URL('../app/api/full-automation/route.ts',import.meta.url),'utf8');
   const page=readFileSync(new URL('../app/page.tsx',import.meta.url),'utf8');
-  assert.match(settings,/maxReferenceSimilarityPercent: 80/);
+  assert.match(settings,/maxReferenceSimilarityPercent: 40/);
   assert.match(settings,/Similarity threshold must be an integer from 0 to 100/);
   assert.match(prefs,/MAXIMUM SIMILARITY WITH REFERENCES/);
-  assert.match(page,/MAXIMUM IMAGE SIMILARITY WITH REFERENCES/);
+  assert.match(page,/MAXIMUM SIMILARITY (%)/);
   assert.match(batch,/references, maxReferenceSimilarityPercent/);
   assert.match(studio,/preferences\.maxReferenceSimilarityPercent \?\? 80/);
   assert.match(flow,/storePrefs\.maxReferenceSimilarityPercent \?\? 80/);
