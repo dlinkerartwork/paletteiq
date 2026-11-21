@@ -658,10 +658,15 @@ async function tick(req: Request, owner: string, id: string) {
         const items=targets.map(c=>({id:c.id,originalPrompt:c.prompt||'',
           imageUrl:c.imageUrl||''}));
         const currentRound=savedRegenerationRounds(f)+1;
+        const settings=await prefs(owner);
+        const similarityLimit=settings.maxReferenceSimilarityPercent ?? 80;
         const instruction=productionPromptInstruction({
           title:p.title||p.name,analysis:projectPromptContext(p),
           characters:targets.map(c=>({...c,previousPrompt:c.prompt})),
+          maxReferenceSimilarityPercent:similarityLimit,
         })+'\nIMPORTANT: Previously generated images were flagged for similarity. '+
+          'Your revised prompts must aim to score no higher than '+similarityLimit+
+          '% versus the references; this is an advisory target, not a guarantee. '+
           'For every character ID, create a substantially ORIGINAL prompt: change pose, '+
           'camera angle, characteristic accessories, silhouette, composition and detail. '+
           'For round '+currentRound+', use a different pose, silhouette and layout from the prior rejected picture. '+
