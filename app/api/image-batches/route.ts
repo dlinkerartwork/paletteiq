@@ -73,7 +73,7 @@ export async function POST(req: Request) {
   const prefs = settings[0] ? JSON.parse(settings[0].preferences) as { output?: string; background?: string; maxReferenceSimilarityPercent?: number } : {};
   const format = prefs.output === 'jpg' ? 'jpeg' : 'png';
   const background = prefs.background === 'opaque' || format === 'jpeg' ? 'opaque' : 'transparent';
-  const lines = selected.map(c => JSON.stringify({ custom_id: c!.id, method: 'POST', url: '/v1/images/generations', body: { model: data.model, prompt: originalImagePrompt(c!.prompt, c!.id, '', prefs.maxReferenceSimilarityPercent ?? 80), quality: data.quality, size: '1024x1024', background, output_format: format, n: 1 } })).join('\n') + '\n';
+  const lines = selected.map(c => JSON.stringify({ custom_id: c!.id, method: 'POST', url: '/v1/images/generations', body: { model: data.model, prompt: originalImagePrompt(c!.prompt, c!.id, '', prefs.maxReferenceSimilarityPercent ?? 40), quality: data.quality, size: '1024x1024', background, output_format: format, n: 1 } })).join('\n') + '\n';
   // Reserve the exact character IDs BEFORE reaching a billable Batch
   // endpoint. If the worker dies after OpenAI acceptance, the reserved row
   // persists and prevents the scheduler from charging the same IDs again.
@@ -181,7 +181,7 @@ async function syncJob(job: typeof imageBatches.$inferSelect, key: string, owner
   const reviewSources = savedProject.length ? JSON.parse(savedProject[0].data) as { selectedImageUrls?: string[]; images?: string[] } : {};
   const references = reviewSources.selectedImageUrls ?? reviewSources.images ?? [];
   const settingsRows=await db.select({ preferences:studioSettings.preferences }).from(studioSettings).where(eq(studioSettings.owner,owner)).limit(1);
-  let maxReferenceSimilarityPercent = 80;
+  let maxReferenceSimilarityPercent = 40;
   try { const value=Number(JSON.parse(settingsRows[0]?.preferences||'{}').maxReferenceSimilarityPercent); if(Number.isInteger(value) && value>=0 && value<=100) maxReferenceSimilarityPercent=value; } catch { /* retain default */ }
   const batch = await (await openai(key, `batches/${encodeURIComponent(job.openaiBatchId)}`)).json() as OpenAIBatch;
   // Email is triggered by OpenAI's verified completed status, not by the
