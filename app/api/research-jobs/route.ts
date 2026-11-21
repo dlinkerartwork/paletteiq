@@ -613,7 +613,7 @@ export async function POST(req: Request) {
           method:'POST', headers:{ 'Content-Type':'application/json' },
           body:JSON.stringify({ model, input, background:true, store:true,
             text:{ format:{ type:'json_object' } },
-            max_output_tokens:Math.min(13000,3000 + subjectCount*190) }),
+            max_output_tokens:Math.min(13000,Math.max(8192,3000 + subjectCount*190)) }),
         });
         if (!ai.ok) {
           const error='Worker ' + (worker.index+1) + ' failed to start (HTTP ' + ai.status +
