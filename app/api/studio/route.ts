@@ -340,8 +340,16 @@ export async function POST(req: Request) {
       name: String(c.name).slice(0, 200), family: String(c.family ?? '').slice(0, 120),
       expression: String(c.expression ?? '').slice(0, 160), shape: String(c.shape ?? '').slice(0, 180), silhouette: String(c.silhouette ?? '').slice(0, 180), accessories: String(c.accessories ?? '').slice(0, 180), colorPlan: String(c.colorPlan ?? '').slice(0, 180), description: String(c.description ?? '').slice(0, 500),
       previousPrompt: String(c.prompt ?? '').slice(0, 1200) }));
+    const promptSettings=await getDb().select({preferences:studioSettings.preferences})
+      .from(studioSettings).where(eq(studioSettings.owner,user.userId)).limit(1);
+    let maxReferenceSimilarityPercent=80;
+    try {
+      const value=JSON.parse(promptSettings[0]?.preferences||'{}').maxReferenceSimilarityPercent;
+      if(Number.isInteger(value) && value>=0 && value<=100) maxReferenceSimilarityPercent=value;
+    } catch { /* legacy settings */ }
     const requestText = productionPromptInstruction({
       title: String(body.title ?? '').slice(0, 350), analysis: context, characters,
+      maxReferenceSimilarityPercent,
     });
     try {
       const result = await generateSeoJson(user.userId, requestText, provider as 'openai' | 'gemini', model) as { prompts?: Array<{ id: string; prompt: string }> };
@@ -512,7 +520,7 @@ Collection: ${JSON.stringify(brief).slice(0, 14000)}. Etsy API SEO reference (ke
     const preferences = settings[0] ? JSON.parse(settings[0].preferences) as { output?: string; background?: string; maxReferenceSimilarityPercent?: number } : {};
     const format = preferences.output === 'jpg' ? 'jpeg' : 'png';
     const background = preferences.background === 'opaque' || format === 'jpeg' ? 'opaque' : 'transparent';
-    const ai = await fetch('https://api.openai.com/v1/images/generations', { method: 'POST', headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: body.model, quality: body.quality, size: '1024x1024', background, output_format: format, n: 1, prompt: originalImagePrompt(character.prompt, character.id, crypto.randomUUID()) }) });
+    const ai = await fetch('https://api.openai.com/v1/images/generations', { method: 'POST', headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: body.model, quality: body.quality, size: '1024x1024', background, output_format: format, n: 1, prompt: originalImagePrompt(character.prompt, character.id, crypto.randomUUID(), preferences.maxReferenceSimilarityPercent ?? 80) }) });
     if (!ai.ok) return fail(`OpenAI image generation failed (${ai.status}): ${(await ai.text()).slice(0,200)}`, 502);
     const data = await ai.json() as { data?: Array<{ b64_json?: string }> };
     const b64 = data.data?.[0]?.b64_json;
