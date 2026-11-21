@@ -70,10 +70,10 @@ export async function POST(req: Request) {
   const key = await userCredential(user.userId, 'openai') || secret;
   if (!key) return fail('Configure an OpenAI API key in Settings first.', 503);
   const settings = await db.select().from(studioSettings).where(eq(studioSettings.owner, user.userId)).limit(1);
-  const prefs = settings[0] ? JSON.parse(settings[0].preferences) as { output?: string; background?: string } : {};
+  const prefs = settings[0] ? JSON.parse(settings[0].preferences) as { output?: string; background?: string; maxReferenceSimilarityPercent?: number } : {};
   const format = prefs.output === 'jpg' ? 'jpeg' : 'png';
   const background = prefs.background === 'opaque' || format === 'jpeg' ? 'opaque' : 'transparent';
-  const lines = selected.map(c => JSON.stringify({ custom_id: c!.id, method: 'POST', url: '/v1/images/generations', body: { model: data.model, prompt: originalImagePrompt(c!.prompt, c!.id), quality: data.quality, size: '1024x1024', background, output_format: format, n: 1 } })).join('\n') + '\n';
+  const lines = selected.map(c => JSON.stringify({ custom_id: c!.id, method: 'POST', url: '/v1/images/generations', body: { model: data.model, prompt: originalImagePrompt(c!.prompt, c!.id, '', prefs.maxReferenceSimilarityPercent ?? 80), quality: data.quality, size: '1024x1024', background, output_format: format, n: 1 } })).join('\n') + '\n';
   // Reserve the exact character IDs BEFORE reaching a billable Batch
   // endpoint. If the worker dies after OpenAI acceptance, the reserved row
   // persists and prevents the scheduler from charging the same IDs again.
