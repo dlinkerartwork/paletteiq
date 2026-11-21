@@ -446,7 +446,7 @@ export async function POST(req: Request) {
       const images=prepared.get(w.index)!;
       const count=Math.ceil(job.requested/job.workers!.length);
       const instruction=researchAnalysisInstruction(job.source,images.length,count,controls)+
-        '\\nHYBRID WORKER '+(w.index+1)+'/'+job.workers!.length+
+        '\nHYBRID WORKER '+(w.index+1)+'/'+job.workers!.length+
         ': analyze ONLY your supplied image group. Final cross-group Style DNA synthesis follows.';
       const input=[{role:'user',content:[{type:'input_text',text:instruction},
         ...images.map(image_url=>({type:'input_image',image_url}))]}];
@@ -474,7 +474,7 @@ export async function POST(req: Request) {
           status:'uncertain',error:'Retry accepted but response receipt could not be read. Check OpenAI Logs.'}).catch(()=>{});
         return;
       }
-      if (!receipt.id || !/^resp_[\\w-]+$/.test(receipt.id)) {
+      if (!receipt.id || !/^resp_[\w-]+$/.test(receipt.id)) {
         await updateWorker(user.userId,projectId,job.id,w.index,{
           status:'uncertain',error:'Retry response has no valid tracking ID. Check OpenAI Logs.'}).catch(()=>{});
         return;
