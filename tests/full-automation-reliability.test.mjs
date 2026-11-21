@@ -72,3 +72,15 @@ test('research retry requires explicit payment confirmation and remote token-lim
   assert.match(page,/window\.confirm\(/);
   assert.match(page,/Retry token-limited Research workers \(paid/);
 });
+
+test('small Research targets use one response with a strict character quota',()=>{
+  const research=read('app/api/research-jobs/route.ts');
+  const prompts=read('lib/creative-research-prompts.ts');
+  assert.match(research,/const hybrid = requested > 20 && selectedImages\.length > 1/);
+  assert.match(research,/requested <= 20 \? \{ reasoning: \{ effort: 'low' \} \}/);
+  assert.match(research,/requested <= 20\s*\? Math\.min\(13000, Math\.max\(8192, 3200 \+ requested \* 250\)\)/);
+  assert.match(prompts,/const fullCatalog = true/);
+  assert.match(prompts,/Return EXACTLY \$\{subjectCount\} ORIGINAL, distinct character concepts/);
+  assert.match(research,/const needed = Math\.max\(0, job\.target - uniquePrevious\.length\)/);
+  assert.match(research,/selectDiverseConcepts\(candidates, uniquePrevious, job\.target, needed/);
+});
