@@ -102,9 +102,13 @@ function isImageFile(file, format) {
 
 function readArchive(folder) {
   const location = path.join(folder,'database','paletteiq.db');
+  // Legacy test fixtures and old pre-manifest extracted snapshots may be
+  // passed directly to the import planner. Read the optional manifest BEFORE
+  // opening SQLite: otherwise an early error leaks a Windows file handle.
+  const manifestPath=path.join(folder,'manifest.json');
+  const sourceType=fs.existsSync(manifestPath) &&
+    JSON.parse(fs.readFileSync(manifestPath,'utf8')).source==='web'?'web':'desktop';
   const legacy = new DatabaseSync(location,{readOnly:true});
-  const sourceManifest=JSON.parse(fs.readFileSync(path.join(folder,'manifest.json'),'utf8'));
-  const sourceType=sourceManifest.source==='web'?'web':'desktop';
   try {
     const rows = legacy.prepare('SELECT id, owner, name, data FROM projects ORDER BY updated_at DESC').all();
     if (rows.length > MAX_PROJECTS) throw Error('Backup has too many collections');
