@@ -509,7 +509,7 @@ Collection: ${JSON.stringify(brief).slice(0, 14000)}. Etsy API SEO reference (ke
     const bucket = nativeAssetBucket() ?? env.BUCKET;
     if (!bucket) return fail('Image storage is not provisioned', 503);
     const settings = await getDb().select().from(studioSettings).where(eq(studioSettings.owner, user.userId)).limit(1);
-    const preferences = settings[0] ? JSON.parse(settings[0].preferences) as { output?: string; background?: string } : {};
+    const preferences = settings[0] ? JSON.parse(settings[0].preferences) as { output?: string; background?: string; maxReferenceSimilarityPercent?: number } : {};
     const format = preferences.output === 'jpg' ? 'jpeg' : 'png';
     const background = preferences.background === 'opaque' || format === 'jpeg' ? 'opaque' : 'transparent';
     const ai = await fetch('https://api.openai.com/v1/images/generations', { method: 'POST', headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: body.model, quality: body.quality, size: '1024x1024', background, output_format: format, n: 1, prompt: originalImagePrompt(character.prompt, character.id, crypto.randomUUID()) }) });
@@ -525,7 +525,7 @@ Collection: ${JSON.stringify(brief).slice(0, 14000)}. Etsy API SEO reference (ke
     // prevent safe recovery of the generated asset.
     let similarityReview: SimilarityReview | undefined;
     try {
-      similarityReview = await reviewImageSimilarity(aiKey, b64, format === 'jpeg' ? 'image/jpeg' : 'image/png', project.selectedImageUrls ?? project.images ?? []);
+      similarityReview = await reviewImageSimilarity(aiKey, b64, format === 'jpeg' ? 'image/jpeg' : 'image/png', project.selectedImageUrls ?? project.images ?? [], preferences.maxReferenceSimilarityPercent ?? 80);
     } catch { similarityReview = undefined; }
     // Concurrent Standard workers must update only their own character.
     // CAS retries preserve images saved by other workers and the latest edits.
