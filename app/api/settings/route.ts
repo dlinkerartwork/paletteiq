@@ -1,3 +1,4 @@
+import { geminiKeyCycle, isGeminiQuotaResponse, GEMINI_ALL_KEYS_EXHAUSTED } from '@/lib/gemini-keyring';
 import { validImageNaming } from '@/lib/image-file-naming';
 import { sharedProviderSecret } from '@/lib/store-secrets';
 import { eq } from 'drizzle-orm';
@@ -49,14 +50,17 @@ async function getSettings(req: Request) {
     const keys = await userGeminiKeys(user.userId);
     if (!keys.length) return bad('Save a Gemini API key first.', 400);
     let response: Response | undefined;
-    for (const key of keys) {
+    let quotaFailures = 0;
+    const keyCycle = geminiKeyCycle(user.userId, keys);
+    for (const key of keyCycle) {
       response = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000', {
         headers: { 'x-goog-api-key': key }, signal: AbortSignal.timeout(15_000),
       });
       if (response.ok) break;
-      if (![401, 403, 429].includes(response.status)) break;
+      if (isGeminiQuotaResponse(response.status, await response.text())) { quotaFailures++; continue; }
+      break;
     }
-    if (!response?.ok) return bad(`Unable to list Gemini models (HTTP ${response?.status ?? 'unknown'}).`, 502);
+    if (!response?.ok) return bad(quotaFailures === keyCycle.length ? GEMINI_ALL_KEYS_EXHAUSTED : `Unable to list Gemini models (HTTP ${response?.status ?? 'unknown'}).`, quotaFailures === keyCycle.length ? 429 : 502);
     const data = await response.json() as { models?: Array<{ name?: string; displayName?: string; supportedGenerationMethods?: string[] }> };
     const models = (data.models || []).filter(item => item.supportedGenerationMethods?.includes('generateContent'))
       .map(item => ({ id: (item.name || '').replace(/^models\//, ''), name: item.displayName || item.name || '' }))
