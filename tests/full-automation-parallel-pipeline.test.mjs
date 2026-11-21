@@ -123,3 +123,18 @@ test('user can accept saved partial characters without any new paid AI Fill',()=
   assert.match(page,/setTarget\(accepted\)/);
   assert.match(page,/Accept '\+project\.characters\.length\+' characters & continue'/);
 });
+
+test('accepting partial characters reloads saved collection before AI Prompts view',()=>{
+  const begin=page.indexOf('const acceptCurrentCharacters = async () =>');
+  const end=page.indexOf('const retryPausedExpansion = async () =>',begin);
+  assert.ok(begin>=0 && end>begin);
+  const handler=page.slice(begin,end);
+  const response=handler.indexOf("action:'accept-current-characters'");
+  const reload=handler.indexOf('await fetchSavedPromptSnapshot(project.id)');
+  const navigate=handler.indexOf("setTab('prompts')");
+  assert.ok(response>=0 && reload>response && navigate>reload,
+    'accept should refresh saved characters/prompts and open prompts without paid requests');
+  assert.match(handler,/saved\.fullAutomation\?\.target!==accepted/);
+  assert.doesNotMatch(handler,/submitStandardTextResponse|apiPost\(/);
+  assert.match(page,/oldStage==='paused' \? automationStageTab\(view\.project\.fullAutomation\?\.resumeStage/);
+});
