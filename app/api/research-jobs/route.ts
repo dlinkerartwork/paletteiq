@@ -21,6 +21,7 @@ type ResearchJob = {
   model: string; transport?: 'batch'|'standard'; responseId?: string; mergeBatchId?: string; createdAt: number; updatedAt: number;
   target: number; requested: number; completedCount: number;
   selectedImages: string[]; source: Source; error?: string;
+  retryHistory?: Array<{worker:number;responseId:string;at:number;reason:string}>;
   workers?: HybridWorker[]; mergeStatus?: 'planned'|'submitting'|'queued'|'in_progress'|'completed'|'failed'|'uncertain';
 };
 type Collection = {
@@ -59,9 +60,20 @@ const safeJob = (job: ResearchJob) => ({
   workersCompleted: job.workers?.filter(w => w.status === 'completed').length,
   workersTotal: job.workers?.length, mergeStatus: job.mergeStatus,
   transport:job.transport||'background',
+  canRetryTokenLimitedWorkers:canRetryTokenLimitedWorkers(job),
   workerPreviews:job.workers?.map(workerPreview),
 });
 const active = (job?: ResearchJob) => job && ['submitting', 'queued', 'in_progress'].includes(job.status);
+// Only definitively truncated, tracked responses may be explicitly retried.
+// Submission/network failures and untracked receipts are never eligible.
+function canRetryTokenLimitedWorkers(job?: ResearchJob): boolean {
+  return Boolean(job && job.status === 'failed' && job.transport === 'standard' &&
+    job.mergeStatus === 'planned' && !job.responseId && !job.mergeBatchId &&
+    job.workers?.length &&
+    job.workers.every(w => w.status === 'completed' ||
+      (w.status === 'failed' && !!w.responseId && w.error === 'max_output_tokens')) &&
+    job.workers.some(w => w.status === 'failed'));
+}
 const openai = (key: string, path: string, init?: RequestInit) => fetch('https://api.openai.com/v1/' + path, {
   ...init,
   headers: { Authorization: 'Bearer ' + key, ...(init?.headers || {}) },
@@ -379,6 +391,107 @@ export async function POST(req: Request) {
   const projectId = String(body.projectId || '');
   const saved = await getCollection(user.userId, projectId).catch(() => null);
   if (!saved) return bad('Save your collection first, then start background research.', 404);
+  if (body.action === 'retry-token-limited') {
+    const job=saved.data.researchJob;
+    if (!job || job.id !== body.jobId || !canRetryTokenLimitedWorkers(job))
+      return bad('Research has no eligible token-limited workers. Refresh its status; uncertain submissions cannot be retried.',409);
+    const key=await userCredential(user.userId,'openai') ||
+      sharedProviderSecret(user.userId,'OPENAI_API_KEY');
+    if (!key) return bad('OpenAI API key required to inspect saved worker responses.',503);
+    const failed=job.workers!.filter(w=>w.status==='failed');
+    // Check the actual remote receipts, not just cached error strings.
+    // GET requests are free of new generation and cannot duplicate paid work.
+    try {
+      for (const w of failed) {
+        const remote=await openai(key,'responses/'+encodeURIComponent(w.responseId!));
+        if (!remote.ok) throw Error('Worker '+(w.index+1)+' status HTTP '+remote.status);
+        const data=await remote.json() as ApiResponse;
+        if (data.status!=='incomplete' || data.incomplete_details?.reason!=='max_output_tokens')
+          return bad('Worker '+(w.index+1)+' is not confirmed as token-limited. No new request submitted.',409);
+      }
+    } catch(error) {
+      return bad('Cannot verify old OpenAI receipts: '+
+        (error instanceof Error?error.message:String(error)).slice(0,220)+'. No new request submitted.',502);
+    }
+    // Prepare all selected source images before claiming any additional paid work.
+    // Every URL is checked against the original stored worker group.
+    const prepared=new Map<number,string[]>();
+    try {
+      for (const w of failed) prepared.set(w.index,await fetchResearchImageDataUrls(w.images));
+    } catch(error) {
+      return bad('Research references unavailable. No retry submitted: '+
+        (error instanceof Error?error.message:String(error)).slice(0,220),422);
+    }
+    // Single atomic claim prevents two browser tabs from double-submitting.
+    // Keep successful workers and historical OpenAI IDs intact.
+    let claimed=false;
+    const now=Date.now();
+    const claim=await mutateJob(user.userId,projectId,job.id,current=>{
+      if (!canRetryTokenLimitedWorkers(current) ||
+          failed.some(w=>current.workers?.find(x=>x.index===w.index)?.responseId!==w.responseId))
+        return current;
+      claimed=true;
+      return {...current,status:'in_progress',error:undefined,
+        retryHistory:[...(current.retryHistory||[]),
+          ...failed.map(w=>({worker:w.index,responseId:w.responseId!,at:now,reason:'max_output_tokens'}))],
+        workers:current.workers!.map(w=>failed.some(x=>x.index===w.index)
+          ? {...w,status:'submitting' as const,responseId:undefined,error:undefined,startedAt:now}
+          : w)};
+    });
+    if (!claimed || !claim || claim.status!=='in_progress')
+      return bad('Another Research retry claimed these workers. Refresh status; no new request submitted.',409);
+    const controls=normalizeCreativeControls(saved.data.creativeControls);
+    // Do not automatically retry HTTP errors or ambiguous accepted submissions.
+    const submissions=await Promise.allSettled(failed.map(async w=>{
+      const images=prepared.get(w.index)!;
+      const count=Math.ceil(job.requested/job.workers!.length);
+      const instruction=researchAnalysisInstruction(job.source,images.length,count,controls)+
+        '\\nHYBRID WORKER '+(w.index+1)+'/'+job.workers!.length+
+        ': analyze ONLY your supplied image group. Final cross-group Style DNA synthesis follows.';
+      const input=[{role:'user',content:[{type:'input_text',text:instruction},
+        ...images.map(image_url=>({type:'input_image',image_url}))]}];
+      let response:Response;
+      try {
+        response=await openai(key,'responses',{method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({model:job.model,input,background:true,store:true,
+            text:{format:{type:'json_object'}},max_output_tokens:13000})});
+      } catch(error) {
+        await updateWorker(user.userId,projectId,job.id,w.index,{
+          status:'uncertain',error:'Retry submission may have reached OpenAI: '+
+            (error instanceof Error?error.message:String(error)).slice(0,150)}).catch(()=>{});
+        return;
+      }
+      if (!response.ok) {
+        await updateWorker(user.userId,projectId,job.id,w.index,{
+          status:'failed',error:'Retry rejected HTTP '+response.status+': '+
+            (await response.text()).slice(0,130)}).catch(()=>{});
+        return;
+      }
+      let receipt:ApiResponse;
+      try {receipt=await response.json() as ApiResponse;} catch {
+        await updateWorker(user.userId,projectId,job.id,w.index,{
+          status:'uncertain',error:'Retry accepted but response receipt could not be read. Check OpenAI Logs.'}).catch(()=>{});
+        return;
+      }
+      if (!receipt.id || !/^resp_[\\w-]+$/.test(receipt.id)) {
+        await updateWorker(user.userId,projectId,job.id,w.index,{
+          status:'uncertain',error:'Retry response has no valid tracking ID. Check OpenAI Logs.'}).catch(()=>{});
+        return;
+      }
+      await updateWorker(user.userId,projectId,job.id,w.index,{
+        responseId:receipt.id,status:receipt.status==='in_progress'?'in_progress':'queued',
+        error:undefined}).catch(()=>{});
+    }));
+    const latest=(await getCollection(user.userId,projectId))?.data.researchJob;
+    if (!latest) return bad('Retry submissions need review. Check saved receipts and OpenAI Logs.',503);
+    return Response.json({job:safeJob(latest),message:
+      'Token-limited workers were retried with 13000 max output tokens. '+
+      'Only failed groups were submitted; completed groups were preserved. '+
+      (submissions.some(r=>r.status==='rejected')?
+        'Some receipt saves failed; inspect OpenAI Logs before any further retry.':
+        'Resume Full Automation after checking the Research status.')},{status:202});
+  }
   if (body.action === 'recover-existing') {
     const job=saved.data.researchJob;
     if (!job || job.id !== body.jobId || job.status !== 'failed' ||
