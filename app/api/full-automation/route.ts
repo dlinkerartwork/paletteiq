@@ -25,6 +25,7 @@ import { AUTOMATION_LIMITS, activeExpansionSlots, planExpansionSlots, pendingIma
 import { canAutoRecoverSimilarityPause, canAutoRecoverFirstReplacementPause, unverifiedImages, similarityRetryKey, similarityDue, similarityExhausted, matchesCurrentReplacementVersion, savedRegenerationRounds, SIMILARITY_RECHECK_COOLDOWN_MS, MAX_AUTOMATIC_REGENERATION_ROUNDS, type RetryLedger } from '@/lib/automation-similarity';
 import { reviewStoredBatchImage } from '@/lib/image-review-queue';
 import { batchAssetKey } from '@/lib/batch-assets';
+import { imageWithoutPromptCount } from '@/lib/prompt-image-consistency';
 import { nativeAssetBucket } from '@/lib/native-bridge';
 import type { SimilarityReview } from '@/lib/similarity-review';
 
@@ -128,6 +129,7 @@ function progress(p: Project) {
     canRestartMissingResearch: Boolean(canRestartMissingResearch(p)), characterCount: p.characters.length,
     promptCount: p.characters.filter(c => !!c.prompt?.trim()).length,
     promptMissingCount: p.characters.filter(c=>!c.prompt?.trim()).length,
+    imageWithoutPromptCount: imageWithoutPromptCount(p.characters),
     promptRecovery: p.promptJob ? {
       status:p.promptJob.status, failed:p.promptJob.failed,
       received:p.promptJob.items.filter(item=>item.status==='done').length,
