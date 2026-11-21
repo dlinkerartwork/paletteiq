@@ -1172,7 +1172,7 @@ export default function Home() {
         'All previously saved prompts and images will be preserved. Existing Response IDs were checked, '+
         'but the new '+missing.length+' prompts will incur additional API charges. Continue?'
       ))return;
-      const model=saved.fullAutomation?.promptModel||saved.promptJob?.model||
+      const model=saved.fullAutomation?.promptModel||saved.fullAutomation?.textModel||saved.promptJob?.model||
         preferences.automationPromptModel;
       const submit=await fetch('/api/prompt-jobs',{
         method:'POST',headers:{'Content-Type':'application/json'},
