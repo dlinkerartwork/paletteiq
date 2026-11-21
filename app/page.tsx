@@ -182,6 +182,7 @@ export default function Home() {
   const [savedResearchError, setSavedResearchError] = useState<string|null>(null);
   const [savedPromptProgress,setSavedPromptProgress]=useState<{
     projectId:string;present:number;missing:number;total:number;
+    imagesWithoutPrompts:number;
   }|null>(null);
   useEffect(() => { setFullAutoRequested(Boolean(project.fullAutomation?.enabled)); }, [project.id, project.fullAutomation?.enabled]);
   const [model, setModel] = useState('gpt-image-1-mini');
@@ -992,7 +993,7 @@ export default function Home() {
   const refreshAutomationStatus = async (projectId: string): Promise<FullAutomation | null> => {
     const response = await fetch('/api/full-automation?projectId=' + encodeURIComponent(projectId),
       { cache: 'no-store' });
-    const state = await response.json() as { error?: string; flow?: FullAutomation | null; canRestartMissingResearch?: boolean; canRetryRejectedResearch?: boolean; researchRecovery?: {state:string;message:string}|null; researchJobStatus?:string; researchJobError?:string|null; promptCount?:number;promptMissingCount?:number };
+    const state = await response.json() as { error?: string; flow?: FullAutomation | null; canRestartMissingResearch?: boolean; canRetryRejectedResearch?: boolean; researchRecovery?: {state:string;message:string}|null; researchJobStatus?:string; researchJobError?:string|null; promptCount?:number;promptMissingCount?:number;imageWithoutPromptCount?:number };
     if (!response.ok) throw Error(state.error || 'Unable to check saved Full Automation status');
     const flow = state.flow ?? null;
     setCanRestartMissingResearch(Boolean(state.canRestartMissingResearch));
@@ -1002,7 +1003,8 @@ export default function Home() {
     setSavedResearchError(state.researchJobError || null);
     if(Number.isInteger(state.promptCount)&&Number.isInteger(state.promptMissingCount))
       setSavedPromptProgress({projectId,present:state.promptCount!,
-        missing:state.promptMissingCount!,total:state.promptCount!+state.promptMissingCount!});
+        missing:state.promptMissingCount!,total:state.promptCount!+state.promptMissingCount!,
+        imagesWithoutPrompts:state.imageWithoutPromptCount||0});
     setProject(prev => prev.id === projectId ? { ...prev, fullAutomation: flow ?? undefined } : prev);
     setProjects(prev => prev.map(item => item.id === projectId
       ? { ...item, fullAutomation: flow ?? undefined } : item));
@@ -1015,7 +1017,7 @@ export default function Home() {
       try {
         const response = await fetch('/api/full-automation?projectId=' + encodeURIComponent(project.id),
           { cache: 'no-store' });
-        const state = await response.json() as { flow?: FullAutomation | null; canRestartMissingResearch?: boolean; canRetryRejectedResearch?: boolean; researchRecovery?: {state:string;message:string}|null; researchJobStatus?:string; researchJobError?:string|null;promptCount?:number;promptMissingCount?:number };
+        const state = await response.json() as { flow?: FullAutomation | null; canRestartMissingResearch?: boolean; canRetryRejectedResearch?: boolean; researchRecovery?: {state:string;message:string}|null; researchJobStatus?:string; researchJobError?:string|null;promptCount?:number;promptMissingCount?:number;imageWithoutPromptCount?:number };
         if (!response.ok || cancelled) return;
         const flow = state.flow ?? null;
         setCanRestartMissingResearch(Boolean(state.canRestartMissingResearch));
@@ -1025,7 +1027,8 @@ export default function Home() {
         setSavedResearchError(state.researchJobError || null);
         if(Number.isInteger(state.promptCount)&&Number.isInteger(state.promptMissingCount))
           setSavedPromptProgress({projectId:project.id,present:state.promptCount!,
-            missing:state.promptMissingCount!,total:state.promptCount!+state.promptMissingCount!});
+            missing:state.promptMissingCount!,total:state.promptCount!+state.promptMissingCount!,
+            imagesWithoutPrompts:state.imageWithoutPromptCount||0});
         setProject(prev => prev.id === project.id ? { ...prev, fullAutomation: flow ?? undefined } : prev);
         setProjects(prev => prev.map(item => item.id === project.id
           ? { ...item, fullAutomation: flow ?? undefined } : item));
@@ -1461,10 +1464,21 @@ export default function Home() {
           <p className="sub" role="status">Saved research status: {savedResearchStatus}. {researchRecovery?.message || 'Refresh status to inspect the saved stage and job.'}</p>}
         {project.fullAutomation.stage === 'paused' &&
           project.fullAutomation.resumeStage!=='research' && !researchRecovery &&
-          <p className="sub" role="status">Paused at {project.fullAutomation.resumeStage||'saved workflow stage'}. Research is not the current blocker; review the saved Image Batch and similarity results.</p>}
+          <p className="sub" role="status">Paused at {project.fullAutomation.resumeStage||'saved workflow stage'}.
+            {project.fullAutomation.resumeStage==='prompts'
+              ? ' Research is complete; recover the saved Prompt Responses and confirm all source prompts before continuing Image Generation.'
+              : ' Research is not the current blocker; review the saved Image Batch and similarity results.'}</p>}
         {project.fullAutomation.stage === 'paused' && project.fullAutomation.resumeStage==='research' && savedResearchError && <p className="sub" role="alert">Last research error: {savedResearchError}</p>}
         {project.fullAutomation.stage === 'paused' && <button type="button" className="outline-btn" disabled={!!busy} onClick={() => void refreshAutomationStatus(project.id).then(() => setMessage('Saved Full Automation and Research status refreshed.')).catch(error => setMessage(error instanceof Error ? error.message : String(error)))}>Refresh Full Automation status</button>}
         {project.fullAutomation.stage === 'paused' && project.fullAutomation.resumeStage==='research' && project.researchJob?.error && <p className="sub" role="alert">Saved research job error: {project.researchJob.error}</p>}
+        {project.characters.some(char=>!!char.imageUrl && !char.prompt?.trim()) &&
+          <p className="sub" role="alert">
+            Image / Prompt consistency warning: {savedPromptProgress?.projectId===project.id
+              ? savedPromptProgress.imagesWithoutPrompts
+              : project.characters.filter(char=>!!char.imageUrl&&!char.prompt?.trim()).length}
+            {' '}saved image(s) have no source prompt recorded. Their existing PNGs remain intact.
+            Check saved Prompt Responses before regenerating any image.
+          </p>}
         {project.fullAutomation.stage==='paused' &&
           project.fullAutomation.resumeStage==='prompts' && <>
           <p className="sub" role="status">Saved prompts: {savedPromptProgress?.projectId===project.id
