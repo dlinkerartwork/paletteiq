@@ -30,7 +30,7 @@ import { nativeAssetBucket } from '@/lib/native-bridge';
 import type { SimilarityReview } from '@/lib/similarity-review';
 
 type Stage = 'research'|'expanding'|'prompts'|'images'|'reviewing'|'revising'|'regenerating'|'verifying'|'listing'|'completed'|'paused';
-type Flow = { enabled: boolean; stage: Stage; target: number; textModel?: string; promptModel?: string; batchImageModel?: string; imageQuality?: string; startedAt: number; updatedAt: number;
+type Flow = { enabled: boolean; stage: Stage; target: number; textModel?: string; promptModel?: string; batchImageModel?: string; imageBatchSize?: 10 | 20; imageQuality?: string; startedAt: number; updatedAt: number;
   resumeStage?: Stage; lastError?: string; leaseUntil?: number; expandAttempts?: number;
   promptAttempts?: number; imageAttempts?: number; revisionAttempts?: number;
   expansionBatch?: Omit<ExpansionSlot, 'id'>; // Backwards-compatible paid receipt.
@@ -45,7 +45,7 @@ type Subject = PromptProject['characters'][number] & { imageUrl?: string; origin
 type Project = Omit<PromptProject, 'characters'> & Pick<PromptProject, 'id' | 'name' | 'title' | 'theme' | 'subtheme' | 'microtheme' | 'style' | 'palette' | 'texture' | 'primaryKeyword' | 'keywords' | 'longTailKeywords' | 'notes' | 'emotionDirection' | 'ageDirection' | 'cutenessDirection' | 'creativeControls' | 'research' | 'promptJob'> & { characters: Subject[]; fullAutomation?: Flow;
   researchJob?: { status: string; error?: string; responseId?: string; selectedImages?: string[]; model?: string }; listing?: { title?: string };
   url?: string; images?: string[]; selectedImageUrls?: string[]; characterTarget?: number; researchModel?: string; progressivePrompts?: boolean };
-type Prefs = { automationPromptModel?: string; automationImageModel?: string;
+type Prefs = { automationPromptModel?: string; automationImageModel?: string; imageBatchSize?: 10 | 20;
   quality?: string; seoProvider?: string; seoOpenaiModel?: string; seoGeminiModel?: string };
 const idValid = (x: unknown): x is string => typeof x === 'string' && /^[\w-]{8,80}$/.test(x);
 const isActive = (f?: Flow) => !!f?.enabled && f.stage !== 'completed' && f.stage !== 'paused';
@@ -241,14 +241,15 @@ async function scheduleReadyImageWave(
   const retry=missing.filter(c=>retryableFailedImage(c));
   const selected=fresh.length?fresh:retry;
   const usable=partialPrompts?fresh:selected;
-  // During Prompt generation, wait for a complete 20-image chunk. Avoid
-  // paying for excessive small Batches while other prompt groups are pending.
-  if(partialPrompts && usable.length<20)return {occupied,submitted:0};
+  // Freeze per-workflow group size. Legacy workflows retain their original 20-image sizing.
+  const groupSize=f.imageBatchSize===10?10:20;
+  // During prompt generation, wait for a full group before creating paid Batches.
+  if(partialPrompts && usable.length<groupSize)return {occupied,submitted:0};
   if(!capacity || !usable.length)return {occupied,submitted:0};
   const chunks:Array<Subject[]>=[];
-  for(let i=0;i<usable.length&&chunks.length<capacity;i+=20)
-    chunks.push(usable.slice(i,i+20));
-  if((f.imageAttempts||0)+chunks.length>Math.ceil(f.target/20)+AUTOMATION_LIMITS.imageBatches)
+  for(let i=0;i<usable.length&&chunks.length<capacity;i+=groupSize)
+    chunks.push(usable.slice(i,i+groupSize));
+  if((f.imageAttempts||0)+chunks.length>Math.ceil(f.target/groupSize)+AUTOMATION_LIMITS.imageBatches)
     throw Error('Too many Image Batch attempts; inspect existing jobs before further charges.');
   // Slot budget is persisted first, then each Image Batch API handler makes a
   // durable per-character reservation before it reaches the OpenAI endpoint.
@@ -969,7 +970,7 @@ export async function POST(req:Request) {
     const now=Date.now();
     const savedPromptModel=String(config.automationPromptModel||'gpt-6-luna');
     if(!/^gpt-[a-z0-9.-]{1,80}$/.test(savedPromptModel))return bad('Invalid saved AI Prompt Batch model',422);
-    const flow:Flow={enabled:true,stage:'research',target,textModel:requestedModel,promptModel:savedPromptModel,batchImageModel:selectedBatchImageModel,imageQuality:quality(config),startedAt:now,updatedAt:now,
+    const flow:Flow={enabled:true,stage:'research',target,textModel:requestedModel,promptModel:savedPromptModel,batchImageModel:selectedBatchImageModel,imageBatchSize:config.imageBatchSize===20?20:10,imageQuality:quality(config),startedAt:now,updatedAt:now,
       expandAttempts:0,promptAttempts:0,imageAttempts:0};
     return Response.json(progress(await save(user.userId,id,p=>({...p,characterTarget:target,researchModel:requestedModel,fullAutomation:flow}))));
   }
