@@ -1,7 +1,7 @@
 export type SimilarityReview = { status: 'clear' | 'needs_review' | 'unverified'; score?: number; reason: string; checkedAt: number };
 
 /** Advisory visual review, not a copyright determination or mathematical similarity guarantee. */
-export async function reviewImageSimilarity(apiKey: string, generatedBase64: string, mime: string, references: string[]): Promise<SimilarityReview> {
+export async function reviewImageSimilarity(apiKey: string, generatedBase64: string, mime: string, references: string[], maxSimilarityPercent = 80): Promise<SimilarityReview> {
   const checkedAt = Date.now();
   const urls = references.filter(url => {
     try { const parsed = new URL(url); return parsed.protocol === 'https:' && (parsed.hostname === 'etsystatic.com' || parsed.hostname.endsWith('.etsystatic.com')); }
@@ -9,6 +9,7 @@ export async function reviewImageSimilarity(apiKey: string, generatedBase64: str
   }).slice(0, 20);
   if (!urls.length) return { status: 'unverified', reason: 'No selected Etsy reference images available for comparison.', checkedAt };
   try {
+    const threshold = Number.isFinite(maxSimilarityPercent) ? Math.max(0, Math.min(100, maxSimilarityPercent)) : 80;
     let worstScore = -1;
     let flagged = false;
     let reason = '';
@@ -17,7 +18,7 @@ export async function reviewImageSimilarity(apiKey: string, generatedBase64: str
     const compareGroup = async (offset: number) => {
       const group = urls.slice(offset, offset + 5);
       const input = [{ role: 'user', content: [
-        { type: 'input_text', text: 'Compare IMAGE 1 (newly generated clipart) to each following SOURCE REFERENCE image. Judge visual duplication of concrete artistic expression, not the generic subject or shared watercolor style. Flag near-identical composition, pose, silhouette, arrangement of petals/features/props, distinctive details, and overall visual structure. Do not penalize merely using the same type of flower or animal. Return ONLY JSON {"similarityScore":0-100,"tooSimilar":boolean,"reason":"concise specific explanation"}. Score above 75 means potentially near-duplicate artistic expression. If uncertain, mark tooSimilar true for manual review. IMAGE 1 is generated; remaining images are references.' },
+        { type: 'input_text', text: `Compare IMAGE 1 (newly generated clipart) to each following SOURCE REFERENCE image. Judge visual duplication of concrete artistic expression, not the generic subject or shared watercolor style. Flag near-identical composition, pose, silhouette, arrangement of petals/features/props, distinctive details, and overall visual structure. Do not penalize merely using the same type of flower or animal. Return ONLY JSON {"similarityScore":0-100,"tooSimilar":boolean,"reason":"concise specific explanation"}. Use the supplied maximum similarity percentage as the threshold for potential near-duplicate artistic expression. If uncertain, mark tooSimilar true for manual review. IMAGE 1 is generated; remaining images are references. Flag results only when similarity is above ${threshold}%, or flag genuinely indistinguishable artistic expression.' },
         { type: 'input_image', image_url: `data:${mime};base64,${generatedBase64}`, detail: 'low' },
         ...group.map(image_url => ({ type: 'input_image', image_url, detail: 'low' })),
       ] }];
@@ -38,7 +39,7 @@ export async function reviewImageSimilarity(apiKey: string, generatedBase64: str
       for (const parsed of results) {
         const score = Math.max(0, Math.min(100, Math.round(parsed.similarityScore)));
         if (score > worstScore || (parsed.tooSimilar && !flagged)) { worstScore = score; reason = String(parsed.reason || 'AI visual comparison complete.').slice(0, 500); }
-        flagged ||= parsed.tooSimilar || score >= 75;
+        flagged ||= score > threshold;
       }
     }
     return { status: flagged ? 'needs_review' : 'clear', score: worstScore, reason, checkedAt };
