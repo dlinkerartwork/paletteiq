@@ -87,3 +87,17 @@ test('network outages retry saved status IDs on reconnection without blind paid 
   assert.match(page,/networkPollFailures\.current\.delete\('prompts'\)/);
   assert.match(flow,/throw Error\('Parallel AI Fill submission has uncertain receipts/);
 });
+
+test('paused expansion may be explicitly rearmed only with no existing paid receipts',()=>{
+  assert.match(flow,/body\.action==='resume-expansion'/);
+  assert.match(flow,/f\.stage!=='paused' \|\| f\.resumeStage!=='expanding'/);
+  assert.match(flow,/activeExpansionSlots\(f\)\.length/);
+  assert.match(flow,/const extra=6/);
+  assert.match(flow,/expandAttempts:Math\.max\(0,maxAttempts-extra\)/);
+  assert.match(page,/Continue AI Fill — up to 6 paid attempts \(confirm\)/);
+  assert.match(page,/window\.confirm\([\s\S]*?SIX NEW PAID OpenAI AI Fill requests/);
+  assert.match(flow,/const firstPass=selectDiverseConcepts\(candidates,latest\.characters/);
+  assert.match(flow,/remaining-firstPass\.length,variation,focus,true/);
+  assert.match(page,/Manual AI Fill can recover a paused workflow/);
+  assert.match(page,/await api\(\{action:'save',id:current\.id,name:current\.name,data:current\}\)/);
+});
