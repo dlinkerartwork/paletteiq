@@ -453,10 +453,19 @@ async function tick(req: Request, owner: string, id: string) {
                 ? current.expansionBatch : current.expansionBatches?.find(slot=>slot.id===receipt.id);
               if(!present || (receipt.responseId ? present.responseId!==receipt.responseId :
                   present.batchId!==receipt.batchId)) return latest;
-              const selected=selectDiverseConcepts(candidates,latest.characters,current.target,
-                Math.min(receipt.count,Math.max(0,current.target-latest.characters.length)),
-                normalizeCreativeControls(latest.creativeControls).characterVariation,
-                primaryCharacterSubject(latest.title||latest.name));
+              const remaining=Math.min(receipt.count,Math.max(0,current.target-latest.characters.length));
+              const variation=normalizeCreativeControls(latest.creativeControls).characterVariation;
+              const focus=primaryCharacterSubject(latest.title||latest.name);
+              const firstPass=selectDiverseConcepts(candidates,latest.characters,current.target,
+                remaining,variation,focus);
+              // Salvage genuinely distinct paid proposals if only an artificial
+              // family cap blocks completion; names and silhouette checks remain.
+              const selected=firstPass.length<remaining &&
+                latest.characters.length>=Math.ceil(current.target/2)
+                ? [...firstPass,...selectDiverseConcepts(candidates,
+                    [...latest.characters,...firstPass],current.target,
+                    remaining-firstPass.length,variation,focus,true)]
+                : firstPass;
               const seen=new Set(latest.characters.map(c=>c.name.trim().toLowerCase()));
               const unique=selected.filter(c=>{const name=c.name.trim().toLowerCase();
                 if(!name||seen.has(name))return false;seen.add(name);return true;});
