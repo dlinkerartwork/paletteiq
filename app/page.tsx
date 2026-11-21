@@ -27,7 +27,14 @@ import { auditCreativeConcepts, expressionDistribution, familyDistribution, norm
 type Character = { id: string; name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description: string; prompt: string; status: 'draft' | 'ready' | 'done' | 'error'; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: { id: string; submittedAt?: number; factor?: number }; error?: string; similarityReview?: SimilarityReview; origin: 'listing' | 'ai' | 'manual' };
 type ResearchJobPreview = { transport?: 'batch'|'background'; workerPreviews?: Array<{index:number;status:string;imageCount:number;theme:string;style:string;concepts:Array<{name:string;family:string;description:string}>;error?:string;warning?:string}>; workersCompleted?: number; workersTotal?: number; mergeStatus?: string; id: string; status: 'submitting' | 'queued' | 'in_progress' | 'completed' | 'failed'; target: number; requested: number; completedCount: number; model: string; createdAt: number; updatedAt: number; error?: string };
 const hasActiveResearch = (job?: ResearchJobPreview) => !!job && ['submitting','queued','in_progress'].includes(job.status);
-type PromptJobPreview = { mode?: 'batch'|'progressive'|'standard'; groupStates?: Array<{key:string;status:string;error?:string}>; id: string; status: string; total: number; imported: number; failed: number; processedGroups: number; totalGroups: number; model: string; createdAt: number; updatedAt: number; error?: string };
+type PromptJobGroupPreview = {key:string;status:string;error?:string;batchId?:string;responseId?:string};
+type PromptJobPreview = { mode?: 'batch'|'progressive'|'standard';
+  groupStates?: PromptJobGroupPreview[]; progressiveBatches?: PromptJobGroupPreview[];
+  id: string; status: string; total: number; imported: number; failed: number;
+  processedGroups: number; totalGroups: number; model: string; createdAt: number;
+  updatedAt: number; error?: string };
+const savedPromptGroups = (job?:PromptJobPreview):PromptJobGroupPreview[] =>
+  job?.progressiveBatches?.length ? job.progressiveBatches : job?.groupStates || [];
 const hasActivePromptJob = (job?: PromptJobPreview) => !!job && !['completed','completed_with_errors','failed','cancelled','expired'].includes(job.status);
 type FullAutomation = { enabled: boolean; textModel?: string; promptModel?: string; batchImageModel?: string; imageQuality?: string; stage: 'research' | 'expanding' | 'prompts' | 'images' | 'reviewing' | 'revising' | 'regenerating' | 'verifying' | 'listing' | 'completed' | 'paused'; resumeStage?: string; target: number; updatedAt: number; lastError?: string; reviewQueue?: string[]; revisedIds?: string[]; regenerationBatchId?: string; regenerationRounds?: number; similarityRetries?: Record<string,number> };
 type Project = { fullAutomation?: FullAutomation; characterTarget?: number; researchModel?: string; hybridResearch?: boolean; progressivePrompts?: boolean; id: string; name: string; url: string; upscaleBatch?: StoredUpscaleBatch; researchJob?: ResearchJobPreview; promptJob?: PromptJobPreview; theme: string; subtheme: string; microtheme?: string; primaryKeyword?: string; longTailKeywords?: string[]; research?: CreativeAnalysis; creativeControls?: CreativeControls; sourceDescription?: string; sourceTags?: string[]; emotionDirection?: string; ageDirection?: string; cutenessDirection?: string; style: string; palette: string; texture: string; keywords: string[]; characters: Character[]; title: string; images: string[]; selectedImageUrls?: string[]; notes: string; listing?: ListingData; seoReview?: SavedSeoReview; thumbnails?: ThumbnailDesign[]; listingImages?: ListingImageRecord[]; listingStudioSettings?: ListingStudioConfig; lastDownloadedAt?: number; downloadCount?: number; lastDownloadImageCount?: number; downloadedImageIds?: string[] };
@@ -1151,7 +1158,7 @@ export default function Home() {
       if(!recovery.ok)throw Error(result.error||'Cannot inspect existing Responses');
       const saved=await fetchSavedPromptSnapshot(project.id);
       const previous=saved.promptJob;
-      const groups=previous?.groupStates||[];
+      const groups=savedPromptGroups(previous);
       const safe=previous&&['completed','completed_with_errors'].includes(previous.status)&&
         groups.length>0&&groups.every(g=>['completed','failed'].includes(g.status));
       if(!safe)throw Error('Uncertain or active Prompt receipt exists. Inspect the saved group IDs in OpenAI activity before retrying.');
@@ -1175,7 +1182,7 @@ export default function Home() {
       const accepted=await submit.json() as {error?:string;job?:PromptJobPreview};
       if(!submit.ok||!accepted.job)throw Error(accepted.error||'Saved paid Prompt receipt needs inspection');
       await fetchSavedPromptSnapshot(project.id);
-      const uncertain=accepted.job.groupStates?.some(g=>g.status==='uncertain');
+      const uncertain=savedPromptGroups(accepted.job).some(g=>g.status==='uncertain');
       if(uncertain){
         setMessage('New paid Prompt request has an uncertain submission receipt. Inspect OpenAI activity before resuming.');
         return;
@@ -1468,7 +1475,7 @@ export default function Home() {
               ? savedPromptProgress.missing : project.characters.filter(c=>!c.prompt?.trim()).length}.
             A prior Prompt Response may have failed or returned incomplete output.
             Read existing OpenAI receipts first; no new paid requests are needed for that check.</p>
-          {(project.promptJob?.groupStates||[]).filter(g=>
+          {savedPromptGroups(project.promptJob).filter(g=>
             ['failed','uncertain'].includes(g.status)).map(g=>
               <p key={g.key} className="sub" role="alert">Prompt group {g.key}: {g.status}
                 {g.error?' — '+g.error:''}</p>)}
@@ -1479,8 +1486,8 @@ export default function Home() {
             </button>
             {project.promptJob &&
               ['completed','completed_with_errors'].includes(project.promptJob.status) &&
-              (project.promptJob.groupStates||[]).length>0 &&
-              (project.promptJob.groupStates||[]).every(g=>['completed','failed'].includes(g.status)) &&
+              savedPromptGroups(project.promptJob).length>0 &&
+              savedPromptGroups(project.promptJob).every(g=>['completed','failed'].includes(g.status)) &&
               project.characters.some(c=>!c.prompt?.trim()) &&
               <button type="button" className="outline-btn" disabled={!!busy}
                 onClick={()=>void retryOnlyMissingPrompts()}>
@@ -1631,7 +1638,7 @@ export default function Home() {
         <div className="production-progress"><span>OpenAI {project.promptJob.mode==='standard'?'Standard Parallel Responses':project.promptJob.mode==='progressive'?'Legacy Progressive Prompt Batches':'Legacy Prompt Batch'} · {project.promptJob.status}</span>
           <b>{project.promptJob.processedGroups}/{project.promptJob.totalGroups} groups · {project.promptJob.imported}/{project.promptJob.total} imported</b></div>
         <div className="progress"><i style={{ width: `${project.promptJob.totalGroups ? 100 * project.promptJob.processedGroups / project.promptJob.totalGroups : 0}%` }}/></div>
-        {(project.promptJob.mode==='progressive'||project.promptJob.mode==='standard') && <div className="sub">{project.promptJob.groupStates?.map(g=><p key={g.key}>{g.key}: {g.status}{g.error?' — '+g.error:''}</p>)}</div>}
+        {(project.promptJob.mode==='progressive'||project.promptJob.mode==='standard') && <div className="sub">{savedPromptGroups(project.promptJob).map(g=><p key={g.key}>{g.key}: {g.status}{g.error?' — '+g.error:''}</p>)}</div>}
         <p className="sub">{(project.promptJob.mode==='progressive'||project.promptJob.mode==='standard')?'Completed groups are imported and rendered without waiting for the other groups.':'A single OpenAI Batch exposes completed request counts, but its actual prompt output is generally available only after Batch result files are published.'} OpenAI processing can continue while the PC is off. Import does not replace manually edited prompts.</p>
         {project.promptJob.error && <p className="sub">{project.promptJob.error}</p>}
       </div>}
