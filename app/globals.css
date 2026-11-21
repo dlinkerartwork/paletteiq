@@ -642,3 +642,12 @@ h1,h2,.stat strong,.step b,.source-card strong,.asset-meta b { color:#302721; }
   .source-setup-url .primary-btn { width:100%; }
   .source-similarity-save { justify-content:flex-start; }
 }
+
+/* Keep the two Collection Goals inputs and Save action on one horizontal row. */
+.source-setup-fields.source-goals-row { grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; gap:12px; align-items:start; }
+.source-goals-row .source-similarity-save { margin:0; padding-top:27px; display:flex; justify-content:flex-start; }
+.source-goals-row .source-similarity-save .outline-btn { min-width:66px; height:43px; }
+@media(max-width:560px) {
+  .source-setup-fields.source-goals-row { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .source-goals-row .source-similarity-save { grid-column:1 / -1; padding-top:0; }
+}
