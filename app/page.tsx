@@ -25,7 +25,7 @@ import { collectionHasUnsavedEdits } from '@/lib/collection-unsaved';
 import { auditCreativeConcepts, expressionDistribution, familyDistribution, normalizeCreativeAnalysis, normalizeCreativeControls, referenceMoodFromExpressions, reverseEngineeringKeys, styleDNAKeys, characterDNAKeys, selectDiverseConcepts, type CreativeAnalysis, type CreativeControls } from '@/lib/creative-intelligence';
 
 type Character = { id: string; name: string; family?: string; expression?: string; shape?: string; silhouette?: string; accessories?: string; colorPlan?: string; description: string; prompt: string; status: 'draft' | 'ready' | 'done' | 'error'; imageUrl?: string; upscaledImageUrl?: string; upscaledAt?: number; upscaleJob?: { id: string; submittedAt?: number; factor?: number }; error?: string; similarityReview?: SimilarityReview; origin: 'listing' | 'ai' | 'manual' };
-type ResearchJobPreview = { transport?: 'batch'|'background'; workerPreviews?: Array<{index:number;status:string;imageCount:number;theme:string;style:string;concepts:Array<{name:string;family:string;description:string}>;error?:string;warning?:string}>; workersCompleted?: number; workersTotal?: number; mergeStatus?: string; id: string; status: 'submitting' | 'queued' | 'in_progress' | 'completed' | 'failed'; target: number; requested: number; completedCount: number; model: string; createdAt: number; updatedAt: number; error?: string };
+type ResearchJobPreview = { canRetryTokenLimitedWorkers?: boolean; transport?: 'batch'|'standard'|'background'; workerPreviews?: Array<{index:number;status:string;imageCount:number;theme:string;style:string;concepts:Array<{name:string;family:string;description:string}>;error?:string;warning?:string}>; workersCompleted?: number; workersTotal?: number; mergeStatus?: string; id: string; status: 'submitting' | 'queued' | 'in_progress' | 'completed' | 'failed'; target: number; requested: number; completedCount: number; model: string; createdAt: number; updatedAt: number; error?: string };
 const hasActiveResearch = (job?: ResearchJobPreview) => !!job && ['submitting','queued','in_progress'].includes(job.status);
 type PromptJobGroupPreview = {key:string;status:string;error?:string;batchId?:string;responseId?:string};
 type PromptJobPreview = { mode?: 'batch'|'progressive'|'standard';
@@ -755,6 +755,35 @@ export default function Home() {
         (error instanceof Error ? error.message : String(error)) +
         '. Existing OpenAI responses are preserved. Do not resubmit Research blindly.');
     } finally { setBusy(''); }
+  };
+  const retryTokenLimitedResearch = async () => {
+    const job=project.researchJob;
+    if (!job || job.status!=='failed' || !job.canRetryTokenLimitedWorkers) return;
+    if (!window.confirm(
+      'Retry ONLY Research workers confirmed incomplete because of max_output_tokens? ' +
+      'This creates NEW PAID OpenAI requests (up to the number of failed workers) ' +
+      'with max_output_tokens=13000. Completed workers, character assets, prompts ' +
+      'and generated images stay saved. Review OpenAI costs before continuing.'
+    )) return;
+    const projectId=project.id;
+    setBusy('research-token-retry');
+    try {
+      const response=await fetch('/api/research-jobs',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action:'retry-token-limited',projectId,jobId:job.id}),
+      });
+      const result=await response.json() as {job?:ResearchJobPreview;error?:string;message?:string};
+      if (!response.ok || !result.job)
+        throw Error(result.error||'Research worker retry could not be confirmed');
+      setProject(prev=>prev.id===projectId?{...prev,researchJob:result.job}:prev);
+      setProjects(prev=>prev.map(item=>item.id===projectId?{...item,researchJob:result.job}:item));
+      setMessage((result.message||'Research retries submitted.')+
+        ' Allow the saved Research job to finish, then Resume Full Automation.');
+    } catch(error) {
+      setMessage('Research worker retry stopped: '+
+        (error instanceof Error?error.message:String(error))+
+        '. Check saved responses and OpenAI Logs before any further paid retry.');
+    } finally {setBusy('');}
   };
   // Keep the UI interactive; poll only the remote response status, then import
   // the server-owned collection once. Works after refresh/relaunch as well.
@@ -1514,10 +1543,23 @@ export default function Home() {
           All {project.fullAutomation.target} image prompts are saved. The paused workflow will NOT
           submit Image Batches until you explicitly select Resume after reviewing OpenAI costs.
         </p>}
+        {project.fullAutomation.stage === 'paused' && project.fullAutomation.resumeStage==='research' &&
+          project.researchJob?.canRetryTokenLimitedWorkers &&
+          <div className="sub" role="status">
+            Saved Research workers exhausted max_output_tokens. Resume alone cannot retry them.
+            Confirm an explicit paid retry of only the failed workers below.
+          </div>}
+        {project.fullAutomation.stage === 'paused' && project.fullAutomation.resumeStage==='research' &&
+          project.researchJob?.canRetryTokenLimitedWorkers &&
+          <button type="button" className="outline-btn" disabled={!!busy}
+            onClick={()=>void retryTokenLimitedResearch()}>
+            {busy==='research-token-retry'?'Checking original receipts and submitting retries…':
+              'Retry token-limited Research workers (paid — confirm first)'}
+          </button>}
         {project.fullAutomation.stage === 'paused' && canRestartMissingResearch && <div className="sub" role="status">No background research job is recorded for this workflow. Resuming alone would pause again. Start the missing research only after checking OpenAI activity for any untracked charge.</div>}
         {project.fullAutomation.stage === 'paused' && canRetryRejectedResearch && <button type="button" className="outline-btn" disabled={!!busy} onClick={() => void retryRejectedResearch()}>Retry rejected image research (check OpenAI usage first)</button>}
         {project.fullAutomation.stage === 'paused' && canRestartMissingResearch && <button type="button" className="outline-btn" disabled={!!busy} onClick={() => void recoverMissingResearch()}>Start missing research (check OpenAI usage first)</button>}
-        {project.fullAutomation.stage === 'paused' && !canRestartMissingResearch && !canRetryRejectedResearch && <button type="button" className="outline-btn" disabled={!!busy} onClick={() => void changeAutomation('resume')}>Resume Full Automation (review costs/jobs first)</button>}
+        {project.fullAutomation.stage === 'paused' && !canRestartMissingResearch && !canRetryRejectedResearch && !project.researchJob?.canRetryTokenLimitedWorkers && <button type="button" className="outline-btn" disabled={!!busy} onClick={() => void changeAutomation('resume')}>Resume Full Automation (review costs/jobs first)</button>}
         {project.fullAutomation.stage !== 'paused' && project.fullAutomation.stage !== 'completed' && <button type="button" className="outline-btn" disabled={!!busy} onClick={() => void changeAutomation('pause')}>Pause automation</button>}
       </section>}
       {project.researchJob?.status==='failed' &&
