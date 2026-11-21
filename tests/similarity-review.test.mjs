@@ -51,3 +51,13 @@ test('Source listing refactor keeps its JSX panel wrapper balanced',()=>{
   assert.match(page,/<\/section>\s*<p className="sub">OpenAI analysis can continue remotely/);
   assert.doesNotMatch(page,/<\/section>\s*<\/div><p className="sub">OpenAI analysis can continue remotely/);
 });
+
+test('development JSON failure diagnostics redact tokens and connector preview preserves uncertain status',()=>{
+  const launcher=readFileSync(new URL('../scripts/run-framework.mjs',import.meta.url),'utf8');
+  const connector=readFileSync(new URL('../scripts/vite/connector-preview-plugin.mjs',import.meta.url),'utf8');
+  assert.match(launcher,/PALETTEIQ_TRACE_INVALID_JSON/);
+  assert.match(launcher,/\[PaletteIQ invalid JSON\]/);
+  assert.match(launcher,/REDACTED_KEY/);
+  assert.match(connector,/Connector preview returned a non-JSON response/);
+  assert.match(connector,/the action may have completed/);
+});
